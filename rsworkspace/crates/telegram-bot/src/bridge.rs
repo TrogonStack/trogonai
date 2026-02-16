@@ -173,6 +173,94 @@ impl TelegramBridge {
         Ok(())
     }
 
+    /// Publish an audio message event
+    pub async fn publish_audio_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let audio = msg.audio().unwrap();
+        let caption = msg.caption().map(|s| s.to_string());
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageAudioEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            audio: FileInfo {
+                file_id: audio.file.id.clone(),
+                file_unique_id: audio.file.unique_id.clone(),
+                file_size: Some(audio.file.size as u64),
+                file_name: audio.file_name.clone(),
+                mime_type: audio.mime_type.as_ref().map(|m| m.to_string()),
+            },
+            caption,
+        };
+
+        let subject = subjects::bot::message_audio(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published audio message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a document message event
+    pub async fn publish_document_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let document = msg.document().unwrap();
+        let caption = msg.caption().map(|s| s.to_string());
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageDocumentEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            document: FileInfo {
+                file_id: document.file.id.clone(),
+                file_unique_id: document.file.unique_id.clone(),
+                file_size: Some(document.file.size as u64),
+                file_name: document.file_name.clone(),
+                mime_type: document.mime_type.as_ref().map(|m| m.to_string()),
+            },
+            caption,
+        };
+
+        let subject = subjects::bot::message_document(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published document message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a voice message event
+    pub async fn publish_voice_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let voice = msg.voice().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageVoiceEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            voice: FileInfo {
+                file_id: voice.file.id.clone(),
+                file_unique_id: voice.file.unique_id.clone(),
+                file_size: Some(voice.file.size as u64),
+                file_name: None, // Voice messages don't have file names
+                mime_type: voice.mime_type.as_ref().map(|m| m.to_string()),
+            },
+        };
+
+        let subject = subjects::bot::message_voice(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published voice message event to {}", subject);
+        Ok(())
+    }
+
     /// Publish a callback query event
     pub async fn publish_callback_query(&self, query: &CallbackQuery, update_id: i64) -> Result<()> {
         let data = query.data.clone().unwrap_or_default();
