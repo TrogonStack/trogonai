@@ -1,11 +1,11 @@
 //! Main agent implementation
 
 use async_nats::Client;
-use futures::stream::StreamExt; // Required for .next() on streams
 use telegram_nats::{MessageSubscriber, MessagePublisher};
 use tracing::{info, error};
 use anyhow::Result;
 
+use crate::llm::ClaudeConfig;
 use crate::processor::MessageProcessor;
 
 /// Telegram agent that processes messages
@@ -18,10 +18,10 @@ pub struct TelegramAgent {
 
 impl TelegramAgent {
     /// Create a new Telegram agent
-    pub fn new(client: Client, prefix: String, agent_name: String) -> Self {
+    pub fn new(client: Client, prefix: String, agent_name: String, llm_config: Option<ClaudeConfig>) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
-        let processor = MessageProcessor::new();
+        let processor = MessageProcessor::new(llm_config);
 
         Self {
             subscriber,

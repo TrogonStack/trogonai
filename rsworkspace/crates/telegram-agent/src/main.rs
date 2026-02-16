@@ -4,6 +4,8 @@
 //! AI-generated messages.
 
 mod agent;
+mod conversation;
+mod llm;
 mod processor;
 
 use anyhow::Result;
@@ -28,6 +30,18 @@ struct Args {
     /// Agent name (for logging and identification)
     #[arg(long, env = "AGENT_NAME", default_value = "telegram-agent")]
     agent_name: String,
+
+    /// Claude API key
+    #[arg(long, env = "ANTHROPIC_API_KEY")]
+    anthropic_api_key: Option<String>,
+
+    /// Claude model to use
+    #[arg(long, env = "CLAUDE_MODEL", default_value = "claude-3-5-sonnet-20241022")]
+    claude_model: String,
+
+    /// Enable LLM mode (requires API key)
+    #[arg(long, env = "ENABLE_LLM", default_value = "false")]
+    enable_llm: bool,
 }
 
 #[tokio::main]
@@ -64,11 +78,31 @@ async fn main() -> Result<()> {
     let nats_client = telegram_nats::connect(&nats_config).await?;
     info!("Connected to NATS successfully");
 
+    // Configure LLM if enabled
+    let llm_config = if args.enable_llm {
+        if let Some(api_key) = args.anthropic_api_key {
+            info!("LLM mode enabled with model: {}", args.claude_model);
+            Some(llm::ClaudeConfig {
+                api_key,
+                model: args.claude_model,
+                max_tokens: 1024,
+                temperature: 1.0,
+            })
+        } else {
+            error!("LLM mode enabled but ANTHROPIC_API_KEY not provided");
+            return Err(anyhow::anyhow!("ANTHROPIC_API_KEY required when --enable-llm is set"));
+        }
+    } else {
+        info!("LLM mode disabled, running in echo mode");
+        None
+    };
+
     // Create and run agent
     let agent = TelegramAgent::new(
         nats_client,
         args.prefix,
         args.agent_name,
+        llm_config,
     );
 
     info!("Agent initialized, starting message processing...");

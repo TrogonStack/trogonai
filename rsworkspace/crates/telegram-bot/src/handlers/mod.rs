@@ -70,6 +70,60 @@ pub async fn handle_video_message(_bot: Bot, msg: Message, bridge: TelegramBridg
     Ok(())
 }
 
+/// Handle audio messages
+pub async fn handle_audio_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received audio message");
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for audio message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_audio_message(&msg, update_id).await {
+        error!("Failed to publish audio message: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Handle document messages
+pub async fn handle_document_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received document message");
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for document message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_document_message(&msg, update_id).await {
+        error!("Failed to publish document message: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Handle voice messages
+pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received voice message");
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for voice message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_voice_message(&msg, update_id).await {
+        error!("Failed to publish voice message: {}", e);
+    }
+
+    Ok(())
+}
+
 /// Handle callback queries (button clicks)
 pub async fn handle_callback_query(_bot: Bot, query: CallbackQuery, bridge: TelegramBridge) -> ResponseResult<()> {
     let update_id = query.id.parse::<i64>().unwrap_or(0);

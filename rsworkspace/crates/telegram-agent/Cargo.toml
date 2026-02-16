@@ -31,3 +31,6 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # Utils
 futures = "0.3"
+
+# HTTP client for LLM API
+reqwest = { version = "0.12", features = ["json"] }

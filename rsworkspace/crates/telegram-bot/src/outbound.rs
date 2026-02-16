@@ -7,11 +7,25 @@ use telegram_nats::{MessageSubscriber, subjects};
 use telegram_types::commands::*;
 use tracing::{debug, error, info, warn};
 use anyhow::Result;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::Instant;
+
+/// Tracking info for streaming messages
+#[derive(Debug, Clone)]
+pub(crate) struct StreamingMessage {
+    pub message_id: i32,
+    pub last_edit: Instant,
+    pub edit_count: u32,
+}
 
 /// Outbound processor that listens to agent commands and executes them
 pub struct OutboundProcessor {
-    bot: Bot,
-    subscriber: MessageSubscriber,
+    pub(crate) bot: Bot,
+    pub(crate) subscriber: MessageSubscriber,
+    /// Track streaming messages by (chat_id, session_id)
+    pub(crate) streaming_messages: Arc<RwLock<HashMap<(i64, String), StreamingMessage>>>,
 }
 
 impl OutboundProcessor {
@@ -20,6 +34,7 @@ impl OutboundProcessor {
         Self {
             bot,
             subscriber: MessageSubscriber::new(client, prefix),
+            streaming_messages: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -245,57 +260,12 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    /// Handle stream message commands
-    async fn handle_stream_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_stream(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self.subscriber.subscribe::<StreamMessageCommand>(&subject).await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received stream message command for chat {}", cmd.chat_id);
-
-                    if let Some(message_id) = cmd.message_id {
-                        // Edit existing message
-                        let mut req = self.bot.edit_message_text(
-                            ChatId(cmd.chat_id),
-                            MessageId(message_id),
-                            cmd.text
-                        );
-
-                        if let Some(parse_mode) = cmd.parse_mode {
-                            req.parse_mode = Some(convert_parse_mode(parse_mode));
-                        }
-
-                        if let Err(e) = req.await {
-                            error!("Failed to edit streaming message: {}", e);
-                        }
-                    } else {
-                        // Send new message
-                        let mut req = self.bot.send_message(ChatId(cmd.chat_id), cmd.text);
-
-                        if let Some(parse_mode) = cmd.parse_mode {
-                            req.parse_mode = Some(convert_parse_mode(parse_mode));
-                        }
-
-                        if let Err(e) = req.await {
-                            error!("Failed to send streaming message: {}", e);
-                        }
-                    }
-                }
-                Err(e) => error!("Failed to deserialize stream message command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
+    // Stream message handling moved to outbound_streaming.rs module
 }
 
 /// Convert our ParseMode to Teloxide's ParseMode
 #[allow(deprecated)]
-fn convert_parse_mode(mode: ParseMode) -> TgParseMode {
+pub(crate) fn convert_parse_mode(mode: ParseMode) -> TgParseMode {
     match mode {
         ParseMode::Markdown => TgParseMode::Markdown,
         ParseMode::MarkdownV2 => TgParseMode::MarkdownV2,
