@@ -69,6 +69,7 @@ impl SessionManager {
     }
 
     /// Get a session state
+    #[allow(dead_code)]
     pub async fn get(&self, session_id: &SessionId) -> Result<Option<SessionState>> {
         let key = session_id.as_str();
 
@@ -86,6 +87,7 @@ impl SessionManager {
     }
 
     /// Update session state
+    #[allow(dead_code)]
     pub async fn update(&self, state: &SessionState) -> Result<()> {
         let key = state.session_id.as_str();
         self.kv.put(key, serde_json::to_vec(state)?.into()).await?;
@@ -93,6 +95,7 @@ impl SessionManager {
     }
 
     /// Delete a session
+    #[allow(dead_code)]
     pub async fn delete(&self, session_id: &SessionId) -> Result<()> {
         let key = session_id.as_str();
         self.kv.delete(key).await?;
