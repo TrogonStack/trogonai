@@ -1,12 +1,5 @@
 [tools]
-buf = "1.70.0"
-"cargo:protoc-gen-buffa" = "0.7.0"
-"cargo:protoc-gen-buffa-packaging" = "0.7.0"
-node = "26.3.0"
-pnpm = "11.5.1"
-python = "3.14.5"
-uv = "0.11.18"
-rust = { version = "1.96.0", profile = "default" }
+rust = "1.93.0"
 
 [tasks.dev]
 description = "Start development environment"
@@ -14,35 +7,16 @@ run = "docker compose -f devops/docker/compose/compose.yml up -d"
 
 [tasks.build]
 description = "Build all"
-depends = ["build:rust", "build:docs"]
-
-[tasks."build:docs"]
-dir = "docs"
-run = "pnpm docs:build"
+depends = ["build:rust"]
 
 [tasks."build:rust"]
 dir = "rsworkspace"
 run = "cargo build"
 
 [tasks.check]
-description = "Check Rust"
+description = "Check all"
 depends = ["check:rust"]
 
 [tasks."check:rust"]
 dir = "rsworkspace"
-run = "cargo clippy --workspace && cargo fmt --check"
-
-[tasks."proto:generate"]
-description = "Generate Buffa Rust protobuf bindings from Buf modules"
-run = "buf generate"
-depends_post = ["proto:format:rust"]
-
-[tasks."proto:format:rust"]
-description = "Format generated Rust protobuf bindings"
-dir = "rsworkspace"
-run = "cargo fmt --all"
-
-[tasks."rsc"]
-description = "Format and check all Rust code (fmt, clippy, all targets, all features)"
-dir = "rsworkspace"
-run = "cargo fmt && cargo clippy --all-targets --all-features"
+run = "cargo clippy --workspace -- -D warnings && cargo fmt --check"
