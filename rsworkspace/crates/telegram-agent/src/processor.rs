@@ -3,21 +3,25 @@
 use telegram_types::events::{MessageTextEvent, MessagePhotoEvent, CommandEvent, CallbackQueryEvent};
 use telegram_types::commands::{SendMessageCommand, AnswerCallbackCommand, SendChatActionCommand, ChatAction};
 use telegram_nats::{MessagePublisher, subjects};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use anyhow::Result;
+
+use crate::llm::{ClaudeClient, ClaudeConfig};
+use crate::conversation::ConversationManager;
 
 /// Message processor
 pub struct MessageProcessor {
-    // In the future, this will hold:
-    // - LLM client
-    // - Conversation state
-    // - Memory/context
+    llm_client: Option<ClaudeClient>,
+    conversation_manager: ConversationManager,
 }
 
 impl MessageProcessor {
     /// Create a new message processor
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(llm_config: Option<ClaudeConfig>) -> Self {
+        Self {
+            llm_client: llm_config.map(ClaudeClient::new),
+            conversation_manager: ConversationManager::new(),
+        }
     }
 
     /// Process a text message
@@ -27,13 +31,41 @@ impl MessageProcessor {
         publisher: &MessagePublisher,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
+        let session_id = &event.metadata.session_id;
 
         // Send typing indicator
         self.send_typing_indicator(chat_id, publisher).await?;
 
-        // For now, echo the message back
-        // TODO: Replace with LLM integration
-        let response_text = format!("You said: {}", event.text);
+        // Generate response
+        let response_text = if let Some(ref llm_client) = self.llm_client {
+            // LLM mode: Generate intelligent response
+            debug!("Generating LLM response for session {}", session_id);
+
+            // Get conversation history
+            let history = self.conversation_manager.get_history(session_id).await;
+
+            // System prompt
+            let system_prompt = "You are a helpful AI assistant in a Telegram chat. \
+                Be concise, friendly, and helpful. Keep responses under 500 words unless \
+                the user specifically asks for more detail.";
+
+            // Generate response
+            match llm_client.generate_response(system_prompt, &event.text, &history).await {
+                Ok(response) => {
+                    // Add to conversation history
+                    self.conversation_manager.add_message(session_id, "user", &event.text).await;
+                    self.conversation_manager.add_message(session_id, "assistant", &response).await;
+                    response
+                }
+                Err(e) => {
+                    warn!("LLM generation failed: {}", e);
+                    "Sorry, I encountered an error generating a response. Please try again.".to_string()
+                }
+            }
+        } else {
+            // Echo mode: Simple echo response
+            format!("You said: {}", event.text)
+        };
 
         // Send response
         let command = SendMessageCommand {
@@ -91,23 +123,50 @@ impl MessageProcessor {
         publisher: &MessagePublisher,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
+        let session_id = &event.metadata.session_id;
 
         let response_text = match event.command.as_str() {
             "start" => {
-                "👋 Welcome to the Telegram AI Agent!\n\n\
-                I'm powered by NATS and can help you with various tasks.\n\n\
-                Send me a message to get started!"
+                if self.llm_client.is_some() {
+                    "👋 Welcome to the Telegram AI Agent!\n\n\
+                    I'm powered by Claude AI and can help you with:\n\
+                    • Answering questions\n\
+                    • Writing and editing text\n\
+                    • Analyzing images\n\
+                    • General assistance\n\n\
+                    Just send me a message to get started!"
+                } else {
+                    "👋 Welcome to the Telegram AI Agent!\n\n\
+                    I'm running in echo mode (LLM disabled).\n\n\
+                    Send me a message and I'll echo it back!"
+                }
             }
             "help" => {
                 "Available commands:\n\n\
                 /start - Start the bot\n\
                 /help - Show this help message\n\
-                /status - Show bot status\n\n\
+                /status - Show bot status\n\
+                /clear - Clear conversation history\n\n\
                 Just send me any text and I'll respond!"
             }
             "status" => {
-                "✅ Bot is running and connected to NATS.\n\
-                Ready to process messages!"
+                let active_sessions = self.conversation_manager.active_sessions().await;
+                let mode = if self.llm_client.is_some() {
+                    "LLM (Claude AI)"
+                } else {
+                    "Echo mode"
+                };
+                &format!(
+                    "✅ Bot Status\n\n\
+                    Mode: {}\n\
+                    Active sessions: {}\n\
+                    Ready to process messages!",
+                    mode, active_sessions
+                )
+            }
+            "clear" => {
+                self.conversation_manager.clear_session(session_id).await;
+                "✅ Conversation history cleared!"
             }
             _ => {
                 "Unknown command. Use /help to see available commands."
@@ -183,6 +242,6 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }

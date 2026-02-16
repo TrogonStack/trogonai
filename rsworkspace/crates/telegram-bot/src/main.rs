@@ -8,6 +8,7 @@ mod bridge;
 mod config;
 mod handlers;
 mod outbound;
+mod outbound_streaming;
 mod session;
 
 use anyhow::Result;
@@ -145,6 +146,18 @@ async fn main() -> Result<()> {
         .branch(
             dptree::filter(|msg: Message| msg.video().is_some())
                 .endpoint(handlers::handle_video_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.audio().is_some())
+                .endpoint(handlers::handle_audio_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.document().is_some())
+                .endpoint(handlers::handle_document_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.voice().is_some())
+                .endpoint(handlers::handle_voice_message),
         );
 
     let callback_handler = Update::filter_callback_query()
