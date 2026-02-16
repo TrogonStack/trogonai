@@ -294,6 +294,7 @@ impl OutboundProcessor {
 }
 
 /// Convert our ParseMode to Teloxide's ParseMode
+#[allow(deprecated)]
 fn convert_parse_mode(mode: ParseMode) -> TgParseMode {
     match mode {
         ParseMode::Markdown => TgParseMode::Markdown,
