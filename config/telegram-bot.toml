@@ -6,14 +6,20 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 
 # Access control
 [telegram.access]
-# Admin user IDs (full access)
-admin_ids = []
+# DM policy: "allowlist", "denylist", or "open"
+dm_policy = "allowlist"
+
+# Group policy: "allowlist", "denylist", or "disabled"
+group_policy = "allowlist"
 
 # Allowed user IDs for DMs
-allowed_user_ids = []
+user_allowlist = []
 
 # Allowed group IDs
-allowed_group_ids = []
+group_allowlist = []
+
+# Admin user IDs (full access, bypass all restrictions)
+admin_users = []
 
 # Feature configuration
 [telegram.features]

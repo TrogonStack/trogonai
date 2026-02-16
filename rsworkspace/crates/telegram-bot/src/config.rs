@@ -1,5 +1,9 @@
 //! Configuration management for telegram-bot
 
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod config_tests;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
