@@ -1,0 +1,65 @@
+# Telegram Bot Configuration - Example
+
+[telegram]
+# Bot token from @BotFather
+# Get your token from https://t.me/BotFather
+bot_token = "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+
+# Access control
+[telegram.access]
+# Admin user IDs (full access to all features)
+# You can get your user ID by messaging @userinfobot
+admin_ids = [123456789]
+
+# Allowed user IDs for direct messages
+# Only these users can interact with the bot in DMs
+allowed_user_ids = [123456789, 987654321]
+
+# Allowed group IDs
+# Only these groups can use the bot
+# Get group ID by adding the bot to a group and checking logs
+allowed_group_ids = [-1001234567890]
+
+# Feature configuration
+[telegram.features]
+# Enable inline buttons
+inline_buttons = true
+
+# Streaming mode for progressive message updates
+# Options: "disabled", "partial", or "full"
+# - disabled: No streaming, send complete messages only
+# - partial: Stream long messages in chunks
+# - full: Stream all messages progressively
+streaming = "partial"
+
+# Rate limiting and constraints
+[telegram.limits]
+# Maximum text chunk size (Telegram limit: 4096)
+text_chunk_limit = 4096
+
+# Maximum media file size in MB (Telegram limit: 50MB for bots)
+media_max_mb = 50
+
+# Message history limit per session
+history_limit = 100
+
+# Rate limit: messages per minute per user
+rate_limit_messages_per_minute = 20
+
+# NATS Configuration
+[nats]
+# NATS server URLs
+servers = ["nats://localhost:4222"]
+
+# Environment prefix for JetStream streams and KV stores
+# Use different prefixes for different environments (dev, staging, prod)
+prefix = "prod"
+
+# NATS credentials (optional, for authenticated connections)
+# credentials_file = "/path/to/nats.creds"
+
+# TLS configuration (optional, for secure connections)
+# [nats.tls]
+# ca_file = "/path/to/ca.pem"
+# cert_file = "/path/to/cert.pem"
+# key_file = "/path/to/key.pem"
