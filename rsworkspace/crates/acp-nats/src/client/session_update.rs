@@ -1,0 +1,16 @@
+use agent_client_protocol::{Client, SessionNotification};
+use tracing::{error, instrument};
+
+#[instrument(name = "acp.client.session.update", skip(payload, client))]
+pub async fn handle<C: Client>(payload: &[u8], client: &C) {
+    match serde_json::from_slice::<SessionNotification>(payload) {
+        Ok(notification) => {
+            if let Err(e) = client.session_notification(notification).await {
+                error!(error = %e, "Failed to send session notification");
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to parse session notification");
+        }
+    }
+}
