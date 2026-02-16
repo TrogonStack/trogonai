@@ -1,0 +1,55 @@
+# Telegram Bot Configuration
+
+[telegram]
+# Bot token from @BotFather
+bot_token = "${TELEGRAM_BOT_TOKEN}"
+
+# Access control
+[telegram.access]
+# Admin user IDs (full access)
+admin_ids = []
+
+# Allowed user IDs for DMs
+allowed_user_ids = []
+
+# Allowed group IDs
+allowed_group_ids = []
+
+# Feature configuration
+[telegram.features]
+# Enable inline buttons
+inline_buttons = true
+
+# Streaming mode: "disabled", "partial", or "full"
+streaming = "partial"
+
+# Rate limiting and constraints
+[telegram.limits]
+# Maximum text chunk size (Telegram limit: 4096)
+text_chunk_limit = 4096
+
+# Maximum media file size in MB
+media_max_mb = 50
+
+# Message history limit per session
+history_limit = 100
+
+# Rate limit: messages per minute
+rate_limit_messages_per_minute = 20
+
+# NATS Configuration
+[nats]
+# NATS server URLs (comma-separated)
+servers = ["nats://localhost:4222"]
+
+# Environment prefix for JetStream and KV stores
+prefix = "prod"
+
+# NATS credentials (optional)
+# credentials_file = "/path/to/nats.creds"
+
+# TLS configuration (optional)
+# [nats.tls]
+# ca_file = "/path/to/ca.pem"
+# cert_file = "/path/to/cert.pem"
+# key_file = "/path/to/key.pem"
