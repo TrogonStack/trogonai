@@ -1,0 +1,14 @@
+name: trogonai
+
+services:
+  nats:
+    image: nats:latest
+    container_name: nats
+    command: 
+      - "--jetstream"
+      - "--store_dir=/data"
+    volumes:
+      - nats_data:/data
+
+volumes:
+  nats_data:
