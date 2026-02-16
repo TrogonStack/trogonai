@@ -2,74 +2,13 @@ name: trogonai
 
 services:
   nats:
-    image: nats:2.14.2-alpine
-    command:
+    image: nats:latest
+    container_name: nats
+    command: 
       - "--jetstream"
       - "--store_dir=/data"
-      - "--http_port=8222"
     volumes:
       - nats_data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
-      interval: 5s
-      timeout: 3s
-      start_period: 5s
-      retries: 3
-
-  trogon-gateway:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-gateway/Dockerfile
-    command:
-      - "--config"
-      - "/etc/trogon-gateway/gateway.toml"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:-local-dev-secret}"
-      NATS_URL: "nats:4222"
-      RUST_LOG: "${RUST_LOG:-info}"
-      TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
-    volumes:
-      - ./services/trogon-gateway/gateway.toml:/etc/trogon-gateway/gateway.toml:ro
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${TROGON_GATEWAY_PORT:-8080}/-/liveness"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-
-  ngrok:
-    image: ngrok/ngrok:3.39.6-alpine
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      GATEWAY_ADDR: "trogon-gateway:${TROGON_GATEWAY_PORT:-8080}"
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        cat > /tmp/ngrok.yml <<EOF
-        version: 3
-        tunnels:
-          gateway:
-            addr: $${GATEWAY_ADDR}
-            proto: http
-        EOF
-        exec ngrok start --all --config /tmp/ngrok.yml
-    depends_on:
-      trogon-gateway:
-        condition: service_healthy
-    restart: unless-stopped
-    profiles:
-      - dev
 
 volumes:
   nats_data:
