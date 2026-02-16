@@ -1,15 +1,5 @@
 [tools]
-buf = "1.70.0"
-"ubi:open-telemetry/weaver" = { version = "0.24.2", exe = "weaver" }
-"cargo:cargo-dylint" = "6.0.1"
-"cargo:dylint-link" = "6.0.1"
-"cargo:protoc-gen-buffa" = "0.7.0"
-"cargo:protoc-gen-buffa-packaging" = "0.7.0"
-node = "26.3.0"
-pnpm = "11.5.1"
-python = "3.14.5"
-uv = "0.11.18"
-rust = { version = "1.96.0", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview" }
+rust = "1.93.0"
 
 [tasks.dev]
 description = "Start development environment"
@@ -17,49 +7,16 @@ run = "docker compose -f devops/docker/compose/compose.yml up -d"
 
 [tasks.build]
 description = "Build all"
-depends = ["build:rust", "build:docs"]
-
-[tasks."build:docs"]
-dir = "docs"
-run = "pnpm docs:build"
+depends = ["build:rust"]
 
 [tasks."build:rust"]
 dir = "rsworkspace"
 run = "cargo build"
 
 [tasks.check]
-description = "Check Rust"
+description = "Check all"
 depends = ["check:rust"]
 
 [tasks."check:rust"]
 dir = "rsworkspace"
-run = "cargo clippy --workspace && cargo fmt --check"
-
-[tasks."proto:generate"]
-description = "Generate Buffa Rust protobuf bindings from Buf modules"
-run = "buf generate"
-depends_post = ["proto:format:rust"]
-
-[tasks."proto:format:rust"]
-description = "Format generated Rust protobuf bindings"
-dir = "rsworkspace"
-run = "cargo fmt --all"
-
-[tasks."rsc"]
-description = "Format and check all Rust code (fmt, clippy, all targets, all features)"
-dir = "rsworkspace"
-run = "cargo fmt && cargo clippy --all-targets --all-features"
-
-[tasks."semconv:check"]
-description = "Validate the otel/semconv/ Weaver registry and enforce naming policies"
-run = "weaver registry check --registry otel/semconv/registry --policy otel/semconv/policies"
-
-[tasks."semconv:generate"]
-description = "Generate Rust semconv bindings from the Weaver registry"
-run = "weaver registry generate --registry otel/semconv/registry --templates otel/semconv/templates rust rsworkspace/crates/trogon-semconv/src/gen"
-depends_post = ["semconv:format:rust"]
-
-[tasks."semconv:format:rust"]
-description = "Format generated Rust semconv bindings"
-dir = "rsworkspace"
-run = "cargo fmt -p trogon-semconv"
+run = "cargo clippy --workspace -- -D warnings && cargo fmt --check"

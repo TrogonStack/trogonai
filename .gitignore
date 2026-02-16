@@ -5,7 +5,6 @@ debug
 /target/
 **/*.rs.bk
 *.pdb
-*.rlib
 **/mutants.out*/
 
 # Node.js
@@ -13,7 +12,6 @@ node_modules
 .next
 .turbo
 dist
-docs/.vitepress/cache
 *.tsbuildinfo
 
 # pnpm
@@ -23,7 +21,6 @@ docs/.vitepress/cache
 .env
 .env.*
 !.env.example
-mise.local.toml
 
 # Docker
 docker-compose.override.yml
@@ -42,16 +39,5 @@ Thumbs.db
 .trogonai/
 *.internal.trogonai.md
 
-# Coverage
-lcov.info
-*.lcov
-coverage.xml
-coverage-*.xml
-*.profraw
-*.profdata
-
 # Misc
 tmp
-
-# Python
-__pycache__
