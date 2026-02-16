@@ -1,0 +1,14 @@
+# Test configuration - minimal valid config
+[telegram]
+bot_token = "test_token_for_dry_run"
+
+[telegram.access]
+dm_policy = "allowlist"
+group_policy = "allowlist"
+user_allowlist = [123456789]
+group_allowlist = []
+admin_users = [123456789]
+
+[nats]
+servers = ["nats://localhost:4222"]
+prefix = "test"

@@ -2,6 +2,10 @@
 //!
 //! Converts Telegram updates into NATS events
 
+#[cfg(test)]
+#[path = "bridge_tests.rs"]
+mod bridge_tests;
+
 use async_nats::{Client, jetstream::kv::Store};
 use teloxide::types::{Message, CallbackQuery};
 use telegram_nats::{MessagePublisher, subjects};
