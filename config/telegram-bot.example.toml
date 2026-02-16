@@ -7,18 +7,28 @@ bot_token = "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
 
 # Access control
 [telegram.access]
-# Admin user IDs (full access to all features)
-# You can get your user ID by messaging @userinfobot
-admin_ids = [123456789]
+# DM policy: "allowlist", "denylist", or "open"
+# - allowlist: Only users in user_allowlist can DM the bot
+# - denylist: All users except those in user_allowlist can DM
+# - open: Anyone can DM the bot
+dm_policy = "allowlist"
+
+# Group policy: "allowlist", "denylist", or "disabled"
+# - allowlist: Only groups in group_allowlist can use the bot
+# - denylist: All groups except those in group_allowlist can use the bot
+# - disabled: Bot doesn't respond in any groups
+group_policy = "allowlist"
 
 # Allowed user IDs for direct messages
-# Only these users can interact with the bot in DMs
-allowed_user_ids = [123456789, 987654321]
+# You can get your user ID by messaging @userinfobot
+user_allowlist = [123456789, 987654321]
 
 # Allowed group IDs
-# Only these groups can use the bot
 # Get group ID by adding the bot to a group and checking logs
-allowed_group_ids = [-1001234567890]
+group_allowlist = [-1001234567890]
+
+# Admin user IDs (full access to all features, bypass all restrictions)
+admin_users = [123456789]
 
 # Feature configuration
 [telegram.features]
