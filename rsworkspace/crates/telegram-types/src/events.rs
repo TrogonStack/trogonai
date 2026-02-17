@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, PhotoSize, User};
+use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, MessageEntity, PhotoSize, User};
 
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +25,9 @@ pub struct MessageTextEvent {
     pub metadata: EventMetadata,
     pub message: Message,
     pub text: String,
+    /// Message entities (mentions, hashtags, URLs, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entities: Option<Vec<MessageEntity>>,
 }
 
 /// Photo message event

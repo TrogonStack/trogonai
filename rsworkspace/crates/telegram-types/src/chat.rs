@@ -150,3 +150,132 @@ pub struct ChatInviteLink {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_limit: Option<i32>,
 }
+
+/// Chat permissions for all members
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChatPermissions {
+    /// True if users can send text messages, contacts, locations, and venues
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_send_messages: Option<bool>,
+    /// True if users can send photos, videos, video notes, and voice notes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_send_media_messages: Option<bool>,
+    /// True if users can send polls
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_send_polls: Option<bool>,
+    /// True if users can send animations, games, stickers, and use inline bots
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_send_other_messages: Option<bool>,
+    /// True if users can add web page previews
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_add_web_page_previews: Option<bool>,
+    /// True if users can change the chat title, photo, and other settings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_change_info: Option<bool>,
+    /// True if users can invite new users to the chat
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_invite_users: Option<bool>,
+    /// True if users can pin messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_pin_messages: Option<bool>,
+    /// True if users can create forum topics
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_manage_topics: Option<bool>,
+}
+
+/// Administrator rights in a chat
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChatAdministratorRights {
+    /// True if the user's presence in the chat is hidden
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_anonymous: Option<bool>,
+    /// True if the administrator can access the chat event log
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_manage_chat: Option<bool>,
+    /// True if the administrator can delete messages of other users
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_delete_messages: Option<bool>,
+    /// True if the administrator can manage video chats
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_manage_video_chats: Option<bool>,
+    /// True if the administrator can restrict, ban, or unban chat members
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_restrict_members: Option<bool>,
+    /// True if the administrator can add new administrators
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_promote_members: Option<bool>,
+    /// True if the user can change the chat title, photo, and other settings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_change_info: Option<bool>,
+    /// True if the user can invite new users to the chat
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_invite_users: Option<bool>,
+    /// True if the administrator can pin messages (supergroups only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_pin_messages: Option<bool>,
+    /// True if the user can create, rename, close, and reopen forum topics (supergroups only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_manage_topics: Option<bool>,
+    /// True if the administrator can post messages in the channel (channels only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_post_messages: Option<bool>,
+    /// True if the administrator can edit messages of other users (channels only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_edit_messages: Option<bool>,
+    /// True if the user can post stories to the chat (channels only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_post_stories: Option<bool>,
+    /// True if the user can edit stories posted to the chat (channels only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_edit_stories: Option<bool>,
+    /// True if the user can delete stories posted to the chat (channels only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_delete_stories: Option<bool>,
+}
+
+/// Text entity type (mention, hashtag, url, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageEntityType {
+    Mention,           // @username
+    Hashtag,           // #hashtag
+    Cashtag,           // $USD
+    BotCommand,        // /start
+    Url,               // https://telegram.org
+    Email,             // do-not-reply@telegram.org
+    PhoneNumber,       // +1-212-555-0123
+    Bold,              // bold text
+    Italic,            // italic text
+    Underline,         // underlined text
+    Strikethrough,     // strikethrough text
+    Spoiler,           // spoiler message
+    Code,              // monowidth string
+    Pre,               // monowidth block
+    TextLink,          // clickable text URLs
+    TextMention,       // users without usernames
+    CustomEmoji,       // inline custom emoji stickers
+}
+
+/// Message entity (mention, hashtag, URL, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageEntity {
+    /// Type of the entity
+    #[serde(rename = "type")]
+    pub entity_type: MessageEntityType,
+    /// Offset in UTF-16 code units to the start of the entity
+    pub offset: i32,
+    /// Length of the entity in UTF-16 code units
+    pub length: i32,
+    /// For "text_link" only, URL that will be opened after user taps on the text
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// For "text_mention" only, the mentioned user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    /// For "pre" only, the programming language of the entity text
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// For "custom_emoji" only, unique identifier of the custom emoji
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_emoji_id: Option<String>,
+}
