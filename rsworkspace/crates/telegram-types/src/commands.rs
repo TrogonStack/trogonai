@@ -1402,3 +1402,259 @@ pub struct SetStickerMaskPositionCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mask_position: Option<MaskPosition>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn roundtrip<T: Serialize + for<'de> Deserialize<'de>>(val: &T) {
+        let json = serde_json::to_string(val).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        let json2 = serde_json::to_string(&back).expect("re-serialize");
+        assert_eq!(json, json2, "roundtrip produced different JSON");
+    }
+
+    #[test]
+    fn test_send_video_command_roundtrip() {
+        let cmd = SendVideoCommand {
+            chat_id: 100,
+            video: "file_id_123".to_string(),
+            caption: Some("Watch this".to_string()),
+            parse_mode: Some(ParseMode::HTML),
+            duration: Some(30),
+            width: Some(1280),
+            height: Some(720),
+            supports_streaming: Some(true),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_audio_command_roundtrip() {
+        let cmd = SendAudioCommand {
+            chat_id: 200,
+            audio: "audio_file_id".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(180),
+            performer: Some("Artist".to_string()),
+            title: Some("Song".to_string()),
+            reply_to_message_id: Some(5),
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_document_command_roundtrip() {
+        let cmd = SendDocumentCommand {
+            chat_id: 300,
+            document: "doc_file_id".to_string(),
+            caption: Some("Here's the file".to_string()),
+            parse_mode: Some(ParseMode::MarkdownV2),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: Some(7),
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_voice_command_roundtrip() {
+        let cmd = SendVoiceCommand {
+            chat_id: 400,
+            voice: "voice_file_id".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(10),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_input_media_item_variants_roundtrip() {
+        let photo = InputMediaItem::Photo {
+            media: "photo_id".to_string(),
+            caption: Some("pic".to_string()),
+            parse_mode: None,
+        };
+        roundtrip(&photo);
+
+        let video = InputMediaItem::Video {
+            media: "video_id".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(60),
+            width: Some(1920),
+            height: Some(1080),
+            supports_streaming: Some(true),
+        };
+        roundtrip(&video);
+
+        let audio = InputMediaItem::Audio {
+            media: "audio_id".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(120),
+            performer: Some("Band".to_string()),
+            title: Some("Track".to_string()),
+        };
+        roundtrip(&audio);
+
+        let doc = InputMediaItem::Document {
+            media: "doc_id".to_string(),
+            caption: None,
+            parse_mode: None,
+        };
+        roundtrip(&doc);
+    }
+
+    #[test]
+    fn test_send_media_group_command_roundtrip() {
+        let cmd = SendMediaGroupCommand {
+            chat_id: 500,
+            media: vec![
+                InputMediaItem::Photo { media: "p1".to_string(), caption: None, parse_mode: None },
+                InputMediaItem::Video {
+                    media: "v1".to_string(),
+                    caption: Some("vid".to_string()),
+                    parse_mode: Some(ParseMode::HTML),
+                    duration: None,
+                    width: None,
+                    height: None,
+                    supports_streaming: None,
+                },
+            ],
+            reply_to_message_id: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_location_command_roundtrip() {
+        let cmd = SendLocationCommand {
+            chat_id: 600,
+            latitude: 40.416775,
+            longitude: -3.703790,
+            live_period: Some(300),
+            horizontal_accuracy: Some(10.5),
+            heading: Some(270),
+            proximity_alert_radius: Some(100),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_venue_command_roundtrip() {
+        let cmd = SendVenueCommand {
+            chat_id: 700,
+            latitude: 48.8566,
+            longitude: 2.3522,
+            title: "Louvre".to_string(),
+            address: "Rue de Rivoli".to_string(),
+            foursquare_id: None,
+            foursquare_type: None,
+            google_place_id: Some("ChIJ...".to_string()),
+            google_place_type: Some("museum".to_string()),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_contact_command_roundtrip() {
+        let cmd = SendContactCommand {
+            chat_id: 800,
+            phone_number: "+1234567890".to_string(),
+            first_name: "Alice".to_string(),
+            last_name: Some("Smith".to_string()),
+            vcard: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_poll_command_roundtrip() {
+        let cmd = SendPollCommand {
+            chat_id: 900,
+            question: "Favorite color?".to_string(),
+            options: vec!["Red".to_string(), "Blue".to_string(), "Green".to_string()],
+            is_anonymous: Some(false),
+            poll_type: Some(PollKind::Regular),
+            allows_multiple_answers: Some(true),
+            correct_option_id: None,
+            explanation: None,
+            explanation_parse_mode: None,
+            open_period: Some(60),
+            close_date: None,
+            is_closed: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_quiz_poll_command_roundtrip() {
+        let cmd = SendPollCommand {
+            chat_id: 901,
+            question: "Capital of France?".to_string(),
+            options: vec!["London".to_string(), "Paris".to_string(), "Madrid".to_string()],
+            is_anonymous: Some(true),
+            poll_type: Some(PollKind::Quiz),
+            allows_multiple_answers: None,
+            correct_option_id: Some(1),
+            explanation: Some("It's Paris!".to_string()),
+            explanation_parse_mode: Some(ParseMode::HTML),
+            open_period: None,
+            close_date: None,
+            is_closed: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_stop_poll_command_roundtrip() {
+        let cmd = StopPollCommand {
+            chat_id: 1000,
+            message_id: 55,
+            reply_markup: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_poll_kind_serde() {
+        assert_eq!(serde_json::to_string(&PollKind::Regular).unwrap(), "\"regular\"");
+        assert_eq!(serde_json::to_string(&PollKind::Quiz).unwrap(), "\"quiz\"");
+        let rt: PollKind = serde_json::from_str("\"quiz\"").unwrap();
+        assert_eq!(rt, PollKind::Quiz);
+    }
+
+    #[test]
+    fn test_parse_mode_serde() {
+        assert_eq!(serde_json::to_string(&ParseMode::HTML).unwrap(), "\"HTML\"");
+        assert_eq!(serde_json::to_string(&ParseMode::Markdown).unwrap(), "\"Markdown\"");
+        assert_eq!(serde_json::to_string(&ParseMode::MarkdownV2).unwrap(), "\"MarkdownV2\"");
+    }
+}

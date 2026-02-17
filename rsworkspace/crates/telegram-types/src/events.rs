@@ -461,3 +461,150 @@ pub struct SuccessfulPaymentEvent {
     pub message: Message,
     pub payment: SuccessfulPayment,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::{Chat, ChatType, Message as TgMessage};
+
+    fn test_metadata() -> EventMetadata {
+        EventMetadata::new("tg-private-123".to_string(), 1)
+    }
+
+    fn test_message() -> TgMessage {
+        TgMessage {
+            message_id: 42,
+            date: 0,
+            chat: Chat { id: 123, chat_type: ChatType::Private, title: None, username: None },
+            from: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        }
+    }
+
+    fn roundtrip<T: Serialize + for<'de> Deserialize<'de>>(val: &T) {
+        let json = serde_json::to_string(val).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        let json2 = serde_json::to_string(&back).expect("re-serialize");
+        assert_eq!(json, json2, "roundtrip produced different JSON");
+    }
+
+    #[test]
+    fn test_poll_type_serde() {
+        assert_eq!(serde_json::to_string(&PollType::Regular).unwrap(), "\"regular\"");
+        assert_eq!(serde_json::to_string(&PollType::Quiz).unwrap(), "\"quiz\"");
+        let rt: PollType = serde_json::from_str("\"regular\"").unwrap();
+        assert_eq!(rt, PollType::Regular);
+    }
+
+    #[test]
+    fn test_message_poll_event_roundtrip() {
+        let event = MessagePollEvent {
+            metadata: test_metadata(),
+            message: test_message(),
+            poll_id: "poll123".to_string(),
+            question: "Best language?".to_string(),
+            options: vec![
+                PollOption { text: "Rust".to_string(), voter_count: 10 },
+                PollOption { text: "Python".to_string(), voter_count: 5 },
+            ],
+            total_voter_count: 15,
+            is_closed: false,
+            is_anonymous: true,
+            poll_type: PollType::Regular,
+            allows_multiple_answers: false,
+            correct_option_id: None,
+            explanation: None,
+            open_period: None,
+        };
+        roundtrip(&event);
+    }
+
+    #[test]
+    fn test_poll_update_event_roundtrip() {
+        let event = PollUpdateEvent {
+            metadata: test_metadata(),
+            poll_id: "p1".to_string(),
+            question: "Quiz?".to_string(),
+            options: vec![
+                PollOption { text: "A".to_string(), voter_count: 1 },
+                PollOption { text: "B".to_string(), voter_count: 0 },
+            ],
+            total_voter_count: 1,
+            is_closed: true,
+            is_anonymous: false,
+            poll_type: PollType::Quiz,
+            allows_multiple_answers: false,
+            correct_option_id: Some(0),
+            explanation: Some("Because A".to_string()),
+        };
+        roundtrip(&event);
+    }
+
+    #[test]
+    fn test_poll_answer_event_roundtrip() {
+        let event = PollAnswerEvent {
+            metadata: test_metadata(),
+            poll_id: "p2".to_string(),
+            option_ids: vec![0, 2],
+            voter_user_id: Some(999),
+            voter_chat_id: None,
+        };
+        roundtrip(&event);
+
+        let anon = PollAnswerEvent {
+            metadata: test_metadata(),
+            poll_id: "p3".to_string(),
+            option_ids: vec![],
+            voter_user_id: None,
+            voter_chat_id: Some(-100123456),
+        };
+        roundtrip(&anon);
+    }
+
+    #[test]
+    fn test_message_location_event_roundtrip() {
+        let event = MessageLocationEvent {
+            metadata: test_metadata(),
+            message: test_message(),
+            longitude: -3.703790,
+            latitude: 40.416775,
+            horizontal_accuracy: Some(15.0),
+            live_period: Some(300),
+            heading: Some(180),
+            proximity_alert_radius: Some(500),
+        };
+        roundtrip(&event);
+    }
+
+    #[test]
+    fn test_message_venue_event_roundtrip() {
+        let event = MessageVenueEvent {
+            metadata: test_metadata(),
+            message: test_message(),
+            longitude: 2.347,
+            latitude: 48.859,
+            title: "Eiffel Tower".to_string(),
+            address: "Champ de Mars".to_string(),
+            foursquare_id: Some("abc123".to_string()),
+            foursquare_type: None,
+            google_place_id: None,
+            google_place_type: None,
+        };
+        roundtrip(&event);
+    }
+
+    #[test]
+    fn test_message_contact_event_roundtrip() {
+        let event = MessageContactEvent {
+            metadata: test_metadata(),
+            message: test_message(),
+            phone_number: "+34600000000".to_string(),
+            first_name: "Jorge".to_string(),
+            last_name: Some("Garcia".to_string()),
+            user_id: Some(42),
+            vcard: None,
+        };
+        roundtrip(&event);
+    }
+}

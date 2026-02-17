@@ -228,3 +228,264 @@ fn make_event(
         is_permanent,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teloxide::{ApiError, RequestError};
+    use telegram_types::errors::{ErrorCategory, TelegramErrorCode};
+
+    // ── TelegramErrorCode::is_permanent() ─────────────────────────────────────
+
+    #[test]
+    fn test_is_permanent_true_for_bot_blocked() {
+        assert!(TelegramErrorCode::BotBlocked.is_permanent());
+        assert!(TelegramErrorCode::BotKicked.is_permanent());
+        assert!(TelegramErrorCode::BotKickedFromSupergroup.is_permanent());
+        assert!(TelegramErrorCode::BotKickedFromChannel.is_permanent());
+        assert!(TelegramErrorCode::InvalidToken.is_permanent());
+        assert!(TelegramErrorCode::ChatNotFound.is_permanent());
+        assert!(TelegramErrorCode::UserDeactivated.is_permanent());
+        assert!(TelegramErrorCode::GroupDeactivated.is_permanent());
+    }
+
+    #[test]
+    fn test_is_permanent_true_for_message_errors() {
+        assert!(TelegramErrorCode::MessageNotModified.is_permanent());
+        assert!(TelegramErrorCode::MessageCantBeEdited.is_permanent());
+        assert!(TelegramErrorCode::MessageCantBeDeleted.is_permanent());
+        assert!(TelegramErrorCode::ChatDescriptionIsNotModified.is_permanent());
+        assert!(TelegramErrorCode::CantDemoteChatCreator.is_permanent());
+    }
+
+    #[test]
+    fn test_is_permanent_false_for_transient_errors() {
+        assert!(!TelegramErrorCode::NetworkError.is_permanent());
+        assert!(!TelegramErrorCode::IoError.is_permanent());
+        assert!(!TelegramErrorCode::FloodControl.is_permanent());
+        assert!(!TelegramErrorCode::PollHasAlreadyClosed.is_permanent());
+        assert!(!TelegramErrorCode::Unknown.is_permanent());
+    }
+
+    // ── TelegramErrorCode::is_retryable() ─────────────────────────────────────
+
+    #[test]
+    fn test_is_retryable() {
+        assert!(TelegramErrorCode::FloodControl.is_retryable());
+        assert!(TelegramErrorCode::NetworkError.is_retryable());
+        assert!(TelegramErrorCode::IoError.is_retryable());
+        assert!(TelegramErrorCode::CantGetUpdates.is_retryable());
+
+        assert!(!TelegramErrorCode::BotBlocked.is_retryable());
+        assert!(!TelegramErrorCode::ChatNotFound.is_retryable());
+        assert!(!TelegramErrorCode::MessageNotModified.is_retryable());
+    }
+
+    // ── TelegramErrorCode::category() ─────────────────────────────────────────
+
+    #[test]
+    fn test_category_bot_blocked() {
+        assert_eq!(TelegramErrorCode::BotBlocked.category(), ErrorCategory::BotBlocked);
+        assert_eq!(TelegramErrorCode::BotKicked.category(), ErrorCategory::BotBlocked);
+        assert_eq!(TelegramErrorCode::CantInitiateConversation.category(), ErrorCategory::BotBlocked);
+    }
+
+    #[test]
+    fn test_category_not_found() {
+        assert_eq!(TelegramErrorCode::ChatNotFound.category(), ErrorCategory::NotFound);
+        assert_eq!(TelegramErrorCode::UserNotFound.category(), ErrorCategory::NotFound);
+        assert_eq!(TelegramErrorCode::GroupDeactivated.category(), ErrorCategory::NotFound);
+    }
+
+    #[test]
+    fn test_category_permission_denied() {
+        assert_eq!(TelegramErrorCode::NotEnoughRightsToPinMessage.category(), ErrorCategory::PermissionDenied);
+        assert_eq!(TelegramErrorCode::NotEnoughRightsToPostMessages.category(), ErrorCategory::PermissionDenied);
+        assert_eq!(TelegramErrorCode::CantRestrictSelf.category(), ErrorCategory::PermissionDenied);
+    }
+
+    #[test]
+    fn test_category_message_unmodifiable() {
+        assert_eq!(TelegramErrorCode::MessageNotModified.category(), ErrorCategory::MessageUnmodifiable);
+        assert_eq!(TelegramErrorCode::MessageCantBeEdited.category(), ErrorCategory::MessageUnmodifiable);
+        assert_eq!(TelegramErrorCode::MessageCantBeDeleted.category(), ErrorCategory::MessageUnmodifiable);
+    }
+
+    #[test]
+    fn test_category_network() {
+        assert_eq!(TelegramErrorCode::NetworkError.category(), ErrorCategory::Network);
+        assert_eq!(TelegramErrorCode::IoError.category(), ErrorCategory::Network);
+    }
+
+    #[test]
+    fn test_category_webhook_error() {
+        assert_eq!(TelegramErrorCode::WebhookRequireHttps.category(), ErrorCategory::WebhookError);
+        assert_eq!(TelegramErrorCode::BadWebhookPort.category(), ErrorCategory::WebhookError);
+        assert_eq!(TelegramErrorCode::UnknownHost.category(), ErrorCategory::WebhookError);
+    }
+
+    // ── classify() with RequestError::Api ─────────────────────────────────────
+
+    #[test]
+    fn test_classify_bot_blocked_is_permanent() {
+        let err = RequestError::Api(ApiError::BotBlocked);
+        let outcome = classify("test.subject", &err);
+        match outcome {
+            ErrorOutcome::Permanent(evt) => {
+                assert_eq!(evt.command_subject, "test.subject");
+                assert_eq!(evt.error_code, TelegramErrorCode::BotBlocked);
+                assert!(evt.is_permanent);
+            }
+            other => panic!("Expected Permanent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_chat_not_found_is_permanent() {
+        let err = RequestError::Api(ApiError::ChatNotFound);
+        let outcome = classify("send.message", &err);
+        match outcome {
+            ErrorOutcome::Permanent(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::ChatNotFound);
+                assert!(evt.is_permanent);
+                assert_eq!(evt.category, ErrorCategory::NotFound);
+            }
+            other => panic!("Expected Permanent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_message_not_modified_is_permanent() {
+        let err = RequestError::Api(ApiError::MessageNotModified);
+        let outcome = classify("edit.message", &err);
+        match outcome {
+            ErrorOutcome::Permanent(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::MessageNotModified);
+                assert!(evt.is_permanent);
+                assert_eq!(evt.category, ErrorCategory::MessageUnmodifiable);
+            }
+            other => panic!("Expected Permanent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_poll_closed_is_transient() {
+        let err = RequestError::Api(ApiError::PollHasAlreadyClosed);
+        let outcome = classify("stop.poll", &err);
+        match outcome {
+            ErrorOutcome::Transient(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::PollHasAlreadyClosed);
+                assert!(!evt.is_permanent);
+            }
+            other => panic!("Expected Transient, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_migrate_to_chat_id() {
+        let new_id = ChatId(9876);
+        let err = RequestError::MigrateToChatId(new_id);
+        let outcome = classify("send.message", &err);
+        match outcome {
+            ErrorOutcome::Migrated(id) => {
+                assert_eq!(id, new_id);
+            }
+            other => panic!("Expected Migrated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_io_error_is_transient() {
+        let io_err = std::sync::Arc::new(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "connection reset"));
+        let err = RequestError::Io(io_err);
+        let outcome = classify("send.message", &err);
+        match outcome {
+            ErrorOutcome::Transient(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::IoError);
+                assert!(!evt.is_permanent);
+                assert_eq!(evt.category, ErrorCategory::Network);
+            }
+            other => panic!("Expected Transient, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_unknown_api_error_is_transient() {
+        let err = RequestError::Api(ApiError::Unknown("some unknown error".to_string()));
+        let outcome = classify("some.subject", &err);
+        match outcome {
+            ErrorOutcome::Transient(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::Unknown);
+                assert!(!evt.is_permanent);
+            }
+            other => panic!("Expected Transient, got {:?}", other),
+        }
+    }
+
+    // ── classify() - various API errors ───────────────────────────────────────
+
+    #[test]
+    fn test_classify_wrong_file_id_is_transient() {
+        let err = RequestError::Api(ApiError::WrongFileId);
+        let outcome = classify("send.document", &err);
+        match outcome {
+            ErrorOutcome::Transient(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::WrongFileId);
+                assert_eq!(evt.category, ErrorCategory::InvalidInput);
+            }
+            other => panic!("Expected Transient, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_classify_webhook_error_is_transient() {
+        let err = RequestError::Api(ApiError::WebhookRequireHttps);
+        let outcome = classify("set.webhook", &err);
+        match outcome {
+            ErrorOutcome::Transient(evt) => {
+                assert_eq!(evt.error_code, TelegramErrorCode::WebhookRequireHttps);
+                assert_eq!(evt.category, ErrorCategory::WebhookError);
+            }
+            other => panic!("Expected Transient, got {:?}", other),
+        }
+    }
+
+    // ── CommandErrorEvent fields ───────────────────────────────────────────────
+
+    #[test]
+    fn test_command_error_event_has_correct_subject() {
+        let subject = "telegram.prod.bot.message.send";
+        let err = RequestError::Api(ApiError::BotBlocked);
+        let outcome = classify(subject, &err);
+        match outcome {
+            ErrorOutcome::Permanent(evt) => {
+                assert_eq!(evt.command_subject, subject);
+            }
+            other => panic!("Expected Permanent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_command_error_event_serde_roundtrip() {
+        use telegram_types::errors::CommandErrorEvent;
+        let evt = CommandErrorEvent {
+            command_subject: "test.subject".to_string(),
+            error_code: TelegramErrorCode::ChatNotFound,
+            category: ErrorCategory::NotFound,
+            message: "Chat not found".to_string(),
+            retry_after_secs: None,
+            migrated_to_chat_id: None,
+            is_permanent: true,
+        };
+
+        let json = serde_json::to_string(&evt).expect("serialize");
+        let decoded: CommandErrorEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.command_subject, evt.command_subject);
+        assert_eq!(decoded.error_code, evt.error_code);
+        assert_eq!(decoded.category, evt.category);
+        assert_eq!(decoded.message, evt.message);
+        assert_eq!(decoded.is_permanent, evt.is_permanent);
+        assert!(decoded.retry_after_secs.is_none());
+        assert!(decoded.migrated_to_chat_id.is_none());
+    }
+}
