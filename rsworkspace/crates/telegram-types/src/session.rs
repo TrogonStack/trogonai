@@ -57,11 +57,12 @@ impl SessionId {
         match chat.chat_type {
             ChatType::Private => Self::for_private_chat(chat.id),
             ChatType::Group | ChatType::Supergroup => {
-                if isolate_in_groups && user_id.is_some() {
-                    Self::for_user_in_group(chat.id, user_id.unwrap())
-                } else {
-                    Self::from_chat(chat)
+                if isolate_in_groups {
+                    if let Some(uid) = user_id {
+                        return Self::for_user_in_group(chat.id, uid);
+                    }
                 }
+                Self::from_chat(chat)
             }
             ChatType::Channel => Self::for_channel(chat.id),
         }

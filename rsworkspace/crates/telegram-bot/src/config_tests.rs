@@ -5,7 +5,7 @@ mod tests {
     #[test]
     fn test_default_feature_config() {
         let config = FeatureConfig::default();
-        assert_eq!(config.inline_buttons, true);
+        assert!(config.inline_buttons);
         assert_eq!(config.streaming, StreamingMode::Partial);
     }
 

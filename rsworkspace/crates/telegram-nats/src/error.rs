@@ -90,13 +90,20 @@ mod tests {
     #[test]
     fn test_result_ok() {
         let r: Result<i32> = Ok(42);
-        assert_eq!(r.unwrap(), 42);
+        if let Ok(v) = r {
+            assert_eq!(v, 42);
+        } else {
+            panic!("should be ok");
+        }
     }
 
     #[test]
     fn test_result_err() {
         let r: Result<i32> = Err(Error::Connection("fail".to_string()));
-        assert!(r.is_err());
-        assert!(r.unwrap_err().to_string().contains("Connection error"));
+        if let Err(e) = r {
+            assert!(e.to_string().contains("Connection error"));
+        } else {
+            panic!("should be err");
+        }
     }
 }
