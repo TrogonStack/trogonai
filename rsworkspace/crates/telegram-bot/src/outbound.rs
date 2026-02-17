@@ -51,6 +51,11 @@ impl OutboundProcessor {
         let edit_task = self.handle_edit_messages(prefix.clone());
         let delete_task = self.handle_delete_messages(prefix.clone());
         let photo_task = self.handle_send_photos(prefix.clone());
+        let video_task = self.handle_send_videos(prefix.clone());
+        let audio_task = self.handle_send_audios(prefix.clone());
+        let document_task = self.handle_send_documents(prefix.clone());
+        let voice_task = self.handle_send_voices(prefix.clone());
+        let media_group_task = self.handle_send_media_groups(prefix.clone());
         let sticker_task = self.handle_send_stickers(prefix.clone());
         let animation_task = self.handle_send_animations(prefix.clone());
         let video_note_task = self.handle_send_video_notes(prefix.clone());
@@ -74,6 +79,11 @@ impl OutboundProcessor {
             edit_task,
             delete_task,
             photo_task,
+            video_task,
+            audio_task,
+            document_task,
+            voice_task,
+            media_group_task,
             sticker_task,
             animation_task,
             video_note_task,
@@ -232,6 +242,278 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => error!("Failed to deserialize send photo command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send video commands
+    async fn handle_send_videos(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_video(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendVideoCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send video command for chat {}", cmd.chat_id);
+
+                    let video = teloxide::types::InputFile::file_id(cmd.video);
+                    let mut req = self.bot.send_video(ChatId(cmd.chat_id), video);
+
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(convert_parse_mode(parse_mode));
+                    }
+
+                    if let Some(duration) = cmd.duration {
+                        req.duration = Some(duration);
+                    }
+
+                    if let Some(width) = cmd.width {
+                        req.width = Some(width);
+                    }
+
+                    if let Some(height) = cmd.height {
+                        req.height = Some(height);
+                    }
+
+                    if let Some(supports_streaming) = cmd.supports_streaming {
+                        req.supports_streaming = Some(supports_streaming);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send video command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send audio commands
+    async fn handle_send_audios(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_audio(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendAudioCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send audio command for chat {}", cmd.chat_id);
+
+                    let audio = teloxide::types::InputFile::file_id(cmd.audio);
+                    let mut req = self.bot.send_audio(ChatId(cmd.chat_id), audio);
+
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(convert_parse_mode(parse_mode));
+                    }
+
+                    if let Some(duration) = cmd.duration {
+                        req.duration = Some(duration);
+                    }
+
+                    if let Some(performer) = cmd.performer {
+                        req.performer = Some(performer);
+                    }
+
+                    if let Some(title) = cmd.title {
+                        req.title = Some(title);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send audio command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send document commands
+    async fn handle_send_documents(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_document(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendDocumentCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send document command for chat {}", cmd.chat_id);
+
+                    let document = teloxide::types::InputFile::file_id(cmd.document);
+                    let mut req = self.bot.send_document(ChatId(cmd.chat_id), document);
+
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(convert_parse_mode(parse_mode));
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send document command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send voice commands
+    async fn handle_send_voices(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_voice(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendVoiceCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send voice command for chat {}", cmd.chat_id);
+
+                    let voice = teloxide::types::InputFile::file_id(cmd.voice);
+                    let mut req = self.bot.send_voice(ChatId(cmd.chat_id), voice);
+
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(convert_parse_mode(parse_mode));
+                    }
+
+                    if let Some(duration) = cmd.duration {
+                        req.duration = Some(duration);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send voice command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send media group commands
+    async fn handle_send_media_groups(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::InputMediaItem;
+        use teloxide::types::{InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo};
+
+        let subject = subjects::agent::message_send_media_group(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendMediaGroupCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send media group command for chat {} ({} items)", cmd.chat_id, cmd.media.len());
+
+                    let media: Vec<InputMedia> = cmd.media.into_iter().map(|item| {
+                        match item {
+                            InputMediaItem::Photo { media, caption, parse_mode } => {
+                                let mut m = InputMediaPhoto::new(teloxide::types::InputFile::file_id(media));
+                                m.caption = caption;
+                                m.parse_mode = parse_mode.map(convert_parse_mode);
+                                InputMedia::Photo(m)
+                            }
+                            InputMediaItem::Video { media, caption, parse_mode, duration, width, height, supports_streaming } => {
+                                let mut m = InputMediaVideo::new(teloxide::types::InputFile::file_id(media));
+                                m.caption = caption;
+                                m.parse_mode = parse_mode.map(convert_parse_mode);
+                                m.duration = duration.map(|d| d as u16);
+                                m.width = width.map(|w| w as u16);
+                                m.height = height.map(|h| h as u16);
+                                m.supports_streaming = supports_streaming;
+                                InputMedia::Video(m)
+                            }
+                            InputMediaItem::Audio { media, caption, parse_mode, duration, performer, title } => {
+                                let mut m = InputMediaAudio::new(teloxide::types::InputFile::file_id(media));
+                                m.caption = caption;
+                                m.parse_mode = parse_mode.map(convert_parse_mode);
+                                m.duration = duration.map(|d| d as u16);
+                                m.performer = performer;
+                                m.title = title;
+                                InputMedia::Audio(m)
+                            }
+                            InputMediaItem::Document { media, caption, parse_mode } => {
+                                let mut m = InputMediaDocument::new(teloxide::types::InputFile::file_id(media));
+                                m.caption = caption;
+                                m.parse_mode = parse_mode.map(convert_parse_mode);
+                                InputMedia::Document(m)
+                            }
+                        }
+                    }).collect();
+
+                    let mut req = self.bot.send_media_group(ChatId(cmd.chat_id), media);
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send media group command: {}", e),
             }
         }
 

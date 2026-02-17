@@ -78,6 +78,155 @@ pub struct SendPhotoCommand {
     pub message_thread_id: Option<i32>,
 }
 
+/// Send a video
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendVideoCommand {
+    pub chat_id: i64,
+    /// file_id or URL of the video
+    pub video: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_streaming: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send an audio file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendAudioCommand {
+    pub chat_id: i64,
+    /// file_id or URL of the audio
+    pub audio: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send a document (file)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendDocumentCommand {
+    pub chat_id: i64,
+    /// file_id or URL of the document
+    pub document: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send a voice message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendVoiceCommand {
+    pub chat_id: i64,
+    /// file_id or URL of the voice message (ogg encoded with OPUS)
+    pub voice: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// An item in a media group
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InputMediaItem {
+    Photo {
+        /// file_id or URL
+        media: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parse_mode: Option<ParseMode>,
+    },
+    Video {
+        media: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parse_mode: Option<ParseMode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        supports_streaming: Option<bool>,
+    },
+    Audio {
+        media: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parse_mode: Option<ParseMode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        performer: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    Document {
+        media: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parse_mode: Option<ParseMode>,
+    },
+}
+
+/// Send a group of media (2-10 items)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMediaGroupCommand {
+    pub chat_id: i64,
+    /// 2–10 media items (photo, video, audio, or document)
+    pub media: Vec<InputMediaItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
 /// Send a sticker
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendStickerCommand {

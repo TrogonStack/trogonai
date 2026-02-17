@@ -213,6 +213,31 @@ pub mod agent {
         format!("telegram.{}.agent.message.send_photo", prefix)
     }
 
+    /// Send video command subject
+    pub fn message_send_video(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_video", prefix)
+    }
+
+    /// Send audio command subject
+    pub fn message_send_audio(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_audio", prefix)
+    }
+
+    /// Send document command subject
+    pub fn message_send_document(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_document", prefix)
+    }
+
+    /// Send voice command subject
+    pub fn message_send_voice(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_voice", prefix)
+    }
+
+    /// Send media group command subject
+    pub fn message_send_media_group(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_media_group", prefix)
+    }
+
     /// Send location command subject
     pub fn message_send_location(prefix: &str) -> String {
         format!("telegram.{}.agent.message.send_location", prefix)
