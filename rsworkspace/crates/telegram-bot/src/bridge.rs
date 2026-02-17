@@ -6,6 +6,10 @@
 #[path = "bridge_tests.rs"]
 mod bridge_tests;
 
+#[cfg(test)]
+#[path = "bridge_nats_tests.rs"]
+mod bridge_nats_tests;
+
 use anyhow::Result;
 use async_nats::{jetstream::kv::Store, Client};
 use telegram_nats::{subjects, MessagePublisher};
