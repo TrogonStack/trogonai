@@ -253,6 +253,276 @@ mod nats_tests {
         assert!(event["voice"]["file_name"].is_null());
     }
 
+    // ── Core message type — caption and access denied gaps ───────────────────
+
+    #[tokio::test]
+    async fn test_nats_photo_no_caption_is_null() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-photo-nocap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(2);
+        json["photo"] = serde_json::json!([
+            {"file_id": "ph3", "file_unique_id": "uph3", "width": 320, "height": 240, "file_size": 1000}
+        ]);
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_photo_message(&message, 20).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert!(event["caption"].is_null(), "photo without caption must have null caption");
+        assert_eq!(event["photo"][0]["file_id"], "ph3");
+    }
+
+    #[tokio::test]
+    async fn test_nats_photo_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-photo-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99);
+        json["photo"] = serde_json::json!([
+            {"file_id": "ph4", "file_unique_id": "uph4", "width": 100, "height": 100, "file_size": 500}
+        ]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_photo_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied photo must NOT be published");
+    }
+
+    #[tokio::test]
+    async fn test_nats_video_with_caption() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-video-cap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(3);
+        json["video"] = serde_json::json!({
+            "file_id": "vid2", "file_unique_id": "uvid2",
+            "width": 1280, "height": 720, "duration": 10,
+            "file_size": 5000, "mime_type": "video/mp4"
+        });
+        json["caption"] = serde_json::json!("watch this");
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_video_message(&message, 30).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["caption"], "watch this");
+        assert_eq!(event["video"]["file_id"], "vid2");
+    }
+
+    #[tokio::test]
+    async fn test_nats_video_no_caption_is_null() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-video-nocap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(3);
+        json["video"] = serde_json::json!({
+            "file_id": "vid3", "file_unique_id": "uvid3",
+            "width": 640, "height": 480, "duration": 5,
+            "file_size": 2000, "mime_type": "video/mp4"
+        });
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_video_message(&message, 31).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert!(event["caption"].is_null(), "video without caption must have null caption");
+    }
+
+    #[tokio::test]
+    async fn test_nats_video_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-video-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99);
+        json["video"] = serde_json::json!({
+            "file_id": "vid4", "file_unique_id": "uvid4",
+            "width": 640, "height": 480, "duration": 3,
+            "file_size": 1000, "mime_type": "video/mp4"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_video_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied video must NOT be published");
+    }
+
+    #[tokio::test]
+    async fn test_nats_audio_with_caption_and_mime_type() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-audio-cap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(4);
+        json["audio"] = serde_json::json!({
+            "file_id": "aud2", "file_unique_id": "uaud2",
+            "duration": 210, "file_size": 4200,
+            "file_name": "track.mp3", "mime_type": "audio/mpeg"
+        });
+        json["caption"] = serde_json::json!("great track");
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_audio_message(&message, 40).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["caption"], "great track");
+        assert_eq!(event["audio"]["mime_type"], "audio/mpeg");
+        assert_eq!(event["audio"]["file_id"], "aud2");
+    }
+
+    #[tokio::test]
+    async fn test_nats_audio_no_caption_is_null() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-audio-nocap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(4);
+        json["audio"] = serde_json::json!({
+            "file_id": "aud3", "file_unique_id": "uaud3",
+            "duration": 60, "file_size": 1200,
+            "file_name": "clip.ogg", "mime_type": "audio/ogg"
+        });
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_audio_message(&message, 41).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert!(event["caption"].is_null(), "audio without caption must have null caption");
+    }
+
+    #[tokio::test]
+    async fn test_nats_audio_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-audio-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99);
+        json["audio"] = serde_json::json!({
+            "file_id": "aud4", "file_unique_id": "uaud4",
+            "duration": 30, "file_size": 600,
+            "file_name": "blocked.ogg", "mime_type": "audio/ogg"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_audio_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied audio must NOT be published");
+    }
+
+    #[tokio::test]
+    async fn test_nats_document_with_caption_and_mime_type() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-doc-cap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(5);
+        json["document"] = serde_json::json!({
+            "file_id": "doc2", "file_unique_id": "udoc2",
+            "file_size": 2048, "file_name": "report.pdf",
+            "mime_type": "application/pdf"
+        });
+        json["caption"] = serde_json::json!("Q3 report");
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_document_message(&message, 50).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["caption"], "Q3 report");
+        assert_eq!(event["document"]["mime_type"], "application/pdf");
+        assert_eq!(event["document"]["file_id"], "doc2");
+    }
+
+    #[tokio::test]
+    async fn test_nats_document_no_caption_is_null() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-doc-nocap";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(5);
+        json["document"] = serde_json::json!({
+            "file_id": "doc3", "file_unique_id": "udoc3",
+            "file_size": 100, "file_name": "raw.bin",
+            "mime_type": "application/octet-stream"
+        });
+        let message = msg(json);
+
+        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        bridge.publish_document_message(&message, 51).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert!(event["caption"].is_null(), "document without caption must have null caption");
+    }
+
+    #[tokio::test]
+    async fn test_nats_document_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-doc-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99);
+        json["document"] = serde_json::json!({
+            "file_id": "doc4", "file_unique_id": "udoc4",
+            "file_size": 50, "file_name": "blocked.txt",
+            "mime_type": "text/plain"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_document_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied document must NOT be published");
+    }
+
+    #[tokio::test]
+    async fn test_nats_voice_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-voice-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99);
+        json["voice"] = serde_json::json!({
+            "file_id": "voc2", "file_unique_id": "uvoc2",
+            "duration": 3, "file_size": 200, "mime_type": "audio/ogg"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.voice", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_voice_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied voice must NOT be published");
+    }
+
     // ── Handler routing ───────────────────────────────────────────────────────
 
     fn fake_bot() -> Bot {
@@ -850,6 +1120,152 @@ mod nats_tests {
         assert_eq!(event["query"], "admin query");
     }
 
+    #[tokio::test]
+    async fn test_inline_query_empty_query_published() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "iq-empty";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // User types just "@bot" with no search text
+        let query = inline_query_json(42, "");
+        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["query"], "");
+        assert_eq!(event["inline_query_id"], "iq-1");
+    }
+
+    #[tokio::test]
+    async fn test_inline_query_offset_forwarded() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "iq-offset";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // Pagination: Telegram sends offset="5" when user scrolls past first page
+        let query: teloxide::types::InlineQuery = serde_json::from_value(serde_json::json!({
+            "id": "iq-page2",
+            "from": {"id": 42, "is_bot": false, "first_name": "U"},
+            "query": "rust",
+            "offset": "5"
+        })).unwrap();
+
+        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["query"], "rust");
+        assert_eq!(event["offset"], "5");
+        assert_eq!(event["inline_query_id"], "iq-page2");
+    }
+
+    #[tokio::test]
+    async fn test_inline_query_chat_type_forwarded() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "iq-chattype";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let query: teloxide::types::InlineQuery = serde_json::from_value(serde_json::json!({
+            "id": "iq-ct",
+            "from": {"id": 42, "is_bot": false, "first_name": "U"},
+            "query": "search",
+            "offset": "",
+            "chat_type": "private"
+        })).unwrap();
+
+        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["query"], "search");
+        // chat_type is forwarded (teloxide formats it via Debug)
+        assert!(!event["chat_type"].is_null(), "chat_type must be present when provided");
+    }
+
+    #[tokio::test]
+    async fn test_chosen_inline_result_with_inline_message_id() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "chosen-imid";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // inline_message_id is present when the bot can edit the sent message later
+        let result: teloxide::types::ChosenInlineResult = serde_json::from_value(serde_json::json!({
+            "result_id": "res_xyz",
+            "from": {"id": 42, "is_bot": false, "first_name": "U"},
+            "query": "rust",
+            "inline_message_id": "ABCDEF123"
+        })).unwrap();
+
+        let subject = format!("telegram.{}.bot.inline.chosen", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_chosen_inline_result(fake_bot(), result, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["result_id"], "res_xyz");
+        assert_eq!(event["query"], "rust");
+        assert_eq!(event["inline_message_id"], "ABCDEF123");
+    }
+
+    #[tokio::test]
+    async fn test_inline_query_location_forwarded() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "iq-location";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // Bot configured with supports_inline_queries + location request
+        let query: teloxide::types::InlineQuery = serde_json::from_value(serde_json::json!({
+            "id": "iq-loc",
+            "from": {"id": 42, "is_bot": false, "first_name": "U"},
+            "query": "coffee near me",
+            "offset": "",
+            "location": {"longitude": -122.4194, "latitude": 37.7749}
+        })).unwrap();
+
+        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["query"], "coffee near me");
+        let loc = &event["location"];
+        assert!(!loc.is_null(), "location must be present");
+        assert!((loc["longitude"].as_f64().unwrap() - (-122.4194)).abs() < 0.001);
+        assert!((loc["latitude"].as_f64().unwrap() - 37.7749).abs() < 0.001);
+    }
+
     // ── Message types: location, venue, contact, sticker, animation, video_note
 
     #[tokio::test]
@@ -987,6 +1403,205 @@ mod nats_tests {
         assert_eq!(event["video_note"]["file_id"], "DQACAgIA");
         assert_eq!(event["duration"], 5);
         assert_eq!(event["length"], 240);
+    }
+
+    // ── Sticker extra fields ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_nats_sticker_emoji_and_set_name_forwarded() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-emoji";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA", "file_unique_id": "AgAD01",
+            "type": "regular", "width": 512, "height": 512,
+            "is_animated": false, "is_video": false, "file_size": 12345,
+            "emoji": "😀",
+            "set_name": "MyPack"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["emoji"], "😀");
+        assert_eq!(event["set_name"], "MyPack");
+        assert_eq!(event["format"], "static");
+    }
+
+    #[tokio::test]
+    async fn test_nats_sticker_format_animated() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-anim";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA2", "file_unique_id": "AgAD02",
+            "type": "regular", "width": 512, "height": 512,
+            "is_animated": true, "is_video": false, "file_size": 8000
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["format"], "animated");
+    }
+
+    #[tokio::test]
+    async fn test_nats_sticker_format_video() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-video";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA3", "file_unique_id": "AgAD03",
+            "type": "regular", "width": 512, "height": 512,
+            "is_animated": false, "is_video": true, "file_size": 20000
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["format"], "video");
+    }
+
+    #[tokio::test]
+    async fn test_nats_sticker_kind_mask() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-mask";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA4", "file_unique_id": "AgAD04",
+            "type": "mask", "width": 512, "height": 512,
+            "is_animated": false, "is_video": false, "file_size": 12000,
+            "mask_position": {"point": "forehead", "x_shift": 0.0, "y_shift": 0.0, "scale": 1.0}
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["kind"], "mask");
+    }
+
+    #[tokio::test]
+    async fn test_nats_sticker_kind_custom_emoji() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-cemoji";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA5", "file_unique_id": "AgAD05",
+            "type": "custom_emoji", "width": 100, "height": 100,
+            "is_animated": false, "is_video": false, "file_size": 5000,
+            "custom_emoji_id": "5364471070641932931"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["kind"], "custom_emoji");
+    }
+
+    #[tokio::test]
+    async fn test_nats_sticker_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-sticker-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99); // denied user
+        json["sticker"] = serde_json::json!({
+            "file_id": "CAACAgIA6", "file_unique_id": "AgAD06",
+            "type": "regular", "width": 512, "height": 512,
+            "is_animated": false, "is_video": false, "file_size": 12345
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            sub.next(),
+        ).await;
+        assert!(result.is_err(), "denied sticker must NOT be published to NATS");
+    }
+
+    // ── Animation extra fields ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_nats_animation_with_caption() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-anim-caption";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["animation"] = serde_json::json!({
+            "file_id": "CgACAgIA2", "file_unique_id": "AgAD07",
+            "width": 480, "height": 270, "duration": 5,
+            "file_name": "funny.gif", "mime_type": "image/gif", "file_size": 30000
+        });
+        json["document"] = serde_json::json!({
+            "file_id": "CgACAgIA2", "file_unique_id": "AgAD07",
+            "file_name": "funny.gif", "mime_type": "image/gif", "file_size": 30000
+        });
+        json["caption"] = serde_json::json!("haha");
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.animation", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_animation_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["caption"], "haha");
+        assert_eq!(event["animation"]["file_id"], "CgACAgIA2");
+    }
+
+    #[tokio::test]
+    async fn test_nats_animation_no_caption_is_null() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-anim-nocaption";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(1);
+        json["animation"] = serde_json::json!({
+            "file_id": "CgACAgIA3", "file_unique_id": "AgAD08",
+            "width": 320, "height": 240, "duration": 2,
+            "file_name": "loop.gif", "mime_type": "image/gif", "file_size": 10000
+        });
+        json["document"] = serde_json::json!({
+            "file_id": "CgACAgIA3", "file_unique_id": "AgAD08",
+            "file_name": "loop.gif", "mime_type": "image/gif", "file_size": 10000
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.animation", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_animation_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert!(event["caption"].is_null(), "caption must be null when absent");
     }
 
     // ── Chosen inline result ─────────────────────────────────────────────────

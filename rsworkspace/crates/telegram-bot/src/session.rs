@@ -188,4 +188,203 @@ mod tests {
         assert_eq!(clone.session_id, state.session_id);
         assert_eq!(clone.message_count, state.message_count);
     }
+
+    // ── NATS / JetStream KV integration ──────────────────────────────────────
+
+    mod nats_integration {
+        use super::super::*;
+        use async_nats::jetstream;
+        use telegram_types::SessionId;
+
+        const NATS_URL: &str = "nats://localhost:14222";
+
+        async fn make_manager() -> Option<SessionManager> {
+            let client = async_nats::connect(NATS_URL).await.ok()?;
+            let js = jetstream::new(client);
+            let bucket = format!("test-sess-{}", uuid::Uuid::new_v4().simple());
+            let kv = js
+                .create_key_value(jetstream::kv::Config {
+                    bucket,
+                    ..Default::default()
+                })
+                .await
+                .ok()?;
+            Some(SessionManager::new(kv))
+        }
+
+        #[tokio::test]
+        async fn test_get_or_create_new_session() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-1".to_string()).unwrap();
+            let state = mgr.get_or_create(&sid, 1, Some(42)).await.unwrap();
+
+            assert_eq!(state.session_id, "tg-private-1");
+            assert_eq!(state.chat_id, 1);
+            assert_eq!(state.user_id, Some(42));
+            assert_eq!(state.message_count, 1);
+        }
+
+        #[tokio::test]
+        async fn test_get_or_create_existing_increments_count() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-2".to_string()).unwrap();
+
+            let first = mgr.get_or_create(&sid, 2, Some(10)).await.unwrap();
+            assert_eq!(first.message_count, 1);
+
+            let second = mgr.get_or_create(&sid, 2, Some(10)).await.unwrap();
+            assert_eq!(second.message_count, 2);
+            assert_eq!(second.session_id, "tg-private-2");
+            assert_eq!(second.chat_id, 2);
+            assert!(second.last_activity >= first.last_activity);
+        }
+
+        #[tokio::test]
+        async fn test_get_returns_stored_session() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-3".to_string()).unwrap();
+
+            // Nothing stored yet
+            let none = mgr.get(&sid).await.unwrap();
+            assert!(none.is_none());
+
+            // Create it
+            mgr.get_or_create(&sid, 3, None).await.unwrap();
+
+            // Now get() should return it
+            let stored = mgr.get(&sid).await.unwrap().expect("session must exist");
+            assert_eq!(stored.session_id, "tg-private-3");
+            assert_eq!(stored.chat_id, 3);
+            assert_eq!(stored.message_count, 1);
+        }
+
+        #[tokio::test]
+        async fn test_update_overwrites_session() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-4".to_string()).unwrap();
+            let mut state = mgr.get_or_create(&sid, 4, Some(99)).await.unwrap();
+
+            state.message_count = 100;
+            state.user_id = None;
+            mgr.update(&state).await.unwrap();
+
+            let loaded = mgr.get(&sid).await.unwrap().expect("session must exist");
+            assert_eq!(loaded.message_count, 100);
+            assert!(loaded.user_id.is_none());
+        }
+
+        #[tokio::test]
+        async fn test_delete_removes_session() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-5".to_string()).unwrap();
+            mgr.get_or_create(&sid, 5, Some(7)).await.unwrap();
+
+            // Verify it exists
+            assert!(mgr.get(&sid).await.unwrap().is_some());
+
+            // Delete
+            mgr.delete(&sid).await.unwrap();
+
+            // Verify it's gone
+            let after = mgr.get(&sid).await.unwrap();
+            assert!(after.is_none());
+        }
+
+        #[tokio::test]
+        async fn test_get_or_create_preserves_created_at() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            let sid = SessionId::try_from("tg-private-6".to_string()).unwrap();
+
+            let first = mgr.get_or_create(&sid, 6, Some(1)).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let second = mgr.get_or_create(&sid, 6, Some(1)).await.unwrap();
+
+            // created_at must not change
+            assert_eq!(second.created_at, first.created_at);
+            // but message_count and last_activity must update
+            assert_eq!(second.message_count, 2);
+            assert!(second.last_activity >= first.last_activity);
+        }
+
+        #[tokio::test]
+        async fn test_session_persists_across_manager_instances() {
+            let client = match async_nats::connect(NATS_URL).await {
+                Ok(c) => c,
+                Err(_) => { eprintln!("SKIP: NATS not available"); return; }
+            };
+            let js = jetstream::new(client.clone());
+            let bucket = format!("test-sess-{}", uuid::Uuid::new_v4().simple());
+
+            // First manager: create session
+            let kv1 = js
+                .create_key_value(jetstream::kv::Config {
+                    bucket: bucket.clone(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let mgr1 = SessionManager::new(kv1);
+            let sid = SessionId::try_from("tg-private-7".to_string()).unwrap();
+            let created = mgr1.get_or_create(&sid, 7, Some(55)).await.unwrap();
+
+            // Second manager: open same bucket, read session
+            let kv2 = js
+                .get_key_value(&bucket)
+                .await
+                .unwrap();
+            let mgr2 = SessionManager::new(kv2);
+            let loaded = mgr2.get(&sid).await.unwrap().expect("session must persist");
+
+            assert_eq!(loaded.session_id, created.session_id);
+            assert_eq!(loaded.chat_id, created.chat_id);
+            assert_eq!(loaded.user_id, created.user_id);
+            assert_eq!(loaded.message_count, created.message_count);
+            assert_eq!(loaded.created_at, created.created_at);
+        }
+
+        #[tokio::test]
+        async fn test_get_or_create_anonymous_session() {
+            let Some(mgr) = make_manager().await else {
+                eprintln!("SKIP: NATS not available");
+                return;
+            };
+
+            // Channels and anonymous group messages have no user_id
+            let sid = SessionId::try_from("tg-channel-999".to_string()).unwrap();
+            let state = mgr.get_or_create(&sid, -100999, None).await.unwrap();
+
+            assert_eq!(state.chat_id, -100999);
+            assert!(state.user_id.is_none());
+            assert_eq!(state.message_count, 1);
+
+            // Second call: still no user_id
+            let state2 = mgr.get_or_create(&sid, -100999, None).await.unwrap();
+            assert!(state2.user_id.is_none());
+            assert_eq!(state2.message_count, 2);
+        }
+    }
 }

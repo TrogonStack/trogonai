@@ -770,6 +770,120 @@ mod tests {
     }
 
     #[test]
+    fn test_bot_callback_and_inline_subjects() {
+        assert_eq!(bot::callback_query("prod"), "telegram.prod.bot.callback.query");
+        assert_eq!(bot::inline_query("prod"), "telegram.prod.bot.inline.query");
+        assert_eq!(bot::chosen_inline_result("prod"), "telegram.prod.bot.inline.chosen");
+    }
+
+    #[test]
+    fn test_bot_chat_member_subjects() {
+        assert_eq!(bot::chat_member_updated("prod"), "telegram.prod.bot.chat.member_updated");
+        assert_eq!(bot::my_chat_member_updated("prod"), "telegram.prod.bot.chat.my_member_updated");
+    }
+
+    #[test]
+    fn test_bot_file_subjects() {
+        assert_eq!(bot::file_info("prod"), "telegram.prod.bot.file.info");
+        assert_eq!(bot::file_downloaded("prod"), "telegram.prod.bot.file.downloaded");
+    }
+
+    #[test]
+    fn test_bot_payment_subjects() {
+        assert_eq!(bot::payment_pre_checkout("prod"), "telegram.prod.bot.payment.pre_checkout");
+        assert_eq!(bot::payment_shipping("prod"), "telegram.prod.bot.payment.shipping");
+        assert_eq!(bot::payment_successful("prod"), "telegram.prod.bot.payment.successful");
+    }
+
+    #[test]
+    fn test_bot_bot_commands_and_sticker_subjects() {
+        assert_eq!(bot::bot_commands_response("prod"), "telegram.prod.bot.bot_commands.response");
+        assert_eq!(bot::sticker_set_info("prod"), "telegram.prod.bot.sticker.set_info");
+        assert_eq!(bot::sticker_uploaded("prod"), "telegram.prod.bot.sticker.uploaded");
+    }
+
+    #[test]
+    fn test_bot_wildcard_subjects() {
+        assert_eq!(bot::all_messages("prod"), "telegram.prod.bot.message.>");
+        assert_eq!(bot::all_commands("prod"), "telegram.prod.bot.command.>");
+        assert_eq!(bot::all("prod"), "telegram.prod.bot.>");
+    }
+
+    #[test]
+    fn test_agent_streaming_callback_inline_subjects() {
+        assert_eq!(agent::message_send_photo("prod"), "telegram.prod.agent.message.send_photo");
+        assert_eq!(agent::message_stream("prod"), "telegram.prod.agent.message.stream");
+        assert_eq!(agent::callback_answer("prod"), "telegram.prod.agent.callback.answer");
+        assert_eq!(agent::chat_action("prod"), "telegram.prod.agent.chat.action");
+        assert_eq!(agent::inline_answer("prod"), "telegram.prod.agent.inline.answer");
+    }
+
+    #[test]
+    fn test_agent_file_subjects() {
+        assert_eq!(agent::file_get("prod"), "telegram.prod.agent.file.get");
+        assert_eq!(agent::file_download("prod"), "telegram.prod.agent.file.download");
+    }
+
+    #[test]
+    fn test_agent_admin_subjects() {
+        assert_eq!(agent::admin_promote("prod"), "telegram.prod.agent.admin.promote");
+        assert_eq!(agent::admin_restrict("prod"), "telegram.prod.agent.admin.restrict");
+        assert_eq!(agent::admin_ban("prod"), "telegram.prod.agent.admin.ban");
+        assert_eq!(agent::admin_unban("prod"), "telegram.prod.agent.admin.unban");
+        assert_eq!(agent::admin_set_permissions("prod"), "telegram.prod.agent.admin.set_permissions");
+        assert_eq!(agent::admin_set_title("prod"), "telegram.prod.agent.admin.set_title");
+        assert_eq!(agent::admin_pin("prod"), "telegram.prod.agent.admin.pin");
+        assert_eq!(agent::admin_unpin("prod"), "telegram.prod.agent.admin.unpin");
+        assert_eq!(agent::admin_unpin_all("prod"), "telegram.prod.agent.admin.unpin_all");
+        assert_eq!(agent::admin_set_chat_title("prod"), "telegram.prod.agent.admin.set_title_chat");
+        assert_eq!(agent::admin_set_chat_description("prod"), "telegram.prod.agent.admin.set_description");
+    }
+
+    #[test]
+    fn test_agent_payment_subjects() {
+        assert_eq!(agent::payment_send_invoice("prod"), "telegram.prod.agent.payment.send_invoice");
+        assert_eq!(agent::payment_answer_pre_checkout("prod"), "telegram.prod.agent.payment.answer_pre_checkout");
+        assert_eq!(agent::payment_answer_shipping("prod"), "telegram.prod.agent.payment.answer_shipping");
+    }
+
+    #[test]
+    fn test_agent_bot_commands_subjects() {
+        assert_eq!(agent::bot_commands_set("prod"), "telegram.prod.agent.bot_commands.set");
+        assert_eq!(agent::bot_commands_delete("prod"), "telegram.prod.agent.bot_commands.delete");
+        assert_eq!(agent::bot_commands_get("prod"), "telegram.prod.agent.bot_commands.get");
+    }
+
+    #[test]
+    fn test_agent_sticker_management_subjects() {
+        assert_eq!(agent::sticker_upload_file("prod"), "telegram.prod.agent.sticker.upload_file");
+        assert_eq!(agent::sticker_add_to_set("prod"), "telegram.prod.agent.sticker.add_to_set");
+        assert_eq!(agent::sticker_set_position("prod"), "telegram.prod.agent.sticker.set_position");
+        assert_eq!(agent::sticker_delete_from_set("prod"), "telegram.prod.agent.sticker.delete_from_set");
+        assert_eq!(agent::sticker_set_title("prod"), "telegram.prod.agent.sticker.set_title");
+        assert_eq!(agent::sticker_set_thumbnail("prod"), "telegram.prod.agent.sticker.set_thumbnail");
+        assert_eq!(agent::sticker_delete_set("prod"), "telegram.prod.agent.sticker.delete_set");
+        assert_eq!(agent::sticker_set_emoji_list("prod"), "telegram.prod.agent.sticker.set_emoji_list");
+        assert_eq!(agent::sticker_set_keywords("prod"), "telegram.prod.agent.sticker.set_keywords");
+        assert_eq!(agent::sticker_set_mask_position("prod"), "telegram.prod.agent.sticker.set_mask_position");
+    }
+
+    #[test]
+    fn test_agent_forum_subjects() {
+        assert_eq!(agent::forum_create("prod"), "telegram.prod.agent.forum.create");
+        assert_eq!(agent::forum_edit("prod"), "telegram.prod.agent.forum.edit");
+        assert_eq!(agent::forum_close("prod"), "telegram.prod.agent.forum.close");
+        assert_eq!(agent::forum_reopen("prod"), "telegram.prod.agent.forum.reopen");
+        assert_eq!(agent::forum_delete("prod"), "telegram.prod.agent.forum.delete");
+        assert_eq!(agent::forum_unpin("prod"), "telegram.prod.agent.forum.unpin");
+        assert_eq!(agent::forum_edit_general("prod"), "telegram.prod.agent.forum.edit_general");
+        assert_eq!(agent::forum_close_general("prod"), "telegram.prod.agent.forum.close_general");
+        assert_eq!(agent::forum_reopen_general("prod"), "telegram.prod.agent.forum.reopen_general");
+        assert_eq!(agent::forum_hide_general("prod"), "telegram.prod.agent.forum.hide_general");
+        assert_eq!(agent::forum_unhide_general("prod"), "telegram.prod.agent.forum.unhide_general");
+        assert_eq!(agent::forum_unpin_general("prod"), "telegram.prod.agent.forum.unpin_general");
+    }
+
+    #[test]
     fn test_agent_forward_copy_subjects() {
         assert_eq!(
             agent::message_forward("prod"),
