@@ -185,6 +185,21 @@ pub mod bot {
         format!("telegram.{}.bot.sticker.uploaded", prefix)
     }
 
+    /// Poll message event subject (poll sent inside a chat message)
+    pub fn message_poll(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.poll", prefix)
+    }
+
+    /// Standalone poll update subject (poll state changed)
+    pub fn poll_update(prefix: &str) -> String {
+        format!("telegram.{}.bot.poll.update", prefix)
+    }
+
+    /// Poll answer event subject (user voted)
+    pub fn poll_answer(prefix: &str) -> String {
+        format!("telegram.{}.bot.poll.answer", prefix)
+    }
+
     /// Error event subject for failed agent commands
     pub fn command_error(prefix: &str) -> String {
         format!("telegram.{}.bot.error.command", prefix)
@@ -211,6 +226,16 @@ pub mod agent {
     /// Send photo command subject
     pub fn message_send_photo(prefix: &str) -> String {
         format!("telegram.{}.agent.message.send_photo", prefix)
+    }
+
+    /// Send poll command subject
+    pub fn poll_send(prefix: &str) -> String {
+        format!("telegram.{}.agent.poll.send", prefix)
+    }
+
+    /// Stop poll command subject
+    pub fn poll_stop(prefix: &str) -> String {
+        format!("telegram.{}.agent.poll.stop", prefix)
     }
 
     /// Send video command subject

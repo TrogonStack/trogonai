@@ -497,6 +497,62 @@ pub async fn handle_shipping_query(
     Ok(())
 }
 
+/// Handle poll messages (poll sent inside a chat)
+pub async fn handle_poll_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received poll message");
+    health.increment_messages_received().await;
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for poll message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_poll_message(&msg, update_id).await {
+        error!("Failed to publish poll message: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle standalone poll updates (poll state changed)
+pub async fn handle_poll_update(
+    _bot: Bot,
+    poll: teloxide::types::Poll,
+    bridge: TelegramBridge,
+    health: AppState,
+) -> ResponseResult<()> {
+    debug!("Poll update: {}", poll.id);
+    health.increment_messages_received().await;
+
+    if let Err(e) = bridge.publish_poll_update(&poll, 0).await {
+        error!("Failed to publish poll update: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle poll answers (user voted in a non-anonymous poll)
+pub async fn handle_poll_answer(
+    _bot: Bot,
+    answer: teloxide::types::PollAnswer,
+    bridge: TelegramBridge,
+    health: AppState,
+) -> ResponseResult<()> {
+    debug!("Poll answer for poll {}: {:?}", answer.poll_id, answer.option_ids);
+    health.increment_messages_received().await;
+
+    if let Err(e) = bridge.publish_poll_answer(&answer, 0).await {
+        error!("Failed to publish poll answer: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
     use teloxide::types::ChatKind;

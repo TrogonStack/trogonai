@@ -50,6 +50,7 @@ impl OutboundProcessor {
         let send_task = self.handle_send_messages(prefix.clone());
         let edit_task = self.handle_edit_messages(prefix.clone());
         let delete_task = self.handle_delete_messages(prefix.clone());
+        let poll_task = self.handle_polls(prefix.clone());
         let photo_task = self.handle_send_photos(prefix.clone());
         let video_task = self.handle_send_videos(prefix.clone());
         let audio_task = self.handle_send_audios(prefix.clone());
@@ -78,6 +79,7 @@ impl OutboundProcessor {
             send_task,
             edit_task,
             delete_task,
+            poll_task,
             photo_task,
             video_task,
             audio_task,
@@ -101,6 +103,101 @@ impl OutboundProcessor {
             bot_commands_task,
             sticker_mgmt_task
         )?;
+
+        Ok(())
+    }
+
+    /// Handle send poll and stop poll commands
+    async fn handle_polls(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::PollKind;
+        use teloxide::types::PollType as TgPollType;
+
+        let send_subject = subjects::agent::poll_send(&prefix);
+        let stop_subject = subjects::agent::poll_stop(&prefix);
+
+        info!("Subscribing to {} and {}", send_subject, stop_subject);
+
+        let mut send_stream = self.subscriber.subscribe::<SendPollCommand>(&send_subject).await?;
+        let mut stop_stream = self.subscriber.subscribe::<StopPollCommand>(&stop_subject).await?;
+
+        loop {
+            tokio::select! {
+                Some(result) = send_stream.next() => {
+                    match result {
+                        Ok(cmd) => {
+                            debug!("Received send poll command for chat {}", cmd.chat_id);
+
+                            let options: Vec<teloxide::types::InputPollOption> = cmd.options
+                                .into_iter()
+                                .map(teloxide::types::InputPollOption::new)
+                                .collect();
+
+                            let poll_type = match cmd.poll_type {
+                                Some(PollKind::Quiz) => TgPollType::Quiz,
+                                _ => TgPollType::Regular,
+                            };
+
+                            let mut req = self.bot.send_poll(
+                                ChatId(cmd.chat_id),
+                                cmd.question,
+                                options,
+                            );
+
+                            req.is_anonymous = cmd.is_anonymous;
+                            req.type_ = Some(poll_type);
+                            req.allows_multiple_answers = cmd.allows_multiple_answers;
+                            req.correct_option_id = cmd.correct_option_id;
+
+                            if let Some(explanation) = cmd.explanation {
+                                req.explanation = Some(explanation);
+                            }
+
+                            if let Some(pm) = cmd.explanation_parse_mode {
+                                req.explanation_parse_mode = Some(convert_parse_mode(pm));
+                            }
+
+                            if let Some(period) = cmd.open_period {
+                                req.open_period = Some(period);
+                            }
+
+                            req.is_closed = cmd.is_closed;
+
+                            if let Some(reply_to) = cmd.reply_to_message_id {
+                                req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                            }
+
+                            if let Some(thread_id) = cmd.message_thread_id {
+                                req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                            }
+
+                            if let Err(e) = req.await {
+                                self.handle_telegram_error(&send_subject, e, &prefix).await;
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize send poll command: {}", e),
+                    }
+                }
+                Some(result) = stop_stream.next() => {
+                    match result {
+                        Ok(cmd) => {
+                            debug!("Received stop poll command for chat {}", cmd.chat_id);
+
+                            let mut req = self.bot.stop_poll(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+
+                            if let Some(markup) = cmd.reply_markup {
+                                req.reply_markup = Some(convert_inline_keyboard(markup));
+                            }
+
+                            if let Err(e) = req.await {
+                                self.handle_telegram_error(&stop_subject, e, &prefix).await;
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize stop poll command: {}", e),
+                    }
+                }
+                else => break,
+            }
+        }
 
         Ok(())
     }
