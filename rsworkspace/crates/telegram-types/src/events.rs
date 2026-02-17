@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::chat::{Chat, FileInfo, ForumTopic, Message, PhotoSize, User};
+use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, PhotoSize, User};
 
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,4 +175,46 @@ pub struct GeneralForumTopicHiddenEvent {
 pub struct GeneralForumTopicUnhiddenEvent {
     pub metadata: EventMetadata,
     pub message: Message,
+}
+
+/// Chat member updated event (join/leave/ban/promote/etc)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMemberUpdatedEvent {
+    pub metadata: EventMetadata,
+    pub chat: Chat,
+    pub from: User,
+    pub old_chat_member: ChatMember,
+    pub new_chat_member: ChatMember,
+    /// Date the change was done
+    pub date: i64,
+    /// Chat invite link used by the user to join the chat
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_link: Option<ChatInviteLink>,
+    /// True if the user joined via a join request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_join_request: Option<bool>,
+    /// True if the user joined via a chat folder invite link
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_chat_folder_invite_link: Option<bool>,
+}
+
+/// My chat member updated event (bot's status changed in a chat)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MyChatMemberUpdatedEvent {
+    pub metadata: EventMetadata,
+    pub chat: Chat,
+    pub from: User,
+    pub old_chat_member: ChatMember,
+    pub new_chat_member: ChatMember,
+    /// Date the change was done
+    pub date: i64,
+    /// Chat invite link used by the bot to join the chat
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_link: Option<ChatInviteLink>,
+    /// True if the bot joined via a join request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_join_request: Option<bool>,
+    /// True if the bot joined via a chat folder invite link
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_chat_folder_invite_link: Option<bool>,
 }

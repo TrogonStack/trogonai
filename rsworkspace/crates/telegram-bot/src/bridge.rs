@@ -12,7 +12,7 @@ use telegram_nats::{MessagePublisher, subjects};
 use telegram_types::{
     AccessConfig, SessionId,
     events::*,
-    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo},
+    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ChatMember, ChatMemberStatus, ChatInviteLink},
 };
 use tracing::{debug, info, warn};
 use anyhow::Result;
@@ -339,5 +339,131 @@ impl TelegramBridge {
 
         debug!("Published chosen inline result event to {}", subject);
         Ok(())
+    }
+
+    /// Publish a chat member updated event
+    pub async fn publish_chat_member_updated(
+        &self,
+        update: &teloxide::types::ChatMemberUpdated,
+        update_id: i64
+    ) -> Result<()> {
+        let chat = self.convert_chat(&update.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let event = ChatMemberUpdatedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            chat,
+            from: self.convert_user(&update.from),
+            old_chat_member: self.convert_chat_member(&update.old_chat_member),
+            new_chat_member: self.convert_chat_member(&update.new_chat_member),
+            date: update.date.timestamp(),
+            invite_link: update.invite_link.as_ref().map(|link| self.convert_invite_link(link)),
+            via_join_request: Some(update.via_join_request),
+            via_chat_folder_invite_link: Some(update.via_chat_folder_invite_link),
+        };
+
+        let subject = subjects::bot::chat_member_updated(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published chat member updated event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a my chat member updated event (bot's status changed)
+    pub async fn publish_my_chat_member_updated(
+        &self,
+        update: &teloxide::types::ChatMemberUpdated,
+        update_id: i64
+    ) -> Result<()> {
+        let chat = self.convert_chat(&update.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let event = MyChatMemberUpdatedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            chat,
+            from: self.convert_user(&update.from),
+            old_chat_member: self.convert_chat_member(&update.old_chat_member),
+            new_chat_member: self.convert_chat_member(&update.new_chat_member),
+            date: update.date.timestamp(),
+            invite_link: update.invite_link.as_ref().map(|link| self.convert_invite_link(link)),
+            via_join_request: Some(update.via_join_request),
+            via_chat_folder_invite_link: Some(update.via_chat_folder_invite_link),
+        };
+
+        let subject = subjects::bot::my_chat_member_updated(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published my chat member updated event to {}", subject);
+        Ok(())
+    }
+
+    /// Convert teloxide ChatMember to our ChatMember type
+    fn convert_chat_member(&self, member: &teloxide::types::ChatMember) -> ChatMember {
+        use teloxide::types::ChatMemberKind;
+
+        let (status, until_date, is_anonymous, custom_title) = match &member.kind {
+            ChatMemberKind::Owner(owner) => (
+                ChatMemberStatus::Creator,
+                None,
+                Some(owner.is_anonymous),
+                owner.custom_title.clone(),
+            ),
+            ChatMemberKind::Administrator(admin) => (
+                ChatMemberStatus::Administrator,
+                None,
+                Some(admin.is_anonymous),
+                admin.custom_title.clone(),
+            ),
+            ChatMemberKind::Member => (
+                ChatMemberStatus::Member,
+                None,
+                None,
+                None,
+            ),
+            ChatMemberKind::Restricted(restricted) => {
+                use teloxide::types::UntilDate;
+                let until = match restricted.until_date {
+                    UntilDate::Date(date) => Some(date.timestamp()),
+                    UntilDate::Forever => None,
+                };
+                (ChatMemberStatus::Restricted, until, None, None)
+            },
+            ChatMemberKind::Left => (
+                ChatMemberStatus::Left,
+                None,
+                None,
+                None,
+            ),
+            ChatMemberKind::Banned(banned) => {
+                use teloxide::types::UntilDate;
+                let until = match banned.until_date {
+                    UntilDate::Date(date) => Some(date.timestamp()),
+                    UntilDate::Forever => None,
+                };
+                (ChatMemberStatus::Kicked, until, None, None)
+            },
+        };
+
+        ChatMember {
+            user: self.convert_user(&member.user),
+            status,
+            until_date,
+            is_anonymous,
+            custom_title,
+        }
+    }
+
+    /// Convert teloxide ChatInviteLink to our ChatInviteLink type
+    fn convert_invite_link(&self, link: &teloxide::types::ChatInviteLink) -> ChatInviteLink {
+        ChatInviteLink {
+            invite_link: link.invite_link.clone(),
+            creator: self.convert_user(&link.creator),
+            name: link.name.clone(),
+            creates_join_request: link.creates_join_request,
+            is_primary: link.is_primary,
+            is_revoked: link.is_revoked,
+            expire_date: link.expire_date.map(|d| d.timestamp()),
+            member_limit: link.member_limit.map(|l| l as i32),
+        }
     }
 }

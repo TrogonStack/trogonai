@@ -32,6 +32,9 @@ pub struct TelegramBotConfig {
     /// Rate limiting configuration
     #[serde(default)]
     pub limits: LimitConfig,
+    /// Update mode: polling or webhook
+    #[serde(default)]
+    pub update_mode: UpdateModeConfig,
 }
 
 /// Feature flags
@@ -52,6 +55,42 @@ pub enum StreamingMode {
     Disabled,
     Partial,
     Full,
+}
+
+/// Update mode configuration (webhook or polling)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum UpdateModeConfig {
+    /// Long polling mode (default)
+    Polling {
+        /// Timeout in seconds for long polling
+        #[serde(default = "default_polling_timeout")]
+        timeout: u32,
+        /// Maximum number of updates to fetch at once
+        #[serde(default = "default_polling_limit")]
+        limit: u8,
+    },
+    /// Webhook mode
+    Webhook {
+        /// Public URL where Telegram will send updates
+        /// Example: "https://example.com/webhook"
+        url: String,
+        /// Port to listen on for webhook requests
+        #[serde(default = "default_webhook_port")]
+        port: u16,
+        /// Path where webhook will listen (default: "/webhook")
+        #[serde(default = "default_webhook_path")]
+        path: String,
+        /// Optional secret token to validate requests
+        #[serde(skip_serializing_if = "Option::is_none")]
+        secret_token: Option<String>,
+        /// IP address to bind to (default: 0.0.0.0)
+        #[serde(default = "default_webhook_bind")]
+        bind_address: String,
+        /// Maximum allowed number of simultaneous HTTPS connections to the webhook
+        #[serde(default = "default_max_connections")]
+        max_connections: u8,
+    },
 }
 
 /// Rate limiting configuration
@@ -94,12 +133,35 @@ impl Config {
         let prefix = std::env::var("TELEGRAM_PREFIX")
             .unwrap_or_else(|_| "prod".to_string());
 
+        // Check for webhook mode from environment
+        let update_mode = if let Ok(webhook_url) = std::env::var("TELEGRAM_WEBHOOK_URL") {
+            let port = std::env::var("TELEGRAM_WEBHOOK_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8443);
+            let path = std::env::var("TELEGRAM_WEBHOOK_PATH")
+                .unwrap_or_else(|_| "/webhook".to_string());
+            let secret_token = std::env::var("TELEGRAM_WEBHOOK_SECRET").ok();
+
+            UpdateModeConfig::Webhook {
+                url: webhook_url,
+                port,
+                path,
+                secret_token,
+                bind_address: "0.0.0.0".to_string(),
+                max_connections: 40,
+            }
+        } else {
+            UpdateModeConfig::default()
+        };
+
         Ok(Config {
             telegram: TelegramBotConfig {
                 bot_token,
                 access: AccessConfig::default(),
                 features: FeatureConfig::default(),
                 limits: LimitConfig::default(),
+                update_mode,
             },
             nats: NatsConfig::from_url(nats_url, prefix),
         })
@@ -134,6 +196,30 @@ fn default_rate_limit() -> u32 {
     20
 }
 
+fn default_polling_timeout() -> u32 {
+    30
+}
+
+fn default_polling_limit() -> u8 {
+    100
+}
+
+fn default_webhook_port() -> u16 {
+    8443
+}
+
+fn default_webhook_path() -> String {
+    "/webhook".to_string()
+}
+
+fn default_webhook_bind() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_max_connections() -> u8 {
+    40
+}
+
 impl Default for FeatureConfig {
     fn default() -> Self {
         Self {
@@ -150,6 +236,15 @@ impl Default for LimitConfig {
             media_max_mb: default_media_max_mb(),
             history_limit: default_history_limit(),
             rate_limit_messages_per_minute: default_rate_limit(),
+        }
+    }
+}
+
+impl Default for UpdateModeConfig {
+    fn default() -> Self {
+        UpdateModeConfig::Polling {
+            timeout: default_polling_timeout(),
+            limit: default_polling_limit(),
         }
     }
 }

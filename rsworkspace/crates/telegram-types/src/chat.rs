@@ -106,3 +106,47 @@ pub struct ForumTopic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_custom_emoji_id: Option<String>,
 }
+
+/// Chat member status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatMemberStatus {
+    Creator,
+    Administrator,
+    Member,
+    Restricted,
+    Left,
+    Kicked,
+}
+
+/// Chat member information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMember {
+    pub user: User,
+    pub status: ChatMemberStatus,
+    /// Date when restrictions will be lifted (for restricted/kicked users)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_date: Option<i64>,
+    /// True if the user's presence in the chat is hidden
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_anonymous: Option<bool>,
+    /// Custom title for administrator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_title: Option<String>,
+}
+
+/// Chat invite link information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatInviteLink {
+    pub invite_link: String,
+    pub creator: User,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub creates_join_request: bool,
+    pub is_primary: bool,
+    pub is_revoked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expire_date: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_limit: Option<i32>,
+}
