@@ -147,6 +147,168 @@ async fn live_handler() -> StatusCode {
     StatusCode::OK
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── AppState::new() ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_new_initializes_counters_to_zero() {
+        let state = AppState::new(None);
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.messages_received, 0);
+        assert_eq!(metrics.messages_sent, 0);
+        assert_eq!(metrics.commands_processed, 0);
+        assert_eq!(metrics.active_sessions, 0);
+        assert_eq!(metrics.errors, 0);
+    }
+
+    #[tokio::test]
+    async fn test_new_stores_bot_username() {
+        let state = AppState::new(Some("mybot".to_string()));
+        assert_eq!(state.bot_username, Some("mybot".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_new_nats_not_connected() {
+        let state = AppState::new(None);
+        assert!(!*state.nats_connected.read().await);
+    }
+
+    // ── Counter increments ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_increment_messages_received() {
+        let state = AppState::new(None);
+        state.increment_messages_received().await;
+        state.increment_messages_received().await;
+        state.increment_messages_received().await;
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.messages_received, 3);
+    }
+
+    #[tokio::test]
+    async fn test_increment_messages_sent() {
+        let state = AppState::new(None);
+        state.increment_messages_sent().await;
+        state.increment_messages_sent().await;
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.messages_sent, 2);
+    }
+
+    #[tokio::test]
+    async fn test_increment_commands() {
+        let state = AppState::new(None);
+        state.increment_commands().await;
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.commands_processed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_increment_errors() {
+        let state = AppState::new(None);
+        state.increment_errors().await;
+        state.increment_errors().await;
+        state.increment_errors().await;
+        state.increment_errors().await;
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.errors, 4);
+    }
+
+    #[tokio::test]
+    async fn test_set_active_sessions() {
+        let state = AppState::new(None);
+        state.set_active_sessions(42).await;
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.active_sessions, 42);
+    }
+
+    #[tokio::test]
+    async fn test_counters_are_independent() {
+        let state = AppState::new(None);
+        state.increment_messages_received().await;
+        state.increment_messages_received().await;
+        state.increment_messages_sent().await;
+        state.increment_errors().await;
+        state.increment_commands().await;
+        state.increment_commands().await;
+
+        let metrics = state.metrics.read().await;
+        assert_eq!(metrics.messages_received, 2);
+        assert_eq!(metrics.messages_sent, 1);
+        assert_eq!(metrics.errors, 1);
+        assert_eq!(metrics.commands_processed, 2);
+        assert_eq!(metrics.active_sessions, 0);
+    }
+
+    // ── HealthStatus serde ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_health_status_serde() {
+        let status = HealthStatus {
+            status: "healthy".to_string(),
+            uptime_seconds: 3600,
+            nats_connected: true,
+            bot_username: Some("testbot".to_string()),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let back: HealthStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "healthy");
+        assert_eq!(back.uptime_seconds, 3600);
+        assert!(back.nats_connected);
+        assert_eq!(back.bot_username, Some("testbot".to_string()));
+    }
+
+    #[test]
+    fn test_health_status_unhealthy_serde() {
+        let status = HealthStatus {
+            status: "unhealthy".to_string(),
+            uptime_seconds: 0,
+            nats_connected: false,
+            bot_username: None,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let back: HealthStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "unhealthy");
+        assert!(!back.nats_connected);
+        assert!(back.bot_username.is_none());
+    }
+
+    // ── Metrics serde ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_metrics_serde() {
+        let metrics = Metrics {
+            messages_received: 100,
+            messages_sent: 95,
+            commands_processed: 10,
+            active_sessions: 5,
+            errors: 2,
+        };
+        let json = serde_json::to_string(&metrics).unwrap();
+        let back: Metrics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.messages_received, 100);
+        assert_eq!(back.messages_sent, 95);
+        assert_eq!(back.commands_processed, 10);
+        assert_eq!(back.active_sessions, 5);
+        assert_eq!(back.errors, 2);
+    }
+
+    // ── Clone behavior ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_clone_shares_state() {
+        let state1 = AppState::new(None);
+        let state2 = state1.clone();
+
+        state1.increment_messages_received().await;
+        // Both clones share the same Arc, so state2 sees the change
+        let metrics = state2.metrics.read().await;
+        assert_eq!(metrics.messages_received, 1);
+    }
+}
+
 /// Start health check server
 pub async fn start_health_server(state: AppState, port: u16) -> anyhow::Result<()> {
     let app = create_health_router(state);

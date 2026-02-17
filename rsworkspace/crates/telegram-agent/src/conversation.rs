@@ -64,3 +64,110 @@ impl Default for ConversationManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_new_has_no_sessions() {
+        let mgr = ConversationManager::new();
+        assert_eq!(mgr.active_sessions().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_history_empty_for_unknown_session() {
+        let mgr = ConversationManager::new();
+        let history = mgr.get_history("nonexistent").await;
+        assert!(history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_message_creates_session() {
+        let mgr = ConversationManager::new();
+        mgr.add_message("session1", "user", "Hello").await;
+        assert_eq!(mgr.active_sessions().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_message_stores_role_and_content() {
+        let mgr = ConversationManager::new();
+        mgr.add_message("s1", "user", "Hi there").await;
+        mgr.add_message("s1", "assistant", "Hello!").await;
+
+        let history = mgr.get_history("s1").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].content, "Hi there");
+        assert_eq!(history[1].role, "assistant");
+        assert_eq!(history[1].content, "Hello!");
+    }
+
+    #[tokio::test]
+    async fn test_sessions_are_isolated() {
+        let mgr = ConversationManager::new();
+        mgr.add_message("session_a", "user", "Message A").await;
+        mgr.add_message("session_b", "user", "Message B").await;
+
+        assert_eq!(mgr.active_sessions().await, 2);
+        let hist_a = mgr.get_history("session_a").await;
+        let hist_b = mgr.get_history("session_b").await;
+        assert_eq!(hist_a.len(), 1);
+        assert_eq!(hist_a[0].content, "Message A");
+        assert_eq!(hist_b.len(), 1);
+        assert_eq!(hist_b[0].content, "Message B");
+    }
+
+    #[tokio::test]
+    async fn test_history_trimmed_at_max_size() {
+        let mgr = ConversationManager::new();
+
+        // Add MAX_HISTORY_SIZE + 5 messages
+        for i in 0..(MAX_HISTORY_SIZE + 5) {
+            mgr.add_message("s", "user", &format!("msg {}", i)).await;
+        }
+
+        let history = mgr.get_history("s").await;
+        assert_eq!(history.len(), MAX_HISTORY_SIZE);
+        // Should keep the LAST MAX_HISTORY_SIZE messages
+        assert_eq!(history[0].content, "msg 5");
+        assert_eq!(history[MAX_HISTORY_SIZE - 1].content, format!("msg {}", MAX_HISTORY_SIZE + 4));
+    }
+
+    #[tokio::test]
+    async fn test_history_not_trimmed_below_max() {
+        let mgr = ConversationManager::new();
+        for i in 0..MAX_HISTORY_SIZE {
+            mgr.add_message("s", "user", &format!("msg {}", i)).await;
+        }
+        let history = mgr.get_history("s").await;
+        assert_eq!(history.len(), MAX_HISTORY_SIZE);
+        assert_eq!(history[0].content, "msg 0");
+    }
+
+    #[tokio::test]
+    async fn test_clear_session_removes_history() {
+        let mgr = ConversationManager::new();
+        mgr.add_message("s1", "user", "Hello").await;
+        mgr.add_message("s2", "user", "World").await;
+
+        mgr.clear_session("s1").await;
+
+        assert_eq!(mgr.active_sessions().await, 1);
+        assert!(mgr.get_history("s1").await.is_empty());
+        assert_eq!(mgr.get_history("s2").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_clear_nonexistent_session_is_noop() {
+        let mgr = ConversationManager::new();
+        mgr.clear_session("ghost").await; // should not panic
+        assert_eq!(mgr.active_sessions().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_default_is_same_as_new() {
+        let mgr = ConversationManager::default();
+        assert_eq!(mgr.active_sessions().await, 0);
+    }
+}
