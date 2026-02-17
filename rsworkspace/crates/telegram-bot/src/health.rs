@@ -139,6 +139,20 @@ async fn live_handler() -> StatusCode {
     StatusCode::OK
 }
 
+/// Start health check server
+pub async fn start_health_server(state: AppState, port: u16) -> anyhow::Result<()> {
+    let app = create_health_router(state);
+
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+    tracing::info!("Health check server listening on {}", addr);
+
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,18 +313,4 @@ mod tests {
         let metrics = state2.metrics.read().await;
         assert_eq!(metrics.messages_received, 1);
     }
-}
-
-/// Start health check server
-pub async fn start_health_server(state: AppState, port: u16) -> anyhow::Result<()> {
-    let app = create_health_router(state);
-
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-    tracing::info!("Health check server listening on {}", addr);
-
-    axum::serve(listener, app).await?;
-
-    Ok(())
 }

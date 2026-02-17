@@ -533,7 +533,7 @@ impl TelegramBridge {
 
         // Get chat from message or use a default
         let (chat, message_id) = if let Some(ref msg) = query.message {
-            (self.convert_chat(&msg.chat()), Some(msg.id().0))
+            (self.convert_chat(msg.chat()), Some(msg.id().0))
         } else {
             // For inline queries without a message, we need to handle differently
             warn!("Callback query without message, using user ID as chat");

@@ -2118,7 +2118,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Creating sticker set '{}' for user {}", cmd.name, cmd.user_id);
                         let stickers: Vec<teloxide::types::InputSticker> = cmd.stickers.iter()
-                            .map(|s| convert_input_sticker(s))
+                            .map(convert_input_sticker)
                             .collect();
                         let mut req = self.bot.create_new_sticker_set(
                             teloxide::types::UserId(cmd.user_id as u64),
@@ -2459,7 +2459,7 @@ impl OutboundProcessor {
                     let results: Vec<teloxide::types::InlineQueryResult> = cmd
                         .results
                         .into_iter()
-                        .filter_map(|r| convert_inline_query_result(r))
+                        .filter_map(convert_inline_query_result)
                         .collect();
 
                     let mut req = self.bot.answer_inline_query(&cmd.inline_query_id, results);
