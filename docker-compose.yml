@@ -75,7 +75,7 @@ services:
       - AGENT_NAME=agent-llm
       - ENABLE_LLM=true
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-3-5-sonnet-20241022}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250929}
       - RUST_LOG=${RUST_LOG:-telegram_agent=info,telegram_nats=info,info}
     depends_on:
       nats:
