@@ -462,6 +462,40 @@ pub struct SuccessfulPaymentEvent {
     pub payment: SuccessfulPayment,
 }
 
+/// Edited message event (user edited a previously sent message)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditedMessageEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    /// New text content (if text message was edited)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_text: Option<String>,
+    /// New caption (if media message caption was edited)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_caption: Option<String>,
+    /// Updated message entities
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entities: Option<Vec<MessageEntity>>,
+}
+
+/// Chat join request event (user requested to join a group/channel with approval required)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatJoinRequestEvent {
+    pub metadata: EventMetadata,
+    /// Chat the user wants to join
+    pub chat: Chat,
+    /// User who sent the request
+    pub from: User,
+    /// Date the request was sent (Unix timestamp)
+    pub date: i64,
+    /// User's bio (if set)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    /// Invite link used by the user (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_link: Option<ChatInviteLink>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
