@@ -70,6 +70,15 @@ mod nats_tests {
         })
     }
 
+    fn group_base(user_id: u64, chat_id: i64) -> serde_json::Value {
+        serde_json::json!({
+            "message_id": 1,
+            "date": 1_700_000_000i64,
+            "chat": {"id": chat_id, "type": "group", "title": "Test Group"},
+            "from": {"id": user_id, "is_bot": false, "first_name": "U"}
+        })
+    }
+
     async fn recv(sub: &mut async_nats::Subscriber) -> serde_json::Value {
         let raw = tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -393,6 +402,214 @@ mod nats_tests {
         assert_eq!(entities.len(), 2);
         assert_eq!(entities[0]["type"], "mention");
         assert_eq!(entities[1]["type"], "hashtag");
+    }
+
+    // ── Commands ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_command_start_published() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-start";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(42);
+        json["text"] = serde_json::json!("/start");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["command"], "start");
+        let args = event["args"].as_array().unwrap();
+        assert!(args.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_command_help_published() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-help";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(42);
+        json["text"] = serde_json::json!("/help");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 5}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.help", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["command"], "help");
+    }
+
+    #[tokio::test]
+    async fn test_custom_command_with_args() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-custom";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(42);
+        json["text"] = serde_json::json!("/search rust async");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 7}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.search", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["command"], "search");
+        let args = event["args"].as_array().unwrap();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "rust");
+        assert_eq!(args[1], "async");
+    }
+
+    #[tokio::test]
+    async fn test_command_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99); // denied user
+        json["text"] = serde_json::json!("/start");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            sub.next(),
+        )
+        .await;
+        assert!(result.is_err(), "denied command must NOT be published to NATS");
+    }
+
+    #[tokio::test]
+    async fn test_command_admin_bypasses_access_restriction() {
+        // Admin users must be able to send commands even when DmPolicy is Allowlist
+        // and the user is not in the allowlist.
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-admin";
+        const ADMIN_ID: u64 = 1001;
+
+        let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
+        let kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create KV bucket");
+        let bridge = TelegramBridge::new(
+            client.clone(),
+            prefix.to_string(),
+            AccessConfig {
+                dm_policy: DmPolicy::Allowlist,
+                user_allowlist: vec![],            // nobody in allowlist
+                admin_users: vec![ADMIN_ID as i64], // but this user is admin
+                ..Default::default()
+            },
+            kv,
+        );
+
+        let mut json = private_base(ADMIN_ID);
+        json["text"] = serde_json::json!("/start");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["command"], "start");
+    }
+
+    #[tokio::test]
+    async fn test_command_from_group_with_bot_suffix() {
+        // In group chats Telegram sends commands as "/start@botname".
+        // The handler must strip the "@botname" and publish to "bot.command.start".
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "cmd-group";
+        const GROUP_ID: i64 = -100123456789;
+
+        let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
+        let kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create KV bucket");
+        let bridge = TelegramBridge::new(
+            client.clone(),
+            prefix.to_string(),
+            AccessConfig {
+                dm_policy: DmPolicy::Open,
+                group_policy: GroupPolicy::Allowlist,
+                group_allowlist: vec![GROUP_ID],
+                ..Default::default()
+            },
+            kv,
+        );
+
+        let mut json = group_base(42, GROUP_ID);
+        json["text"] = serde_json::json!("/start@testbot");
+        json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 14}]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["command"], "start");
+        let args = event["args"].as_array().unwrap();
+        assert!(args.is_empty());
     }
 
     // ── Callback queries ──────────────────────────────────────────────────────

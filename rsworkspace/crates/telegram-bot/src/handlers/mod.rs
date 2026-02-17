@@ -347,7 +347,12 @@ async fn handle_command(
         return Ok(());
     }
 
-    let command = parts[0].trim_start_matches('/').to_lowercase();
+    let command = parts[0]
+        .trim_start_matches('/')
+        .split('@')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
     let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
     info!("Received command: {} with {} args", command, args.len());
