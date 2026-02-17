@@ -100,6 +100,9 @@ pub struct StreamMessageCommand {
     pub parse_mode: Option<ParseMode>,
     /// Whether this is the final chunk
     pub is_final: bool,
+    /// Session ID for tracking (optional, defaults to chat-based ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 impl SendMessageCommand {

@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
             text: accumulated.clone(),
             parse_mode: Some(ParseMode::Markdown),
             is_final,
+            session_id: None, // Use default chat-based ID
         };
 
         println!("📤 Chunk {}/{}: \"{}{}\"",
