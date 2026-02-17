@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::InlineKeyboardMarkup;
+use crate::chat::{ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup};
 
 /// Parse mode for message formatting
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -603,4 +603,103 @@ pub struct UnhideGeneralForumTopicCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnpinAllGeneralForumTopicMessagesCommand {
     pub chat_id: i64,
+}
+
+/// Promote a user to administrator
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromoteChatMemberCommand {
+    pub chat_id: i64,
+    pub user_id: i64,
+    /// Administrator rights to grant
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rights: Option<ChatAdministratorRights>,
+}
+
+/// Restrict a user in a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestrictChatMemberCommand {
+    pub chat_id: i64,
+    pub user_id: i64,
+    /// New user permissions
+    pub permissions: ChatPermissions,
+    /// Date when restrictions will be lifted (Unix time, None = forever)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_date: Option<i64>,
+}
+
+/// Ban a user from a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BanChatMemberCommand {
+    pub chat_id: i64,
+    pub user_id: i64,
+    /// Date when the user will be unbanned (Unix time, None = forever)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_date: Option<i64>,
+    /// True to delete all messages from the chat for the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_messages: Option<bool>,
+}
+
+/// Unban a user from a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnbanChatMemberCommand {
+    pub chat_id: i64,
+    pub user_id: i64,
+    /// True to allow the user to join the chat again
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_if_banned: Option<bool>,
+}
+
+/// Set default chat permissions for all members
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetChatPermissionsCommand {
+    pub chat_id: i64,
+    pub permissions: ChatPermissions,
+}
+
+/// Set a custom title for an administrator
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetChatAdministratorCustomTitleCommand {
+    pub chat_id: i64,
+    pub user_id: i64,
+    pub custom_title: String,
+}
+
+/// Pin a message in a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinChatMessageCommand {
+    pub chat_id: i64,
+    pub message_id: i32,
+    /// True to pin without notification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_notification: Option<bool>,
+}
+
+/// Unpin a message in a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnpinChatMessageCommand {
+    pub chat_id: i64,
+    /// Message ID to unpin (None = unpin most recent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<i32>,
+}
+
+/// Unpin all messages in a chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnpinAllChatMessagesCommand {
+    pub chat_id: i64,
+}
+
+/// Set chat title
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetChatTitleCommand {
+    pub chat_id: i64,
+    pub title: String,
+}
+
+/// Set chat description
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetChatDescriptionCommand {
+    pub chat_id: i64,
+    pub description: String,
 }

@@ -12,7 +12,7 @@ use telegram_nats::{MessagePublisher, subjects};
 use telegram_types::{
     AccessConfig, SessionId,
     events::*,
-    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ChatMember, ChatMemberStatus, ChatInviteLink},
+    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ChatMember, ChatMemberStatus, ChatInviteLink, MessageEntity, MessageEntityType},
 };
 use tracing::{debug, info, warn};
 use anyhow::Result;
@@ -100,10 +100,18 @@ impl TelegramBridge {
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
 
+        // Convert entities (mentions, hashtags, etc.)
+        let entities = msg.entities().map(|ents| {
+            ents.iter()
+                .map(|e| self.convert_message_entity(e))
+                .collect()
+        });
+
         let event = MessageTextEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             message: self.convert_message(msg),
             text,
+            entities,
         };
 
         let subject = subjects::bot::message_text(self.publisher.prefix());
@@ -464,6 +472,55 @@ impl TelegramBridge {
             is_revoked: link.is_revoked,
             expire_date: link.expire_date.map(|d| d.timestamp()),
             member_limit: link.member_limit.map(|l| l as i32),
+        }
+    }
+
+    /// Convert teloxide MessageEntity to our MessageEntity type
+    fn convert_message_entity(&self, entity: &teloxide::types::MessageEntity) -> MessageEntity {
+        use teloxide::types::MessageEntityKind;
+
+        let entity_type = match &entity.kind {
+            MessageEntityKind::Mention => MessageEntityType::Mention,
+            MessageEntityKind::Hashtag => MessageEntityType::Hashtag,
+            MessageEntityKind::Cashtag => MessageEntityType::Cashtag,
+            MessageEntityKind::BotCommand => MessageEntityType::BotCommand,
+            MessageEntityKind::Url => MessageEntityType::Url,
+            MessageEntityKind::Email => MessageEntityType::Email,
+            MessageEntityKind::PhoneNumber => MessageEntityType::PhoneNumber,
+            MessageEntityKind::Bold => MessageEntityType::Bold,
+            MessageEntityKind::Italic => MessageEntityType::Italic,
+            MessageEntityKind::Underline => MessageEntityType::Underline,
+            MessageEntityKind::Strikethrough => MessageEntityType::Strikethrough,
+            MessageEntityKind::Spoiler => MessageEntityType::Spoiler,
+            MessageEntityKind::Code => MessageEntityType::Code,
+            MessageEntityKind::Pre { language: _ } => MessageEntityType::Pre,
+            MessageEntityKind::TextLink { url: _ } => MessageEntityType::TextLink,
+            MessageEntityKind::TextMention { user: _ } => MessageEntityType::TextMention,
+            MessageEntityKind::CustomEmoji { custom_emoji_id: _ } => MessageEntityType::CustomEmoji,
+            MessageEntityKind::Blockquote => MessageEntityType::Code, // Map blockquote to code for now
+            MessageEntityKind::ExpandableBlockquote => MessageEntityType::Code, // Map expandable blockquote to code for now
+        };
+
+        MessageEntity {
+            entity_type,
+            offset: entity.offset as i32,
+            length: entity.length as i32,
+            url: match &entity.kind {
+                MessageEntityKind::TextLink { url } => Some(url.to_string()),
+                _ => None,
+            },
+            user: match &entity.kind {
+                MessageEntityKind::TextMention { user } => Some(self.convert_user(user)),
+                _ => None,
+            },
+            language: match &entity.kind {
+                MessageEntityKind::Pre { language } => language.clone(),
+                _ => None,
+            },
+            custom_emoji_id: match &entity.kind {
+                MessageEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id.clone()),
+                _ => None,
+            },
         }
     }
 }
