@@ -41,8 +41,10 @@ impl OutboundProcessor {
     async fn process_stream_message(&self, cmd: StreamMessageCommand) -> Result<()> {
         let chat_id = cmd.chat_id;
 
-        // Extract session_id from message or use chat_id as fallback
-        let session_id = format!("chat_{}", chat_id); // TODO: Get from metadata
+        // Use provided session_id or fallback to chat-based ID
+        let session_id = cmd.session_id
+            .clone()
+            .unwrap_or_else(|| format!("chat_{}", chat_id));
 
         debug!(
             "Processing stream message for chat {} (final: {})",
