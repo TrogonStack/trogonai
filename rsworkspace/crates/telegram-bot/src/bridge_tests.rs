@@ -138,7 +138,11 @@ mod tests {
     // ── tg_entity_to_msg_entity() ─────────────────────────────────────────────
 
     fn simple_entity(kind: MessageEntityKind) -> MessageEntity {
-        MessageEntity { kind, offset: 2, length: 5 }
+        MessageEntity {
+            kind,
+            offset: 2,
+            length: 5,
+        }
     }
 
     #[test]
@@ -235,7 +239,9 @@ mod tests {
 
     #[test]
     fn test_entity_pre_with_language() {
-        let kind = MessageEntityKind::Pre { language: Some("rust".to_string()) };
+        let kind = MessageEntityKind::Pre {
+            language: Some("rust".to_string()),
+        };
         let e = tg_entity_to_msg_entity(&simple_entity(kind));
         assert_eq!(e.entity_type, MessageEntityType::Pre);
         assert_eq!(e.language.as_deref(), Some("rust"));
