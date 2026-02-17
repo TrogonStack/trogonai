@@ -898,10 +898,7 @@ fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
 }
 
 /// Pure access-control check that only depends on AccessConfig (testable without NATS).
-pub(crate) fn check_message_access(
-    msg: &Message,
-    config: &telegram_types::AccessConfig,
-) -> bool {
+pub(crate) fn check_message_access(msg: &Message, config: &telegram_types::AccessConfig) -> bool {
     use teloxide::types::ChatKind;
 
     let user_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);

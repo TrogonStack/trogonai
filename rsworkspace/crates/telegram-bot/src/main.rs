@@ -155,7 +155,10 @@ async fn main() -> Result<()> {
     let health_port = args.health_port;
     tokio::spawn(async move {
         if let Err(e) = health::start_health_server(health_state_clone, health_port).await {
-            warn!("Health check server failed to start on port {} (non-fatal): {}", health_port, e);
+            warn!(
+                "Health check server failed to start on port {} (non-fatal): {}",
+                health_port, e
+            );
         }
     });
 
@@ -332,10 +335,7 @@ async fn main() -> Result<()> {
             );
             let listener = teloxide::update_listeners::polling_default(bot).await;
             dispatcher
-                .dispatch_with_listener(
-                    listener,
-                    std::sync::Arc::new(PollingErrorHandler),
-                )
+                .dispatch_with_listener(listener, std::sync::Arc::new(PollingErrorHandler))
                 .await;
         }
         crate::config::UpdateModeConfig::Webhook {
