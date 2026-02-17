@@ -40,14 +40,19 @@ limit = 100          # Max updates per request (1-100)
 
 # Access Control
 [telegram.access]
-# Admin user IDs (can always use the bot)
-admin_user_ids = [123456789]
+# DM policy: "allowlist" | "open" | "pairing" | "disabled"
+dm_policy = "allowlist"
+# Group policy: "allowlist" | "disabled"
+group_policy = "allowlist"
 
-# Allowed user IDs for direct messages
-allowed_user_ids = [123456789, 987654321]
+# Admin user IDs (bypass all restrictions)
+admin_users = [123456789]
 
-# Allowed group/channel IDs
-allowed_group_ids = [-1001234567890]
+# Allowed user IDs for direct messages (used when dm_policy = "allowlist")
+user_allowlist = [123456789, 987654321]
+
+# Allowed group/supergroup IDs (used when group_policy = "allowlist")
+group_allowlist = [-1001234567890]
 
 # Features
 [telegram.features]
