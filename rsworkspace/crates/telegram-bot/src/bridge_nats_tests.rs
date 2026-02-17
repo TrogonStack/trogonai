@@ -114,6 +114,24 @@ mod nats_tests {
         assert_eq!(v["message"]["from"]["id"], 1);
     }
 
+    #[tokio::test]
+    async fn test_nats_text_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "integ-text-deny";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99); // user 99 not in allowlist
+        json["text"] = serde_json::json!("should not arrive");
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+        handlers::handle_text_message(fake_bot(), message, bridge, health()).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(result.is_err(), "denied text must NOT be published to NATS");
+    }
+
     // ── photo ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
