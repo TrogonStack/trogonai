@@ -382,6 +382,19 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_retry_after() {
+        use teloxide::types::Seconds;
+        let err = RequestError::RetryAfter(Seconds::from_seconds(42));
+        let outcome = classify("send.message", &err);
+        match outcome {
+            ErrorOutcome::Retry(duration) => {
+                assert_eq!(duration.as_secs(), 42);
+            }
+            other => panic!("Expected Retry, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_classify_migrate_to_chat_id() {
         let new_id = ChatId(9876);
         let err = RequestError::MigrateToChatId(new_id);
