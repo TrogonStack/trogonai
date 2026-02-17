@@ -206,7 +206,17 @@ async fn main() -> Result<()> {
         .branch(
             dptree::filter(|msg: Message| msg.video_note().is_some())
                 .endpoint(handlers::handle_video_note_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.poll().is_some())
+                .endpoint(handlers::handle_poll_message),
         );
+
+    let poll_update_handler = Update::filter_poll()
+        .endpoint(handlers::handle_poll_update);
+
+    let poll_answer_handler = Update::filter_poll_answer()
+        .endpoint(handlers::handle_poll_answer);
 
     let callback_handler = Update::filter_callback_query()
         .endpoint(handlers::handle_callback_query);
@@ -243,7 +253,9 @@ async fn main() -> Result<()> {
         .branch(my_chat_member_handler)
         .branch(pre_checkout_handler)
         .branch(shipping_query_handler)
-        .branch(successful_payment_handler);
+        .branch(successful_payment_handler)
+        .branch(poll_update_handler)
+        .branch(poll_answer_handler);
 
     // Start bot based on update mode
     match &config.telegram.update_mode {

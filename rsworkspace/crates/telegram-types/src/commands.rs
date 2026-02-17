@@ -1127,6 +1127,67 @@ pub struct AnswerShippingQueryCommand {
     pub error_message: Option<String>,
 }
 
+// ── Polls ─────────────────────────────────────────────────────────────────────
+
+/// Poll type for sending
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PollKind {
+    Regular,
+    Quiz,
+}
+
+/// Send a poll
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendPollCommand {
+    pub chat_id: i64,
+    /// Poll question (1-300 characters)
+    pub question: String,
+    /// Answer options (2-10 items, 1-100 characters each)
+    pub options: Vec<String>,
+    /// True for anonymous poll (default true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_anonymous: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll_type: Option<PollKind>,
+    /// True if poll allows multiple answers (regular polls only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allows_multiple_answers: Option<bool>,
+    /// 0-based index of the correct option (quiz polls only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correct_option_id: Option<u8>,
+    /// Text shown on incorrect answer (quiz polls only, 0-200 chars)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation_parse_mode: Option<ParseMode>,
+    /// Seconds the poll will be active (5-600)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_period: Option<u16>,
+    /// Unix timestamp when the poll closes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close_date: Option<i64>,
+    /// Pass true to immediately close the poll
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_closed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Stop a poll
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StopPollCommand {
+    pub chat_id: i64,
+    /// Identifier of the original poll message
+    pub message_id: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+}
+
 // ── Location / Venue / Contact ────────────────────────────────────────────────
 
 /// Send a location

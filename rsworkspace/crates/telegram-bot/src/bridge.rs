@@ -841,6 +841,107 @@ impl TelegramBridge {
         }
     }
 
+    /// Convert teloxide Poll to our PollOption vec
+    fn convert_poll_options(&self, options: &[teloxide::types::PollOption]) -> Vec<telegram_types::events::PollOption> {
+        options.iter().map(|o| telegram_types::events::PollOption {
+            text: o.text.clone(),
+            voter_count: o.voter_count,
+        }).collect()
+    }
+
+    /// Convert teloxide PollType to our PollType
+    fn convert_poll_type(&self, pt: &teloxide::types::PollType) -> telegram_types::events::PollType {
+        match pt {
+            teloxide::types::PollType::Quiz => telegram_types::events::PollType::Quiz,
+            teloxide::types::PollType::Regular => telegram_types::events::PollType::Regular,
+        }
+    }
+
+    /// Publish a poll message event (poll inside a chat message)
+    pub async fn publish_poll_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let poll = msg.poll().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessagePollEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            poll_id: poll.id.clone(),
+            question: poll.question.clone(),
+            options: self.convert_poll_options(&poll.options),
+            total_voter_count: poll.total_voter_count,
+            is_closed: poll.is_closed,
+            is_anonymous: poll.is_anonymous,
+            poll_type: self.convert_poll_type(&poll.poll_type),
+            allows_multiple_answers: poll.allows_multiple_answers,
+            correct_option_id: poll.correct_option_id,
+            explanation: poll.explanation.clone(),
+            open_period: poll.open_period.map(|s| s.duration().as_secs() as u32),
+        };
+
+        let subject = subjects::bot::message_poll(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+        info!("Published poll message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a standalone poll update event (poll state changed)
+    pub async fn publish_poll_update(&self, poll: &teloxide::types::Poll, update_id: i64) -> Result<()> {
+        // Standalone polls have no chat context — use poll_id as session key
+        let session_id = format!("tg-poll-{}", poll.id);
+
+        let event = PollUpdateEvent {
+            metadata: EventMetadata::new(session_id, update_id),
+            poll_id: poll.id.clone(),
+            question: poll.question.clone(),
+            options: self.convert_poll_options(&poll.options),
+            total_voter_count: poll.total_voter_count,
+            is_closed: poll.is_closed,
+            is_anonymous: poll.is_anonymous,
+            poll_type: self.convert_poll_type(&poll.poll_type),
+            allows_multiple_answers: poll.allows_multiple_answers,
+            correct_option_id: poll.correct_option_id,
+            explanation: poll.explanation.clone(),
+        };
+
+        let subject = subjects::bot::poll_update(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+        info!("Published poll update event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a poll answer event (user voted)
+    pub async fn publish_poll_answer(&self, answer: &teloxide::types::PollAnswer, update_id: i64) -> Result<()> {
+        use teloxide::types::MaybeAnonymousUser;
+
+        let (voter_user_id, voter_chat_id) = match &answer.voter {
+            MaybeAnonymousUser::User(u) => (Some(u.id.0 as i64), None),
+            MaybeAnonymousUser::Chat(c) => (None, Some(c.id.0)),
+        };
+
+        // Use voter id as session key
+        let session_id = voter_user_id
+            .map(|uid| format!("tg-private-{}", uid))
+            .or_else(|| voter_chat_id.map(|cid| format!("tg-group-{}", cid)))
+            .unwrap_or_else(|| format!("tg-poll-{}", answer.poll_id));
+
+        let event = PollAnswerEvent {
+            metadata: EventMetadata::new(session_id, update_id),
+            poll_id: answer.poll_id.clone(),
+            option_ids: answer.option_ids.clone(),
+            voter_user_id,
+            voter_chat_id,
+        };
+
+        let subject = subjects::bot::poll_answer(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+        info!("Published poll answer event to {}", subject);
+        Ok(())
+    }
+
     /// Convert teloxide ShippingAddress to our ShippingAddress type
     fn convert_shipping_address(&self, addr: &teloxide::types::ShippingAddress) -> telegram_types::chat::ShippingAddress {
         // CountryCode is an enum, use serde_json to get ISO 3166-1 alpha-2 string
