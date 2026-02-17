@@ -1037,6 +1037,57 @@ mod nats_tests {
         assert_eq!(event["data"], "");
     }
 
+    #[tokio::test]
+    async fn test_callback_query_message_id_forwarded() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "callback-msgid";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let query = callback_query_json(42, "click", 77, 42);
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["message_id"], 77);
+        assert_eq!(event["data"], "click");
+    }
+
+    #[tokio::test]
+    async fn test_callback_query_admin_bypasses_restriction() {
+        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let prefix = "callback-admin";
+        const ADMIN_ID: u64 = 3001;
+
+        let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
+        let kv = js
+            .create_key_value(jetstream::kv::Config { bucket, ..Default::default() })
+            .await
+            .unwrap();
+        let bridge = TelegramBridge::new(
+            client.clone(),
+            prefix.to_string(),
+            AccessConfig {
+                dm_policy: DmPolicy::Allowlist,
+                user_allowlist: vec![],
+                admin_users: vec![ADMIN_ID as i64],
+                ..Default::default()
+            },
+            kv,
+        );
+
+        let query = callback_query_json(ADMIN_ID, "admin:action", 1, ADMIN_ID as i64);
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health()).await.unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["data"], "admin:action");
+        assert_eq!(event["from"]["id"], ADMIN_ID);
+    }
+
     // ── Inline queries ────────────────────────────────────────────────────────
 
     fn inline_query_json(user_id: u64, query: &str) -> teloxide::types::InlineQuery {
