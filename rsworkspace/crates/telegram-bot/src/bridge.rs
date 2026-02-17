@@ -54,6 +54,8 @@ impl TelegramBridge {
             date: msg.date.timestamp(),
             chat: self.convert_chat(&msg.chat),
             from: msg.from.as_ref().map(|u| self.convert_user(u)),
+            message_thread_id: msg.thread_id.as_ref().map(|t| t.0.0),
+            is_topic_message: Some(msg.is_topic_message),
         }
     }
 
