@@ -176,10 +176,194 @@ impl<T: DeserializeOwned> MessageStream<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
 
     #[test]
     fn test_message_publisher_creation() {
-        // This test just verifies the types compile correctly
-        // Actual connection tests would require a running NATS server
+        // Verifies the types compile correctly
+    }
+
+    // ── NATS integration ──────────────────────────────────────────────────────
+
+    const NATS_URL: &str = "nats://localhost:14222";
+
+    async fn try_connect() -> Option<Client> {
+        async_nats::connect(NATS_URL).await.ok()
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    struct TestMsg {
+        value: String,
+        count: u32,
+    }
+
+    #[tokio::test]
+    async fn test_publish_subscribe_roundtrip() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.roundtrip.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
+
+        let sent = TestMsg { value: "hello".to_string(), count: 42 };
+        publisher.publish(&subject, &sent).await.unwrap();
+
+        let received = stream.next().await.unwrap().unwrap();
+        assert_eq!(received, sent);
+    }
+
+    #[tokio::test]
+    async fn test_publish_with_headers_roundtrip() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.headers.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
+
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("x-source", "test");
+
+        let sent = TestMsg { value: "with-headers".to_string(), count: 1 };
+        publisher.publish_with_headers(&subject, &sent, headers).await.unwrap();
+
+        let received = stream.next().await.unwrap().unwrap();
+        assert_eq!(received, sent);
+    }
+
+    #[tokio::test]
+    async fn test_queue_subscribe_roundtrip() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.queue.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber
+            .queue_subscribe::<TestMsg>(&subject, "workers")
+            .await
+            .unwrap();
+
+        let sent = TestMsg { value: "queued".to_string(), count: 7 };
+        publisher.publish(&subject, &sent).await.unwrap();
+
+        let received = stream.next().await.unwrap().unwrap();
+        assert_eq!(received, sent);
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_error_on_invalid_json() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.invalid.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
+
+        // Publish raw invalid JSON
+        client
+            .publish(subject, b"not-valid-json".as_ref().into())
+            .await
+            .unwrap();
+
+        let result = stream.next().await.unwrap();
+        assert!(result.is_err(), "invalid JSON must return an error");
+    }
+
+    #[tokio::test]
+    async fn test_next_raw_receives_bytes() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.raw.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
+
+        client
+            .publish(subject, b"{\"value\":\"raw\",\"count\":0}".as_ref().into())
+            .await
+            .unwrap();
+
+        let raw = stream.next_raw().await.unwrap();
+        assert_eq!(&raw.payload[..], b"{\"value\":\"raw\",\"count\":0}");
+    }
+
+    #[tokio::test]
+    async fn test_publisher_prefix_accessor() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let publisher = MessagePublisher::new(client, "mypfx");
+        assert_eq!(publisher.prefix(), "mypfx");
+    }
+
+    #[tokio::test]
+    async fn test_subscriber_prefix_and_client_accessors() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subscriber = MessageSubscriber::new(client, "mypfx");
+        assert_eq!(subscriber.prefix(), "mypfx");
+        // client() must return a usable client
+        let _ = subscriber.client();
+    }
+
+    #[tokio::test]
+    async fn test_multiple_messages_in_order() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!(
+            "test.messaging.order.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let subscriber = MessageSubscriber::new(client.clone(), "test");
+        let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
+
+        for i in 0..3u32 {
+            publisher
+                .publish(&subject, &TestMsg { value: "msg".to_string(), count: i })
+                .await
+                .unwrap();
+        }
+
+        for i in 0..3u32 {
+            let msg = stream.next().await.unwrap().unwrap();
+            assert_eq!(msg.count, i);
+        }
     }
 }
