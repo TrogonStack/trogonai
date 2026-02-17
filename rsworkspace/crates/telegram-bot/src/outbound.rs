@@ -1989,33 +1989,51 @@ impl OutboundProcessor {
         err: teloxide::RequestError,
         prefix: &str,
     ) {
-        match classify(command_subject, &err) {
+        let evt = match classify(command_subject, &err) {
             ErrorOutcome::Retry(duration) => {
                 warn!(
-                    "Rate limited on '{}': would retry after {:?} (retry not implemented)",
+                    "Rate limited on '{}': retry after {:?}",
                     command_subject, duration
                 );
+                telegram_types::errors::CommandErrorEvent {
+                    command_subject: command_subject.to_string(),
+                    error_code: telegram_types::errors::TelegramErrorCode::FloodControl,
+                    category: telegram_types::errors::ErrorCategory::RateLimit,
+                    message: format!("Rate limited: retry after {}s", duration.as_secs()),
+                    retry_after_secs: Some(duration.as_secs()),
+                    migrated_to_chat_id: None,
+                    is_permanent: false,
+                }
             }
             ErrorOutcome::Migrated(new_chat_id) => {
                 warn!(
                     "Chat migrated on '{}': new chat_id={}",
                     command_subject, new_chat_id
                 );
-            }
-            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => {
-                let error_subject = subjects::bot::command_error(prefix);
-                match serde_json::to_vec(&evt) {
-                    Ok(payload) => {
-                        if let Err(e) = self.subscriber.client()
-                            .publish(error_subject.clone(), payload.into())
-                            .await
-                        {
-                            error!("Failed to publish command error to '{}': {}", error_subject, e);
-                        }
-                    }
-                    Err(e) => error!("Failed to serialize CommandErrorEvent: {}", e),
+                telegram_types::errors::CommandErrorEvent {
+                    command_subject: command_subject.to_string(),
+                    error_code: telegram_types::errors::TelegramErrorCode::MigrateToChatId,
+                    category: telegram_types::errors::ErrorCategory::ChatMigrated,
+                    message: format!("Chat migrated to new ID: {}", new_chat_id.0),
+                    retry_after_secs: None,
+                    migrated_to_chat_id: Some(new_chat_id.0),
+                    is_permanent: false,
                 }
             }
+            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => evt,
+        };
+
+        let error_subject = subjects::bot::command_error(prefix);
+        match serde_json::to_vec(&evt) {
+            Ok(payload) => {
+                if let Err(e) = self.subscriber.client()
+                    .publish(error_subject.clone(), payload.into())
+                    .await
+                {
+                    error!("Failed to publish command error to '{}': {}", error_subject, e);
+                }
+            }
+            Err(e) => error!("Failed to serialize CommandErrorEvent: {}", e),
         }
     }
 
