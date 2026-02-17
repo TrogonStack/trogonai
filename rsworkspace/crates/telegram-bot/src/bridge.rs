@@ -12,7 +12,7 @@ use telegram_nats::{MessagePublisher, subjects};
 use telegram_types::{
     AccessConfig, SessionId,
     events::*,
-    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ChatMember, ChatMemberStatus, ChatInviteLink, MessageEntity, MessageEntityType},
+    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ForumTopic, ChatMember, ChatMemberStatus, ChatInviteLink, MessageEntity, MessageEntityType},
 };
 use tracing::{debug, info, warn};
 use anyhow::Result;
@@ -939,6 +939,141 @@ impl TelegramBridge {
         let subject = subjects::bot::poll_answer(self.publisher.prefix());
         self.publisher.publish(&subject, &event).await?;
         info!("Published poll answer event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a forum topic created event
+    pub async fn publish_forum_topic_created(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let topic = msg.forum_topic_created().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let message_thread_id = msg.thread_id.as_ref().map(|t| t.0.0).unwrap_or(0);
+
+        let teloxide::types::Rgb { r, g, b } = topic.icon_color;
+        let icon_color = ((r as i32) << 16) | ((g as i32) << 8) | (b as i32);
+
+        let event = ForumTopicCreatedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            forum_topic: ForumTopic {
+                message_thread_id,
+                name: topic.name.clone(),
+                icon_color,
+                icon_custom_emoji_id: topic.icon_custom_emoji_id.clone(),
+            },
+        };
+
+        let subject = subjects::bot::forum_topic_created(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published forum topic created event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a forum topic edited event
+    pub async fn publish_forum_topic_edited(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let topic = msg.forum_topic_edited().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = ForumTopicEditedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            name: topic.name.clone(),
+            icon_custom_emoji_id: topic.icon_custom_emoji_id.clone(),
+        };
+
+        let subject = subjects::bot::forum_topic_edited(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published forum topic edited event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a forum topic closed event
+    pub async fn publish_forum_topic_closed(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = ForumTopicClosedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+        };
+
+        let subject = subjects::bot::forum_topic_closed(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published forum topic closed event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a forum topic reopened event
+    pub async fn publish_forum_topic_reopened(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = ForumTopicReopenedEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+        };
+
+        let subject = subjects::bot::forum_topic_reopened(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published forum topic reopened event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a general forum topic hidden event
+    pub async fn publish_general_forum_topic_hidden(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = GeneralForumTopicHiddenEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+        };
+
+        let subject = subjects::bot::general_forum_topic_hidden(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published general forum topic hidden event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a general forum topic unhidden event
+    pub async fn publish_general_forum_topic_unhidden(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = GeneralForumTopicUnhiddenEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+        };
+
+        let subject = subjects::bot::general_forum_topic_unhidden(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published general forum topic unhidden event to {}", subject);
         Ok(())
     }
 

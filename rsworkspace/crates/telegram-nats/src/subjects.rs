@@ -19,6 +19,12 @@
 //! - `telegram.{prefix}.bot.payment.shipping`
 //! - `telegram.{prefix}.bot.payment.successful`
 //! - `telegram.{prefix}.bot.bot_commands.response`
+//! - `telegram.{prefix}.bot.forum.created`
+//! - `telegram.{prefix}.bot.forum.edited`
+//! - `telegram.{prefix}.bot.forum.closed`
+//! - `telegram.{prefix}.bot.forum.reopened`
+//! - `telegram.{prefix}.bot.forum.general_hidden`
+//! - `telegram.{prefix}.bot.forum.general_unhidden`
 //!
 //! Agent Commands (Agents → Telegram):
 //! - `telegram.{prefix}.agent.message.send`
@@ -203,6 +209,36 @@ pub mod bot {
     /// Error event subject for failed agent commands
     pub fn command_error(prefix: &str) -> String {
         format!("telegram.{}.bot.error.command", prefix)
+    }
+
+    /// Forum topic created event subject
+    pub fn forum_topic_created(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.created", prefix)
+    }
+
+    /// Forum topic edited event subject
+    pub fn forum_topic_edited(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.edited", prefix)
+    }
+
+    /// Forum topic closed event subject
+    pub fn forum_topic_closed(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.closed", prefix)
+    }
+
+    /// Forum topic reopened event subject
+    pub fn forum_topic_reopened(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.reopened", prefix)
+    }
+
+    /// General forum topic hidden event subject
+    pub fn general_forum_topic_hidden(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.general_hidden", prefix)
+    }
+
+    /// General forum topic unhidden event subject
+    pub fn general_forum_topic_unhidden(prefix: &str) -> String {
+        format!("telegram.{}.bot.forum.general_unhidden", prefix)
     }
 }
 
@@ -626,5 +662,15 @@ mod tests {
         assert_ne!(s1, s2);
         assert!(s1.contains("env1"));
         assert!(s2.contains("env2"));
+    }
+
+    #[test]
+    fn test_bot_forum_subjects() {
+        assert_eq!(bot::forum_topic_created("prod"), "telegram.prod.bot.forum.created");
+        assert_eq!(bot::forum_topic_edited("prod"), "telegram.prod.bot.forum.edited");
+        assert_eq!(bot::forum_topic_closed("prod"), "telegram.prod.bot.forum.closed");
+        assert_eq!(bot::forum_topic_reopened("prod"), "telegram.prod.bot.forum.reopened");
+        assert_eq!(bot::general_forum_topic_hidden("prod"), "telegram.prod.bot.forum.general_hidden");
+        assert_eq!(bot::general_forum_topic_unhidden("prod"), "telegram.prod.bot.forum.general_unhidden");
     }
 }
