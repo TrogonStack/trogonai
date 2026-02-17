@@ -405,6 +405,91 @@ impl TelegramBridge {
         Ok(())
     }
 
+    /// Publish a pre-checkout query event
+    pub async fn publish_pre_checkout_query(
+        &self,
+        query: &teloxide::types::PreCheckoutQuery,
+        update_id: i64,
+    ) -> Result<()> {
+        // Payments are always in private chats
+        let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
+
+        let event = PreCheckoutQueryEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            pre_checkout_query_id: query.id.clone(),
+            from: self.convert_user(&query.from),
+            currency: query.currency.clone(),
+            total_amount: query.total_amount as i64,
+            invoice_payload: query.invoice_payload.clone(),
+            shipping_option_id: query.shipping_option_id.clone(),
+            order_info: Some(self.convert_order_info(&query.order_info)),
+        };
+
+        let subject = subjects::bot::payment_pre_checkout(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published pre-checkout query event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a shipping query event
+    pub async fn publish_shipping_query(
+        &self,
+        query: &teloxide::types::ShippingQuery,
+        update_id: i64,
+    ) -> Result<()> {
+        // Payments are always in private chats
+        let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
+
+        let event = ShippingQueryEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            shipping_query_id: query.id.clone(),
+            from: self.convert_user(&query.from),
+            invoice_payload: query.invoice_payload.clone(),
+            shipping_address: self.convert_shipping_address(&query.shipping_address),
+        };
+
+        let subject = subjects::bot::payment_shipping(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published shipping query event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a successful payment event
+    pub async fn publish_successful_payment(
+        &self,
+        msg: &Message,
+        payment: &teloxide::types::SuccessfulPayment,
+        update_id: i64,
+    ) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = SuccessfulPaymentEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            payment: telegram_types::chat::SuccessfulPayment {
+                currency: payment.currency.clone(),
+                total_amount: payment.total_amount as i64,
+                invoice_payload: payment.invoice_payload.clone(),
+                telegram_payment_charge_id: payment.telegram_payment_charge_id.clone(),
+                provider_payment_charge_id: payment.provider_payment_charge_id.clone(),
+                shipping_option_id: payment.shipping_option_id.clone(),
+                order_info: Some(self.convert_order_info(&payment.order_info)),
+            },
+        };
+
+        let subject = subjects::bot::payment_successful(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published successful payment event to {}", subject);
+        Ok(())
+    }
+
     /// Convert teloxide ChatMember to our ChatMember type
     fn convert_chat_member(&self, member: &teloxide::types::ChatMember) -> ChatMember {
         use teloxide::types::ChatMemberKind;
@@ -521,6 +606,34 @@ impl TelegramBridge {
                 MessageEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id.clone()),
                 _ => None,
             },
+        }
+    }
+
+    /// Convert teloxide OrderInfo to our OrderInfo type
+    fn convert_order_info(&self, info: &teloxide::types::OrderInfo) -> telegram_types::chat::OrderInfo {
+        telegram_types::chat::OrderInfo {
+            name: info.name.clone(),
+            phone_number: info.phone_number.clone(),
+            email: info.email.clone(),
+            shipping_address: info.shipping_address.as_ref().map(|addr| self.convert_shipping_address(addr)),
+        }
+    }
+
+    /// Convert teloxide ShippingAddress to our ShippingAddress type
+    fn convert_shipping_address(&self, addr: &teloxide::types::ShippingAddress) -> telegram_types::chat::ShippingAddress {
+        // CountryCode is an enum, use serde_json to get ISO 3166-1 alpha-2 string
+        let country_code = serde_json::to_string(&addr.country_code)
+            .unwrap_or_default()
+            .trim_matches('"')
+            .to_string();
+
+        telegram_types::chat::ShippingAddress {
+            country_code,
+            state: addr.state.clone(),
+            city: addr.city.clone(),
+            street_line1: addr.street_line1.clone(),
+            street_line2: addr.street_line2.clone(),
+            post_code: addr.post_code.clone(),
         }
     }
 }
