@@ -63,6 +63,7 @@ impl OutboundProcessor {
         let file_task = self.handle_file_commands(prefix.clone());
         let payment_task = self.handle_payment_commands(prefix.clone());
         let bot_commands_task = self.handle_bot_commands(prefix.clone());
+        let sticker_mgmt_task = self.handle_sticker_management(prefix.clone());
 
         // Run all tasks concurrently
         tokio::try_join!(
@@ -81,7 +82,8 @@ impl OutboundProcessor {
             admin_task,
             file_task,
             payment_task,
-            bot_commands_task
+            bot_commands_task,
+            sticker_mgmt_task
         )?;
 
         Ok(())
@@ -1229,6 +1231,223 @@ impl OutboundProcessor {
         Ok(())
     }
 
+    /// Handle sticker set management commands
+    async fn handle_sticker_management(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::*;
+
+        let get_set_subject        = subjects::agent::sticker_get_set(&prefix);
+        let upload_subject         = subjects::agent::sticker_upload_file(&prefix);
+        let create_subject         = subjects::agent::sticker_create_set(&prefix);
+        let add_subject            = subjects::agent::sticker_add_to_set(&prefix);
+        let set_position_subject   = subjects::agent::sticker_set_position(&prefix);
+        let delete_from_subject    = subjects::agent::sticker_delete_from_set(&prefix);
+        let set_title_subject      = subjects::agent::sticker_set_title(&prefix);
+        let set_thumbnail_subject  = subjects::agent::sticker_set_thumbnail(&prefix);
+        let delete_set_subject     = subjects::agent::sticker_delete_set(&prefix);
+        let set_emoji_subject      = subjects::agent::sticker_set_emoji_list(&prefix);
+        let set_keywords_subject   = subjects::agent::sticker_set_keywords(&prefix);
+        let set_mask_subject       = subjects::agent::sticker_set_mask_position(&prefix);
+
+        info!("Subscribing to sticker management commands");
+
+        let (
+            mut get_set_stream, mut upload_stream, mut create_stream, mut add_stream,
+            mut set_position_stream, mut delete_from_stream, mut set_title_stream,
+            mut set_thumbnail_stream, mut delete_set_stream, mut set_emoji_stream,
+            mut set_keywords_stream, mut set_mask_stream,
+        ) = tokio::try_join!(
+            self.subscriber.subscribe::<GetStickerSetCommand>(&get_set_subject),
+            self.subscriber.subscribe::<UploadStickerFileCommand>(&upload_subject),
+            self.subscriber.subscribe::<CreateNewStickerSetCommand>(&create_subject),
+            self.subscriber.subscribe::<AddStickerToSetCommand>(&add_subject),
+            self.subscriber.subscribe::<SetStickerPositionInSetCommand>(&set_position_subject),
+            self.subscriber.subscribe::<DeleteStickerFromSetCommand>(&delete_from_subject),
+            self.subscriber.subscribe::<SetStickerSetTitleCommand>(&set_title_subject),
+            self.subscriber.subscribe::<SetStickerSetThumbnailCommand>(&set_thumbnail_subject),
+            self.subscriber.subscribe::<DeleteStickerSetCommand>(&delete_set_subject),
+            self.subscriber.subscribe::<SetStickerEmojiListCommand>(&set_emoji_subject),
+            self.subscriber.subscribe::<SetStickerKeywordsCommand>(&set_keywords_subject),
+            self.subscriber.subscribe::<SetStickerMaskPositionCommand>(&set_mask_subject),
+        )?;
+
+        loop {
+            tokio::select! {
+                Some(result) = get_set_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Getting sticker set: {}", cmd.name);
+                        match self.bot.get_sticker_set(&cmd.name).await {
+                            Ok(set) => {
+                                let response = StickerSetResponse {
+                                    sticker_set: telegram_types::chat::StickerSet {
+                                        name: set.name.clone(),
+                                        title: set.title.clone(),
+                                        kind: format!("{:?}", set.kind).to_lowercase(),
+                                        sticker_file_ids: set.stickers.iter().map(|s| s.file.id.clone()).collect(),
+                                        thumbnail_file_id: set.thumbnail.as_ref().map(|t| t.file.id.clone()),
+                                    },
+                                    request_id: cmd.request_id,
+                                };
+                                let subj = subjects::bot::sticker_set_info(&prefix);
+                                if let Ok(payload) = serde_json::to_vec(&response) {
+                                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
+                                }
+                            }
+                            Err(e) => self.handle_telegram_error(&get_set_subject, e, &prefix).await,
+                        }
+                    }
+                }
+
+                Some(result) = upload_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Uploading sticker file for user {}", cmd.user_id);
+                        let sticker_file = teloxide::types::InputFile::file_id(&cmd.sticker);
+                        let format = convert_sticker_format(&cmd.format);
+                        match self.bot.upload_sticker_file(teloxide::types::UserId(cmd.user_id as u64), sticker_file, format).await {
+                            Ok(file) => {
+                                let response = UploadStickerFileResponse {
+                                    file_id: file.id.clone(),
+                                    request_id: cmd.request_id,
+                                };
+                                let subj = subjects::bot::sticker_uploaded(&prefix);
+                                if let Ok(payload) = serde_json::to_vec(&response) {
+                                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
+                                }
+                            }
+                            Err(e) => self.handle_telegram_error(&upload_subject, e, &prefix).await,
+                        }
+                    }
+                }
+
+                Some(result) = create_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Creating sticker set '{}' for user {}", cmd.name, cmd.user_id);
+                        let stickers: Vec<teloxide::types::InputSticker> = cmd.stickers.iter()
+                            .map(|s| convert_input_sticker(s))
+                            .collect();
+                        let mut req = self.bot.create_new_sticker_set(
+                            teloxide::types::UserId(cmd.user_id as u64),
+                            &cmd.name,
+                            &cmd.title,
+                            stickers,
+                        );
+                        if let Some(ref kind) = cmd.sticker_type {
+                            req.sticker_type = Some(convert_sticker_type(kind));
+                        }
+                        req.needs_repainting = cmd.needs_repainting;
+                        if let Err(e) = req.await {
+                            self.handle_telegram_error(&create_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = add_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Adding sticker to set '{}' for user {}", cmd.name, cmd.user_id);
+                        let sticker = convert_input_sticker(&cmd.sticker);
+                        if let Err(e) = self.bot.add_sticker_to_set(
+                            teloxide::types::UserId(cmd.user_id as u64),
+                            &cmd.name,
+                            sticker,
+                        ).await {
+                            self.handle_telegram_error(&add_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_position_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting sticker position to {}", cmd.position);
+                        if let Err(e) = self.bot.set_sticker_position_in_set(&cmd.sticker, cmd.position).await {
+                            self.handle_telegram_error(&set_position_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = delete_from_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Deleting sticker from set: {}", cmd.sticker);
+                        if let Err(e) = self.bot.delete_sticker_from_set(&cmd.sticker).await {
+                            self.handle_telegram_error(&delete_from_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_title_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting title of sticker set '{}' to '{}'", cmd.name, cmd.title);
+                        if let Err(e) = self.bot.set_sticker_set_title(&cmd.name, &cmd.title).await {
+                            self.handle_telegram_error(&set_title_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_thumbnail_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting thumbnail of sticker set '{}'", cmd.name);
+                        let format = convert_sticker_format(&cmd.format);
+                        let mut req = self.bot.set_sticker_set_thumbnail(
+                            &cmd.name,
+                            teloxide::types::UserId(cmd.user_id as u64),
+                            format,
+                        );
+                        if let Some(ref file_id) = cmd.thumbnail {
+                            req.thumbnail = Some(teloxide::types::InputFile::file_id(file_id));
+                        }
+                        if let Err(e) = req.await {
+                            self.handle_telegram_error(&set_thumbnail_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = delete_set_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Deleting sticker set '{}'", cmd.name);
+                        if let Err(e) = self.bot.delete_sticker_set(&cmd.name).await {
+                            self.handle_telegram_error(&delete_set_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_emoji_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting emoji list for sticker {}", cmd.sticker);
+                        if let Err(e) = self.bot.set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list).await {
+                            self.handle_telegram_error(&set_emoji_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_keywords_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting keywords for sticker {}", cmd.sticker);
+                        let mut req = self.bot.set_sticker_keywords(&cmd.sticker);
+                        req.keywords = Some(cmd.keywords);
+                        if let Err(e) = req.await {
+                            self.handle_telegram_error(&set_keywords_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                Some(result) = set_mask_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting mask position for sticker {}", cmd.sticker);
+                        let mut req = self.bot.set_sticker_mask_position(&cmd.sticker);
+                        if let Some(mp) = cmd.mask_position {
+                            req.mask_position = Some(convert_mask_position(mp));
+                        }
+                        if let Err(e) = req.await {
+                            self.handle_telegram_error(&set_mask_subject, e, &prefix).await;
+                        }
+                    }
+                }
+
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
     /// Classify a Telegram API error and publish a CommandErrorEvent to NATS.
     ///
     /// - `Retry`    → logs a warning (actual re-execution is the caller's responsibility)
@@ -1861,6 +2080,55 @@ fn convert_bot_command_scope(scope: telegram_types::chat::BotCommandScope) -> te
             user_id: teloxide::types::UserId(user_id as u64),
         },
     }
+}
+
+/// Convert our sticker format string to Teloxide's StickerFormat
+fn convert_sticker_format(format: &str) -> teloxide::types::StickerFormat {
+    match format {
+        "animated" => teloxide::types::StickerFormat::Animated,
+        "video"    => teloxide::types::StickerFormat::Video,
+        _          => teloxide::types::StickerFormat::Static,
+    }
+}
+
+/// Convert our sticker type string to Teloxide's StickerType
+fn convert_sticker_type(kind: &str) -> teloxide::types::StickerType {
+    match kind {
+        "mask"         => teloxide::types::StickerType::Mask,
+        "custom_emoji" => teloxide::types::StickerType::CustomEmoji,
+        _              => teloxide::types::StickerType::Regular,
+    }
+}
+
+/// Convert our InputSticker to Teloxide's InputSticker
+fn convert_input_sticker(s: &telegram_types::chat::InputSticker) -> teloxide::types::InputSticker {
+    use teloxide::types::InputSticker;
+
+    let sticker_file = teloxide::types::InputFile::file_id(&s.sticker);
+    let format = convert_sticker_format(&s.format);
+    let mask_position = s.mask_position.as_ref().map(|mp| convert_mask_position(mp.clone()));
+
+    InputSticker {
+        sticker: sticker_file,
+        format,
+        emoji_list: s.emoji_list.clone(),
+        mask_position,
+        keywords: s.keywords.clone(),
+    }
+}
+
+/// Convert our MaskPosition to Teloxide's MaskPosition
+fn convert_mask_position(mp: telegram_types::chat::MaskPosition) -> teloxide::types::MaskPosition {
+    use teloxide::types::{MaskPoint, MaskPosition};
+
+    let point = match mp.point {
+        telegram_types::chat::MaskPoint::Forehead => MaskPoint::Forehead,
+        telegram_types::chat::MaskPoint::Eyes     => MaskPoint::Eyes,
+        telegram_types::chat::MaskPoint::Mouth    => MaskPoint::Mouth,
+        telegram_types::chat::MaskPoint::Chin     => MaskPoint::Chin,
+    };
+
+    MaskPosition::new(point, mp.x_shift, mp.y_shift, mp.scale)
 }
 
 /// Download a file from URL to local path

@@ -379,6 +379,56 @@ pub struct ShippingOption {
     pub prices: Vec<LabeledPrice>,
 }
 
+/// Sticker set info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StickerSet {
+    /// Short name of the sticker set
+    pub name: String,
+    /// Sticker set title
+    pub title: String,
+    /// Kind: regular, mask, or custom_emoji
+    pub kind: String,
+    /// List of stickers in the set (file_ids)
+    pub sticker_file_ids: Vec<String>,
+    /// Thumbnail file_id if set
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_file_id: Option<String>,
+}
+
+/// Mask point (face part) for mask stickers
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MaskPoint {
+    Forehead,
+    Eyes,
+    Mouth,
+    Chin,
+}
+
+/// Mask position for mask stickers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaskPosition {
+    pub point: MaskPoint,
+    pub x_shift: f64,
+    pub y_shift: f64,
+    pub scale: f64,
+}
+
+/// Input sticker for creating/adding to sticker sets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputSticker {
+    /// file_id of existing sticker or URL
+    pub sticker: String,
+    /// Format: "static", "animated", or "video"
+    pub format: String,
+    /// List of 1-20 emoji associated with the sticker
+    pub emoji_list: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask_position: Option<MaskPosition>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub keywords: Vec<String>,
+}
+
 /// Successful payment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessfulPayment {
