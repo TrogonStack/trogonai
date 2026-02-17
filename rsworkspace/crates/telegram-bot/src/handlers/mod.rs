@@ -5,17 +5,21 @@ use teloxide::types::{Message, CallbackQuery};
 use tracing::{debug, error, info, warn};
 
 use crate::bridge::TelegramBridge;
+use crate::health::AppState;
 
 /// Handle text messages
-pub async fn handle_text_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_text_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
     let update_id = msg.id.0 as i64;
 
     debug!("Received text message: {}", text);
 
+    // Increment metrics
+    health.increment_messages_received().await;
+
     // Check for commands
     if text.starts_with('/') {
-        return handle_command(msg, bridge, update_id).await;
+        return handle_command(msg, bridge, health, update_id).await;
     }
 
     // Check access control
@@ -29,16 +33,18 @@ pub async fn handle_text_message(_bot: Bot, msg: Message, bridge: TelegramBridge
     // Publish to NATS
     if let Err(e) = bridge.publish_text_message(&msg, update_id).await {
         error!("Failed to publish text message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle photo messages
-pub async fn handle_photo_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_photo_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
 
     debug!("Received photo message");
+    health.increment_messages_received().await;
 
     if !check_access(&msg, &bridge) {
         warn!("Access denied for photo message");
@@ -47,16 +53,18 @@ pub async fn handle_photo_message(_bot: Bot, msg: Message, bridge: TelegramBridg
 
     if let Err(e) = bridge.publish_photo_message(&msg, update_id).await {
         error!("Failed to publish photo message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle video messages
-pub async fn handle_video_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_video_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
 
     debug!("Received video message");
+    health.increment_messages_received().await;
 
     if !check_access(&msg, &bridge) {
         warn!("Access denied for video message");
@@ -65,16 +73,18 @@ pub async fn handle_video_message(_bot: Bot, msg: Message, bridge: TelegramBridg
 
     if let Err(e) = bridge.publish_video_message(&msg, update_id).await {
         error!("Failed to publish video message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle audio messages
-pub async fn handle_audio_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_audio_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
 
     debug!("Received audio message");
+    health.increment_messages_received().await;
 
     if !check_access(&msg, &bridge) {
         warn!("Access denied for audio message");
@@ -83,16 +93,18 @@ pub async fn handle_audio_message(_bot: Bot, msg: Message, bridge: TelegramBridg
 
     if let Err(e) = bridge.publish_audio_message(&msg, update_id).await {
         error!("Failed to publish audio message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle document messages
-pub async fn handle_document_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_document_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
 
     debug!("Received document message");
+    health.increment_messages_received().await;
 
     if !check_access(&msg, &bridge) {
         warn!("Access denied for document message");
@@ -101,16 +113,18 @@ pub async fn handle_document_message(_bot: Bot, msg: Message, bridge: TelegramBr
 
     if let Err(e) = bridge.publish_document_message(&msg, update_id).await {
         error!("Failed to publish document message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle voice messages
-pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
 
     debug!("Received voice message");
+    health.increment_messages_received().await;
 
     if !check_access(&msg, &bridge) {
         warn!("Access denied for voice message");
@@ -119,16 +133,18 @@ pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridg
 
     if let Err(e) = bridge.publish_voice_message(&msg, update_id).await {
         error!("Failed to publish voice message: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle callback queries (button clicks)
-pub async fn handle_callback_query(_bot: Bot, query: CallbackQuery, bridge: TelegramBridge) -> ResponseResult<()> {
+pub async fn handle_callback_query(_bot: Bot, query: CallbackQuery, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = query.id.parse::<i64>().unwrap_or(0);
 
     debug!("Received callback query: {:?}", query.data);
+    health.increment_messages_received().await;
 
     // Check access
     let user_id = query.from.id.0 as i64;
@@ -139,13 +155,14 @@ pub async fn handle_callback_query(_bot: Bot, query: CallbackQuery, bridge: Tele
 
     if let Err(e) = bridge.publish_callback_query(&query, update_id).await {
         error!("Failed to publish callback query: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())
 }
 
 /// Handle commands
-async fn handle_command(msg: Message, bridge: TelegramBridge, update_id: i64) -> ResponseResult<()> {
+async fn handle_command(msg: Message, bridge: TelegramBridge, health: AppState, update_id: i64) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
     let parts: Vec<&str> = text.split_whitespace().collect();
 
@@ -157,6 +174,7 @@ async fn handle_command(msg: Message, bridge: TelegramBridge, update_id: i64) ->
     let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
     info!("Received command: {} with {} args", command, args.len());
+    health.increment_commands().await;
 
     // Check access
     if !check_access(&msg, &bridge) {
@@ -167,6 +185,7 @@ async fn handle_command(msg: Message, bridge: TelegramBridge, update_id: i64) ->
     // Publish command to NATS
     if let Err(e) = bridge.publish_command(&msg, &command, args, update_id).await {
         error!("Failed to publish command: {}", e);
+        health.increment_errors().await;
     }
 
     Ok(())

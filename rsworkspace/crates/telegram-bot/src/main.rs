@@ -7,6 +7,7 @@
 mod bridge;
 mod config;
 mod handlers;
+mod health;
 mod outbound;
 mod outbound_streaming;
 mod session;
@@ -40,6 +41,10 @@ struct Args {
     /// NATS prefix (overrides config file)
     #[arg(long, env = "TELEGRAM_PREFIX")]
     prefix: Option<String>,
+
+    /// Health check server port
+    #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3000")]
+    health_port: u16,
 }
 
 #[tokio::main]
@@ -100,15 +105,32 @@ async fn main() -> Result<()> {
     let bot = Bot::new(&config.telegram.bot_token);
 
     // Verify bot token
-    match bot.get_me().await {
+    let bot_username = match bot.get_me().await {
         Ok(me) => {
-            info!("Bot authenticated as: @{}", me.username());
+            let username = me.username().to_string();
+            info!("Bot authenticated as: @{}", username);
+            Some(username)
         }
         Err(e) => {
             error!("Failed to authenticate bot: {}", e);
             return Err(e.into());
         }
-    }
+    };
+
+    // Create health check state
+    let health_state = health::AppState::new(bot_username);
+
+    // Mark NATS as connected
+    *health_state.nats_connected.write().await = true;
+
+    // Start health check server
+    let health_state_clone = health_state.clone();
+    let health_port = args.health_port;
+    tokio::spawn(async move {
+        if let Err(e) = health::start_health_server(health_state_clone, health_port).await {
+            error!("Health check server error: {}", e);
+        }
+    });
 
     // Create bridge
     let bridge = TelegramBridge::new(
@@ -168,7 +190,7 @@ async fn main() -> Result<()> {
         .branch(callback_handler);
 
     Dispatcher::builder(bot, all_handlers)
-        .dependencies(dptree::deps![bridge])
+        .dependencies(dptree::deps![bridge, health_state])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

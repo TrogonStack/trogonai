@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 /// Health check status
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +60,7 @@ impl AppState {
         metrics.messages_received += 1;
     }
 
+    #[allow(dead_code)]
     pub async fn increment_messages_sent(&self) {
         let mut metrics = self.metrics.write().await;
         metrics.messages_sent += 1;
@@ -75,6 +76,7 @@ impl AppState {
         metrics.errors += 1;
     }
 
+    #[allow(dead_code)]
     pub async fn set_active_sessions(&self, count: usize) {
         let mut metrics = self.metrics.write().await;
         metrics.active_sessions = count;
