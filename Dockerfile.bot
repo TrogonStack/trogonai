@@ -11,11 +11,10 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy workspace files
-COPY Cargo.toml Cargo.lock ./
-COPY rsworkspace ./rsworkspace/
+COPY rsworkspace/Cargo.toml rsworkspace/Cargo.lock ./
+COPY rsworkspace/crates ./crates/
 
 # Build only telegram-bot
-WORKDIR /app/rsworkspace
 RUN cargo build --release --package telegram-bot
 
 # Runtime stage
@@ -28,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
-COPY --from=builder /app/rsworkspace/target/release/telegram-bot /usr/local/bin/telegram-bot
+COPY --from=builder /app/target/release/telegram-bot /usr/local/bin/telegram-bot
 
 # Run as non-root user
 RUN useradd -m -u 1000 trogonai
