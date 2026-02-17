@@ -219,7 +219,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-1".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-1".to_string());
             let state = mgr.get_or_create(&sid, 1, Some(42)).await.unwrap();
 
             assert_eq!(state.session_id, "tg-private-1");
@@ -235,7 +235,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-2".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-2".to_string());
 
             let first = mgr.get_or_create(&sid, 2, Some(10)).await.unwrap();
             assert_eq!(first.message_count, 1);
@@ -254,7 +254,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-3".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-3".to_string());
 
             // Nothing stored yet
             let none = mgr.get(&sid).await.unwrap();
@@ -277,7 +277,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-4".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-4".to_string());
             let mut state = mgr.get_or_create(&sid, 4, Some(99)).await.unwrap();
 
             state.message_count = 100;
@@ -296,7 +296,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-5".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-5".to_string());
             mgr.get_or_create(&sid, 5, Some(7)).await.unwrap();
 
             // Verify it exists
@@ -317,7 +317,7 @@ mod tests {
                 return;
             };
 
-            let sid = SessionId::try_from("tg-private-6".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-6".to_string());
 
             let first = mgr.get_or_create(&sid, 6, Some(1)).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -334,7 +334,10 @@ mod tests {
         async fn test_session_persists_across_manager_instances() {
             let client = match async_nats::connect(NATS_URL).await {
                 Ok(c) => c,
-                Err(_) => { eprintln!("SKIP: NATS not available"); return; }
+                Err(_) => {
+                    eprintln!("SKIP: NATS not available");
+                    return;
+                }
             };
             let js = jetstream::new(client.clone());
             let bucket = format!("test-sess-{}", uuid::Uuid::new_v4().simple());
@@ -348,14 +351,11 @@ mod tests {
                 .await
                 .unwrap();
             let mgr1 = SessionManager::new(kv1);
-            let sid = SessionId::try_from("tg-private-7".to_string()).unwrap();
+            let sid = SessionId::from("tg-private-7".to_string());
             let created = mgr1.get_or_create(&sid, 7, Some(55)).await.unwrap();
 
             // Second manager: open same bucket, read session
-            let kv2 = js
-                .get_key_value(&bucket)
-                .await
-                .unwrap();
+            let kv2 = js.get_key_value(&bucket).await.unwrap();
             let mgr2 = SessionManager::new(kv2);
             let loaded = mgr2.get(&sid).await.unwrap().expect("session must persist");
 
@@ -374,7 +374,7 @@ mod tests {
             };
 
             // Channels and anonymous group messages have no user_id
-            let sid = SessionId::try_from("tg-channel-999".to_string()).unwrap();
+            let sid = SessionId::from("tg-channel-999".to_string());
             let state = mgr.get_or_create(&sid, -100999, None).await.unwrap();
 
             assert_eq!(state.chat_id, -100999);

@@ -15,13 +15,15 @@ mod nats_tests {
         policies::{DmPolicy, GroupPolicy},
         AccessConfig,
     };
-    use teloxide::{types::{CallbackQuery, Message}, Bot};
+    use teloxide::{
+        types::{CallbackQuery, Message},
+        Bot,
+    };
 
     const DEFAULT_NATS_URL: &str = "nats://localhost:14222";
 
     async fn try_connect() -> Option<(async_nats::Client, jetstream::Context)> {
-        let url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
+        let url = std::env::var("NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
         match async_nats::connect(&url).await {
             Ok(client) => {
                 let js = jetstream::new(client.clone());
@@ -80,13 +82,10 @@ mod nats_tests {
     }
 
     async fn recv(sub: &mut async_nats::Subscriber) -> serde_json::Value {
-        let raw = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            sub.next(),
-        )
-        .await
-        .expect("timed out waiting for NATS message")
-        .expect("subscriber closed");
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(3), sub.next())
+            .await
+            .expect("timed out waiting for NATS message")
+            .expect("subscriber closed");
         serde_json::from_slice(&raw.payload).unwrap()
     }
 
@@ -116,7 +115,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_text_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-text-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -126,7 +128,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_text_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied text must NOT be published to NATS");
@@ -275,7 +279,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_photo_no_caption_is_null() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-photo-nocap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -290,13 +297,19 @@ mod nats_tests {
         bridge.publish_photo_message(&message, 20).await.unwrap();
 
         let event = recv(&mut sub).await;
-        assert!(event["caption"].is_null(), "photo without caption must have null caption");
+        assert!(
+            event["caption"].is_null(),
+            "photo without caption must have null caption"
+        );
         assert_eq!(event["photo"][0]["file_id"], "ph3");
     }
 
     #[tokio::test]
     async fn test_nats_photo_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-photo-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -308,7 +321,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_photo_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_photo_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied photo must NOT be published");
@@ -316,7 +331,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_video_with_caption() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-video-cap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -340,7 +358,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_video_no_caption_is_null() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-video-nocap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -357,12 +378,18 @@ mod nats_tests {
         bridge.publish_video_message(&message, 31).await.unwrap();
 
         let event = recv(&mut sub).await;
-        assert!(event["caption"].is_null(), "video without caption must have null caption");
+        assert!(
+            event["caption"].is_null(),
+            "video without caption must have null caption"
+        );
     }
 
     #[tokio::test]
     async fn test_nats_video_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-video-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -376,7 +403,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_video_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_video_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied video must NOT be published");
@@ -384,7 +413,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_audio_with_caption_and_mime_type() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-audio-cap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -409,7 +441,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_audio_no_caption_is_null() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-audio-nocap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -426,12 +461,18 @@ mod nats_tests {
         bridge.publish_audio_message(&message, 41).await.unwrap();
 
         let event = recv(&mut sub).await;
-        assert!(event["caption"].is_null(), "audio without caption must have null caption");
+        assert!(
+            event["caption"].is_null(),
+            "audio without caption must have null caption"
+        );
     }
 
     #[tokio::test]
     async fn test_nats_audio_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-audio-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -445,7 +486,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_audio_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_audio_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied audio must NOT be published");
@@ -453,7 +496,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_document_with_caption_and_mime_type() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-doc-cap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -478,7 +524,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_document_no_caption_is_null() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-doc-nocap";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -495,12 +544,18 @@ mod nats_tests {
         bridge.publish_document_message(&message, 51).await.unwrap();
 
         let event = recv(&mut sub).await;
-        assert!(event["caption"].is_null(), "document without caption must have null caption");
+        assert!(
+            event["caption"].is_null(),
+            "document without caption must have null caption"
+        );
     }
 
     #[tokio::test]
     async fn test_nats_document_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-doc-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -514,7 +569,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_document_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_document_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied document must NOT be published");
@@ -522,7 +579,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_voice_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-voice-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -535,7 +595,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.voice", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_voice_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_voice_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
         assert!(result.is_err(), "denied voice must NOT be published");
@@ -622,7 +684,7 @@ mod nats_tests {
             prefix.to_string(),
             AccessConfig {
                 dm_policy: DmPolicy::Allowlist,
-                user_allowlist: vec![],   // nobody allowed
+                user_allowlist: vec![], // nobody allowed
                 ..Default::default()
             },
             kv,
@@ -650,12 +712,11 @@ mod nats_tests {
             .unwrap();
 
         // Nothing should arrive — wait 500ms then assert no message
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            sub.next(),
-        )
-        .await;
-        assert!(result.is_err(), "denied message must NOT be published to NATS");
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "denied message must NOT be published to NATS"
+        );
     }
 
     // ── Text with entities end-to-end ─────────────────────────────────────────
@@ -796,12 +857,11 @@ mod nats_tests {
             .await
             .unwrap();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            sub.next(),
-        )
-        .await;
-        assert!(result.is_err(), "denied command must NOT be published to NATS");
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "denied command must NOT be published to NATS"
+        );
     }
 
     #[tokio::test]
@@ -828,7 +888,7 @@ mod nats_tests {
             prefix.to_string(),
             AccessConfig {
                 dm_policy: DmPolicy::Allowlist,
-                user_allowlist: vec![],            // nobody in allowlist
+                user_allowlist: vec![],             // nobody in allowlist
                 admin_users: vec![ADMIN_ID as i64], // but this user is admin
                 ..Default::default()
             },
@@ -902,7 +962,12 @@ mod nats_tests {
 
     // ── Callback queries ──────────────────────────────────────────────────────
 
-    fn callback_query_json(user_id: u64, data: &str, message_id: i64, chat_id: i64) -> CallbackQuery {
+    fn callback_query_json(
+        user_id: u64,
+        data: &str,
+        message_id: i64,
+        chat_id: i64,
+    ) -> CallbackQuery {
         serde_json::from_value(serde_json::json!({
             "id": "123456789",
             "from": {"id": user_id, "is_bot": false, "first_name": "User"},
@@ -959,12 +1024,11 @@ mod nats_tests {
             .await
             .unwrap();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            sub.next(),
-        )
-        .await;
-        assert!(result.is_err(), "denied callback must NOT be published to NATS");
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "denied callback must NOT be published to NATS"
+        );
     }
 
     #[tokio::test]
@@ -1039,7 +1103,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_callback_query_message_id_forwarded() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "callback-msgid";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1047,7 +1114,9 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health()).await.unwrap();
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["message_id"], 77);
@@ -1056,13 +1125,19 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_callback_query_admin_bypasses_restriction() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "callback-admin";
         const ADMIN_ID: u64 = 3001;
 
         let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
         let kv = js
-            .create_key_value(jetstream::kv::Config { bucket, ..Default::default() })
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
             .await
             .unwrap();
         let bridge = TelegramBridge::new(
@@ -1081,7 +1156,9 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health()).await.unwrap();
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["data"], "admin:action");
@@ -1140,12 +1217,11 @@ mod nats_tests {
             .await
             .unwrap();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            sub.next(),
-        )
-        .await;
-        assert!(result.is_err(), "denied inline query must NOT be published to NATS");
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "denied inline query must NOT be published to NATS"
+        );
     }
 
     #[tokio::test]
@@ -1227,7 +1303,8 @@ mod nats_tests {
             "from": {"id": 42, "is_bot": false, "first_name": "U"},
             "query": "rust",
             "offset": "5"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
@@ -1257,7 +1334,8 @@ mod nats_tests {
             "query": "search",
             "offset": "",
             "chat_type": "private"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
@@ -1269,7 +1347,10 @@ mod nats_tests {
         let event = recv(&mut sub).await;
         assert_eq!(event["query"], "search");
         // chat_type is forwarded (teloxide formats it via Debug)
-        assert!(!event["chat_type"].is_null(), "chat_type must be present when provided");
+        assert!(
+            !event["chat_type"].is_null(),
+            "chat_type must be present when provided"
+        );
     }
 
     #[tokio::test]
@@ -1282,12 +1363,14 @@ mod nats_tests {
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
         // inline_message_id is present when the bot can edit the sent message later
-        let result: teloxide::types::ChosenInlineResult = serde_json::from_value(serde_json::json!({
-            "result_id": "res_xyz",
-            "from": {"id": 42, "is_bot": false, "first_name": "U"},
-            "query": "rust",
-            "inline_message_id": "ABCDEF123"
-        })).unwrap();
+        let result: teloxide::types::ChosenInlineResult =
+            serde_json::from_value(serde_json::json!({
+                "result_id": "res_xyz",
+                "from": {"id": 42, "is_bot": false, "first_name": "U"},
+                "query": "rust",
+                "inline_message_id": "ABCDEF123"
+            }))
+            .unwrap();
 
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
@@ -1318,7 +1401,8 @@ mod nats_tests {
             "query": "coffee near me",
             "offset": "",
             "location": {"longitude": -122.4194, "latitude": 37.7749}
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
@@ -1339,7 +1423,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_location_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-location";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1349,7 +1436,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.location", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_location_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_location_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert!((event["longitude"].as_f64().unwrap() - 2.3514).abs() < 0.001);
@@ -1358,7 +1447,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_venue_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-venue";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1372,7 +1464,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.venue", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_venue_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_venue_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["title"], "Eiffel Tower");
@@ -1381,7 +1475,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_contact_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-contact";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1391,7 +1488,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.contact", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_contact_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_contact_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["phone_number"], "+1234567890");
@@ -1400,7 +1499,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1414,7 +1516,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["file_id"], "CAACAgIA");
@@ -1423,7 +1527,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_animation_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-animation";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1442,7 +1549,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["animation"]["file_id"], "CgACAgIA");
@@ -1453,7 +1562,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_video_note_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-videonote";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1466,7 +1578,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.video_note", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_video_note_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_video_note_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["video_note"]["file_id"], "DQACAgIA");
@@ -1478,7 +1592,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_emoji_and_set_name_forwarded() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-emoji";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1494,7 +1611,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["emoji"], "😀");
@@ -1504,7 +1623,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_format_animated() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-anim";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1518,7 +1640,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["format"], "animated");
@@ -1526,7 +1650,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_format_video() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-video";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1540,7 +1667,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["format"], "video");
@@ -1548,7 +1677,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_kind_mask() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-mask";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1563,7 +1695,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["kind"], "mask");
@@ -1571,7 +1705,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_kind_custom_emoji() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-cemoji";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1586,7 +1723,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["kind"], "custom_emoji");
@@ -1594,7 +1733,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_sticker_access_denied_does_not_publish() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-sticker-deny";
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
@@ -1608,20 +1750,25 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            sub.next(),
-        ).await;
-        assert!(result.is_err(), "denied sticker must NOT be published to NATS");
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "denied sticker must NOT be published to NATS"
+        );
     }
 
     // ── Animation extra fields ────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_nats_animation_with_caption() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-anim-caption";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1640,7 +1787,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["caption"], "haha");
@@ -1649,7 +1798,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_animation_no_caption_is_null() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-anim-nocaption";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1667,29 +1819,41 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
-        assert!(event["caption"].is_null(), "caption must be null when absent");
+        assert!(
+            event["caption"].is_null(),
+            "caption must be null when absent"
+        );
     }
 
     // ── Chosen inline result ─────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_nats_chosen_inline_result() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chosen";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
-        let result: teloxide::types::ChosenInlineResult = serde_json::from_value(serde_json::json!({
-            "result_id": "result_abc",
-            "from": {"id": 42, "is_bot": false, "first_name": "U"},
-            "query": "rust async"
-        })).unwrap();
+        let result: teloxide::types::ChosenInlineResult =
+            serde_json::from_value(serde_json::json!({
+                "result_id": "result_abc",
+                "from": {"id": 42, "is_bot": false, "first_name": "U"},
+                "query": "rust async"
+            }))
+            .unwrap();
 
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chosen_inline_result(fake_bot(), result, bridge, health()).await.unwrap();
+        handlers::handle_chosen_inline_result(fake_bot(), result, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["result_id"], "result_abc");
@@ -1699,9 +1863,12 @@ mod nats_tests {
 
     // ── Chat member updates ──────────────────────────────────────────────────
 
-    fn chat_member_updated_json(chat_id: i64, user_id: u64, old_status: &str, new_status: &str)
-        -> teloxide::types::ChatMemberUpdated
-    {
+    fn chat_member_updated_json(
+        chat_id: i64,
+        user_id: u64,
+        old_status: &str,
+        new_status: &str,
+    ) -> teloxide::types::ChatMemberUpdated {
         serde_json::from_value(serde_json::json!({
             "chat": {"id": chat_id, "type": "group", "title": "Test Group"},
             "from": {"id": user_id, "is_bot": false, "first_name": "U"},
@@ -1714,12 +1881,16 @@ mod nats_tests {
                 "user": {"id": user_id, "is_bot": false, "first_name": "U"},
                 "status": new_status
             }
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     #[tokio::test]
     async fn test_nats_chat_member_updated() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chatmember";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1727,7 +1898,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chat_member_updated(fake_bot(), update, bridge, health()).await.unwrap();
+        handlers::handle_chat_member_updated(fake_bot(), update, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_chat_member"]["status"], "left");
@@ -1736,7 +1909,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_my_chat_member_updated() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-mychatmember";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1745,7 +1921,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.my_member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_my_chat_member_updated(fake_bot(), update, bridge, health()).await.unwrap();
+        handlers::handle_my_chat_member_updated(fake_bot(), update, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_chat_member"]["status"], "member");
@@ -1755,7 +1933,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_pre_checkout_query() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-precheckout";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1765,11 +1946,14 @@ mod nats_tests {
             "currency": "USD",
             "total_amount": 1000,
             "invoice_payload": "order_123"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.payment.pre_checkout", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_pre_checkout_query(fake_bot(), query, bridge, health()).await.unwrap();
+        handlers::handle_pre_checkout_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["currency"], "USD");
@@ -1779,7 +1963,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_shipping_query() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-shipping";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1792,11 +1979,14 @@ mod nats_tests {
                 "city": "San Francisco", "street_line1": "123 Main St",
                 "street_line2": "", "post_code": "94105"
             }
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.payment.shipping", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_shipping_query(fake_bot(), query, bridge, health()).await.unwrap();
+        handlers::handle_shipping_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["invoice_payload"], "order_456");
@@ -1805,7 +1995,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_successful_payment() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-payment";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1820,7 +2013,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.payment.successful", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_successful_payment(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_successful_payment(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["payment"]["currency"], "USD");
@@ -1845,7 +2040,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_poll_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-pollmsg";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1855,7 +2053,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.poll", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_poll_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["question"], "Favorite language?");
@@ -1864,7 +2064,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_poll_update() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-pollupd";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1872,7 +2075,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.poll.update", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_update(fake_bot(), poll, bridge, health()).await.unwrap();
+        handlers::handle_poll_update(fake_bot(), poll, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["poll_id"], "poll_1");
@@ -1881,7 +2086,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_poll_answer() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-pollanswer";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1889,11 +2097,14 @@ mod nats_tests {
             "poll_id": "poll_1",
             "user": {"id": 42, "is_bot": false, "first_name": "U"},
             "option_ids": [0]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.poll.answer", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_answer(fake_bot(), answer, bridge, health()).await.unwrap();
+        handlers::handle_poll_answer(fake_bot(), answer, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["poll_id"], "poll_1");
@@ -1905,7 +2116,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_edited_message() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-edited";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -1916,7 +2130,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_edited_message(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_edited_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_text"], "edited text");
@@ -1924,16 +2140,24 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_channel_post() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chanpost";
         const CHANNEL_ID: i64 = -100999888;
 
         let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
         let kv = js
-            .create_key_value(jetstream::kv::Config { bucket, ..Default::default() })
-            .await.expect("create KV");
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create KV");
         let bridge = TelegramBridge::new(
-            client.clone(), prefix.to_string(),
+            client.clone(),
+            prefix.to_string(),
             AccessConfig {
                 dm_policy: DmPolicy::Open,
                 group_policy: GroupPolicy::Allowlist,
@@ -1947,11 +2171,14 @@ mod nats_tests {
             "message_id": 1, "date": 1_700_000_000i64,
             "chat": {"id": CHANNEL_ID, "type": "channel", "title": "My Channel"},
             "text": "Hello channel"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["text"], "Hello channel");
@@ -1965,10 +2192,15 @@ mod nats_tests {
     ) -> TelegramBridge {
         let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
         let kv = js
-            .create_key_value(jetstream::kv::Config { bucket, ..Default::default() })
-            .await.expect("create KV");
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create KV");
         TelegramBridge::new(
-            client, prefix.to_string(),
+            client,
+            prefix.to_string(),
             AccessConfig {
                 dm_policy: DmPolicy::Open,
                 group_policy: GroupPolicy::Allowlist,
@@ -1981,7 +2213,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_channel_post_photo() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chanpost-photo";
         const CHANNEL_ID: i64 = -100111222;
         let bridge = make_channel_bridge(client.clone(), js, prefix, CHANNEL_ID).await;
@@ -1994,7 +2229,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert!(!event["photo"].as_array().unwrap().is_empty());
@@ -2002,7 +2239,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_channel_post_video() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chanpost-video";
         const CHANNEL_ID: i64 = -100333444;
         let bridge = make_channel_bridge(client.clone(), js, prefix, CHANNEL_ID).await;
@@ -2015,11 +2255,14 @@ mod nats_tests {
                 "width": 1280, "height": 720, "duration": 10,
                 "file_size": 8000, "mime_type": "video/mp4"
             }
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["video"]["file_id"], "vid1");
@@ -2027,7 +2270,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_channel_post_document() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chanpost-doc";
         const CHANNEL_ID: i64 = -100555666;
         let bridge = make_channel_bridge(client.clone(), js, prefix, CHANNEL_ID).await;
@@ -2036,11 +2282,14 @@ mod nats_tests {
             "message_id": 4, "date": 1_700_000_000i64,
             "chat": {"id": CHANNEL_ID, "type": "channel", "title": "My Channel"},
             "document": {"file_id": "doc1", "file_unique_id": "udoc1"}
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["document"]["file_id"], "doc1");
@@ -2048,16 +2297,24 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_edited_channel_post() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-chanedited";
         const CHANNEL_ID: i64 = -100777666;
 
         let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
         let kv = js
-            .create_key_value(jetstream::kv::Config { bucket, ..Default::default() })
-            .await.expect("create KV");
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create KV");
         let bridge = TelegramBridge::new(
-            client.clone(), prefix.to_string(),
+            client.clone(),
+            prefix.to_string(),
             AccessConfig {
                 dm_policy: DmPolicy::Open,
                 group_policy: GroupPolicy::Allowlist,
@@ -2072,11 +2329,14 @@ mod nats_tests {
             "edit_date": 1_700_001_000i64,
             "chat": {"id": CHANNEL_ID, "type": "channel", "title": "My Channel"},
             "text": "edited channel text"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_edited_channel_post(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_edited_channel_post(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_text"], "edited channel text");
@@ -2086,7 +2346,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_chat_join_request() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-joinreq";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2095,11 +2358,14 @@ mod nats_tests {
             "from": {"id": 42, "is_bot": false, "first_name": "Alice"},
             "user_chat_id": 42,
             "date": 1_700_000_000i64
-        })).unwrap();
+        }))
+        .unwrap();
 
         let subject = format!("telegram.{}.bot.chat.join_request", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chat_join_request(fake_bot(), request, bridge, health()).await.unwrap();
+        handlers::handle_chat_join_request(fake_bot(), request, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["from"]["id"], 42);
@@ -2119,7 +2385,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_forum_topic_created() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-created";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2129,7 +2398,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.created", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_created(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_forum_topic_created(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["forum_topic"]["name"], "Help");
@@ -2137,7 +2408,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_forum_topic_edited() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-edited";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2147,7 +2421,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_edited(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_forum_topic_edited(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["name"], "Help v2");
@@ -2155,7 +2431,10 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_nats_forum_topic_closed() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-closed";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2165,14 +2444,19 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.closed", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_closed(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_forum_topic_closed(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         recv(&mut sub).await; // just verify it published
     }
 
     #[tokio::test]
     async fn test_nats_forum_topic_reopened() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-reopened";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2182,14 +2466,19 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.reopened", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_reopened(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_forum_topic_reopened(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         recv(&mut sub).await;
     }
 
     #[tokio::test]
     async fn test_nats_general_forum_topic_hidden() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-hidden";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2199,14 +2488,19 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_hidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_hidden(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_general_forum_topic_hidden(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         recv(&mut sub).await;
     }
 
     #[tokio::test]
     async fn test_nats_general_forum_topic_unhidden() {
-        let Some((client, js)) = try_connect().await else { eprintln!("SKIP"); return; };
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP");
+            return;
+        };
         let prefix = "integ-forum-unhidden";
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
@@ -2216,7 +2510,9 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_unhidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_unhidden(fake_bot(), message, bridge, health()).await.unwrap();
+        handlers::handle_general_forum_topic_unhidden(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
 
         recv(&mut sub).await;
     }
