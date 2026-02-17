@@ -19,7 +19,7 @@ user_allowlist = []
 group_allowlist = []
 
 # Admin user IDs (full access, bypass all restrictions)
-admin_users = []
+admin_users = [802338470]
 
 # Feature configuration
 [telegram.features]
