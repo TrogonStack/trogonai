@@ -279,6 +279,55 @@ pub async fn handle_chosen_inline_result(_bot: Bot, result: teloxide::types::Cho
     Ok(())
 }
 
+/// Handle chat member updates (when other users join/leave/get banned)
+pub async fn handle_chat_member_updated(
+    _bot: Bot,
+    update: teloxide::types::ChatMemberUpdated,
+    bridge: TelegramBridge,
+    health: AppState
+) -> ResponseResult<()> {
+    let update_id = 0; // Chat member updates don't have a standard update_id
+
+    debug!("Chat member updated: {:?} -> {:?}",
+        update.old_chat_member.kind,
+        update.new_chat_member.kind
+    );
+    health.increment_messages_received().await;
+
+    // Publish to NATS
+    if let Err(e) = bridge.publish_chat_member_updated(&update, update_id).await {
+        error!("Failed to publish chat member updated: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle my chat member updates (when bot's status changes in a chat)
+pub async fn handle_my_chat_member_updated(
+    _bot: Bot,
+    update: teloxide::types::ChatMemberUpdated,
+    bridge: TelegramBridge,
+    health: AppState
+) -> ResponseResult<()> {
+    let update_id = 0;
+
+    info!("Bot chat member status changed: {:?} -> {:?} in chat {}",
+        update.old_chat_member.kind,
+        update.new_chat_member.kind,
+        update.chat.id
+    );
+    health.increment_messages_received().await;
+
+    // Publish to NATS
+    if let Err(e) = bridge.publish_my_chat_member_updated(&update, update_id).await {
+        error!("Failed to publish my chat member updated: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
     use teloxide::types::ChatKind;

@@ -191,12 +191,71 @@ async fn main() -> Result<()> {
     let chosen_inline_result_handler = Update::filter_chosen_inline_result()
         .endpoint(handlers::handle_chosen_inline_result);
 
+    let chat_member_handler = Update::filter_chat_member()
+        .endpoint(handlers::handle_chat_member_updated);
+
+    let my_chat_member_handler = Update::filter_my_chat_member()
+        .endpoint(handlers::handle_my_chat_member_updated);
+
     let all_handlers = dptree::entry()
         .branch(handler)
         .branch(callback_handler)
         .branch(inline_query_handler)
-        .branch(chosen_inline_result_handler);
+        .branch(chosen_inline_result_handler)
+        .branch(chat_member_handler)
+        .branch(my_chat_member_handler);
 
+    // Start bot based on update mode
+    match &config.telegram.update_mode {
+        crate::config::UpdateModeConfig::Polling { timeout, limit } => {
+            info!("Starting bot in POLLING mode (timeout: {}s, limit: {})", timeout, limit);
+        }
+        crate::config::UpdateModeConfig::Webhook {
+            url,
+            port,
+            path,
+            secret_token,
+            bind_address,
+            max_connections,
+        } => {
+            info!("Starting bot in WEBHOOK mode");
+            info!("Webhook URL: {}{}", url, path);
+            info!("Listening on: {}:{}", bind_address, port);
+
+            // Parse webhook URL
+            let webhook_url = format!("{}{}", url, path);
+            let parsed_url = match webhook_url.parse::<url::Url>() {
+                Ok(u) => u,
+                Err(e) => {
+                    error!("Invalid webhook URL '{}': {}", webhook_url, e);
+                    return Err(e.into());
+                }
+            };
+
+            // Set webhook on Telegram
+            let mut set_webhook = bot.set_webhook(parsed_url);
+
+            if let Some(token) = secret_token {
+                set_webhook.secret_token = Some(token.clone());
+            }
+
+            if *max_connections > 0 {
+                set_webhook.max_connections = Some(*max_connections);
+            }
+
+            if let Err(e) = set_webhook.await {
+                error!("Failed to set webhook: {}", e);
+                return Err(e.into());
+            }
+
+            info!("Webhook registered with Telegram successfully");
+            info!("NOTE: Webhook mode configured - using polling until webhook listener is fully implemented");
+            info!("The bot will receive updates via polling, but webhook is set on Telegram's side");
+        }
+    }
+
+    // Start dispatcher (currently using polling for both modes)
+    // TODO: Implement proper webhook listener for webhook mode
     Dispatcher::builder(bot, all_handlers)
         .dependencies(dptree::deps![bridge, health_state])
         .enable_ctrlc_handler()

@@ -90,6 +90,16 @@ pub mod bot {
     pub fn chosen_inline_result(prefix: &str) -> String {
         format!("telegram.{}.bot.inline.chosen", prefix)
     }
+
+    /// Chat member updated event subject (other members)
+    pub fn chat_member_updated(prefix: &str) -> String {
+        format!("telegram.{}.bot.chat.member_updated", prefix)
+    }
+
+    /// My chat member updated event subject (bot itself)
+    pub fn my_chat_member_updated(prefix: &str) -> String {
+        format!("telegram.{}.bot.chat.my_member_updated", prefix)
+    }
 }
 
 /// Subject builder for agent commands
