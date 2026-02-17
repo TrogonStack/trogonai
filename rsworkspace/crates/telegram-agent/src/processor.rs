@@ -74,6 +74,7 @@ impl MessageProcessor {
             parse_mode: None,
             reply_to_message_id: Some(event.message.message_id),
             reply_markup: None,
+            message_thread_id: None,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
@@ -107,6 +108,7 @@ impl MessageProcessor {
             parse_mode: None,
             reply_to_message_id: Some(event.message.message_id),
             reply_markup: None,
+            message_thread_id: None,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
@@ -179,6 +181,7 @@ impl MessageProcessor {
             parse_mode: None,
             reply_to_message_id: Some(event.message.message_id),
             reply_markup: None,
+            message_thread_id: None,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
@@ -213,6 +216,7 @@ impl MessageProcessor {
             parse_mode: None,
             reply_to_message_id: event.message_id,
             reply_markup: None,
+            message_thread_id: None,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
@@ -321,6 +325,7 @@ impl MessageProcessor {
         let command = SendChatActionCommand {
             chat_id,
             action: ChatAction::Typing,
+            message_thread_id: None,
         };
 
         let subject = subjects::agent::chat_action(publisher.prefix());
