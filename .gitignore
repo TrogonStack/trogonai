@@ -25,6 +25,11 @@ docs/.vitepress/cache
 !.env.example
 mise.local.toml
 
+# Config
+config/telegram-bot.toml
+config/*.toml
+!config/*.example.toml
+
 # Docker
 docker-compose.override.yml
 
@@ -33,14 +38,14 @@ docker-compose.override.yml
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# trogonai internal
-.trogonai/
-*.internal.trogonai.md
+# Logs
+*.log
 
 # Coverage
 lcov.info
@@ -49,6 +54,12 @@ coverage.xml
 coverage-*.xml
 *.profraw
 *.profdata
+
+# Docker
+.dockerignore
+
+# NATS
+*.creds
 
 # Misc
 tmp
