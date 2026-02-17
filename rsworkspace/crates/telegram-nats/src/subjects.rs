@@ -552,4 +552,79 @@ mod tests {
         assert_eq!(agent::message_edit("dev"), "telegram.dev.agent.message.edit");
         assert_eq!(agent::all("prod"), "telegram.prod.agent.>");
     }
+
+    // ── New bot subjects ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bot_poll_subjects() {
+        assert_eq!(bot::message_poll("prod"), "telegram.prod.bot.message.poll");
+        assert_eq!(bot::poll_update("prod"), "telegram.prod.bot.poll.update");
+        assert_eq!(bot::poll_answer("prod"), "telegram.prod.bot.poll.answer");
+    }
+
+    #[test]
+    fn test_bot_media_subjects() {
+        assert_eq!(bot::message_video("prod"), "telegram.prod.bot.message.video");
+        assert_eq!(bot::message_audio("prod"), "telegram.prod.bot.message.audio");
+        assert_eq!(bot::message_document("prod"), "telegram.prod.bot.message.document");
+        assert_eq!(bot::message_voice("prod"), "telegram.prod.bot.message.voice");
+        assert_eq!(bot::message_sticker("prod"), "telegram.prod.bot.message.sticker");
+        assert_eq!(bot::message_animation("prod"), "telegram.prod.bot.message.animation");
+        assert_eq!(bot::message_video_note("prod"), "telegram.prod.bot.message.video_note");
+    }
+
+    #[test]
+    fn test_bot_location_subjects() {
+        assert_eq!(bot::message_location("prod"), "telegram.prod.bot.message.location");
+        assert_eq!(bot::message_venue("prod"), "telegram.prod.bot.message.venue");
+        assert_eq!(bot::message_contact("prod"), "telegram.prod.bot.message.contact");
+    }
+
+    #[test]
+    fn test_bot_error_subject() {
+        assert_eq!(bot::command_error("prod"), "telegram.prod.bot.error.command");
+    }
+
+    // ── New agent subjects ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_agent_poll_subjects() {
+        assert_eq!(agent::poll_send("prod"), "telegram.prod.agent.poll.send");
+        assert_eq!(agent::poll_stop("prod"), "telegram.prod.agent.poll.stop");
+    }
+
+    #[test]
+    fn test_agent_media_subjects() {
+        assert_eq!(agent::message_send_video("prod"), "telegram.prod.agent.message.send_video");
+        assert_eq!(agent::message_send_audio("prod"), "telegram.prod.agent.message.send_audio");
+        assert_eq!(agent::message_send_document("prod"), "telegram.prod.agent.message.send_document");
+        assert_eq!(agent::message_send_voice("prod"), "telegram.prod.agent.message.send_voice");
+        assert_eq!(agent::message_send_media_group("prod"), "telegram.prod.agent.message.send_media_group");
+    }
+
+    #[test]
+    fn test_agent_location_subjects() {
+        assert_eq!(agent::message_send_location("prod"), "telegram.prod.agent.message.send_location");
+        assert_eq!(agent::message_send_venue("prod"), "telegram.prod.agent.message.send_venue");
+        assert_eq!(agent::message_send_contact("prod"), "telegram.prod.agent.message.send_contact");
+    }
+
+    #[test]
+    fn test_agent_sticker_subjects() {
+        assert_eq!(agent::message_send_sticker("prod"), "telegram.prod.agent.message.send_sticker");
+        assert_eq!(agent::message_send_animation("prod"), "telegram.prod.agent.message.send_animation");
+        assert_eq!(agent::message_send_video_note("prod"), "telegram.prod.agent.message.send_video_note");
+        assert_eq!(agent::sticker_get_set("prod"), "telegram.prod.agent.sticker.get_set");
+        assert_eq!(agent::sticker_create_set("prod"), "telegram.prod.agent.sticker.create_set");
+    }
+
+    #[test]
+    fn test_prefix_isolation() {
+        // Different prefixes must produce different subjects
+        let s1 = bot::message_poll("env1");
+        let s2 = bot::message_poll("env2");
+        assert_ne!(s1, s2);
+        assert!(s1.contains("env1"));
+        assert!(s2.contains("env2"));
+    }
 }
