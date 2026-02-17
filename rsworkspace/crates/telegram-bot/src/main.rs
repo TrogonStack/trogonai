@@ -236,6 +236,18 @@ async fn main() -> Result<()> {
                 .endpoint(handlers::handle_general_forum_topic_unhidden),
         );
 
+    let edited_message_handler = Update::filter_edited_message()
+        .endpoint(handlers::handle_edited_message);
+
+    let channel_post_handler = Update::filter_channel_post()
+        .endpoint(handlers::handle_channel_post);
+
+    let edited_channel_post_handler = Update::filter_edited_channel_post()
+        .endpoint(handlers::handle_edited_channel_post);
+
+    let chat_join_request_handler = Update::filter_chat_join_request()
+        .endpoint(handlers::handle_chat_join_request);
+
     let poll_update_handler = Update::filter_poll()
         .endpoint(handlers::handle_poll_update);
 
@@ -279,7 +291,11 @@ async fn main() -> Result<()> {
         .branch(shipping_query_handler)
         .branch(successful_payment_handler)
         .branch(poll_update_handler)
-        .branch(poll_answer_handler);
+        .branch(poll_answer_handler)
+        .branch(edited_message_handler)
+        .branch(channel_post_handler)
+        .branch(edited_channel_post_handler)
+        .branch(chat_join_request_handler);
 
     // Build dispatcher
     let mut dispatcher = Dispatcher::builder(bot.clone(), all_handlers)

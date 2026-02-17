@@ -553,6 +553,90 @@ pub async fn handle_poll_answer(
     Ok(())
 }
 
+/// Handle edited messages (user edited a previously sent message)
+pub async fn handle_edited_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received edited message");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_edited_message(&msg, update_id).await {
+        error!("Failed to publish edited message: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle channel posts (messages sent to a channel the bot is in)
+pub async fn handle_channel_post(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received channel post");
+    health.increment_messages_received().await;
+
+    // Channel posts have no user sender — check group access by chat ID
+    let chat_id = msg.chat.id.0;
+    if !bridge.access_config.is_admin(0) && !bridge.check_group_access(chat_id) {
+        return Ok(());
+    }
+
+    // Route through the same bridge methods as regular messages; chat_type=channel
+    // lets agents distinguish channel posts from group messages.
+    if msg.text().is_some() {
+        if let Err(e) = bridge.publish_text_message(&msg, update_id).await {
+            error!("Failed to publish channel text post: {}", e);
+            health.increment_errors().await;
+        }
+    } else if msg.photo().is_some() {
+        if let Err(e) = bridge.publish_photo_message(&msg, update_id).await {
+            error!("Failed to publish channel photo post: {}", e);
+            health.increment_errors().await;
+        }
+    } else if msg.video().is_some() {
+        if let Err(e) = bridge.publish_video_message(&msg, update_id).await {
+            error!("Failed to publish channel video post: {}", e);
+            health.increment_errors().await;
+        }
+    } else if msg.document().is_some() {
+        if let Err(e) = bridge.publish_document_message(&msg, update_id).await {
+            error!("Failed to publish channel document post: {}", e);
+            health.increment_errors().await;
+        }
+    }
+    Ok(())
+}
+
+/// Handle edited channel posts
+pub async fn handle_edited_channel_post(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received edited channel post");
+    health.increment_messages_received().await;
+
+    let chat_id = msg.chat.id.0;
+    if !bridge.check_group_access(chat_id) { return Ok(()); }
+
+    if let Err(e) = bridge.publish_edited_message(&msg, update_id).await {
+        error!("Failed to publish edited channel post: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle chat join requests (user requested to join a group with approval required)
+pub async fn handle_chat_join_request(
+    _bot: Bot,
+    request: teloxide::types::ChatJoinRequest,
+    bridge: TelegramBridge,
+    health: AppState,
+) -> ResponseResult<()> {
+    debug!("Chat join request from user {} in chat {}", request.from.id, request.chat.id);
+    health.increment_messages_received().await;
+
+    if let Err(e) = bridge.publish_chat_join_request(&request, 0).await {
+        error!("Failed to publish chat join request: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
 /// Handle forum topic created service messages
 pub async fn handle_forum_topic_created(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
