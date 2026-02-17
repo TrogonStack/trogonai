@@ -2,6 +2,12 @@
 //!
 //! Converts serenity events into discord-types events and publishes them to NATS.
 
+#[path = "bridge_tests.rs"]
+mod bridge_tests;
+
+#[path = "bridge_nats_tests.rs"]
+mod bridge_nats_tests;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -20,11 +26,11 @@ use serenity::model::application::{
     CommandInteraction, ComponentInteraction, ComponentInteractionDataKind, ResolvedValue,
 };
 use serenity::model::channel::Message as SerenityMessage;
+use serenity::model::channel::ReactionType;
 use serenity::model::event::MessageUpdateEvent;
 use serenity::model::guild::Member;
 use serenity::model::id::{ChannelId, GuildId, MessageId};
 use serenity::model::user::User as SerenityUser;
-use serenity::model::channel::ReactionType;
 use serenity::prelude::TypeMapKey;
 use tracing::{debug, warn};
 
@@ -41,11 +47,7 @@ impl TypeMapKey for DiscordBridge {
 
 impl DiscordBridge {
     /// Create a new bridge
-    pub fn new(
-        client: async_nats::Client,
-        prefix: String,
-        access_config: AccessConfig,
-    ) -> Self {
+    pub fn new(client: async_nats::Client, prefix: String, access_config: AccessConfig) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
             access_config,
@@ -130,10 +132,7 @@ impl DiscordBridge {
             edited_timestamp: msg.edited_timestamp.and_then(|t| t.to_rfc3339()),
             attachments,
             embeds,
-            referenced_message_id: msg
-                .referenced_message
-                .as_ref()
-                .map(|r| r.id.get()),
+            referenced_message_id: msg.referenced_message.as_ref().map(|r| r.id.get()),
         }
     }
 
@@ -146,7 +145,12 @@ impl DiscordBridge {
                 None,
             )
         } else {
-            session_id(&ChannelType::Dm, msg.channel_id.get(), None, Some(msg.author.id.get()))
+            session_id(
+                &ChannelType::Dm,
+                msg.channel_id.get(),
+                None,
+                Some(msg.author.id.get()),
+            )
         }
     }
 
@@ -251,7 +255,12 @@ impl DiscordBridge {
         } else {
             ChannelType::Dm
         };
-        let sid = session_id(&chan_type, channel_id, guild_id, Some(interaction.user.id.get()));
+        let sid = session_id(
+            &chan_type,
+            channel_id,
+            guild_id,
+            Some(interaction.user.id.get()),
+        );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let options: Vec<CommandOption> = interaction
@@ -304,7 +313,12 @@ impl DiscordBridge {
         } else {
             ChannelType::Dm
         };
-        let sid = session_id(&chan_type, channel_id, guild_id, Some(interaction.user.id.get()));
+        let sid = session_id(
+            &chan_type,
+            channel_id,
+            guild_id,
+            Some(interaction.user.id.get()),
+        );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let component_type = match interaction.data.kind {
@@ -312,7 +326,9 @@ impl DiscordBridge {
             ComponentInteractionDataKind::StringSelect { .. } => ComponentType::StringSelect,
             ComponentInteractionDataKind::UserSelect { .. } => ComponentType::UserSelect,
             ComponentInteractionDataKind::RoleSelect { .. } => ComponentType::RoleSelect,
-            ComponentInteractionDataKind::MentionableSelect { .. } => ComponentType::MentionableSelect,
+            ComponentInteractionDataKind::MentionableSelect { .. } => {
+                ComponentType::MentionableSelect
+            }
             ComponentInteractionDataKind::ChannelSelect { .. } => ComponentType::ChannelSelect,
             _ => ComponentType::Unknown,
         };
@@ -403,12 +419,13 @@ impl DiscordBridge {
         Ok(())
     }
 
-    pub async fn publish_guild_member_add(
-        &self,
-        guild_id: u64,
-        member: &Member,
-    ) -> Result<()> {
-        let sid = session_id(&ChannelType::GuildText, 0, Some(guild_id), Some(member.user.id.get()));
+    pub async fn publish_guild_member_add(&self, guild_id: u64, member: &Member) -> Result<()> {
+        let sid = session_id(
+            &ChannelType::GuildText,
+            0,
+            Some(guild_id),
+            Some(member.user.id.get()),
+        );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let discord_member = DiscordMember {
@@ -435,7 +452,12 @@ impl DiscordBridge {
         guild_id: u64,
         user: &SerenityUser,
     ) -> Result<()> {
-        let sid = session_id(&ChannelType::GuildText, 0, Some(guild_id), Some(user.id.get()));
+        let sid = session_id(
+            &ChannelType::GuildText,
+            0,
+            Some(guild_id),
+            Some(user.id.get()),
+        );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let event = GuildMemberRemoveEvent {

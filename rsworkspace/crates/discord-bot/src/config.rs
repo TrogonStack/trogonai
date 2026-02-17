@@ -1,5 +1,8 @@
 //! Configuration management for discord-bot
 
+#[path = "config_tests.rs"]
+mod config_tests;
+
 use anyhow::{Context, Result};
 use discord_nats::NatsConfig;
 use discord_types::AccessConfig;
@@ -38,14 +41,11 @@ impl Config {
 
     /// Load configuration from environment variables
     pub fn from_env() -> Result<Self> {
-        let bot_token =
-            std::env::var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
+        let bot_token = std::env::var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
 
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
+        let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
 
-        let prefix =
-            std::env::var("DISCORD_PREFIX").unwrap_or_else(|_| "prod".to_string());
+        let prefix = std::env::var("DISCORD_PREFIX").unwrap_or_else(|_| "prod".to_string());
 
         Ok(Config {
             discord: DiscordBotConfig {
