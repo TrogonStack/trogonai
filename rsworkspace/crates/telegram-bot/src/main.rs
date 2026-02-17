@@ -210,6 +210,30 @@ async fn main() -> Result<()> {
         .branch(
             dptree::filter(|msg: Message| msg.poll().is_some())
                 .endpoint(handlers::handle_poll_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.forum_topic_created().is_some())
+                .endpoint(handlers::handle_forum_topic_created),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.forum_topic_edited().is_some())
+                .endpoint(handlers::handle_forum_topic_edited),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.forum_topic_closed().is_some())
+                .endpoint(handlers::handle_forum_topic_closed),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.forum_topic_reopened().is_some())
+                .endpoint(handlers::handle_forum_topic_reopened),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.general_forum_topic_hidden().is_some())
+                .endpoint(handlers::handle_general_forum_topic_hidden),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.general_forum_topic_unhidden().is_some())
+                .endpoint(handlers::handle_general_forum_topic_unhidden),
         );
 
     let poll_update_handler = Update::filter_poll()
