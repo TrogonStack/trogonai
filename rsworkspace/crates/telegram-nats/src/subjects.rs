@@ -32,6 +32,8 @@
 //! - `telegram.{prefix}.agent.message.send`
 //! - `telegram.{prefix}.agent.message.edit`
 //! - `telegram.{prefix}.agent.message.delete`
+//! - `telegram.{prefix}.agent.message.forward`
+//! - `telegram.{prefix}.agent.message.copy`
 //! - `telegram.{prefix}.agent.message.send_photo`
 //! - `telegram.{prefix}.agent.message.stream`
 //! - `telegram.{prefix}.agent.callback.answer`
@@ -269,6 +271,16 @@ pub mod agent {
     /// Delete message command subject
     pub fn message_delete(prefix: &str) -> String {
         format!("telegram.{}.agent.message.delete", prefix)
+    }
+
+    /// Forward message command subject
+    pub fn message_forward(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.forward", prefix)
+    }
+
+    /// Copy message command subject
+    pub fn message_copy(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.copy", prefix)
     }
 
     /// Send photo command subject
@@ -674,6 +686,12 @@ mod tests {
         assert_ne!(s1, s2);
         assert!(s1.contains("env1"));
         assert!(s2.contains("env2"));
+    }
+
+    #[test]
+    fn test_agent_forward_copy_subjects() {
+        assert_eq!(agent::message_forward("prod"), "telegram.prod.agent.message.forward");
+        assert_eq!(agent::message_copy("prod"), "telegram.prod.agent.message.copy");
     }
 
     #[test]

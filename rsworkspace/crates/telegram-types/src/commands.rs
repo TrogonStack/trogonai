@@ -62,6 +62,50 @@ pub struct DeleteMessageCommand {
     pub message_id: i32,
 }
 
+/// Forward a message from one chat to another
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardMessageCommand {
+    /// Destination chat ID
+    pub chat_id: i64,
+    /// Source chat ID
+    pub from_chat_id: i64,
+    /// Message ID in the source chat
+    pub message_id: i32,
+    /// Forum topic thread ID in the destination chat (forum supergroups only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_notification: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protect_content: Option<bool>,
+}
+
+/// Copy a message from one chat to another (no forward attribution)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyMessageCommand {
+    /// Destination chat ID
+    pub chat_id: i64,
+    /// Source chat ID
+    pub from_chat_id: i64,
+    /// Message ID in the source chat
+    pub message_id: i32,
+    /// Forum topic thread ID in the destination chat (forum supergroups only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_notification: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protect_content: Option<bool>,
+}
+
 /// Send a photo
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendPhotoCommand {

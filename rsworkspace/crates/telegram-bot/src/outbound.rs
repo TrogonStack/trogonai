@@ -73,6 +73,8 @@ impl OutboundProcessor {
         let payment_task = self.handle_payment_commands(prefix.clone());
         let bot_commands_task = self.handle_bot_commands(prefix.clone());
         let sticker_mgmt_task = self.handle_sticker_management(prefix.clone());
+        let forward_task = self.handle_forward_messages(prefix.clone());
+        let copy_task = self.handle_copy_messages(prefix.clone());
 
         // Run all tasks concurrently
         tokio::try_join!(
@@ -101,7 +103,9 @@ impl OutboundProcessor {
             file_task,
             payment_task,
             bot_commands_task,
-            sticker_mgmt_task
+            sticker_mgmt_task,
+            forward_task,
+            copy_task
         )?;
 
         Ok(())
@@ -1972,6 +1976,89 @@ impl OutboundProcessor {
                 }
 
                 else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle forwardMessage commands
+    async fn handle_forward_messages(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_forward(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<ForwardMessageCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received forward message command: from_chat={} msg={} to_chat={}", cmd.from_chat_id, cmd.message_id, cmd.chat_id);
+
+                    let mut req = self.bot.forward_message(
+                        ChatId(cmd.chat_id),
+                        ChatId(cmd.from_chat_id),
+                        MessageId(cmd.message_id),
+                    );
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+                    req.disable_notification = cmd.disable_notification;
+                    req.protect_content = cmd.protect_content;
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize forward message command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle copyMessage commands
+    async fn handle_copy_messages(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_copy(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<CopyMessageCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received copy message command: from_chat={} msg={} to_chat={}", cmd.from_chat_id, cmd.message_id, cmd.chat_id);
+
+                    let mut req = self.bot.copy_message(
+                        ChatId(cmd.chat_id),
+                        ChatId(cmd.from_chat_id),
+                        MessageId(cmd.message_id),
+                    );
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(match parse_mode {
+                            ParseMode::HTML => TgParseMode::Html,
+                            ParseMode::Markdown => TgParseMode::MarkdownV2,
+                            ParseMode::MarkdownV2 => TgParseMode::MarkdownV2,
+                        });
+                    }
+                    if let Some(reply_id) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
+                    }
+                    req.disable_notification = cmd.disable_notification;
+                    req.protect_content = cmd.protect_content;
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize copy message command: {}", e),
             }
         }
 
