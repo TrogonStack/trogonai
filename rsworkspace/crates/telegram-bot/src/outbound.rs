@@ -55,6 +55,7 @@ impl OutboundProcessor {
         let stream_task = self.handle_stream_messages(prefix.clone());
         let inline_task = self.handle_answer_inline_queries(prefix.clone());
         let forum_task = self.handle_forum_topics(prefix.clone());
+        let admin_task = self.handle_admin_commands(prefix.clone());
 
         // Run all tasks concurrently
         tokio::try_join!(
@@ -66,7 +67,8 @@ impl OutboundProcessor {
             action_task,
             stream_task,
             inline_task,
-            forum_task
+            forum_task,
+            admin_task
         )?;
 
         Ok(())
@@ -445,6 +447,227 @@ impl OutboundProcessor {
                         debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
                             error!("Failed to unpin general forum topic messages: {}", e);
+                        }
+                    }
+                }
+
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle admin commands (permissions, pinning, etc.)
+    async fn handle_admin_commands(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::*;
+        use telegram_nats::subjects;
+
+        let promote_subject = subjects::agent::admin_promote(&prefix);
+        let restrict_subject = subjects::agent::admin_restrict(&prefix);
+        let ban_subject = subjects::agent::admin_ban(&prefix);
+        let unban_subject = subjects::agent::admin_unban(&prefix);
+        let set_permissions_subject = subjects::agent::admin_set_permissions(&prefix);
+        let set_title_subject = subjects::agent::admin_set_title(&prefix);
+        let pin_subject = subjects::agent::admin_pin(&prefix);
+        let unpin_subject = subjects::agent::admin_unpin(&prefix);
+        let unpin_all_subject = subjects::agent::admin_unpin_all(&prefix);
+        let set_chat_title_subject = subjects::agent::admin_set_chat_title(&prefix);
+        let set_chat_description_subject = subjects::agent::admin_set_chat_description(&prefix);
+
+        info!("Subscribing to admin commands");
+
+        let promote_stream = self.subscriber.subscribe::<PromoteChatMemberCommand>(&promote_subject);
+        let restrict_stream = self.subscriber.subscribe::<RestrictChatMemberCommand>(&restrict_subject);
+        let ban_stream = self.subscriber.subscribe::<BanChatMemberCommand>(&ban_subject);
+        let unban_stream = self.subscriber.subscribe::<UnbanChatMemberCommand>(&unban_subject);
+        let set_permissions_stream = self.subscriber.subscribe::<SetChatPermissionsCommand>(&set_permissions_subject);
+        let set_title_stream = self.subscriber.subscribe::<SetChatAdministratorCustomTitleCommand>(&set_title_subject);
+        let pin_stream = self.subscriber.subscribe::<PinChatMessageCommand>(&pin_subject);
+        let unpin_stream = self.subscriber.subscribe::<UnpinChatMessageCommand>(&unpin_subject);
+        let unpin_all_stream = self.subscriber.subscribe::<UnpinAllChatMessagesCommand>(&unpin_all_subject);
+        let set_chat_title_stream = self.subscriber.subscribe::<SetChatTitleCommand>(&set_chat_title_subject);
+        let set_chat_description_stream = self.subscriber.subscribe::<SetChatDescriptionCommand>(&set_chat_description_subject);
+
+        let (mut promote_stream, mut restrict_stream, mut ban_stream, mut unban_stream,
+             mut set_permissions_stream, mut set_title_stream, mut pin_stream, mut unpin_stream,
+             mut unpin_all_stream, mut set_chat_title_stream, mut set_chat_description_stream) = tokio::try_join!(
+            promote_stream, restrict_stream, ban_stream, unban_stream,
+            set_permissions_stream, set_title_stream, pin_stream, unpin_stream,
+            unpin_all_stream, set_chat_title_stream, set_chat_description_stream
+        )?;
+
+        loop {
+            tokio::select! {
+                Some(result) = promote_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Promoting user {} in chat {}", cmd.user_id, cmd.chat_id);
+                        let mut req = self.bot.promote_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+
+                        if let Some(rights) = cmd.rights {
+                            req.is_anonymous = rights.is_anonymous;
+                            req.can_manage_chat = rights.can_manage_chat;
+                            req.can_delete_messages = rights.can_delete_messages;
+                            req.can_manage_video_chats = rights.can_manage_video_chats;
+                            req.can_restrict_members = rights.can_restrict_members;
+                            req.can_promote_members = rights.can_promote_members;
+                            req.can_change_info = rights.can_change_info;
+                            req.can_invite_users = rights.can_invite_users;
+                            req.can_pin_messages = rights.can_pin_messages;
+                            req.can_manage_topics = rights.can_manage_topics;
+                            req.can_post_messages = rights.can_post_messages;
+                            req.can_edit_messages = rights.can_edit_messages;
+                            req.can_post_stories = rights.can_post_stories;
+                            req.can_edit_stories = rights.can_edit_stories;
+                            req.can_delete_stories = rights.can_delete_stories;
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to promote chat member: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = restrict_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Restricting user {} in chat {}", cmd.user_id, cmd.chat_id);
+                        let perms = convert_chat_permissions(&cmd.permissions);
+                        let mut req = self.bot.restrict_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64), perms);
+
+                        if let Some(until) = cmd.until_date {
+                            use chrono::{DateTime, Utc};
+                            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
+                                req.until_date = Some(dt);
+                            }
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to restrict chat member: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = ban_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Banning user {} in chat {}", cmd.user_id, cmd.chat_id);
+                        let mut req = self.bot.ban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+
+                        if let Some(until) = cmd.until_date {
+                            use chrono::{DateTime, Utc};
+                            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
+                                req.until_date = Some(dt);
+                            }
+                        }
+
+                        if let Some(revoke) = cmd.revoke_messages {
+                            req.revoke_messages = Some(revoke);
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to ban chat member: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = unban_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Unbanning user {} in chat {}", cmd.user_id, cmd.chat_id);
+                        let mut req = self.bot.unban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+
+                        if let Some(only_if_banned) = cmd.only_if_banned {
+                            req.only_if_banned = Some(only_if_banned);
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to unban chat member: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = set_permissions_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting permissions in chat {}", cmd.chat_id);
+                        let perms = convert_chat_permissions(&cmd.permissions);
+
+                        if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
+                            error!("Failed to set chat permissions: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = set_title_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting custom title for user {} in chat {}", cmd.user_id, cmd.chat_id);
+
+                        if let Err(e) = self.bot.set_chat_administrator_custom_title(
+                            ChatId(cmd.chat_id),
+                            teloxide::types::UserId(cmd.user_id as u64),
+                            cmd.custom_title
+                        ).await {
+                            error!("Failed to set administrator custom title: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = pin_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Pinning message {} in chat {}", cmd.message_id, cmd.chat_id);
+                        let mut req = self.bot.pin_chat_message(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+
+                        if let Some(disable_notification) = cmd.disable_notification {
+                            req.disable_notification = Some(disable_notification);
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to pin message: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = unpin_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Unpinning message in chat {}", cmd.chat_id);
+                        let mut req = self.bot.unpin_chat_message(ChatId(cmd.chat_id));
+
+                        if let Some(message_id) = cmd.message_id {
+                            req.message_id = Some(MessageId(message_id));
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to unpin message: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = unpin_all_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Unpinning all messages in chat {}", cmd.chat_id);
+
+                        if let Err(e) = self.bot.unpin_all_chat_messages(ChatId(cmd.chat_id)).await {
+                            error!("Failed to unpin all messages: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = set_chat_title_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting chat title in chat {}", cmd.chat_id);
+
+                        if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
+                            error!("Failed to set chat title: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = set_chat_description_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting chat description in chat {}", cmd.chat_id);
+
+                        let mut req = self.bot.set_chat_description(ChatId(cmd.chat_id));
+                        req.description = Some(cmd.description);
+
+                        if let Err(e) = req.await {
+                            error!("Failed to set chat description: {}", e);
                         }
                     }
                 }
@@ -990,4 +1213,41 @@ fn convert_inline_keyboard(markup: telegram_types::chat::InlineKeyboardMarkup) -
         .collect();
 
     teloxide::types::InlineKeyboardMarkup::new(buttons)
+}
+
+/// Convert our ChatPermissions to Teloxide's ChatPermissions
+fn convert_chat_permissions(perms: &telegram_types::chat::ChatPermissions) -> teloxide::types::ChatPermissions {
+    use teloxide::types::ChatPermissions as CP;
+
+    let mut result = CP::empty();
+
+    if perms.can_send_messages.unwrap_or(false) {
+        result |= CP::SEND_MESSAGES;
+    }
+    if perms.can_send_media_messages.unwrap_or(false) {
+        result |= CP::SEND_AUDIOS | CP::SEND_DOCUMENTS | CP::SEND_PHOTOS | CP::SEND_VIDEOS | CP::SEND_VIDEO_NOTES | CP::SEND_VOICE_NOTES;
+    }
+    if perms.can_send_polls.unwrap_or(false) {
+        result |= CP::SEND_POLLS;
+    }
+    if perms.can_send_other_messages.unwrap_or(false) {
+        result |= CP::SEND_OTHER_MESSAGES;
+    }
+    if perms.can_add_web_page_previews.unwrap_or(false) {
+        result |= CP::ADD_WEB_PAGE_PREVIEWS;
+    }
+    if perms.can_change_info.unwrap_or(false) {
+        result |= CP::CHANGE_INFO;
+    }
+    if perms.can_invite_users.unwrap_or(false) {
+        result |= CP::INVITE_USERS;
+    }
+    if perms.can_pin_messages.unwrap_or(false) {
+        result |= CP::PIN_MESSAGES;
+    }
+    if perms.can_manage_topics.unwrap_or(false) {
+        result |= CP::MANAGE_TOPICS;
+    }
+
+    result
 }

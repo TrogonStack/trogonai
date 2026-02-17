@@ -204,6 +204,61 @@ pub mod agent {
         format!("telegram.{}.agent.forum.unpin_general", prefix)
     }
 
+    /// Promote chat member command subject
+    pub fn admin_promote(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.promote", prefix)
+    }
+
+    /// Restrict chat member command subject
+    pub fn admin_restrict(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.restrict", prefix)
+    }
+
+    /// Ban chat member command subject
+    pub fn admin_ban(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.ban", prefix)
+    }
+
+    /// Unban chat member command subject
+    pub fn admin_unban(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.unban", prefix)
+    }
+
+    /// Set chat permissions command subject
+    pub fn admin_set_permissions(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.set_permissions", prefix)
+    }
+
+    /// Set administrator custom title command subject
+    pub fn admin_set_title(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.set_title", prefix)
+    }
+
+    /// Pin message command subject
+    pub fn admin_pin(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.pin", prefix)
+    }
+
+    /// Unpin message command subject
+    pub fn admin_unpin(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.unpin", prefix)
+    }
+
+    /// Unpin all messages command subject
+    pub fn admin_unpin_all(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.unpin_all", prefix)
+    }
+
+    /// Set chat title command subject
+    pub fn admin_set_chat_title(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.set_title_chat", prefix)
+    }
+
+    /// Set chat description command subject
+    pub fn admin_set_chat_description(prefix: &str) -> String {
+        format!("telegram.{}.agent.admin.set_description", prefix)
+    }
+
     /// Wildcard subject for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("telegram.{}.agent.>", prefix)
