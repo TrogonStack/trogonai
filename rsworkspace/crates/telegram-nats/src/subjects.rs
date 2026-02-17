@@ -144,6 +144,11 @@ pub mod bot {
     pub fn bot_commands_response(prefix: &str) -> String {
         format!("telegram.{}.bot.bot_commands.response", prefix)
     }
+
+    /// Error event subject for failed agent commands
+    pub fn command_error(prefix: &str) -> String {
+        format!("telegram.{}.bot.error.command", prefix)
+    }
 }
 
 /// Subject builder for agent commands
