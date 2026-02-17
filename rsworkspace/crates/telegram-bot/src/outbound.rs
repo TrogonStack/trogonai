@@ -1,5 +1,9 @@
 //! Outbound message processor (NATS → Telegram)
 
+#[cfg(test)]
+#[path = "outbound_tests.rs"]
+mod outbound_tests;
+
 use crate::errors::{classify, ErrorOutcome};
 use anyhow::Result;
 use async_nats::Client;
@@ -2420,7 +2424,7 @@ pub(crate) fn convert_parse_mode(mode: ParseMode) -> TgParseMode {
 }
 
 /// Convert our ChatAction to Teloxide's ChatAction
-fn convert_chat_action(action: ChatAction) -> teloxide::types::ChatAction {
+pub(crate) fn convert_chat_action(action: ChatAction) -> teloxide::types::ChatAction {
     match action {
         ChatAction::Typing => teloxide::types::ChatAction::Typing,
         ChatAction::UploadPhoto => teloxide::types::ChatAction::UploadPhoto,
