@@ -92,6 +92,11 @@ impl MessageSubscriber {
         &self.prefix
     }
 
+    /// Get a reference to the NATS client
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Subscribe to a subject and deserialize messages
     pub async fn subscribe<T: DeserializeOwned>(
         &self,

@@ -13,6 +13,12 @@
 //! - `telegram.{prefix}.bot.command.{command_name}`
 //! - `telegram.{prefix}.bot.inline.query`
 //! - `telegram.{prefix}.bot.inline.chosen`
+//! - `telegram.{prefix}.bot.file.info`
+//! - `telegram.{prefix}.bot.file.downloaded`
+//! - `telegram.{prefix}.bot.payment.pre_checkout`
+//! - `telegram.{prefix}.bot.payment.shipping`
+//! - `telegram.{prefix}.bot.payment.successful`
+//! - `telegram.{prefix}.bot.bot_commands.response`
 //!
 //! Agent Commands (Agents → Telegram):
 //! - `telegram.{prefix}.agent.message.send`
@@ -23,6 +29,14 @@
 //! - `telegram.{prefix}.agent.callback.answer`
 //! - `telegram.{prefix}.agent.chat.action`
 //! - `telegram.{prefix}.agent.inline.answer`
+//! - `telegram.{prefix}.agent.file.get`
+//! - `telegram.{prefix}.agent.file.download`
+//! - `telegram.{prefix}.agent.payment.send_invoice`
+//! - `telegram.{prefix}.agent.payment.answer_pre_checkout`
+//! - `telegram.{prefix}.agent.payment.answer_shipping`
+//! - `telegram.{prefix}.agent.bot_commands.set`
+//! - `telegram.{prefix}.agent.bot_commands.delete`
+//! - `telegram.{prefix}.agent.bot_commands.get`
 
 /// Subject builder for bot events
 pub mod bot {
@@ -99,6 +113,36 @@ pub mod bot {
     /// My chat member updated event subject (bot itself)
     pub fn my_chat_member_updated(prefix: &str) -> String {
         format!("telegram.{}.bot.chat.my_member_updated", prefix)
+    }
+
+    /// File information response subject
+    pub fn file_info(prefix: &str) -> String {
+        format!("telegram.{}.bot.file.info", prefix)
+    }
+
+    /// File download response subject
+    pub fn file_downloaded(prefix: &str) -> String {
+        format!("telegram.{}.bot.file.downloaded", prefix)
+    }
+
+    /// Pre-checkout query event subject
+    pub fn payment_pre_checkout(prefix: &str) -> String {
+        format!("telegram.{}.bot.payment.pre_checkout", prefix)
+    }
+
+    /// Shipping query event subject
+    pub fn payment_shipping(prefix: &str) -> String {
+        format!("telegram.{}.bot.payment.shipping", prefix)
+    }
+
+    /// Successful payment event subject
+    pub fn payment_successful(prefix: &str) -> String {
+        format!("telegram.{}.bot.payment.successful", prefix)
+    }
+
+    /// Bot commands response subject
+    pub fn bot_commands_response(prefix: &str) -> String {
+        format!("telegram.{}.bot.bot_commands.response", prefix)
     }
 }
 
@@ -204,6 +248,16 @@ pub mod agent {
         format!("telegram.{}.agent.forum.unpin_general", prefix)
     }
 
+    /// Get file information command subject
+    pub fn file_get(prefix: &str) -> String {
+        format!("telegram.{}.agent.file.get", prefix)
+    }
+
+    /// Download file command subject
+    pub fn file_download(prefix: &str) -> String {
+        format!("telegram.{}.agent.file.download", prefix)
+    }
+
     /// Promote chat member command subject
     pub fn admin_promote(prefix: &str) -> String {
         format!("telegram.{}.agent.admin.promote", prefix)
@@ -257,6 +311,36 @@ pub mod agent {
     /// Set chat description command subject
     pub fn admin_set_chat_description(prefix: &str) -> String {
         format!("telegram.{}.agent.admin.set_description", prefix)
+    }
+
+    /// Send invoice command subject
+    pub fn payment_send_invoice(prefix: &str) -> String {
+        format!("telegram.{}.agent.payment.send_invoice", prefix)
+    }
+
+    /// Answer pre-checkout query command subject
+    pub fn payment_answer_pre_checkout(prefix: &str) -> String {
+        format!("telegram.{}.agent.payment.answer_pre_checkout", prefix)
+    }
+
+    /// Answer shipping query command subject
+    pub fn payment_answer_shipping(prefix: &str) -> String {
+        format!("telegram.{}.agent.payment.answer_shipping", prefix)
+    }
+
+    /// Set bot commands command subject
+    pub fn bot_commands_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.bot_commands.set", prefix)
+    }
+
+    /// Delete bot commands command subject
+    pub fn bot_commands_delete(prefix: &str) -> String {
+        format!("telegram.{}.agent.bot_commands.delete", prefix)
+    }
+
+    /// Get bot commands command subject
+    pub fn bot_commands_get(prefix: &str) -> String {
+        format!("telegram.{}.agent.bot_commands.get", prefix)
     }
 
     /// Wildcard subject for all agent commands

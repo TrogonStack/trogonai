@@ -15,6 +15,7 @@ mod session;
 use anyhow::Result;
 use clap::Parser;
 use teloxide::prelude::*;
+use teloxide::types::Message;
 use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -197,13 +198,27 @@ async fn main() -> Result<()> {
     let my_chat_member_handler = Update::filter_my_chat_member()
         .endpoint(handlers::handle_my_chat_member_updated);
 
+    let pre_checkout_handler = Update::filter_pre_checkout_query()
+        .endpoint(handlers::handle_pre_checkout_query);
+
+    let shipping_query_handler = Update::filter_shipping_query()
+        .endpoint(handlers::handle_shipping_query);
+
+    // Successful payments arrive as messages with successful_payment field
+    let successful_payment_handler = Update::filter_message()
+        .filter(|msg: Message| msg.successful_payment().is_some())
+        .endpoint(handlers::handle_successful_payment);
+
     let all_handlers = dptree::entry()
         .branch(handler)
         .branch(callback_handler)
         .branch(inline_query_handler)
         .branch(chosen_inline_result_handler)
         .branch(chat_member_handler)
-        .branch(my_chat_member_handler);
+        .branch(my_chat_member_handler)
+        .branch(pre_checkout_handler)
+        .branch(shipping_query_handler)
+        .branch(successful_payment_handler);
 
     // Start bot based on update mode
     match &config.telegram.update_mode {

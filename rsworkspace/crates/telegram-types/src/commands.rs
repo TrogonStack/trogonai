@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::{ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup};
+use crate::chat::{BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup, LabeledPrice, ShippingOption};
 
 /// Parse mode for message formatting
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -702,4 +702,223 @@ pub struct SetChatTitleCommand {
 pub struct SetChatDescriptionCommand {
     pub chat_id: i64,
     pub description: String,
+}
+
+/// Get file information from Telegram
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetFileCommand {
+    /// File identifier to get info about
+    pub file_id: String,
+    /// Optional request ID for tracking responses
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Download file from Telegram
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadFileCommand {
+    /// File identifier to download
+    pub file_id: String,
+    /// Local path where file should be saved (relative to bot's download directory)
+    pub destination_path: String,
+    /// Optional request ID for tracking responses
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// File information response from getFile API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileInfoResponse {
+    /// Original file_id from the request
+    pub file_id: String,
+    /// Unique identifier for this file
+    pub file_unique_id: String,
+    /// File size in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
+    /// File path on Telegram servers (use for download)
+    pub file_path: String,
+    /// Full download URL for the file
+    pub download_url: String,
+    /// Optional request ID from the original request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// File download completion response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDownloadResponse {
+    /// Original file_id
+    pub file_id: String,
+    /// Local path where file was saved
+    pub local_path: String,
+    /// File size in bytes
+    pub file_size: u64,
+    /// True if download succeeded
+    pub success: bool,
+    /// Error message if download failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Optional request ID from the original request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+// ============================================================================
+// Bot Commands (Menu Setup)
+// ============================================================================
+
+/// Set bot commands (appears in bot menu)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetMyCommandsCommand {
+    /// List of bot commands
+    pub commands: Vec<BotCommand>,
+    /// Scope for which commands apply
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<BotCommandScope>,
+    /// Language code (e.g., "en", "es", "pt")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<String>,
+}
+
+/// Delete bot commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteMyCommandsCommand {
+    /// Scope for which to delete commands
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<BotCommandScope>,
+    /// Language code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<String>,
+}
+
+/// Get bot commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetMyCommandsCommand {
+    /// Scope for which to get commands
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<BotCommandScope>,
+    /// Language code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<String>,
+    /// Optional request ID for tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Response with bot commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCommandsResponse {
+    /// List of bot commands
+    pub commands: Vec<BotCommand>,
+    /// Optional request ID from the original request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+// ============================================================================
+// Payments
+// ============================================================================
+
+/// Send invoice (payment request)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendInvoiceCommand {
+    /// Target chat (must be private chat for invoices)
+    pub chat_id: i64,
+    /// Product name, 1-32 characters
+    pub title: String,
+    /// Product description, 1-255 characters
+    pub description: String,
+    /// Bot-defined invoice payload, 1-128 bytes
+    pub payload: String,
+    /// Payment provider token (from @BotFather or payment provider)
+    pub provider_token: String,
+    /// Three-letter ISO 4217 currency code (e.g., USD, EUR)
+    pub currency: String,
+    /// Price breakdown (at least one LabeledPrice required)
+    pub prices: Vec<LabeledPrice>,
+    /// Maximum accepted amount for tips in the smallest units
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tip_amount: Option<i64>,
+    /// Suggested amounts of tips in the smallest units
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_tip_amounts: Option<Vec<i64>>,
+    /// Unique deep-linking parameter for this invoice
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_parameter: Option<String>,
+    /// JSON-serialized data about the invoice for payment provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_data: Option<String>,
+    /// URL of the product photo (648x648px max)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
+    /// Photo size
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_size: Option<i32>,
+    /// Photo width
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_width: Option<i32>,
+    /// Photo height
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_height: Option<i32>,
+    /// True if you require user's full name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need_name: Option<bool>,
+    /// True if you require user's phone number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need_phone_number: Option<bool>,
+    /// True if you require user's email
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need_email: Option<bool>,
+    /// True if you require user's shipping address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need_shipping_address: Option<bool>,
+    /// True if user's email should be sent to provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_email_to_provider: Option<bool>,
+    /// True if user's phone number should be sent to provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_phone_number_to_provider: Option<bool>,
+    /// True if final price depends on shipping method
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_flexible: Option<bool>,
+    /// Disable notification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_notification: Option<bool>,
+    /// Protects the contents of the sent message from forwarding and saving
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protect_content: Option<bool>,
+    /// Reply to message ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    /// Inline keyboard markup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+}
+
+/// Answer pre-checkout query
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnswerPreCheckoutQueryCommand {
+    /// Unique query identifier
+    pub pre_checkout_query_id: String,
+    /// True if everything is alright
+    pub ok: bool,
+    /// Error message if ok is false (required when ok is false)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+/// Answer shipping query
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnswerShippingQueryCommand {
+    /// Unique query identifier
+    pub shipping_query_id: String,
+    /// True if delivery to the address is possible
+    pub ok: bool,
+    /// Available shipping options (required if ok is true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipping_options: Option<Vec<ShippingOption>>,
+    /// Error message if ok is false (required when ok is false)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }

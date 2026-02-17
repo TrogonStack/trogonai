@@ -279,3 +279,123 @@ pub struct MessageEntity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_emoji_id: Option<String>,
 }
+
+/// Bot command for bot menu
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCommand {
+    /// Command text (1-32 characters, only lowercase letters, digits and underscores)
+    pub command: String,
+    /// Command description (1-256 characters)
+    pub description: String,
+}
+
+/// Scope for bot commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BotCommandScope {
+    /// Commands for all users
+    Default,
+    /// Commands for all private chats
+    AllPrivateChats,
+    /// Commands for all group chats
+    AllGroupChats,
+    /// Commands for all chat administrators
+    AllChatAdministrators,
+    /// Commands for specific chat
+    Chat { chat_id: i64 },
+    /// Commands for chat administrators in specific chat
+    ChatAdministrators { chat_id: i64 },
+    /// Commands for specific user in specific chat
+    ChatMember { chat_id: i64, user_id: i64 },
+}
+
+/// Price portion for invoice
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabeledPrice {
+    /// Portion label
+    pub label: String,
+    /// Price in the smallest units of the currency (integer, not float)
+    /// For example, for $1.45 pass amount = 145
+    pub amount: i64,
+}
+
+/// Invoice information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invoice {
+    /// Product name
+    pub title: String,
+    /// Product description
+    pub description: String,
+    /// Unique bot deep-linking parameter for invoice
+    pub start_parameter: String,
+    /// Three-letter ISO 4217 currency code
+    pub currency: String,
+    /// Total price in the smallest units of the currency
+    pub total_amount: i64,
+}
+
+/// Shipping address
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShippingAddress {
+    /// ISO 3166-1 alpha-2 country code
+    pub country_code: String,
+    /// State, if applicable
+    pub state: String,
+    /// City
+    pub city: String,
+    /// First line for the address
+    pub street_line1: String,
+    /// Second line for the address
+    pub street_line2: String,
+    /// Address post code
+    pub post_code: String,
+}
+
+/// Order info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderInfo {
+    /// User name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// User's phone number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone_number: Option<String>,
+    /// User email
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// User shipping address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipping_address: Option<ShippingAddress>,
+}
+
+/// Shipping option
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShippingOption {
+    /// Shipping option identifier
+    pub id: String,
+    /// Option title
+    pub title: String,
+    /// List of price portions
+    pub prices: Vec<LabeledPrice>,
+}
+
+/// Successful payment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuccessfulPayment {
+    /// Three-letter ISO 4217 currency code
+    pub currency: String,
+    /// Total price in the smallest units of the currency
+    pub total_amount: i64,
+    /// Bot specified invoice payload
+    pub invoice_payload: String,
+    /// Telegram payment identifier
+    pub telegram_payment_charge_id: String,
+    /// Provider payment identifier
+    pub provider_payment_charge_id: String,
+    /// Identifier of the shipping option chosen by the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipping_option_id: Option<String>,
+    /// Order info provided by the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_info: Option<OrderInfo>,
+}

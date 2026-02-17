@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, MessageEntity, PhotoSize, User};
+use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, MessageEntity, PhotoSize, User, ShippingAddress, OrderInfo, SuccessfulPayment};
 
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,4 +220,48 @@ pub struct MyChatMemberUpdatedEvent {
     /// True if the bot joined via a chat folder invite link
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via_chat_folder_invite_link: Option<bool>,
+}
+
+/// Pre-checkout query event (before payment is confirmed)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreCheckoutQueryEvent {
+    pub metadata: EventMetadata,
+    /// Unique query identifier
+    pub pre_checkout_query_id: String,
+    /// User who sent the query
+    pub from: User,
+    /// Three-letter ISO 4217 currency code
+    pub currency: String,
+    /// Total price in the smallest units of the currency
+    pub total_amount: i64,
+    /// Bot specified invoice payload
+    pub invoice_payload: String,
+    /// Identifier of the shipping option chosen by the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipping_option_id: Option<String>,
+    /// Order info provided by the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_info: Option<OrderInfo>,
+}
+
+/// Shipping query event (for physical goods)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShippingQueryEvent {
+    pub metadata: EventMetadata,
+    /// Unique query identifier
+    pub shipping_query_id: String,
+    /// User who sent the query
+    pub from: User,
+    /// Bot specified invoice payload
+    pub invoice_payload: String,
+    /// User specified shipping address
+    pub shipping_address: ShippingAddress,
+}
+
+/// Successful payment event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuccessfulPaymentEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub payment: SuccessfulPayment,
 }
