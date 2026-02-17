@@ -121,6 +121,21 @@ impl AsRef<str> for SessionId {
 mod tests {
     use super::*;
 
+    fn private_chat() -> Chat {
+        Chat { id: 123456789, chat_type: ChatType::Private, title: None, username: None }
+    }
+    fn group_chat() -> Chat {
+        Chat { id: 987654321, chat_type: ChatType::Group, title: None, username: None }
+    }
+    fn supergroup_chat() -> Chat {
+        Chat { id: 111222333, chat_type: ChatType::Supergroup, title: None, username: None }
+    }
+    fn channel_chat() -> Chat {
+        Chat { id: 444555666, chat_type: ChatType::Channel, title: None, username: None }
+    }
+
+    // ── Constructor functions ─────────────────────────────────────────────────
+
     #[test]
     fn test_private_session_id() {
         let id = SessionId::for_private_chat(123456789);
@@ -138,10 +153,158 @@ mod tests {
     }
 
     #[test]
+    fn test_supergroup_session_id() {
+        let id = SessionId::for_supergroup_chat(111222333);
+        assert_eq!(id.as_str(), "tg-supergroup-111222333");
+        assert_eq!(id.chat_id(), Some(111222333));
+        assert_eq!(id.user_id(), None);
+    }
+
+    #[test]
+    fn test_channel_session_id() {
+        let id = SessionId::for_channel(444555666);
+        assert_eq!(id.as_str(), "tg-channel-444555666");
+        assert_eq!(id.chat_id(), Some(444555666));
+        assert_eq!(id.user_id(), None);
+    }
+
+    #[test]
     fn test_user_in_group_session_id() {
         let id = SessionId::for_user_in_group(987654321, 123456789);
         assert_eq!(id.as_str(), "tg-group-987654321-123456789");
         assert_eq!(id.chat_id(), Some(987654321));
         assert_eq!(id.user_id(), Some(123456789));
+    }
+
+    // ── from_chat() ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_from_chat_private() {
+        let id = SessionId::from_chat(&private_chat());
+        assert_eq!(id.as_str(), "tg-private-123456789");
+    }
+
+    #[test]
+    fn test_from_chat_group() {
+        let id = SessionId::from_chat(&group_chat());
+        assert_eq!(id.as_str(), "tg-group-987654321");
+    }
+
+    #[test]
+    fn test_from_chat_supergroup() {
+        let id = SessionId::from_chat(&supergroup_chat());
+        assert_eq!(id.as_str(), "tg-supergroup-111222333");
+    }
+
+    #[test]
+    fn test_from_chat_channel() {
+        let id = SessionId::from_chat(&channel_chat());
+        assert_eq!(id.as_str(), "tg-channel-444555666");
+    }
+
+    // ── from_chat_with_user() ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_from_chat_with_user_private_ignores_isolation() {
+        // Private chats never use user isolation — user_id and isolate flag ignored
+        let id = SessionId::from_chat_with_user(&private_chat(), Some(42), true);
+        assert_eq!(id.as_str(), "tg-private-123456789");
+    }
+
+    #[test]
+    fn test_from_chat_with_user_group_isolated() {
+        let id = SessionId::from_chat_with_user(&group_chat(), Some(42), true);
+        assert_eq!(id.as_str(), "tg-group-987654321-42");
+        assert_eq!(id.user_id(), Some(42));
+    }
+
+    #[test]
+    fn test_from_chat_with_user_group_not_isolated() {
+        let id = SessionId::from_chat_with_user(&group_chat(), Some(42), false);
+        assert_eq!(id.as_str(), "tg-group-987654321");
+        assert_eq!(id.user_id(), None);
+    }
+
+    #[test]
+    fn test_from_chat_with_user_group_no_user_id() {
+        // isolation=true but no user_id → falls back to shared session
+        let id = SessionId::from_chat_with_user(&group_chat(), None, true);
+        assert_eq!(id.as_str(), "tg-group-987654321");
+    }
+
+    #[test]
+    fn test_from_chat_with_user_supergroup_isolated() {
+        let id = SessionId::from_chat_with_user(&supergroup_chat(), Some(99), true);
+        assert_eq!(id.as_str(), "tg-group-111222333-99");
+    }
+
+    #[test]
+    fn test_from_chat_with_user_channel_ignores_isolation() {
+        // Channels don't support user isolation
+        let id = SessionId::from_chat_with_user(&channel_chat(), Some(99), true);
+        assert_eq!(id.as_str(), "tg-channel-444555666");
+    }
+
+    // ── Trait implementations ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_display() {
+        let id = SessionId::for_private_chat(42);
+        assert_eq!(id.to_string(), "tg-private-42");
+    }
+
+    #[test]
+    fn test_from_string() {
+        let id: SessionId = "tg-custom-session".to_string().into();
+        assert_eq!(id.as_str(), "tg-custom-session");
+    }
+
+    #[test]
+    fn test_as_ref_str() {
+        let id = SessionId::for_private_chat(1);
+        let s: &str = id.as_ref();
+        assert_eq!(s, "tg-private-1");
+    }
+
+    #[test]
+    fn test_into_string() {
+        let id = SessionId::for_private_chat(1);
+        let s: String = id.into();
+        assert_eq!(s, "tg-private-1");
+    }
+
+    #[test]
+    fn test_equality() {
+        let a = SessionId::for_private_chat(123);
+        let b = SessionId::for_private_chat(123);
+        let c = SessionId::for_private_chat(456);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_hash_consistency() {
+        use std::collections::HashMap;
+        let mut map: HashMap<SessionId, &str> = HashMap::new();
+        let id = SessionId::for_private_chat(42);
+        map.insert(id.clone(), "value");
+        assert_eq!(map[&id], "value");
+    }
+
+    // ── serde ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let id = SessionId::for_user_in_group(100, 200);
+        let json = serde_json::to_string(&id).unwrap();
+        let back: SessionId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn test_serializes_as_plain_string() {
+        let id = SessionId::for_private_chat(7);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"tg-private-7\"");
     }
 }
