@@ -11,6 +11,8 @@
 //! - `telegram.{prefix}.bot.message.voice`
 //! - `telegram.{prefix}.bot.callback.query`
 //! - `telegram.{prefix}.bot.command.{command_name}`
+//! - `telegram.{prefix}.bot.inline.query`
+//! - `telegram.{prefix}.bot.inline.chosen`
 //!
 //! Agent Commands (Agents → Telegram):
 //! - `telegram.{prefix}.agent.message.send`
@@ -20,6 +22,7 @@
 //! - `telegram.{prefix}.agent.message.stream`
 //! - `telegram.{prefix}.agent.callback.answer`
 //! - `telegram.{prefix}.agent.chat.action`
+//! - `telegram.{prefix}.agent.inline.answer`
 
 /// Subject builder for bot events
 pub mod bot {
@@ -77,6 +80,16 @@ pub mod bot {
     pub fn all_commands(prefix: &str) -> String {
         format!("telegram.{}.bot.command.>", prefix)
     }
+
+    /// Inline query event subject
+    pub fn inline_query(prefix: &str) -> String {
+        format!("telegram.{}.bot.inline.query", prefix)
+    }
+
+    /// Chosen inline result event subject
+    pub fn chosen_inline_result(prefix: &str) -> String {
+        format!("telegram.{}.bot.inline.chosen", prefix)
+    }
 }
 
 /// Subject builder for agent commands
@@ -114,6 +127,11 @@ pub mod agent {
     /// Send chat action command subject
     pub fn chat_action(prefix: &str) -> String {
         format!("telegram.{}.agent.chat.action", prefix)
+    }
+
+    /// Answer inline query command subject
+    pub fn inline_answer(prefix: &str) -> String {
+        format!("telegram.{}.agent.inline.answer", prefix)
     }
 
     /// Wildcard subject for all agent commands

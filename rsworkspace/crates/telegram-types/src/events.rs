@@ -91,6 +91,35 @@ pub struct CommandEvent {
     pub args: Vec<String>,
 }
 
+/// Inline query event (when user types @bot query in any chat)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryEvent {
+    pub metadata: EventMetadata,
+    pub inline_query_id: String,
+    pub from: User,
+    pub query: String,
+    pub offset: String,
+    pub chat_type: Option<String>,
+    pub location: Option<Location>,
+}
+
+/// User location (for location-based inline queries)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Location {
+    pub longitude: f64,
+    pub latitude: f64,
+}
+
+/// Chosen inline result event (when user selects an inline result)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChosenInlineResultEvent {
+    pub metadata: EventMetadata,
+    pub result_id: String,
+    pub from: User,
+    pub query: String,
+    pub inline_message_id: Option<String>,
+}
+
 impl EventMetadata {
     /// Create new event metadata
     pub fn new(session_id: String, update_id: i64) -> Self {

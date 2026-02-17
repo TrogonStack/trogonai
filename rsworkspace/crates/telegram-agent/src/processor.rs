@@ -222,6 +222,96 @@ impl MessageProcessor {
         Ok(())
     }
 
+    /// Process an inline query
+    pub async fn process_inline_query(
+        &self,
+        event: &telegram_types::events::InlineQueryEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        use telegram_types::commands::{
+            AnswerInlineQueryCommand, InlineQueryResult, InlineQueryResultArticle,
+            InputMessageContent,
+        };
+
+        info!("Processing inline query: {}", event.query);
+
+        // Generate results based on the query
+        let results = if let Some(ref llm_client) = self.llm_client {
+            // LLM mode: Generate intelligent results
+            let system_prompt = "You are a helpful AI assistant. Provide a concise, helpful response to the user's query.";
+
+            let response = match llm_client.generate_response(system_prompt, &event.query, &[]).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    warn!("LLM generation failed: {}", e);
+                    format!("I couldn't process your query: {}", event.query)
+                }
+            };
+
+            vec![
+                InlineQueryResult::Article(InlineQueryResultArticle {
+                    id: "1".to_string(),
+                    title: format!("AI Response: {}", truncate(&event.query, 50)),
+                    description: Some(truncate(&response, 100)),
+                    input_message_content: InputMessageContent {
+                        message_text: response,
+                        parse_mode: None,
+                    },
+                    thumb_url: None,
+                }),
+            ]
+        } else {
+            // Echo mode: Simple echo results
+            vec![
+                InlineQueryResult::Article(InlineQueryResultArticle {
+                    id: "1".to_string(),
+                    title: format!("Echo: {}", event.query),
+                    description: Some("Tap to send this query as a message".to_string()),
+                    input_message_content: InputMessageContent {
+                        message_text: format!("You searched for: {}", event.query),
+                        parse_mode: None,
+                    },
+                    thumb_url: None,
+                }),
+                InlineQueryResult::Article(InlineQueryResultArticle {
+                    id: "2".to_string(),
+                    title: "Uppercase".to_string(),
+                    description: Some(event.query.to_uppercase()),
+                    input_message_content: InputMessageContent {
+                        message_text: event.query.to_uppercase(),
+                        parse_mode: None,
+                    },
+                    thumb_url: None,
+                }),
+                InlineQueryResult::Article(InlineQueryResultArticle {
+                    id: "3".to_string(),
+                    title: "Lowercase".to_string(),
+                    description: Some(event.query.to_lowercase()),
+                    input_message_content: InputMessageContent {
+                        message_text: event.query.to_lowercase(),
+                        parse_mode: None,
+                    },
+                    thumb_url: None,
+                }),
+            ]
+        };
+
+        // Send the answer
+        let answer_command = AnswerInlineQueryCommand {
+            inline_query_id: event.inline_query_id.clone(),
+            results,
+            cache_time: Some(300), // 5 minutes
+            is_personal: Some(true),
+            next_offset: None,
+        };
+
+        let subject = subjects::agent::inline_answer(publisher.prefix());
+        publisher.publish(&subject, &answer_command).await?;
+
+        debug!("Answered inline query {}", event.inline_query_id);
+        Ok(())
+    }
+
     /// Send typing indicator
     async fn send_typing_indicator(
         &self,
@@ -237,6 +327,15 @@ impl MessageProcessor {
         publisher.publish(&subject, &command).await?;
 
         Ok(())
+    }
+}
+
+/// Truncate a string to a maximum length
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len - 3])
     }
 }
 

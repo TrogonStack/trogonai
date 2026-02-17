@@ -40,13 +40,15 @@ impl TelegramAgent {
         let photo_handler = self.handle_photo_messages();
         let command_handler = self.handle_commands();
         let callback_handler = self.handle_callbacks();
+        let inline_handler = self.handle_inline_queries();
 
         // Run all handlers concurrently
         tokio::try_join!(
             text_handler,
             photo_handler,
             command_handler,
-            callback_handler
+            callback_handler,
+            inline_handler
         )?;
 
         Ok(())
@@ -178,6 +180,39 @@ impl TelegramAgent {
                     }
                 }
                 Err(e) => error!("Failed to deserialize callback query event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle inline queries
+    async fn handle_inline_queries(&self) -> Result<()> {
+        use telegram_types::events::InlineQueryEvent;
+
+        let subject = telegram_nats::subjects::bot::inline_query(self.subscriber.prefix());
+        info!("Subscribing to inline queries: {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<InlineQueryEvent>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    info!(
+                        "Received inline query from user {}: {}",
+                        event.from.id,
+                        event.query
+                    );
+
+                    // Process the inline query
+                    if let Err(e) = self.processor.process_inline_query(
+                        &event,
+                        &self.publisher
+                    ).await {
+                        error!("Failed to process inline query: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize inline query event: {}", e),
             }
         }
 
