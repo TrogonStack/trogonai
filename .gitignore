@@ -1,41 +1,31 @@
 # Rust
-debug
-target
+/target/
+/rsworkspace/target/
 **/*.rs.bk
-*.pdb
-**/mutants.out*/
+Cargo.lock
 
-# Node.js
-node_modules
-.next
-.turbo
-dist
-*.tsbuildinfo
-
-# pnpm
-.pnpm-store
-
-# Environment
+# Environment & Config
 .env
-.env.*
-!.env.example
-
-# Docker
-docker-compose.override.yml
+config/telegram-bot.toml
+config/*.toml
+!config/*.example.toml
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# trogonai internal
-.trogonai/
-*.internal.trogonai.md
+# Logs
+*.log
 
-# Misc
-tmp
+# Docker
+.dockerignore
+
+# NATS
+*.creds
