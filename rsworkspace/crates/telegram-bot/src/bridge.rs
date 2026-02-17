@@ -271,6 +271,143 @@ impl TelegramBridge {
         Ok(())
     }
 
+    /// Publish a sticker message event
+    pub async fn publish_sticker_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        use telegram_types::events::{StickerFormat, StickerKind};
+        use teloxide::types::StickerKind as TgStickerKind;
+
+        let sticker = msg.sticker().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let format = if sticker.flags.is_video {
+            StickerFormat::Video
+        } else if sticker.flags.is_animated {
+            StickerFormat::Animated
+        } else {
+            StickerFormat::Static
+        };
+
+        let kind = match &sticker.kind {
+            TgStickerKind::Regular { .. } => StickerKind::Regular,
+            TgStickerKind::Mask { .. } => StickerKind::Mask,
+            TgStickerKind::CustomEmoji { .. } => StickerKind::CustomEmoji,
+        };
+
+        let thumbnail = sticker.thumbnail.as_ref().map(|t| PhotoSize {
+            file_id: t.file.id.clone(),
+            file_unique_id: t.file.unique_id.clone(),
+            width: t.width,
+            height: t.height,
+            file_size: Some(t.file.size as u64),
+        });
+
+        let event = MessageStickerEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            file_id: sticker.file.id.clone(),
+            file_unique_id: sticker.file.unique_id.clone(),
+            file_size: Some(sticker.file.size as u64),
+            width: sticker.width as u32,
+            height: sticker.height as u32,
+            format,
+            kind,
+            emoji: sticker.emoji.clone(),
+            set_name: sticker.set_name.clone(),
+            thumbnail,
+        };
+
+        let subject = subjects::bot::message_sticker(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published sticker message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish an animation (GIF) message event
+    pub async fn publish_animation_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let animation = msg.animation().unwrap();
+        let caption = msg.caption().map(|s| s.to_string());
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let thumbnail = animation.thumbnail.as_ref().map(|t| PhotoSize {
+            file_id: t.file.id.clone(),
+            file_unique_id: t.file.unique_id.clone(),
+            width: t.width,
+            height: t.height,
+            file_size: Some(t.file.size as u64),
+        });
+
+        let event = MessageAnimationEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            animation: FileInfo {
+                file_id: animation.file.id.clone(),
+                file_unique_id: animation.file.unique_id.clone(),
+                file_size: Some(animation.file.size as u64),
+                file_name: animation.file_name.clone(),
+                mime_type: animation.mime_type.as_ref().map(|m| m.to_string()),
+            },
+            width: animation.width,
+            height: animation.height,
+            duration: animation.duration.seconds(),
+            thumbnail,
+            caption,
+        };
+
+        let subject = subjects::bot::message_animation(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published animation message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a video note message event
+    pub async fn publish_video_note_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let video_note = msg.video_note().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let thumbnail = video_note.thumbnail.as_ref().map(|t| PhotoSize {
+            file_id: t.file.id.clone(),
+            file_unique_id: t.file.unique_id.clone(),
+            width: t.width,
+            height: t.height,
+            file_size: Some(t.file.size as u64),
+        });
+
+        let event = MessageVideoNoteEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            video_note: FileInfo {
+                file_id: video_note.file.id.clone(),
+                file_unique_id: video_note.file.unique_id.clone(),
+                file_size: Some(video_note.file.size as u64),
+                file_name: None,
+                mime_type: None,
+            },
+            duration: video_note.duration.seconds(),
+            length: video_note.length,
+            thumbnail,
+        };
+
+        let subject = subjects::bot::message_video_note(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published video note message event to {}", subject);
+        Ok(())
+    }
+
     /// Publish a callback query event
     pub async fn publish_callback_query(&self, query: &CallbackQuery, update_id: i64) -> Result<()> {
         let data = query.data.clone().unwrap_or_default();

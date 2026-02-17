@@ -74,6 +74,77 @@ pub struct MessageVoiceEvent {
     pub voice: FileInfo,
 }
 
+/// Sticker format (encoding)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StickerFormat {
+    /// Static `.webp` sticker
+    Static,
+    /// Animated `.tgs` sticker
+    Animated,
+    /// Video `.webm` sticker
+    Video,
+}
+
+/// Sticker kind (presentation context)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StickerKind {
+    Regular,
+    Mask,
+    CustomEmoji,
+}
+
+/// Sticker message event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageStickerEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub file_id: String,
+    pub file_unique_id: String,
+    pub file_size: Option<u64>,
+    pub width: u32,
+    pub height: u32,
+    pub format: StickerFormat,
+    pub kind: StickerKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<PhotoSize>,
+}
+
+/// Animation (GIF) message event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageAnimationEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub animation: FileInfo,
+    pub width: u32,
+    pub height: u32,
+    /// Duration in seconds
+    pub duration: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<PhotoSize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+}
+
+/// Video note message event (short round video)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageVideoNoteEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub video_note: FileInfo,
+    /// Duration in seconds
+    pub duration: u32,
+    /// Diameter of the video
+    pub length: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<PhotoSize>,
+}
+
 /// Callback query event (button click)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackQueryEvent {
