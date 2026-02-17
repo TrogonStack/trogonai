@@ -9,7 +9,7 @@
 //! to the error subject. Tests verify receipt of those error events.
 
 #[cfg(test)]
-mod outbound_tests {
+mod tests {
     use crate::outbound::{convert_chat_action, convert_parse_mode, OutboundProcessor};
     use futures::StreamExt;
     use telegram_nats::subjects;
@@ -19,17 +19,15 @@ mod outbound_tests {
     const DEFAULT_NATS_URL: &str = "nats://localhost:14222";
 
     async fn try_connect() -> Option<async_nats::Client> {
-        let url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
+        let url = std::env::var("NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
         async_nats::connect(&url).await.ok()
     }
 
     /// Creates a bot that immediately fails all API calls (connection refused).
     /// This avoids internet access and keeps tests fast.
     fn fake_bot() -> Bot {
-        Bot::new("1234567890:AAAAAAAAAAAAAAAAAAAaaaaaaaaa").set_api_url(
-            reqwest::Url::parse("http://127.0.0.1:19999/").unwrap(),
-        )
+        Bot::new("1234567890:AAAAAAAAAAAAAAAAAAAaaaaaaaaa")
+            .set_api_url(reqwest::Url::parse("http://127.0.0.1:19999/").unwrap())
     }
 
     /// Starts an OutboundProcessor in the background and waits for it to subscribe.
@@ -44,22 +42,15 @@ mod outbound_tests {
 
     /// Waits for a message on a subscription with a 5-second timeout.
     async fn recv_msg(sub: &mut async_nats::Subscriber) -> serde_json::Value {
-        let raw = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            sub.next(),
-        )
-        .await
-        .expect("timed out waiting for NATS message")
-        .expect("subscriber closed unexpectedly");
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(5), sub.next())
+            .await
+            .expect("timed out waiting for NATS message")
+            .expect("subscriber closed unexpectedly");
         serde_json::from_slice(&raw.payload).unwrap()
     }
 
     /// Publishes a command as JSON to the given NATS subject.
-    async fn publish_cmd<T: serde::Serialize>(
-        client: &async_nats::Client,
-        subject: &str,
-        cmd: &T,
-    ) {
+    async fn publish_cmd<T: serde::Serialize>(client: &async_nats::Client, subject: &str, cmd: &T) {
         let payload = serde_json::to_vec(cmd).unwrap();
         client
             .publish(subject.to_string(), payload.into())
@@ -493,8 +484,14 @@ mod outbound_tests {
     async fn test_outbound_stop_poll() {
         let prefix = format!("ob-stoppoll-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::poll_stop(&prefix);
-        let cmd = StopPollCommand { chat_id: 99999, message_id: 7, reply_markup: None };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = StopPollCommand {
+            chat_id: 99999,
+            message_id: 7,
+            reply_markup: None,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -503,12 +500,20 @@ mod outbound_tests {
         let prefix = format!("ob-audio-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::message_send_audio(&prefix);
         let cmd = SendAudioCommand {
-            chat_id: 99999, audio: "CQACAgIAAxk".to_string(),
-            caption: None, parse_mode: None, duration: Some(120),
-            performer: Some("Artist".to_string()), title: Some("Song".to_string()),
-            reply_to_message_id: None, reply_markup: None, message_thread_id: None,
+            chat_id: 99999,
+            audio: "CQACAgIAAxk".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(120),
+            performer: Some("Artist".to_string()),
+            title: Some("Song".to_string()),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -517,11 +522,18 @@ mod outbound_tests {
         let prefix = format!("ob-voice-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::message_send_voice(&prefix);
         let cmd = SendVoiceCommand {
-            chat_id: 99999, voice: "AwACAgIAAxk".to_string(),
-            caption: None, parse_mode: None, duration: Some(10),
-            reply_to_message_id: None, reply_markup: None, message_thread_id: None,
+            chat_id: 99999,
+            voice: "AwACAgIAAxk".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: Some(10),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -530,10 +542,15 @@ mod outbound_tests {
         let prefix = format!("ob-sticker-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::message_send_sticker(&prefix);
         let cmd = SendStickerCommand {
-            chat_id: 99999, sticker: "CAACAgIAAxk".to_string(),
-            reply_to_message_id: None, reply_markup: None, message_thread_id: None,
+            chat_id: 99999,
+            sticker: "CAACAgIAAxk".to_string(),
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -542,12 +559,20 @@ mod outbound_tests {
         let prefix = format!("ob-anim-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::message_send_animation(&prefix);
         let cmd = SendAnimationCommand {
-            chat_id: 99999, animation: "CgACAgIAAxk".to_string(),
-            caption: None, parse_mode: None, duration: None,
-            width: None, height: None,
-            reply_to_message_id: None, reply_markup: None, message_thread_id: None,
+            chat_id: 99999,
+            animation: "CgACAgIAAxk".to_string(),
+            caption: None,
+            parse_mode: None,
+            duration: None,
+            width: None,
+            height: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -556,11 +581,16 @@ mod outbound_tests {
         let prefix = format!("ob-vidnote-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::message_send_video_note(&prefix);
         let cmd = SendVideoNoteCommand {
-            chat_id: 99999, video_note: "DQACAgIAAxk".to_string(),
-            duration: Some(5), length: Some(240),
-            reply_to_message_id: None, message_thread_id: None,
+            chat_id: 99999,
+            video_note: "DQACAgIAAxk".to_string(),
+            duration: Some(5),
+            length: Some(240),
+            reply_to_message_id: None,
+            message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -571,13 +601,23 @@ mod outbound_tests {
         let cmd = SendMediaGroupCommand {
             chat_id: 99999,
             media: vec![
-                InputMediaItem::Photo { media: "p1".to_string(), caption: None, parse_mode: None },
-                InputMediaItem::Photo { media: "p2".to_string(), caption: None, parse_mode: None },
+                InputMediaItem::Photo {
+                    media: "p1".to_string(),
+                    caption: None,
+                    parse_mode: None,
+                },
+                InputMediaItem::Photo {
+                    media: "p2".to_string(),
+                    caption: None,
+                    parse_mode: None,
+                },
             ],
             reply_to_message_id: None,
             message_thread_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -598,9 +638,11 @@ mod outbound_tests {
         start_processor(client.clone(), &prefix).await;
 
         let cmd = StreamMessageCommand {
-            chat_id: 99999, message_id: None,
+            chat_id: 99999,
+            message_id: None,
             text: "Streaming chunk...".to_string(),
-            parse_mode: None, is_final: false,
+            parse_mode: None,
+            is_final: false,
             session_id: Some("sess-1".to_string()),
             message_thread_id: None,
         };
@@ -619,23 +661,23 @@ mod outbound_tests {
         let cmd_subject = subjects::agent::inline_answer(&prefix);
         let cmd = AnswerInlineQueryCommand {
             inline_query_id: "iq_test_456".to_string(),
-            results: vec![
-                InlineQueryResult::Article(InlineQueryResultArticle {
-                    id: "r1".to_string(),
-                    title: "Result".to_string(),
-                    input_message_content: InputMessageContent {
-                        message_text: "The answer".to_string(),
-                        parse_mode: None,
-                    },
-                    description: None,
-                    thumb_url: None,
-                }),
-            ],
+            results: vec![InlineQueryResult::Article(InlineQueryResultArticle {
+                id: "r1".to_string(),
+                title: "Result".to_string(),
+                input_message_content: InputMessageContent {
+                    message_text: "The answer".to_string(),
+                    parse_mode: None,
+                },
+                description: None,
+                thumb_url: None,
+            })],
             cache_time: None,
             is_personal: None,
             next_offset: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -646,10 +688,14 @@ mod outbound_tests {
         let prefix = format!("ob-fcreate-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_create(&prefix);
         let cmd = CreateForumTopicCommand {
-            chat_id: 99999, name: "Support".to_string(),
-            icon_color: Some(0x6FB9F0), icon_custom_emoji_id: None,
+            chat_id: 99999,
+            name: "Support".to_string(),
+            icon_color: Some(0x6FB9F0),
+            icon_custom_emoji_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -658,10 +704,14 @@ mod outbound_tests {
         let prefix = format!("ob-fedit-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_edit(&prefix);
         let cmd = EditForumTopicCommand {
-            chat_id: 99999, message_thread_id: 3,
-            name: Some("Support v2".to_string()), icon_custom_emoji_id: None,
+            chat_id: 99999,
+            message_thread_id: 3,
+            name: Some("Support v2".to_string()),
+            icon_custom_emoji_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -669,8 +719,13 @@ mod outbound_tests {
     async fn test_outbound_forum_close() {
         let prefix = format!("ob-fclose-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_close(&prefix);
-        let cmd = CloseForumTopicCommand { chat_id: 99999, message_thread_id: 3 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = CloseForumTopicCommand {
+            chat_id: 99999,
+            message_thread_id: 3,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -678,8 +733,13 @@ mod outbound_tests {
     async fn test_outbound_forum_reopen() {
         let prefix = format!("ob-freopen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_reopen(&prefix);
-        let cmd = ReopenForumTopicCommand { chat_id: 99999, message_thread_id: 3 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = ReopenForumTopicCommand {
+            chat_id: 99999,
+            message_thread_id: 3,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -687,8 +747,13 @@ mod outbound_tests {
     async fn test_outbound_forum_delete() {
         let prefix = format!("ob-fdel-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_delete(&prefix);
-        let cmd = DeleteForumTopicCommand { chat_id: 99999, message_thread_id: 3 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = DeleteForumTopicCommand {
+            chat_id: 99999,
+            message_thread_id: 3,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -696,8 +761,13 @@ mod outbound_tests {
     async fn test_outbound_forum_unpin() {
         let prefix = format!("ob-funpin-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_unpin(&prefix);
-        let cmd = UnpinAllForumTopicMessagesCommand { chat_id: 99999, message_thread_id: 3 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = UnpinAllForumTopicMessagesCommand {
+            chat_id: 99999,
+            message_thread_id: 3,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -705,8 +775,13 @@ mod outbound_tests {
     async fn test_outbound_forum_edit_general() {
         let prefix = format!("ob-fgeneral-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_edit_general(&prefix);
-        let cmd = EditGeneralForumTopicCommand { chat_id: 99999, name: "General".to_string() };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = EditGeneralForumTopicCommand {
+            chat_id: 99999,
+            name: "General".to_string(),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -715,7 +790,9 @@ mod outbound_tests {
         let prefix = format!("ob-fclgen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_close_general(&prefix);
         let cmd = CloseGeneralForumTopicCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -724,7 +801,9 @@ mod outbound_tests {
         let prefix = format!("ob-freopgen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_reopen_general(&prefix);
         let cmd = ReopenGeneralForumTopicCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -733,7 +812,9 @@ mod outbound_tests {
         let prefix = format!("ob-fhidegen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_hide_general(&prefix);
         let cmd = HideGeneralForumTopicCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -742,7 +823,9 @@ mod outbound_tests {
         let prefix = format!("ob-funhidegen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_unhide_general(&prefix);
         let cmd = UnhideGeneralForumTopicCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -751,7 +834,9 @@ mod outbound_tests {
         let prefix = format!("ob-funpingen-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::forum_unpin_general(&prefix);
         let cmd = UnpinAllGeneralForumTopicMessagesCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -763,10 +848,16 @@ mod outbound_tests {
         let prefix = format!("ob-promote-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_promote(&prefix);
         let cmd = PromoteChatMemberCommand {
-            chat_id: 99999, user_id: 1001,
-            rights: Some(ChatAdministratorRights { can_delete_messages: Some(true), ..Default::default() }),
+            chat_id: 99999,
+            user_id: 1001,
+            rights: Some(ChatAdministratorRights {
+                can_delete_messages: Some(true),
+                ..Default::default()
+            }),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -776,11 +867,17 @@ mod outbound_tests {
         let prefix = format!("ob-restrict-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_restrict(&prefix);
         let cmd = RestrictChatMemberCommand {
-            chat_id: 99999, user_id: 1001,
-            permissions: ChatPermissions { can_send_messages: Some(false), ..Default::default() },
+            chat_id: 99999,
+            user_id: 1001,
+            permissions: ChatPermissions {
+                can_send_messages: Some(false),
+                ..Default::default()
+            },
             until_date: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -789,10 +886,14 @@ mod outbound_tests {
         let prefix = format!("ob-ban-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_ban(&prefix);
         let cmd = BanChatMemberCommand {
-            chat_id: 99999, user_id: 1001,
-            until_date: None, revoke_messages: Some(true),
+            chat_id: 99999,
+            user_id: 1001,
+            until_date: None,
+            revoke_messages: Some(true),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -801,9 +902,13 @@ mod outbound_tests {
         let prefix = format!("ob-unban-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_unban(&prefix);
         let cmd = UnbanChatMemberCommand {
-            chat_id: 99999, user_id: 1001, only_if_banned: Some(true),
+            chat_id: 99999,
+            user_id: 1001,
+            only_if_banned: Some(true),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -814,9 +919,14 @@ mod outbound_tests {
         let cmd_subject = subjects::agent::admin_set_permissions(&prefix);
         let cmd = SetChatPermissionsCommand {
             chat_id: 99999,
-            permissions: ChatPermissions { can_send_messages: Some(true), ..Default::default() },
+            permissions: ChatPermissions {
+                can_send_messages: Some(true),
+                ..Default::default()
+            },
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -825,9 +935,13 @@ mod outbound_tests {
         let prefix = format!("ob-settitle-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_set_title(&prefix);
         let cmd = SetChatAdministratorCustomTitleCommand {
-            chat_id: 99999, user_id: 1001, custom_title: "Head of Ops".to_string(),
+            chat_id: 99999,
+            user_id: 1001,
+            custom_title: "Head of Ops".to_string(),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -836,9 +950,13 @@ mod outbound_tests {
         let prefix = format!("ob-pin-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_pin(&prefix);
         let cmd = PinChatMessageCommand {
-            chat_id: 99999, message_id: 42, disable_notification: Some(true),
+            chat_id: 99999,
+            message_id: 42,
+            disable_notification: Some(true),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -846,8 +964,13 @@ mod outbound_tests {
     async fn test_outbound_admin_unpin() {
         let prefix = format!("ob-unpin-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_unpin(&prefix);
-        let cmd = UnpinChatMessageCommand { chat_id: 99999, message_id: Some(42) };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = UnpinChatMessageCommand {
+            chat_id: 99999,
+            message_id: Some(42),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -856,7 +979,9 @@ mod outbound_tests {
         let prefix = format!("ob-unpinall-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_unpin_all(&prefix);
         let cmd = UnpinAllChatMessagesCommand { chat_id: 99999 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -864,8 +989,13 @@ mod outbound_tests {
     async fn test_outbound_admin_set_chat_title() {
         let prefix = format!("ob-chattitle-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_set_chat_title(&prefix);
-        let cmd = SetChatTitleCommand { chat_id: 99999, title: "New Name".to_string() };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = SetChatTitleCommand {
+            chat_id: 99999,
+            title: "New Name".to_string(),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -873,8 +1003,13 @@ mod outbound_tests {
     async fn test_outbound_admin_set_chat_description() {
         let prefix = format!("ob-chatdesc-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::admin_set_chat_description(&prefix);
-        let cmd = SetChatDescriptionCommand { chat_id: 99999, description: "A test group".to_string() };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = SetChatDescriptionCommand {
+            chat_id: 99999,
+            description: "A test group".to_string(),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -884,8 +1019,13 @@ mod outbound_tests {
     async fn test_outbound_file_get() {
         let prefix = format!("ob-fileget-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::file_get(&prefix);
-        let cmd = GetFileCommand { file_id: "AgACAgIAAxk".to_string(), request_id: Some("req-1".to_string()) };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = GetFileCommand {
+            file_id: "AgACAgIAAxk".to_string(),
+            request_id: Some("req-1".to_string()),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -898,7 +1038,9 @@ mod outbound_tests {
             destination_path: "/tmp/test_file.jpg".to_string(),
             request_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -916,17 +1058,33 @@ mod outbound_tests {
             payload: "sub_monthly".to_string(),
             provider_token: "FAKE_PROVIDER_TOKEN".to_string(),
             currency: "USD".to_string(),
-            prices: vec![LabeledPrice { label: "Monthly".to_string(), amount: 999 }],
-            max_tip_amount: None, suggested_tip_amounts: None, start_parameter: None,
-            provider_data: None, photo_url: None, photo_size: None,
-            photo_width: None, photo_height: None,
-            need_name: None, need_phone_number: None, need_email: None,
-            need_shipping_address: None, send_email_to_provider: None,
-            send_phone_number_to_provider: None, is_flexible: None,
-            disable_notification: None, protect_content: None,
-            reply_to_message_id: None, reply_markup: None,
+            prices: vec![LabeledPrice {
+                label: "Monthly".to_string(),
+                amount: 999,
+            }],
+            max_tip_amount: None,
+            suggested_tip_amounts: None,
+            start_parameter: None,
+            provider_data: None,
+            photo_url: None,
+            photo_size: None,
+            photo_width: None,
+            photo_height: None,
+            need_name: None,
+            need_phone_number: None,
+            need_email: None,
+            need_shipping_address: None,
+            send_email_to_provider: None,
+            send_phone_number_to_provider: None,
+            is_flexible: None,
+            disable_notification: None,
+            protect_content: None,
+            reply_to_message_id: None,
+            reply_markup: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -939,7 +1097,9 @@ mod outbound_tests {
             ok: true,
             error_message: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -954,11 +1114,16 @@ mod outbound_tests {
             shipping_options: Some(vec![ShippingOption {
                 id: "standard".to_string(),
                 title: "Standard Shipping".to_string(),
-                prices: vec![LabeledPrice { label: "Shipping".to_string(), amount: 500 }],
+                prices: vec![LabeledPrice {
+                    label: "Shipping".to_string(),
+                    amount: 500,
+                }],
             }]),
             error_message: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -971,13 +1136,21 @@ mod outbound_tests {
         let cmd_subject = subjects::agent::bot_commands_set(&prefix);
         let cmd = SetMyCommandsCommand {
             commands: vec![
-                BotCommand { command: "start".to_string(), description: "Start the bot".to_string() },
-                BotCommand { command: "help".to_string(), description: "Show help".to_string() },
+                BotCommand {
+                    command: "start".to_string(),
+                    description: "Start the bot".to_string(),
+                },
+                BotCommand {
+                    command: "help".to_string(),
+                    description: "Show help".to_string(),
+                },
             ],
             scope: None,
             language_code: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -985,8 +1158,13 @@ mod outbound_tests {
     async fn test_outbound_bot_commands_delete() {
         let prefix = format!("ob-cmddel-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::bot_commands_delete(&prefix);
-        let cmd = DeleteMyCommandsCommand { scope: None, language_code: None };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = DeleteMyCommandsCommand {
+            scope: None,
+            language_code: None,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -994,8 +1172,14 @@ mod outbound_tests {
     async fn test_outbound_bot_commands_get() {
         let prefix = format!("ob-cmdget-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::bot_commands_get(&prefix);
-        let cmd = GetMyCommandsCommand { scope: None, language_code: None, request_id: None };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = GetMyCommandsCommand {
+            scope: None,
+            language_code: None,
+            request_id: None,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1005,8 +1189,13 @@ mod outbound_tests {
     async fn test_outbound_sticker_get_set() {
         let prefix = format!("ob-stkgetset-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_get_set(&prefix);
-        let cmd = GetStickerSetCommand { name: "my_stickers".to_string(), request_id: None };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = GetStickerSetCommand {
+            name: "my_stickers".to_string(),
+            request_id: None,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1015,10 +1204,14 @@ mod outbound_tests {
         let prefix = format!("ob-stkupload-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_upload_file(&prefix);
         let cmd = UploadStickerFileCommand {
-            user_id: 1001, sticker: "CAACAgIAAxk".to_string(),
-            format: "static".to_string(), request_id: None,
+            user_id: 1001,
+            sticker: "CAACAgIAAxk".to_string(),
+            format: "static".to_string(),
+            request_id: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1041,7 +1234,9 @@ mod outbound_tests {
             sticker_type: None,
             needs_repainting: None,
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1061,7 +1256,9 @@ mod outbound_tests {
                 keywords: vec![],
             },
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1069,8 +1266,13 @@ mod outbound_tests {
     async fn test_outbound_sticker_set_position() {
         let prefix = format!("ob-stkpos-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_set_position(&prefix);
-        let cmd = SetStickerPositionInSetCommand { sticker: "CAACAgIAAxk".to_string(), position: 2 };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = SetStickerPositionInSetCommand {
+            sticker: "CAACAgIAAxk".to_string(),
+            position: 2,
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1078,8 +1280,12 @@ mod outbound_tests {
     async fn test_outbound_sticker_delete_from_set() {
         let prefix = format!("ob-stkdelfromset-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_delete_from_set(&prefix);
-        let cmd = DeleteStickerFromSetCommand { sticker: "CAACAgIAAxk".to_string() };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = DeleteStickerFromSetCommand {
+            sticker: "CAACAgIAAxk".to_string(),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1088,9 +1294,12 @@ mod outbound_tests {
         let prefix = format!("ob-stktitle-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_set_title(&prefix);
         let cmd = SetStickerSetTitleCommand {
-            name: "my_pack_by_testbot".to_string(), title: "Better Pack".to_string(),
+            name: "my_pack_by_testbot".to_string(),
+            title: "Better Pack".to_string(),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1104,7 +1313,9 @@ mod outbound_tests {
             format: "static".to_string(),
             thumbnail: Some("CAACAgIAAxk".to_string()),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1112,8 +1323,12 @@ mod outbound_tests {
     async fn test_outbound_sticker_delete_set() {
         let prefix = format!("ob-stkdelset-{}", uuid::Uuid::new_v4().simple());
         let cmd_subject = subjects::agent::sticker_delete_set(&prefix);
-        let cmd = DeleteStickerSetCommand { name: "my_pack_by_testbot".to_string() };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let cmd = DeleteStickerSetCommand {
+            name: "my_pack_by_testbot".to_string(),
+        };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1125,7 +1340,9 @@ mod outbound_tests {
             sticker: "CAACAgIAAxk".to_string(),
             emoji_list: vec!["😀".to_string(), "🎉".to_string()],
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1137,7 +1354,9 @@ mod outbound_tests {
             sticker: "CAACAgIAAxk".to_string(),
             keywords: vec!["funny".to_string(), "happy".to_string()],
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 
@@ -1148,9 +1367,16 @@ mod outbound_tests {
         let cmd_subject = subjects::agent::sticker_set_mask_position(&prefix);
         let cmd = SetStickerMaskPositionCommand {
             sticker: "CAACAgIAAxk".to_string(),
-            mask_position: Some(MaskPosition { point: MaskPoint::Eyes, x_shift: 0.1, y_shift: -0.1, scale: 1.0 }),
+            mask_position: Some(MaskPosition {
+                point: MaskPoint::Eyes,
+                x_shift: 0.1,
+                y_shift: -0.1,
+                scale: 1.0,
+            }),
         };
-        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else { return; };
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
         assert_eq!(evt["command_subject"], cmd_subject);
     }
 }

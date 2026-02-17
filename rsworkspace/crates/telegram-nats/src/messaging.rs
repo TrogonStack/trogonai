@@ -204,16 +204,16 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.roundtrip.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.roundtrip.{}", uuid::Uuid::new_v4().simple());
 
         let publisher = MessagePublisher::new(client.clone(), "test");
         let subscriber = MessageSubscriber::new(client.clone(), "test");
         let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
 
-        let sent = TestMsg { value: "hello".to_string(), count: 42 };
+        let sent = TestMsg {
+            value: "hello".to_string(),
+            count: 42,
+        };
         publisher.publish(&subject, &sent).await.unwrap();
 
         let received = stream.next().await.unwrap().unwrap();
@@ -226,10 +226,7 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.headers.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.headers.{}", uuid::Uuid::new_v4().simple());
 
         let publisher = MessagePublisher::new(client.clone(), "test");
         let subscriber = MessageSubscriber::new(client.clone(), "test");
@@ -238,8 +235,14 @@ mod tests {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("x-source", "test");
 
-        let sent = TestMsg { value: "with-headers".to_string(), count: 1 };
-        publisher.publish_with_headers(&subject, &sent, headers).await.unwrap();
+        let sent = TestMsg {
+            value: "with-headers".to_string(),
+            count: 1,
+        };
+        publisher
+            .publish_with_headers(&subject, &sent, headers)
+            .await
+            .unwrap();
 
         let received = stream.next().await.unwrap().unwrap();
         assert_eq!(received, sent);
@@ -251,10 +254,7 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.queue.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.queue.{}", uuid::Uuid::new_v4().simple());
 
         let publisher = MessagePublisher::new(client.clone(), "test");
         let subscriber = MessageSubscriber::new(client.clone(), "test");
@@ -263,7 +263,10 @@ mod tests {
             .await
             .unwrap();
 
-        let sent = TestMsg { value: "queued".to_string(), count: 7 };
+        let sent = TestMsg {
+            value: "queued".to_string(),
+            count: 7,
+        };
         publisher.publish(&subject, &sent).await.unwrap();
 
         let received = stream.next().await.unwrap().unwrap();
@@ -276,10 +279,7 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.invalid.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.invalid.{}", uuid::Uuid::new_v4().simple());
 
         let subscriber = MessageSubscriber::new(client.clone(), "test");
         let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
@@ -300,10 +300,7 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.raw.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.raw.{}", uuid::Uuid::new_v4().simple());
 
         let subscriber = MessageSubscriber::new(client.clone(), "test");
         let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();
@@ -345,10 +342,7 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!(
-            "test.messaging.order.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.messaging.order.{}", uuid::Uuid::new_v4().simple());
 
         let publisher = MessagePublisher::new(client.clone(), "test");
         let subscriber = MessageSubscriber::new(client.clone(), "test");
@@ -356,7 +350,13 @@ mod tests {
 
         for i in 0..3u32 {
             publisher
-                .publish(&subject, &TestMsg { value: "msg".to_string(), count: i })
+                .publish(
+                    &subject,
+                    &TestMsg {
+                        value: "msg".to_string(),
+                        count: i,
+                    },
+                )
                 .await
                 .unwrap();
         }
