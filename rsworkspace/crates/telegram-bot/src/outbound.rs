@@ -51,6 +51,9 @@ impl OutboundProcessor {
         let edit_task = self.handle_edit_messages(prefix.clone());
         let delete_task = self.handle_delete_messages(prefix.clone());
         let photo_task = self.handle_send_photos(prefix.clone());
+        let sticker_task = self.handle_send_stickers(prefix.clone());
+        let animation_task = self.handle_send_animations(prefix.clone());
+        let video_note_task = self.handle_send_video_notes(prefix.clone());
         let callback_task = self.handle_answer_callbacks(prefix.clone());
         let action_task = self.handle_chat_actions(prefix.clone());
         let stream_task = self.handle_stream_messages(prefix.clone());
@@ -67,6 +70,9 @@ impl OutboundProcessor {
             edit_task,
             delete_task,
             photo_task,
+            sticker_task,
+            animation_task,
+            video_note_task,
             callback_task,
             action_task,
             stream_task,
@@ -218,6 +224,144 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => error!("Failed to deserialize send photo command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send sticker commands
+    async fn handle_send_stickers(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_sticker(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendStickerCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send sticker command for chat {}", cmd.chat_id);
+
+                    let sticker = teloxide::types::InputFile::file_id(cmd.sticker);
+                    let mut req = self.bot.send_sticker(ChatId(cmd.chat_id), sticker);
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(markup) = cmd.reply_markup {
+                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(convert_inline_keyboard(markup)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send sticker command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send animation (GIF) commands
+    async fn handle_send_animations(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_animation(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendAnimationCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send animation command for chat {}", cmd.chat_id);
+
+                    let animation = teloxide::types::InputFile::file_id(cmd.animation);
+                    let mut req = self.bot.send_animation(ChatId(cmd.chat_id), animation);
+
+                    if let Some(caption) = cmd.caption {
+                        req.caption = Some(caption);
+                    }
+
+                    if let Some(parse_mode) = cmd.parse_mode {
+                        req.parse_mode = Some(convert_parse_mode(parse_mode));
+                    }
+
+                    if let Some(duration) = cmd.duration {
+                        req.duration = Some(duration);
+                    }
+
+                    if let Some(width) = cmd.width {
+                        req.width = Some(width);
+                    }
+
+                    if let Some(height) = cmd.height {
+                        req.height = Some(height);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(markup) = cmd.reply_markup {
+                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(convert_inline_keyboard(markup)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send animation command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send video note commands
+    async fn handle_send_video_notes(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_video_note(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendVideoNoteCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send video note command for chat {}", cmd.chat_id);
+
+                    let video_note = teloxide::types::InputFile::file_id(cmd.video_note);
+                    let mut req = self.bot.send_video_note(ChatId(cmd.chat_id), video_note);
+
+                    if let Some(duration) = cmd.duration {
+                        req.duration = Some(duration);
+                    }
+
+                    if let Some(length) = cmd.length {
+                        req.length = Some(length);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send video note command: {}", e),
             }
         }
 
@@ -1149,7 +1293,7 @@ fn convert_chat_action(action: ChatAction) -> teloxide::types::ChatAction {
         ChatAction::RecordVoice => teloxide::types::ChatAction::RecordVoice,
         ChatAction::UploadVoice => teloxide::types::ChatAction::UploadVoice,
         ChatAction::UploadDocument => teloxide::types::ChatAction::UploadDocument,
-        ChatAction::ChooseSticker => teloxide::types::ChatAction::Typing, // Fallback to Typing
+        ChatAction::ChooseSticker => teloxide::types::ChatAction::Typing, // no direct equivalent in this teloxide version
         ChatAction::FindLocation => teloxide::types::ChatAction::FindLocation,
     }
 }

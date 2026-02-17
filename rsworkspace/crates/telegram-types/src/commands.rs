@@ -78,6 +78,61 @@ pub struct SendPhotoCommand {
     pub message_thread_id: Option<i32>,
 }
 
+/// Send a sticker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendStickerCommand {
+    pub chat_id: i64,
+    /// file_id of the sticker on Telegram servers
+    pub sticker: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send an animation (GIF)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendAnimationCommand {
+    pub chat_id: i64,
+    /// file_id or URL of the animation
+    pub animation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send a video note (short round video)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendVideoNoteCommand {
+    pub chat_id: i64,
+    /// file_id of the video note
+    pub video_note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    /// Diameter of the video (must be equal to video width and height)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
 /// Answer a callback query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnswerCallbackCommand {

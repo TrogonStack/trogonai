@@ -182,6 +182,18 @@ async fn main() -> Result<()> {
         .branch(
             dptree::filter(|msg: Message| msg.voice().is_some())
                 .endpoint(handlers::handle_voice_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.sticker().is_some())
+                .endpoint(handlers::handle_sticker_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.animation().is_some())
+                .endpoint(handlers::handle_animation_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.video_note().is_some())
+                .endpoint(handlers::handle_video_note_message),
         );
 
     let callback_handler = Update::filter_callback_query()

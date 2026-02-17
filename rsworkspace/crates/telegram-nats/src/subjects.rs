@@ -70,6 +70,21 @@ pub mod bot {
         format!("telegram.{}.bot.message.voice", prefix)
     }
 
+    /// Sticker message event subject
+    pub fn message_sticker(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.sticker", prefix)
+    }
+
+    /// Animation (GIF) message event subject
+    pub fn message_animation(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.animation", prefix)
+    }
+
+    /// Video note message event subject
+    pub fn message_video_note(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.video_note", prefix)
+    }
+
     /// Callback query event subject
     pub fn callback_query(prefix: &str) -> String {
         format!("telegram.{}.bot.callback.query", prefix)
@@ -171,6 +186,21 @@ pub mod agent {
     /// Send photo command subject
     pub fn message_send_photo(prefix: &str) -> String {
         format!("telegram.{}.agent.message.send_photo", prefix)
+    }
+
+    /// Send sticker command subject
+    pub fn message_send_sticker(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_sticker", prefix)
+    }
+
+    /// Send animation (GIF) command subject
+    pub fn message_send_animation(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_animation", prefix)
+    }
+
+    /// Send video note command subject
+    pub fn message_send_video_note(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_video_note", prefix)
     }
 
     /// Stream message command subject
