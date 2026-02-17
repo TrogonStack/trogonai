@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::{BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup, LabeledPrice, ShippingOption};
+use crate::chat::{BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup, InputSticker, LabeledPrice, MaskPosition, ShippingOption, StickerSet};
 
 /// Parse mode for message formatting
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -976,4 +976,150 @@ pub struct AnswerShippingQueryCommand {
     /// Error message if ok is false (required when ok is false)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+}
+
+// ── Sticker set management ────────────────────────────────────────────────────
+
+/// Get sticker set info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetStickerSetCommand {
+    /// Name of the sticker set
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Response to GetStickerSetCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StickerSetResponse {
+    pub sticker_set: StickerSet,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Upload a sticker file (returns file_id usable for creating sticker sets)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadStickerFileCommand {
+    /// User ID of the sticker set owner
+    pub user_id: i64,
+    /// file_id of the sticker to upload
+    pub sticker: String,
+    /// Format: "static", "animated", or "video"
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Response to UploadStickerFileCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadStickerFileResponse {
+    /// file_id of the uploaded sticker file
+    pub file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Create a new sticker set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateNewStickerSetCommand {
+    /// User ID of the sticker set owner
+    pub user_id: i64,
+    /// Short name (1-64 chars, a-z 0-9 _, must end in _by_<bot_username>)
+    pub name: String,
+    /// Sticker set title (1-64 chars)
+    pub title: String,
+    /// List of stickers to be added to the set (1-50)
+    pub stickers: Vec<InputSticker>,
+    /// Kind of stickers in the set: "regular", "mask", or "custom_emoji"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sticker_type: Option<String>,
+    /// True if custom emoji stickers can be used as chat boosts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needs_repainting: Option<bool>,
+}
+
+/// Add a sticker to an existing set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddStickerToSetCommand {
+    /// User ID of the sticker set owner
+    pub user_id: i64,
+    /// Sticker set name
+    pub name: String,
+    /// Sticker to add
+    pub sticker: InputSticker,
+}
+
+/// Move a sticker to a specific position in its set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerPositionInSetCommand {
+    /// file_id of the sticker
+    pub sticker: String,
+    /// New zero-based position in the set
+    pub position: u32,
+}
+
+/// Delete a sticker from its set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteStickerFromSetCommand {
+    /// file_id of the sticker to delete
+    pub sticker: String,
+}
+
+/// Set the title of a sticker set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerSetTitleCommand {
+    /// Sticker set name
+    pub name: String,
+    /// New title (1-64 chars)
+    pub title: String,
+}
+
+/// Set the thumbnail of a sticker set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerSetThumbnailCommand {
+    /// Sticker set name
+    pub name: String,
+    /// User ID of the sticker set owner
+    pub user_id: i64,
+    /// Format of the thumbnail: "static", "animated", or "video"
+    pub format: String,
+    /// file_id of the thumbnail (omit to remove)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
+}
+
+/// Delete an entire sticker set
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteStickerSetCommand {
+    /// Sticker set name
+    pub name: String,
+}
+
+/// Set the list of emoji associated with a sticker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerEmojiListCommand {
+    /// file_id of the sticker
+    pub sticker: String,
+    /// 1-20 emoji associated with the sticker
+    pub emoji_list: Vec<String>,
+}
+
+/// Set search keywords for a sticker (regular and custom_emoji only)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerKeywordsCommand {
+    /// file_id of the sticker
+    pub sticker: String,
+    /// 0-20 keywords (total ≤ 64 chars)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub keywords: Vec<String>,
+}
+
+/// Set the mask position for a mask sticker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStickerMaskPositionCommand {
+    /// file_id of the sticker
+    pub sticker: String,
+    /// New mask position (omit to remove)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask_position: Option<MaskPosition>,
 }
