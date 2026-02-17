@@ -384,6 +384,76 @@ pub struct ShippingQueryEvent {
     pub shipping_address: ShippingAddress,
 }
 
+/// Poll type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PollType {
+    Regular,
+    Quiz,
+}
+
+/// A single poll answer option with its current vote count
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollOption {
+    pub text: String,
+    pub voter_count: u32,
+}
+
+/// Poll message event — poll sent inside a chat message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePollEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub poll_id: String,
+    pub question: String,
+    pub options: Vec<PollOption>,
+    pub total_voter_count: u32,
+    pub is_closed: bool,
+    pub is_anonymous: bool,
+    pub poll_type: PollType,
+    pub allows_multiple_answers: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correct_option_id: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    /// Open period in seconds (auto-close timer)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_period: Option<u32>,
+}
+
+/// Standalone poll update — sent when a poll's state changes (votes updated, closed, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollUpdateEvent {
+    pub metadata: EventMetadata,
+    pub poll_id: String,
+    pub question: String,
+    pub options: Vec<PollOption>,
+    pub total_voter_count: u32,
+    pub is_closed: bool,
+    pub is_anonymous: bool,
+    pub poll_type: PollType,
+    pub allows_multiple_answers: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correct_option_id: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+}
+
+/// Poll answer event — sent when a user votes in a non-anonymous poll
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollAnswerEvent {
+    pub metadata: EventMetadata,
+    pub poll_id: String,
+    /// Indices of the chosen options (empty = vote retracted)
+    pub option_ids: Vec<u8>,
+    /// User ID of the voter (if not anonymous)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voter_user_id: Option<i64>,
+    /// Chat ID when vote is cast anonymously via a chat
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voter_chat_id: Option<i64>,
+}
+
 /// Successful payment event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessfulPaymentEvent {
