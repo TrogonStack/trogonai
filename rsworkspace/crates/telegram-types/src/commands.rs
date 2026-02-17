@@ -978,6 +978,75 @@ pub struct AnswerShippingQueryCommand {
     pub error_message: Option<String>,
 }
 
+// ── Location / Venue / Contact ────────────────────────────────────────────────
+
+/// Send a location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendLocationCommand {
+    pub chat_id: i64,
+    pub latitude: f64,
+    pub longitude: f64,
+    /// Live location period in seconds (60-86400, or 0x7FFFFFFF for indefinite)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_period: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horizontal_accuracy: Option<f64>,
+    /// Heading direction in degrees (1-360)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<u16>,
+    /// Proximity alert radius in meters (1-100000)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proximity_alert_radius: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send a venue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendVenueCommand {
+    pub chat_id: i64,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub title: String,
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
+/// Send a contact
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendContactCommand {
+    pub chat_id: i64,
+    pub phone_number: String,
+    pub first_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vcard: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+}
+
 // ── Sticker set management ────────────────────────────────────────────────────
 
 /// Get sticker set info

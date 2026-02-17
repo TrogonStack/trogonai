@@ -74,6 +74,61 @@ pub struct MessageVoiceEvent {
     pub voice: FileInfo,
 }
 
+/// Location message event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageLocationEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub longitude: f64,
+    pub latitude: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horizontal_accuracy: Option<f64>,
+    /// Live location period in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_period: Option<u32>,
+    /// Heading direction in degrees (1-360), live locations only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<u16>,
+    /// Proximity alert radius in meters, live locations only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proximity_alert_radius: Option<u32>,
+}
+
+/// Venue message event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageVenueEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub longitude: f64,
+    pub latitude: f64,
+    pub title: String,
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_type: Option<String>,
+}
+
+/// Contact message event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageContactEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub phone_number: String,
+    pub first_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
+    /// Telegram user ID of the contact, if known
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vcard: Option<String>,
+}
+
 /// Sticker format (encoding)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

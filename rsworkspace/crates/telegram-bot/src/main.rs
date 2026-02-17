@@ -184,6 +184,18 @@ async fn main() -> Result<()> {
                 .endpoint(handlers::handle_voice_message),
         )
         .branch(
+            dptree::filter(|msg: Message| msg.location().is_some())
+                .endpoint(handlers::handle_location_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.venue().is_some())
+                .endpoint(handlers::handle_venue_message),
+        )
+        .branch(
+            dptree::filter(|msg: Message| msg.contact().is_some())
+                .endpoint(handlers::handle_contact_message),
+        )
+        .branch(
             dptree::filter(|msg: Message| msg.sticker().is_some())
                 .endpoint(handlers::handle_sticker_message),
         )

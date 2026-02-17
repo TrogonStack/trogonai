@@ -139,6 +139,45 @@ pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridg
     Ok(())
 }
 
+/// Handle location messages
+pub async fn handle_location_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received location message");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_location_message(&msg, update_id).await {
+        error!("Failed to publish location message: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle venue messages
+pub async fn handle_venue_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received venue message");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_venue_message(&msg, update_id).await {
+        error!("Failed to publish venue message: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle contact messages
+pub async fn handle_contact_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Received contact message");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_contact_message(&msg, update_id).await {
+        error!("Failed to publish contact message: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
 /// Handle sticker messages
 pub async fn handle_sticker_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = msg.id.0 as i64;
