@@ -36,7 +36,7 @@ struct Args {
     anthropic_api_key: Option<String>,
 
     /// Claude model to use
-    #[arg(long, env = "CLAUDE_MODEL", default_value = "claude-3-5-sonnet-20241022")]
+    #[arg(long, env = "CLAUDE_MODEL", default_value = "claude-sonnet-4-5-20250929")]
     claude_model: String,
 
     /// Enable LLM mode (requires API key)
@@ -78,6 +78,35 @@ async fn main() -> Result<()> {
     let nats_client = telegram_nats::connect(&nats_config).await?;
     info!("Connected to NATS successfully");
 
+    // Setup JetStream KV for persistent conversation history
+    let conversation_kv = {
+        let js = async_nats::jetstream::new(nats_client.clone());
+        let bucket = format!("telegram_conversations_{}", args.prefix);
+        match js.get_key_value(&bucket).await {
+            Ok(kv) => {
+                info!("Using existing conversation KV bucket: {}", bucket);
+                Some(kv)
+            }
+            Err(_) => {
+                match js.create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: bucket.clone(),
+                    history: 1,
+                    storage: async_nats::jetstream::stream::StorageType::File,
+                    ..Default::default()
+                }).await {
+                    Ok(kv) => {
+                        info!("Created conversation KV bucket: {}", bucket);
+                        Some(kv)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not create conversation KV bucket (running without persistence): {}", e);
+                        None
+                    }
+                }
+            }
+        }
+    };
+
     // Configure LLM if enabled
     let llm_config = if args.enable_llm {
         if let Some(api_key) = args.anthropic_api_key {
@@ -103,6 +132,7 @@ async fn main() -> Result<()> {
         args.prefix,
         args.agent_name,
         llm_config,
+        conversation_kv,
     );
 
     info!("Agent initialized, starting message processing...");

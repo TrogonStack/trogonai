@@ -1,7 +1,7 @@
 //! Message processor - handles business logic for different message types
 
 use telegram_types::events::{MessageTextEvent, MessagePhotoEvent, CommandEvent, CallbackQueryEvent};
-use telegram_types::commands::{SendMessageCommand, AnswerCallbackCommand, SendChatActionCommand, ChatAction};
+use telegram_types::commands::{SendMessageCommand, AnswerCallbackCommand, SendChatActionCommand, ChatAction, StreamMessageCommand};
 use telegram_nats::{MessagePublisher, subjects};
 use tracing::{debug, info, warn};
 use anyhow::Result;
@@ -17,10 +17,17 @@ pub struct MessageProcessor {
 
 impl MessageProcessor {
     /// Create a new message processor
-    pub fn new(llm_config: Option<ClaudeConfig>) -> Self {
+    pub fn new(
+        llm_config: Option<ClaudeConfig>,
+        conversation_kv: Option<async_nats::jetstream::kv::Store>,
+    ) -> Self {
+        let conversation_manager = match conversation_kv {
+            Some(kv) => ConversationManager::with_kv(kv),
+            None => ConversationManager::new(),
+        };
         Self {
             llm_client: llm_config.map(ClaudeClient::new),
-            conversation_manager: ConversationManager::new(),
+            conversation_manager,
         }
     }
 
@@ -32,55 +39,87 @@ impl MessageProcessor {
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
         let session_id = &event.metadata.session_id;
+        let message_thread_id = event.message.message_thread_id;
 
         // Send typing indicator
         self.send_typing_indicator(chat_id, publisher).await?;
 
-        // Generate response
-        let response_text = if let Some(ref llm_client) = self.llm_client {
-            // LLM mode: Generate intelligent response
-            debug!("Generating LLM response for session {}", session_id);
-
-            // Get conversation history
+        if let Some(ref llm_client) = self.llm_client {
             let history = self.conversation_manager.get_history(session_id).await;
 
-            // System prompt
             let system_prompt = "You are a helpful AI assistant in a Telegram chat. \
                 Be concise, friendly, and helpful. Keep responses under 500 words unless \
                 the user specifically asks for more detail.";
 
-            // Generate response
-            match llm_client.generate_response(system_prompt, &event.text, &history).await {
-                Ok(response) => {
-                    // Add to conversation history
-                    self.conversation_manager.add_message(session_id, "user", &event.text).await;
-                    self.conversation_manager.add_message(session_id, "assistant", &response).await;
-                    response
+            // Record user message before streaming starts
+            self.conversation_manager.add_message(session_id, "user", &event.text).await;
+
+            match llm_client.generate_response_streaming(system_prompt, &event.text, &history).await {
+                Ok(mut rx) => {
+                    let stream_subject = subjects::agent::message_stream(publisher.prefix());
+                    let mut accumulated = String::new();
+
+                    while let Some(chunk_result) = rx.recv().await {
+                        match chunk_result {
+                            Ok(chunk) => {
+                                accumulated.push_str(&chunk);
+
+                                let cmd = StreamMessageCommand {
+                                    chat_id,
+                                    message_id: None,
+                                    text: accumulated.clone(),
+                                    parse_mode: None,
+                                    is_final: false,
+                                    session_id: Some(session_id.clone()),
+                                    message_thread_id,
+                                };
+                                publisher.publish(&stream_subject, &cmd).await?;
+                            }
+                            Err(e) => {
+                                warn!("Streaming chunk error for session {}: {}", session_id, e);
+                            }
+                        }
+                    }
+
+                    if !accumulated.is_empty() {
+                        // Send final chunk to signal completion
+                        let cmd = StreamMessageCommand {
+                            chat_id,
+                            message_id: None,
+                            text: accumulated.clone(),
+                            parse_mode: None,
+                            is_final: true,
+                            session_id: Some(session_id.clone()),
+                            message_thread_id,
+                        };
+                        publisher.publish(&stream_subject, &cmd).await?;
+
+                        self.conversation_manager.add_message(session_id, "assistant", &accumulated).await;
+                        debug!("Streamed response to chat {}", chat_id);
+                    } else {
+                        warn!("LLM returned empty streaming response for session {}", session_id);
+                        self.send_error_reply(chat_id, event.message.message_id, message_thread_id, publisher).await?;
+                    }
                 }
                 Err(e) => {
-                    warn!("LLM generation failed: {}", e);
-                    "Sorry, I encountered an error generating a response. Please try again.".to_string()
+                    warn!("LLM streaming failed for session {}: {}", session_id, e);
+                    self.send_error_reply(chat_id, event.message.message_id, message_thread_id, publisher).await?;
                 }
             }
         } else {
-            // Echo mode: Simple echo response
-            format!("You said: {}", event.text)
-        };
+            // Echo mode
+            let cmd = SendMessageCommand {
+                chat_id,
+                text: format!("You said: {}", event.text),
+                parse_mode: None,
+                reply_to_message_id: Some(event.message.message_id),
+                reply_markup: None,
+                message_thread_id,
+            };
+            let subject = subjects::agent::message_send(publisher.prefix());
+            publisher.publish(&subject, &cmd).await?;
+        }
 
-        // Send response
-        let command = SendMessageCommand {
-            chat_id,
-            text: response_text,
-            parse_mode: None,
-            reply_to_message_id: Some(event.message.message_id),
-            reply_markup: None,
-            message_thread_id: None,
-        };
-
-        let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &command).await?;
-
-        debug!("Sent response to chat {}", chat_id);
         Ok(())
     }
 
@@ -91,28 +130,53 @@ impl MessageProcessor {
         publisher: &MessagePublisher,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
+        let session_id = &event.metadata.session_id;
+        let message_thread_id = event.message.message_thread_id;
 
         // Send typing indicator
         self.send_typing_indicator(chat_id, publisher).await?;
 
-        // Respond to photo
-        let response_text = if let Some(ref caption) = event.caption {
-            format!("I received your photo with caption: {}", caption)
+        let response_text = if let Some(ref llm_client) = self.llm_client {
+            // Build a description of the photo for the conversation context
+            let photo_description = match &event.caption {
+                Some(caption) => format!("[User sent a photo with caption: \"{}\"]", caption),
+                None => "[User sent a photo without caption]".to_string(),
+            };
+
+            let history = self.conversation_manager.get_history(session_id).await;
+            self.conversation_manager.add_message(session_id, "user", &photo_description).await;
+
+            let system_prompt = "You are a helpful AI assistant in a Telegram chat. \
+                Be concise, friendly, and helpful.";
+
+            match llm_client.generate_response(system_prompt, &photo_description, &history).await {
+                Ok(response) => {
+                    self.conversation_manager.add_message(session_id, "assistant", &response).await;
+                    response
+                }
+                Err(e) => {
+                    warn!("LLM generation failed for photo in session {}: {}", session_id, e);
+                    "Sorry, I encountered an error processing your photo. Please try again.".to_string()
+                }
+            }
         } else {
-            "I received your photo!".to_string()
+            match &event.caption {
+                Some(caption) => format!("I received your photo with caption: {}", caption),
+                None => "I received your photo!".to_string(),
+            }
         };
 
-        let command = SendMessageCommand {
+        let cmd = SendMessageCommand {
             chat_id,
             text: response_text,
             parse_mode: None,
             reply_to_message_id: Some(event.message.message_id),
             reply_markup: None,
-            message_thread_id: None,
+            message_thread_id,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &command).await?;
+        publisher.publish(&subject, &cmd).await?;
 
         debug!("Sent response to photo in chat {}", chat_id);
         Ok(())
@@ -126,19 +190,19 @@ impl MessageProcessor {
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
         let session_id = &event.metadata.session_id;
+        let message_thread_id = event.message.message_thread_id;
 
         let response_text = match event.command.as_str() {
             "start" => {
                 if self.llm_client.is_some() {
-                    "👋 Welcome to the Telegram AI Agent!\n\n\
+                    "Welcome to the Telegram AI Agent!\n\n\
                     I'm powered by Claude AI and can help you with:\n\
-                    • Answering questions\n\
-                    • Writing and editing text\n\
-                    • Analyzing images\n\
-                    • General assistance\n\n\
+                    - Answering questions\n\
+                    - Writing and editing text\n\
+                    - General assistance\n\n\
                     Just send me a message to get started!"
                 } else {
-                    "👋 Welcome to the Telegram AI Agent!\n\n\
+                    "Welcome to the Telegram AI Agent!\n\n\
                     I'm running in echo mode (LLM disabled).\n\n\
                     Send me a message and I'll echo it back!"
                 }
@@ -153,39 +217,30 @@ impl MessageProcessor {
             }
             "status" => {
                 let active_sessions = self.conversation_manager.active_sessions().await;
-                let mode = if self.llm_client.is_some() {
-                    "LLM (Claude AI)"
-                } else {
-                    "Echo mode"
-                };
+                let mode = if self.llm_client.is_some() { "LLM (Claude AI)" } else { "Echo mode" };
                 &format!(
-                    "✅ Bot Status\n\n\
-                    Mode: {}\n\
-                    Active sessions: {}\n\
-                    Ready to process messages!",
+                    "Bot Status\n\nMode: {}\nActive sessions: {}\nReady to process messages!",
                     mode, active_sessions
                 )
             }
             "clear" => {
                 self.conversation_manager.clear_session(session_id).await;
-                "✅ Conversation history cleared!"
+                "Conversation history cleared!"
             }
-            _ => {
-                "Unknown command. Use /help to see available commands."
-            }
+            _ => "Unknown command. Use /help to see available commands.",
         };
 
-        let command = SendMessageCommand {
+        let cmd = SendMessageCommand {
             chat_id,
             text: response_text.to_string(),
             parse_mode: None,
             reply_to_message_id: Some(event.message.message_id),
             reply_markup: None,
-            message_thread_id: None,
+            message_thread_id,
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &command).await?;
+        publisher.publish(&subject, &cmd).await?;
 
         info!("Processed command /{} for chat {}", event.command, chat_id);
         Ok(())
@@ -208,11 +263,9 @@ impl MessageProcessor {
         publisher.publish(&subject, &answer_command).await?;
 
         // Send a message with the callback data
-        let response_text = format!("You clicked: {}", event.data);
-
         let message_command = SendMessageCommand {
             chat_id: event.chat.id,
-            text: response_text,
+            text: format!("You clicked: {}", event.data),
             parse_mode: None,
             reply_to_message_id: event.message_id,
             reply_markup: None,
@@ -239,15 +292,13 @@ impl MessageProcessor {
 
         info!("Processing inline query: {}", event.query);
 
-        // Generate results based on the query
         let results = if let Some(ref llm_client) = self.llm_client {
-            // LLM mode: Generate intelligent results
             let system_prompt = "You are a helpful AI assistant. Provide a concise, helpful response to the user's query.";
 
             let response = match llm_client.generate_response(system_prompt, &event.query, &[]).await {
                 Ok(resp) => resp,
                 Err(e) => {
-                    warn!("LLM generation failed: {}", e);
+                    warn!("LLM generation failed for inline query: {}", e);
                     format!("I couldn't process your query: {}", event.query)
                 }
             };
@@ -265,7 +316,6 @@ impl MessageProcessor {
                 }),
             ]
         } else {
-            // Echo mode: Simple echo results
             vec![
                 InlineQueryResult::Article(InlineQueryResultArticle {
                     id: "1".to_string(),
@@ -300,11 +350,10 @@ impl MessageProcessor {
             ]
         };
 
-        // Send the answer
         let answer_command = AnswerInlineQueryCommand {
             inline_query_id: event.inline_query_id.clone(),
             results,
-            cache_time: Some(300), // 5 minutes
+            cache_time: Some(300),
             is_personal: Some(true),
             next_offset: None,
         };
@@ -333,6 +382,27 @@ impl MessageProcessor {
 
         Ok(())
     }
+
+    /// Send a generic error reply message
+    async fn send_error_reply(
+        &self,
+        chat_id: i64,
+        reply_to_message_id: i32,
+        message_thread_id: Option<i32>,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        let cmd = SendMessageCommand {
+            chat_id,
+            text: "Sorry, I encountered an error generating a response. Please try again.".to_string(),
+            parse_mode: None,
+            reply_to_message_id: Some(reply_to_message_id),
+            reply_markup: None,
+            message_thread_id,
+        };
+        let subject = subjects::agent::message_send(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+        Ok(())
+    }
 }
 
 /// Truncate a string to a maximum length
@@ -346,6 +416,6 @@ fn truncate(s: &str, max_len: usize) -> String {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
