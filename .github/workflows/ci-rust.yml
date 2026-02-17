@@ -1,0 +1,42 @@
+name: CI Rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+
+      - uses: jdx/mise-action@v3.6.1
+
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.8.2
+        with:
+          workspaces: rsworkspace -> target
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+        working-directory: rsworkspace
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: rsworkspace
+
+      - name: Build
+        run: cargo build --release
+        working-directory: rsworkspace
+
+      - name: Run tests
+        run: cargo test --all-features
+        working-directory: rsworkspace
