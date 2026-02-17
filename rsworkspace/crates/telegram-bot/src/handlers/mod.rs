@@ -553,6 +553,84 @@ pub async fn handle_poll_answer(
     Ok(())
 }
 
+/// Handle forum topic created service messages
+pub async fn handle_forum_topic_created(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Forum topic created");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_forum_topic_created(&msg, update_id).await {
+        error!("Failed to publish forum topic created: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle forum topic edited service messages
+pub async fn handle_forum_topic_edited(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Forum topic edited");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_forum_topic_edited(&msg, update_id).await {
+        error!("Failed to publish forum topic edited: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle forum topic closed service messages
+pub async fn handle_forum_topic_closed(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Forum topic closed");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_forum_topic_closed(&msg, update_id).await {
+        error!("Failed to publish forum topic closed: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle forum topic reopened service messages
+pub async fn handle_forum_topic_reopened(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("Forum topic reopened");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_forum_topic_reopened(&msg, update_id).await {
+        error!("Failed to publish forum topic reopened: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle general forum topic hidden service messages
+pub async fn handle_general_forum_topic_hidden(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("General forum topic hidden");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_general_forum_topic_hidden(&msg, update_id).await {
+        error!("Failed to publish general forum topic hidden: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
+/// Handle general forum topic unhidden service messages
+pub async fn handle_general_forum_topic_unhidden(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+    debug!("General forum topic unhidden");
+    health.increment_messages_received().await;
+    if !check_access(&msg, &bridge) { return Ok(()); }
+    if let Err(e) = bridge.publish_general_forum_topic_unhidden(&msg, update_id).await {
+        error!("Failed to publish general forum topic unhidden: {}", e);
+        health.increment_errors().await;
+    }
+    Ok(())
+}
+
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
     use teloxide::types::ChatKind;
