@@ -320,4 +320,22 @@ impl TelegramBridge {
         info!("Published command event: {} to {}", command, subject);
         Ok(())
     }
+
+    /// Publish an inline query event
+    pub async fn publish_inline_query(&self, event: &telegram_types::events::InlineQueryEvent) -> Result<()> {
+        let subject = subjects::bot::inline_query(self.publisher.prefix());
+        self.publisher.publish(&subject, event).await?;
+
+        debug!("Published inline query event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a chosen inline result event
+    pub async fn publish_chosen_inline_result(&self, event: &telegram_types::events::ChosenInlineResultEvent) -> Result<()> {
+        let subject = subjects::bot::chosen_inline_result(self.publisher.prefix());
+        self.publisher.publish(&subject, event).await?;
+
+        debug!("Published chosen inline result event to {}", subject);
+        Ok(())
+    }
 }

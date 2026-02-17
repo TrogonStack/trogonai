@@ -53,6 +53,7 @@ impl OutboundProcessor {
         let callback_task = self.handle_answer_callbacks(prefix.clone());
         let action_task = self.handle_chat_actions(prefix.clone());
         let stream_task = self.handle_stream_messages(prefix.clone());
+        let inline_task = self.handle_answer_inline_queries(prefix.clone());
 
         // Run all tasks concurrently
         tokio::try_join!(
@@ -62,7 +63,8 @@ impl OutboundProcessor {
             photo_task,
             callback_task,
             action_task,
-            stream_task
+            stream_task,
+            inline_task
         )?;
 
         Ok(())
@@ -285,6 +287,85 @@ fn convert_chat_action(action: ChatAction) -> teloxide::types::ChatAction {
         ChatAction::UploadDocument => teloxide::types::ChatAction::UploadDocument,
         ChatAction::ChooseSticker => teloxide::types::ChatAction::Typing, // Fallback to Typing
         ChatAction::FindLocation => teloxide::types::ChatAction::FindLocation,
+    }
+}
+
+impl OutboundProcessor {
+    /// Handle answer inline query commands
+    async fn handle_answer_inline_queries(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::AnswerInlineQueryCommand;
+
+        let subject = subjects::agent::inline_answer(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<AnswerInlineQueryCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received answer inline query command for query {}", cmd.inline_query_id);
+
+                    // Convert our inline results to teloxide format
+                    let results: Vec<teloxide::types::InlineQueryResult> = cmd.results
+                        .into_iter()
+                        .filter_map(|r| convert_inline_query_result(r))
+                        .collect();
+
+                    let mut req = self.bot.answer_inline_query(&cmd.inline_query_id, results);
+
+                    if let Some(cache_time) = cmd.cache_time {
+                        req.cache_time = Some(cache_time as u32);
+                    }
+
+                    if let Some(is_personal) = cmd.is_personal {
+                        req.is_personal = Some(is_personal);
+                    }
+
+                    if let Some(next_offset) = cmd.next_offset {
+                        req.next_offset = Some(next_offset);
+                    }
+
+                    if let Err(e) = req.await {
+                        error!("Failed to answer inline query: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize answer inline query command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Convert our InlineQueryResult to Teloxide's
+fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResult) -> Option<teloxide::types::InlineQueryResult> {
+    use teloxide::types::{InlineQueryResult as TgResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText};
+    use telegram_types::commands::InlineQueryResult as OurResult;
+
+    match result {
+        OurResult::Article(article) => {
+            let input_content = InputMessageContent::Text(InputMessageContentText::new(
+                article.input_message_content.message_text
+            ));
+
+            let mut result = InlineQueryResultArticle::new(
+                article.id,
+                article.title,
+                input_content
+            );
+
+            if let Some(desc) = article.description {
+                result.description = Some(desc);
+            }
+
+            Some(TgResult::Article(result))
+        }
+        OurResult::Photo(_photo) => {
+            // Photo results are more complex and require proper URL handling
+            // Skipping for now to keep implementation simple
+            warn!("Photo inline results not yet implemented");
+            None
+        }
     }
 }
 

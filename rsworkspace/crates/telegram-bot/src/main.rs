@@ -185,9 +185,17 @@ async fn main() -> Result<()> {
     let callback_handler = Update::filter_callback_query()
         .endpoint(handlers::handle_callback_query);
 
+    let inline_query_handler = Update::filter_inline_query()
+        .endpoint(handlers::handle_inline_query);
+
+    let chosen_inline_result_handler = Update::filter_chosen_inline_result()
+        .endpoint(handlers::handle_chosen_inline_result);
+
     let all_handlers = dptree::entry()
         .branch(handler)
-        .branch(callback_handler);
+        .branch(callback_handler)
+        .branch(inline_query_handler)
+        .branch(chosen_inline_result_handler);
 
     Dispatcher::builder(bot, all_handlers)
         .dependencies(dptree::deps![bridge, health_state])
