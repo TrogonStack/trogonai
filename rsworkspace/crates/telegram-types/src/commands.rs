@@ -1657,4 +1657,210 @@ mod tests {
         assert_eq!(serde_json::to_string(&ParseMode::Markdown).unwrap(), "\"Markdown\"");
         assert_eq!(serde_json::to_string(&ParseMode::MarkdownV2).unwrap(), "\"MarkdownV2\"");
     }
+
+    // ── ChatAction serde ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chat_action_serde() {
+        for (action, expected) in [
+            (ChatAction::Typing, "\"typing\""),
+            (ChatAction::UploadPhoto, "\"upload_photo\""),
+            (ChatAction::RecordVideo, "\"record_video\""),
+            (ChatAction::UploadDocument, "\"upload_document\""),
+            (ChatAction::FindLocation, "\"find_location\""),
+        ] {
+            let json = serde_json::to_string(&action).unwrap();
+            assert_eq!(json, expected);
+            let back: ChatAction = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, action);
+        }
+    }
+
+    // ── Core messaging commands ───────────────────────────────────────────────
+
+    #[test]
+    fn test_send_message_command_roundtrip() {
+        let cmd = SendMessageCommand {
+            chat_id: 123,
+            text: "Hello!".to_string(),
+            parse_mode: Some(ParseMode::Markdown),
+            reply_to_message_id: Some(10),
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_message_optional_fields_omitted() {
+        let cmd = SendMessageCommand {
+            chat_id: 1,
+            text: "Hi".to_string(),
+            parse_mode: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+            message_thread_id: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("parse_mode"));
+        assert!(!json.contains("reply_to_message_id"));
+        assert!(!json.contains("reply_markup"));
+        assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn test_edit_message_command_roundtrip() {
+        let cmd = EditMessageCommand {
+            chat_id: 42,
+            message_id: 7,
+            text: "Updated text".to_string(),
+            parse_mode: Some(ParseMode::HTML),
+            reply_markup: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_delete_message_command_roundtrip() {
+        let cmd = DeleteMessageCommand { chat_id: 999, message_id: 55 };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_send_photo_command_roundtrip() {
+        let cmd = SendPhotoCommand {
+            chat_id: 100,
+            photo: "AgACAgIAAxk".to_string(),
+            caption: Some("Nice photo".to_string()),
+            parse_mode: None,
+            reply_to_message_id: None,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    // ── Action / interaction commands ─────────────────────────────────────────
+
+    #[test]
+    fn test_answer_callback_command_roundtrip() {
+        let cmd = AnswerCallbackCommand {
+            callback_query_id: "cq_abc".to_string(),
+            text: Some("Done!".to_string()),
+            show_alert: Some(false),
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_answer_callback_command_no_text() {
+        let cmd = AnswerCallbackCommand {
+            callback_query_id: "cq_xyz".to_string(),
+            text: None,
+            show_alert: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("text"));
+        assert!(!json.contains("show_alert"));
+    }
+
+    #[test]
+    fn test_send_chat_action_command_roundtrip() {
+        let cmd = SendChatActionCommand {
+            chat_id: 200,
+            action: ChatAction::Typing,
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    // ── StreamMessageCommand ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_stream_message_command_roundtrip() {
+        let cmd = StreamMessageCommand {
+            chat_id: 300,
+            message_id: Some(15),
+            text: "Partial response...".to_string(),
+            parse_mode: Some(ParseMode::Markdown),
+            is_final: false,
+            session_id: Some("tg-private-300".to_string()),
+            message_thread_id: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_stream_message_command_final() {
+        let cmd = StreamMessageCommand {
+            chat_id: 300,
+            message_id: Some(15),
+            text: "Complete response.".to_string(),
+            parse_mode: None,
+            is_final: true,
+            session_id: None,
+            message_thread_id: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(json.contains("\"is_final\":true"));
+        assert!(!json.contains("\"session_id\""));
+    }
+
+    // ── AnswerInlineQueryCommand + InlineQueryResult ──────────────────────────
+
+    #[test]
+    fn test_answer_inline_query_command_roundtrip() {
+        let cmd = AnswerInlineQueryCommand {
+            inline_query_id: "iq_1".to_string(),
+            results: vec![
+                InlineQueryResult::Article(InlineQueryResultArticle {
+                    id: "r1".to_string(),
+                    title: "Result Title".to_string(),
+                    input_message_content: InputMessageContent {
+                        message_text: "The answer".to_string(),
+                        parse_mode: None,
+                    },
+                    description: Some("Brief description".to_string()),
+                    thumb_url: None,
+                }),
+            ],
+            cache_time: Some(300),
+            is_personal: Some(true),
+            next_offset: None,
+        };
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_inline_query_result_article_has_type_tag() {
+        let result = InlineQueryResult::Article(InlineQueryResultArticle {
+            id: "1".to_string(),
+            title: "T".to_string(),
+            input_message_content: InputMessageContent { message_text: "M".to_string(), parse_mode: None },
+            description: None,
+            thumb_url: None,
+        });
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"type\":\"article\""));
+    }
+
+    #[test]
+    fn test_inline_query_result_cached_sticker_roundtrip() {
+        let result = InlineQueryResult::CachedSticker(InlineQueryResultCachedSticker {
+            id: "s1".to_string(),
+            sticker_file_id: "stk_file_abc".to_string(),
+            reply_markup: None,
+        });
+        roundtrip(&result);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"type\":\"cached_sticker\""));
+    }
+
+    #[test]
+    fn test_input_message_content_roundtrip() {
+        let content = InputMessageContent {
+            message_text: "Test message".to_string(),
+            parse_mode: Some(ParseMode::MarkdownV2),
+        };
+        roundtrip(&content);
+    }
 }
