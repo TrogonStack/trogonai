@@ -1,0 +1,19 @@
+# Dockerfile for discord-bot
+#
+# Expected build context: rsworkspace/
+# Binary must be pre-built: cargo build --release --package discord-bot
+# Build: docker build -f Dockerfile.discord-bot -t discord-bot rsworkspace/
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY target/release/discord-bot /usr/local/bin/discord-bot
+
+RUN useradd -m -u 1000 trogonai
+USER trogonai
+
+ENTRYPOINT ["discord-bot"]

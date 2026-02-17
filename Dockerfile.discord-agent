@@ -1,0 +1,19 @@
+# Dockerfile for discord-agent
+#
+# Expected build context: rsworkspace/
+# Binary must be pre-built: cargo build --release --package discord-agent
+# Build: docker build -f Dockerfile.discord-agent -t discord-agent rsworkspace/
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY target/release/discord-agent /usr/local/bin/discord-agent
+
+RUN useradd -m -u 1000 trogonai
+USER trogonai
+
+ENTRYPOINT ["discord-agent"]

@@ -1,0 +1,24 @@
+[package]
+name = "discord-agent"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "discord-agent"
+path = "src/main.rs"
+
+[dependencies]
+discord-types = { path = "../discord-types" }
+discord-nats = { path = "../discord-nats" }
+
+tokio = { version = "1", features = ["full"] }
+async-nats = "0.45"
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream"] }

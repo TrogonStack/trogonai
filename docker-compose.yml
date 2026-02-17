@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  # NATS Server with JetStream
+  nats:
+    image: nats:2.10-alpine
+    container_name: trogonai-nats
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+      - "6222:6222"  # Cluster connections
+    volumes:
+      - nats-data:/data
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Telegram Bot
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: trogonai-telegram-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - NATS_URL=nats://nats:4222
+      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
+      - RUST_LOG=${RUST_LOG:-telegram_bot=info,telegram_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+
+  # Telegram Agent (Echo mode)
+  telegram-agent-echo:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: trogonai-agent-echo
+    environment:
+      - NATS_URL=nats://nats:4222
+      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
+      - AGENT_NAME=agent-echo
+      - ENABLE_LLM=false
+      - RUST_LOG=${RUST_LOG:-telegram_agent=info,telegram_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - echo
+
+  # Telegram Agent (LLM mode)
+  telegram-agent-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: trogonai-agent-llm
+    environment:
+      - NATS_URL=nats://nats:4222
+      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
+      - AGENT_NAME=agent-llm
+      - ENABLE_LLM=true
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250929}
+      - RUST_LOG=${RUST_LOG:-telegram_agent=info,telegram_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - llm
+
+  # Discord Bot
+  discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.discord-bot
+    container_name: trogonai-discord-bot
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - NATS_URL=nats://nats:4222
+      - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
+      - RUST_LOG=${RUST_LOG:-discord_bot=info,discord_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - discord
+
+  # Discord Agent (Echo mode)
+  discord-agent-echo:
+    build:
+      context: .
+      dockerfile: Dockerfile.discord-agent
+    container_name: trogonai-discord-agent-echo
+    environment:
+      - NATS_URL=nats://nats:4222
+      - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
+      - AGENT_NAME=discord-agent-echo
+      - ENABLE_LLM=false
+      - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - discord
+      - discord-echo
+
+  # Discord Agent (LLM mode)
+  discord-agent-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile.discord-agent
+    container_name: trogonai-discord-agent-llm
+    environment:
+      - NATS_URL=nats://nats:4222
+      - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
+      - AGENT_NAME=discord-agent-llm
+      - ENABLE_LLM=true
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-6}
+      - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - discord
+      - discord-llm
+
+  # NATS Monitoring (optional)
+  nats-surveyor:
+    image: natsio/nats-surveyor:latest
+    container_name: trogonai-nats-surveyor
+    command:
+      - "-s"
+      - "http://nats:8222"
+      - "-p"
+      - "7777"
+    ports:
+      - "7777:7777"
+    depends_on:
+      - nats
+    networks:
+      - trogonai-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+networks:
+  trogonai-network:
+    driver: bridge
+
+volumes:
+  nats-data:
+    driver: local
