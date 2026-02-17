@@ -76,6 +76,7 @@ impl OutboundProcessor {
                 message_id,
                 &cmd.text,
                 cmd.parse_mode.as_ref(),
+                cmd.message_thread_id,
             ).await {
                 error!("Failed to edit message {} after retries: {}", message_id, e);
             } else {
@@ -101,6 +102,7 @@ impl OutboundProcessor {
                 chat_id,
                 &cmd.text,
                 cmd.parse_mode.as_ref(),
+                cmd.message_thread_id,
             ).await {
                 Ok(message) => {
                     let message_id = message.id.0;
@@ -137,6 +139,7 @@ impl OutboundProcessor {
         message_id: i32,
         text: &str,
         parse_mode: Option<&telegram_types::commands::ParseMode>,
+        _message_thread_id: Option<i32>,
     ) -> Result<()> {
         let mut attempts = 0;
 
@@ -186,6 +189,7 @@ impl OutboundProcessor {
         chat_id: i64,
         text: &str,
         parse_mode: Option<&telegram_types::commands::ParseMode>,
+        message_thread_id: Option<i32>,
     ) -> Result<teloxide::types::Message> {
         let mut attempts = 0;
 
@@ -196,6 +200,10 @@ impl OutboundProcessor {
 
             if let Some(mode) = parse_mode {
                 req.parse_mode = Some(convert_parse_mode(mode.clone()));
+            }
+
+            if let Some(thread_id) = message_thread_id {
+                req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
             }
 
             match req.await {

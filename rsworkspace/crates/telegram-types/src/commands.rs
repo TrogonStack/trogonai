@@ -38,6 +38,9 @@ pub struct SendMessageCommand {
     pub reply_to_message_id: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_markup: Option<InlineKeyboardMarkup>,
+    /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
 }
 
 /// Edit an existing message
@@ -70,6 +73,9 @@ pub struct SendPhotoCommand {
     pub parse_mode: Option<ParseMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to_message_id: Option<i32>,
+    /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
 }
 
 /// Answer a callback query
@@ -87,6 +93,9 @@ pub struct AnswerCallbackCommand {
 pub struct SendChatActionCommand {
     pub chat_id: i64,
     pub action: ChatAction,
+    /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
 }
 
 /// Stream partial message updates (for progressive display)
@@ -103,6 +112,9 @@ pub struct StreamMessageCommand {
     /// Session ID for tracking (optional, defaults to chat-based ID)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
 }
 
 /// Answer inline query
@@ -124,7 +136,24 @@ pub struct AnswerInlineQueryCommand {
 pub enum InlineQueryResult {
     Article(InlineQueryResultArticle),
     Photo(InlineQueryResultPhoto),
-    // Can add more types: Video, Audio, Document, etc.
+    CachedPhoto(InlineQueryResultCachedPhoto),
+    CachedSticker(InlineQueryResultCachedSticker),
+    Gif(InlineQueryResultGif),
+    CachedGif(InlineQueryResultCachedGif),
+    Mpeg4Gif(InlineQueryResultMpeg4Gif),
+    CachedMpeg4Gif(InlineQueryResultCachedMpeg4Gif),
+    Video(InlineQueryResultVideo),
+    CachedVideo(InlineQueryResultCachedVideo),
+    Audio(InlineQueryResultAudio),
+    CachedAudio(InlineQueryResultCachedAudio),
+    Voice(InlineQueryResultVoice),
+    CachedVoice(InlineQueryResultCachedVoice),
+    Document(InlineQueryResultDocument),
+    CachedDocument(InlineQueryResultCachedDocument),
+    Location(InlineQueryResultLocation),
+    Venue(InlineQueryResultVenue),
+    Contact(InlineQueryResultContact),
+    Game(InlineQueryResultGame),
 }
 
 /// Inline query result article (text-based result)
@@ -153,6 +182,292 @@ pub struct InlineQueryResultPhoto {
     pub caption: Option<String>,
 }
 
+/// Inline query result sticker (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedSticker {
+    pub id: String,
+    pub sticker_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_markup: Option<InlineKeyboardMarkup>,
+}
+
+/// Inline query result GIF animation (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultGif {
+    pub id: String,
+    pub gif_url: String,
+    pub thumbnail_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gif_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gif_height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gif_duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result GIF animation (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedGif {
+    pub id: String,
+    pub gif_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result MP4 animation (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultMpeg4Gif {
+    pub id: String,
+    pub mpeg4_url: String,
+    pub thumbnail_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mpeg4_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mpeg4_height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mpeg4_duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result MP4 animation (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedMpeg4Gif {
+    pub id: String,
+    pub mpeg4_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result video (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultVideo {
+    pub id: String,
+    pub video_url: String,
+    pub mime_type: String,
+    pub thumbnail_url: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Inline query result video (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedVideo {
+    pub id: String,
+    pub video_file_id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result audio (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultAudio {
+    pub id: String,
+    pub audio_url: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_duration: Option<u32>,
+}
+
+/// Inline query result audio (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedAudio {
+    pub id: String,
+    pub audio_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result voice (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultVoice {
+    pub id: String,
+    pub voice_url: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice_duration: Option<u32>,
+}
+
+/// Inline query result voice (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedVoice {
+    pub id: String,
+    pub voice_file_id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result document (from URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultDocument {
+    pub id: String,
+    pub title: String,
+    pub document_url: String,
+    pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_height: Option<u32>,
+}
+
+/// Inline query result document (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedDocument {
+    pub id: String,
+    pub title: String,
+    pub document_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result photo (cached on Telegram servers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultCachedPhoto {
+    pub id: String,
+    pub photo_file_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
+/// Inline query result location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultLocation {
+    pub id: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horizontal_accuracy: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_period: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proximity_alert_radius: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_height: Option<u32>,
+}
+
+/// Inline query result venue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultVenue {
+    pub id: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub title: String,
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foursquare_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_place_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_height: Option<u32>,
+}
+
+/// Inline query result contact
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultContact {
+    pub id: String,
+    pub phone_number: String,
+    pub first_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vcard: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_height: Option<u32>,
+}
+
+/// Inline query result game
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultGame {
+    pub id: String,
+    pub game_short_name: String,
+}
+
 /// Input message content for inline results
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputMessageContent {
@@ -170,6 +485,7 @@ impl SendMessageCommand {
             parse_mode: None,
             reply_to_message_id: None,
             reply_markup: None,
+            message_thread_id: None,
         }
     }
 
@@ -190,4 +506,101 @@ impl SendMessageCommand {
         self.reply_to_message_id = Some(message_id);
         self
     }
+
+    /// Send message to a specific forum topic
+    pub fn in_topic(mut self, thread_id: i32) -> Self {
+        self.message_thread_id = Some(thread_id);
+        self
+    }
+}
+
+/// Create a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateForumTopicCommand {
+    pub chat_id: i64,
+    pub name: String,
+    /// Color of the topic icon in RGB format (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_color: Option<i32>,
+    /// Unique identifier of the custom emoji shown as the topic icon (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_custom_emoji_id: Option<String>,
+}
+
+/// Edit a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditForumTopicCommand {
+    pub chat_id: i64,
+    pub message_thread_id: i32,
+    /// New topic name (optional, 1-128 characters)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// New unique identifier of the custom emoji shown as the topic icon (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_custom_emoji_id: Option<String>,
+}
+
+/// Close a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseForumTopicCommand {
+    pub chat_id: i64,
+    pub message_thread_id: i32,
+}
+
+/// Reopen a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReopenForumTopicCommand {
+    pub chat_id: i64,
+    pub message_thread_id: i32,
+}
+
+/// Delete a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteForumTopicCommand {
+    pub chat_id: i64,
+    pub message_thread_id: i32,
+}
+
+/// Unpin all messages in a forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnpinAllForumTopicMessagesCommand {
+    pub chat_id: i64,
+    pub message_thread_id: i32,
+}
+
+/// Edit the name of the 'General' topic in a forum supergroup chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditGeneralForumTopicCommand {
+    pub chat_id: i64,
+    pub name: String,
+}
+
+/// Close the 'General' topic in a forum supergroup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseGeneralForumTopicCommand {
+    pub chat_id: i64,
+}
+
+/// Reopen the 'General' topic in a forum supergroup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReopenGeneralForumTopicCommand {
+    pub chat_id: i64,
+}
+
+/// Hide the 'General' topic in a forum supergroup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HideGeneralForumTopicCommand {
+    pub chat_id: i64,
+}
+
+/// Unhide the 'General' topic in a forum supergroup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnhideGeneralForumTopicCommand {
+    pub chat_id: i64,
+}
+
+/// Unpin all messages in a general forum topic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnpinAllGeneralForumTopicMessagesCommand {
+    pub chat_id: i64,
 }
