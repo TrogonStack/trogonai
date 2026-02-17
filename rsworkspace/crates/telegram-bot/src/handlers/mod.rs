@@ -139,6 +139,66 @@ pub async fn handle_voice_message(_bot: Bot, msg: Message, bridge: TelegramBridg
     Ok(())
 }
 
+/// Handle sticker messages
+pub async fn handle_sticker_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received sticker message");
+    health.increment_messages_received().await;
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for sticker message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_sticker_message(&msg, update_id).await {
+        error!("Failed to publish sticker message: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle animation (GIF) messages
+pub async fn handle_animation_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received animation message");
+    health.increment_messages_received().await;
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for animation message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_animation_message(&msg, update_id).await {
+        error!("Failed to publish animation message: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle video note messages (short round videos)
+pub async fn handle_video_note_message(_bot: Bot, msg: Message, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    let update_id = msg.id.0 as i64;
+
+    debug!("Received video note message");
+    health.increment_messages_received().await;
+
+    if !check_access(&msg, &bridge) {
+        warn!("Access denied for video note message");
+        return Ok(());
+    }
+
+    if let Err(e) = bridge.publish_video_note_message(&msg, update_id).await {
+        error!("Failed to publish video note message: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
 /// Handle callback queries (button clicks)
 pub async fn handle_callback_query(_bot: Bot, query: CallbackQuery, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
     let update_id = query.id.parse::<i64>().unwrap_or(0);
