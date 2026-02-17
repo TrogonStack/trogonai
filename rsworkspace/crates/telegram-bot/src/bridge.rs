@@ -1057,6 +1057,58 @@ impl TelegramBridge {
         Ok(())
     }
 
+    /// Publish an edited message event
+    pub async fn publish_edited_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let entities = msg.entities().map(|ents| {
+            ents.iter().map(|e| self.convert_message_entity(e)).collect()
+        });
+
+        let event = EditedMessageEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            new_text: msg.text().map(|s| s.to_string()),
+            new_caption: msg.caption().map(|s| s.to_string()),
+            entities,
+        };
+
+        let subject = subjects::bot::message_edited(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published edited message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a chat join request event
+    pub async fn publish_chat_join_request(
+        &self,
+        request: &teloxide::types::ChatJoinRequest,
+        update_id: i64,
+    ) -> Result<()> {
+        let chat = self.convert_chat(&request.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let event = ChatJoinRequestEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            chat,
+            from: self.convert_user(&request.from),
+            date: request.date.timestamp(),
+            bio: request.bio.clone(),
+            invite_link: request.invite_link.as_ref().map(|l| self.convert_invite_link(l)),
+        };
+
+        let subject = subjects::bot::chat_join_request(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        info!("Published chat join request event to {}", subject);
+        Ok(())
+    }
+
     /// Publish a general forum topic unhidden event
     pub async fn publish_general_forum_topic_unhidden(&self, msg: &Message, update_id: i64) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);

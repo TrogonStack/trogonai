@@ -103,3 +103,84 @@ impl SessionManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_state() -> SessionState {
+        SessionState {
+            session_id: "tg-private-123".to_string(),
+            chat_id: 123,
+            user_id: Some(456),
+            created_at: 1700000000,
+            last_activity: 1700000060,
+            message_count: 5,
+        }
+    }
+
+    // ── SessionState serde ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_session_state_roundtrip() {
+        let state = sample_state();
+        let json = serde_json::to_string(&state).expect("serialize");
+        let back: SessionState = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.session_id, state.session_id);
+        assert_eq!(back.chat_id, state.chat_id);
+        assert_eq!(back.user_id, state.user_id);
+        assert_eq!(back.created_at, state.created_at);
+        assert_eq!(back.last_activity, state.last_activity);
+        assert_eq!(back.message_count, state.message_count);
+    }
+
+    #[test]
+    fn test_session_state_no_user_id() {
+        let state = SessionState {
+            session_id: "tg-group-999".to_string(),
+            chat_id: -999,
+            user_id: None,
+            created_at: 1700000000,
+            last_activity: 1700000000,
+            message_count: 1,
+        };
+        let json = serde_json::to_string(&state).expect("serialize");
+        let back: SessionState = serde_json::from_str(&json).expect("deserialize");
+        assert!(back.user_id.is_none());
+        assert_eq!(back.chat_id, -999);
+    }
+
+    #[test]
+    fn test_session_state_message_count_starts_at_one() {
+        // New sessions should have message_count = 1 (first message)
+        let state = SessionState {
+            session_id: "tg-private-1".to_string(),
+            chat_id: 1,
+            user_id: None,
+            created_at: 0,
+            last_activity: 0,
+            message_count: 1,
+        };
+        assert_eq!(state.message_count, 1);
+    }
+
+    #[test]
+    fn test_session_state_json_contains_expected_keys() {
+        let state = sample_state();
+        let json = serde_json::to_string(&state).expect("serialize");
+        assert!(json.contains("\"session_id\""));
+        assert!(json.contains("\"chat_id\""));
+        assert!(json.contains("\"user_id\""));
+        assert!(json.contains("\"created_at\""));
+        assert!(json.contains("\"last_activity\""));
+        assert!(json.contains("\"message_count\""));
+    }
+
+    #[test]
+    fn test_session_state_clone() {
+        let state = sample_state();
+        let clone = state.clone();
+        assert_eq!(clone.session_id, state.session_id);
+        assert_eq!(clone.message_count, state.message_count);
+    }
+}

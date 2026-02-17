@@ -25,6 +25,8 @@
 //! - `telegram.{prefix}.bot.forum.reopened`
 //! - `telegram.{prefix}.bot.forum.general_hidden`
 //! - `telegram.{prefix}.bot.forum.general_unhidden`
+//! - `telegram.{prefix}.bot.message.edited`
+//! - `telegram.{prefix}.bot.chat.join_request`
 //!
 //! Agent Commands (Agents → Telegram):
 //! - `telegram.{prefix}.agent.message.send`
@@ -239,6 +241,16 @@ pub mod bot {
     /// General forum topic unhidden event subject
     pub fn general_forum_topic_unhidden(prefix: &str) -> String {
         format!("telegram.{}.bot.forum.general_unhidden", prefix)
+    }
+
+    /// Edited message event subject
+    pub fn message_edited(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.edited", prefix)
+    }
+
+    /// Chat join request event subject
+    pub fn chat_join_request(prefix: &str) -> String {
+        format!("telegram.{}.bot.chat.join_request", prefix)
     }
 }
 
@@ -662,6 +674,12 @@ mod tests {
         assert_ne!(s1, s2);
         assert!(s1.contains("env1"));
         assert!(s2.contains("env2"));
+    }
+
+    #[test]
+    fn test_bot_edited_and_join_subjects() {
+        assert_eq!(bot::message_edited("prod"), "telegram.prod.bot.message.edited");
+        assert_eq!(bot::chat_join_request("prod"), "telegram.prod.bot.chat.join_request");
     }
 
     #[test]

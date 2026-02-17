@@ -228,6 +228,118 @@ impl TelegramErrorCode {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── ErrorCategory serde ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_error_category_serde() {
+        for (variant, expected) in [
+            (ErrorCategory::RateLimit, "\"rate_limit\""),
+            (ErrorCategory::BotBlocked, "\"bot_blocked\""),
+            (ErrorCategory::NotFound, "\"not_found\""),
+            (ErrorCategory::PermissionDenied, "\"permission_denied\""),
+            (ErrorCategory::MessageUnmodifiable, "\"message_unmodifiable\""),
+            (ErrorCategory::ChatMigrated, "\"chat_migrated\""),
+            (ErrorCategory::PayloadTooLarge, "\"payload_too_large\""),
+            (ErrorCategory::InvalidInput, "\"invalid_input\""),
+            (ErrorCategory::Network, "\"network\""),
+            (ErrorCategory::WebhookError, "\"webhook_error\""),
+            (ErrorCategory::Unknown, "\"unknown\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected, "Unexpected JSON for {:?}", variant);
+            let back: ErrorCategory = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    // ── TelegramErrorCode serde ───────────────────────────────────────────────
+
+    #[test]
+    fn test_telegram_error_code_serde_spot_check() {
+        // Verify key codes serialize to expected snake_case JSON
+        for (code, expected) in [
+            (TelegramErrorCode::BotBlocked, "\"bot_blocked\""),
+            (TelegramErrorCode::ChatNotFound, "\"chat_not_found\""),
+            (TelegramErrorCode::MessageNotModified, "\"message_not_modified\""),
+            (TelegramErrorCode::FloodControl, "\"flood_control\""),
+            (TelegramErrorCode::NetworkError, "\"network_error\""),
+            (TelegramErrorCode::Unknown, "\"unknown\""),
+        ] {
+            let json = serde_json::to_string(&code).unwrap();
+            assert_eq!(json, expected, "Unexpected JSON for {:?}", code);
+            let back: TelegramErrorCode = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, code);
+        }
+    }
+
+    // ── TelegramErrorCode logic methods ───────────────────────────────────────
+
+    #[test]
+    fn test_flood_control_is_rate_limit_category() {
+        assert_eq!(TelegramErrorCode::FloodControl.category(), ErrorCategory::RateLimit);
+    }
+
+    #[test]
+    fn test_migrate_to_chat_id_is_chat_migrated_category() {
+        assert_eq!(TelegramErrorCode::MigrateToChatId.category(), ErrorCategory::ChatMigrated);
+    }
+
+    #[test]
+    fn test_request_entity_too_large_is_payload_category() {
+        assert_eq!(TelegramErrorCode::RequestEntityTooLarge.category(), ErrorCategory::PayloadTooLarge);
+    }
+
+    #[test]
+    fn test_poll_errors_are_unknown_category() {
+        // Poll errors fall through to Unknown category
+        assert_eq!(TelegramErrorCode::PollHasAlreadyClosed.category(), ErrorCategory::Unknown);
+        assert_eq!(TelegramErrorCode::PollMustHaveMoreOptions.category(), ErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn test_is_permanent_comprehensive() {
+        let permanent = [
+            TelegramErrorCode::BotBlocked,
+            TelegramErrorCode::BotKicked,
+            TelegramErrorCode::BotKickedFromSupergroup,
+            TelegramErrorCode::BotKickedFromChannel,
+            TelegramErrorCode::InvalidToken,
+            TelegramErrorCode::ChatNotFound,
+            TelegramErrorCode::UserDeactivated,
+            TelegramErrorCode::GroupDeactivated,
+            TelegramErrorCode::CantDemoteChatCreator,
+            TelegramErrorCode::MessageCantBeEdited,
+            TelegramErrorCode::MessageCantBeDeleted,
+            TelegramErrorCode::MessageNotModified,
+            TelegramErrorCode::ChatDescriptionIsNotModified,
+        ];
+        for code in &permanent {
+            assert!(code.is_permanent(), "{:?} should be permanent", code);
+        }
+    }
+
+    #[test]
+    fn test_is_retryable_comprehensive() {
+        let retryable = [
+            TelegramErrorCode::FloodControl,
+            TelegramErrorCode::NetworkError,
+            TelegramErrorCode::IoError,
+            TelegramErrorCode::CantGetUpdates,
+        ];
+        for code in &retryable {
+            assert!(code.is_retryable(), "{:?} should be retryable", code);
+        }
+
+        // Permanent errors are NOT retryable
+        assert!(!TelegramErrorCode::BotBlocked.is_retryable());
+        assert!(!TelegramErrorCode::ChatNotFound.is_retryable());
+    }
+}
+
 /// Error event published via NATS when a bot operation fails
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandErrorEvent {
