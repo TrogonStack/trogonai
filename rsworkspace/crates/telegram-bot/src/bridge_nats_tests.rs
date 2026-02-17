@@ -15,7 +15,7 @@ mod nats_tests {
         policies::{DmPolicy, GroupPolicy},
         AccessConfig,
     };
-    use teloxide::{types::Message, Bot};
+    use teloxide::{types::{CallbackQuery, Message}, Bot};
 
     const DEFAULT_NATS_URL: &str = "nats://localhost:14222";
 
@@ -393,5 +393,142 @@ mod nats_tests {
         assert_eq!(entities.len(), 2);
         assert_eq!(entities[0]["type"], "mention");
         assert_eq!(entities[1]["type"], "hashtag");
+    }
+
+    // ── Callback queries ──────────────────────────────────────────────────────
+
+    fn callback_query_json(user_id: u64, data: &str, message_id: i64, chat_id: i64) -> CallbackQuery {
+        serde_json::from_value(serde_json::json!({
+            "id": "123456789",
+            "from": {"id": user_id, "is_bot": false, "first_name": "User"},
+            "data": data,
+            "chat_instance": "abc",
+            "message": {
+                "message_id": message_id,
+                "date": 1_700_000_000i64,
+                "chat": {"id": chat_id, "type": "private", "first_name": "User"},
+                "from": {"id": user_id, "is_bot": false, "first_name": "User"},
+                "text": "button text"
+            }
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_handler_routes_callback_query_to_nats() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "route-callback";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let query = callback_query_json(42, "action:confirm", 1, 42);
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["data"], "action:confirm");
+        assert_eq!(event["from"]["id"], 42);
+        assert_eq!(event["callback_query_id"], "123456789");
+    }
+
+    #[tokio::test]
+    async fn test_callback_query_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "deny-callback";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let query = callback_query_json(99, "action:deny", 1, 99);
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            sub.next(),
+        )
+        .await;
+        assert!(result.is_err(), "denied callback must NOT be published to NATS");
+    }
+
+    #[tokio::test]
+    async fn test_callback_query_without_message_inline_mode() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "callback-inline";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // Inline mode: no "message" field, only inline_message_id
+        let query: CallbackQuery = serde_json::from_value(serde_json::json!({
+            "id": "777",
+            "from": {"id": 55, "is_bot": false, "first_name": "U"},
+            "chat_instance": "inline_chat",
+            "inline_message_id": "ABCDEF",
+            "data": "inline:action"
+        }))
+        .unwrap();
+
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["data"], "inline:action");
+        assert_eq!(event["from"]["id"], 55);
+        // No message → message_id should be null
+        assert!(event["message_id"].is_null());
+        // chat.id should fall back to user_id
+        assert_eq!(event["chat"]["id"], 55);
+    }
+
+    #[tokio::test]
+    async fn test_callback_query_empty_data() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "callback-empty";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        // No "data" field → bridge should publish with empty string
+        let query: CallbackQuery = serde_json::from_value(serde_json::json!({
+            "id": "999",
+            "from": {"id": 42, "is_bot": false, "first_name": "U"},
+            "chat_instance": "xyz",
+            "message": {
+                "message_id": 5,
+                "date": 1_700_000_000i64,
+                "chat": {"id": 42, "type": "private", "first_name": "U"},
+                "from": {"id": 42, "is_bot": false, "first_name": "U"},
+                "text": "x"
+            }
+        }))
+        .unwrap();
+
+        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["data"], "");
     }
 }
