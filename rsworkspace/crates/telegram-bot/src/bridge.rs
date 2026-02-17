@@ -408,6 +408,91 @@ impl TelegramBridge {
         Ok(())
     }
 
+    /// Publish a location message event
+    pub async fn publish_location_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let location = msg.location().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageLocationEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            longitude: location.longitude,
+            latitude: location.latitude,
+            horizontal_accuracy: location.horizontal_accuracy,
+            live_period: location.live_period.map(|lp| match lp {
+                teloxide::types::LivePeriod::Timeframe(secs) => secs.duration().as_secs() as u32,
+                teloxide::types::LivePeriod::Indefinite => 0x7FFFFFFF,
+            }),
+            heading: location.heading,
+            proximity_alert_radius: location.proximity_alert_radius,
+        };
+
+        let subject = subjects::bot::message_location(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published location message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a venue message event
+    pub async fn publish_venue_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let venue = msg.venue().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageVenueEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            longitude: venue.location.longitude,
+            latitude: venue.location.latitude,
+            title: venue.title.clone(),
+            address: venue.address.clone(),
+            foursquare_id: venue.foursquare_id.clone(),
+            foursquare_type: venue.foursquare_type.clone(),
+            google_place_id: venue.google_place_id.clone(),
+            google_place_type: venue.google_place_type.clone(),
+        };
+
+        let subject = subjects::bot::message_venue(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published venue message event to {}", subject);
+        Ok(())
+    }
+
+    /// Publish a contact message event
+    pub async fn publish_contact_message(&self, msg: &Message, update_id: i64) -> Result<()> {
+        let contact = msg.contact().unwrap();
+        let chat = self.convert_chat(&msg.chat);
+        let session_id = SessionId::from_chat(&chat);
+
+        let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
+        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+
+        let event = MessageContactEvent {
+            metadata: EventMetadata::new(session_id.to_string(), update_id),
+            message: self.convert_message(msg),
+            phone_number: contact.phone_number.clone(),
+            first_name: contact.first_name.clone(),
+            last_name: contact.last_name.clone(),
+            user_id: contact.user_id.map(|uid| uid.0 as i64),
+            vcard: contact.vcard.clone(),
+        };
+
+        let subject = subjects::bot::message_contact(self.publisher.prefix());
+        self.publisher.publish(&subject, &event).await?;
+
+        debug!("Published contact message event to {}", subject);
+        Ok(())
+    }
+
     /// Publish a callback query event
     pub async fn publish_callback_query(&self, query: &CallbackQuery, update_id: i64) -> Result<()> {
         let data = query.data.clone().unwrap_or_default();

@@ -70,6 +70,21 @@ pub mod bot {
         format!("telegram.{}.bot.message.voice", prefix)
     }
 
+    /// Location message event subject
+    pub fn message_location(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.location", prefix)
+    }
+
+    /// Venue message event subject
+    pub fn message_venue(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.venue", prefix)
+    }
+
+    /// Contact message event subject
+    pub fn message_contact(prefix: &str) -> String {
+        format!("telegram.{}.bot.message.contact", prefix)
+    }
+
     /// Sticker message event subject
     pub fn message_sticker(prefix: &str) -> String {
         format!("telegram.{}.bot.message.sticker", prefix)
@@ -196,6 +211,21 @@ pub mod agent {
     /// Send photo command subject
     pub fn message_send_photo(prefix: &str) -> String {
         format!("telegram.{}.agent.message.send_photo", prefix)
+    }
+
+    /// Send location command subject
+    pub fn message_send_location(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_location", prefix)
+    }
+
+    /// Send venue command subject
+    pub fn message_send_venue(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_venue", prefix)
+    }
+
+    /// Send contact command subject
+    pub fn message_send_contact(prefix: &str) -> String {
+        format!("telegram.{}.agent.message.send_contact", prefix)
     }
 
     /// Send sticker command subject
