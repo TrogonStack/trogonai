@@ -143,25 +143,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rsworkspace/target
+          key: ${{ runner.os }}-cargo-docker-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build binaries
+        run: |
+          cd rsworkspace
+          cargo build --release --package telegram-bot
+          cargo build --release --package telegram-agent
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build telegram-bot image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: rsworkspace
           file: ./Dockerfile.bot
           push: false
           tags: trogonai/telegram-bot:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Build telegram-agent image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: rsworkspace
           file: ./Dockerfile.agent
           push: false
           tags: trogonai/telegram-agent:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
