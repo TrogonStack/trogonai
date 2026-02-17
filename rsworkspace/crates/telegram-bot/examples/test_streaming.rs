@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
             parse_mode: Some(ParseMode::Markdown),
             is_final,
             session_id: None, // Use default chat-based ID
+            message_thread_id: None,
         };
 
         println!("📤 Chunk {}/{}: \"{}{}\"",
