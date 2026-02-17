@@ -1,19 +1,39 @@
 #[cfg(test)]
 mod tests {
-    use telegram_types::chat::{ChatType, Chat};
+    use telegram_types::chat::{Chat, ChatType};
     use telegram_types::SessionId;
 
     fn private(id: i64) -> Chat {
-        Chat { id, chat_type: ChatType::Private, title: None, username: None }
+        Chat {
+            id,
+            chat_type: ChatType::Private,
+            title: None,
+            username: None,
+        }
     }
     fn group(id: i64) -> Chat {
-        Chat { id, chat_type: ChatType::Group, title: None, username: None }
+        Chat {
+            id,
+            chat_type: ChatType::Group,
+            title: None,
+            username: None,
+        }
     }
     fn supergroup(id: i64) -> Chat {
-        Chat { id, chat_type: ChatType::Supergroup, title: None, username: None }
+        Chat {
+            id,
+            chat_type: ChatType::Supergroup,
+            title: None,
+            username: None,
+        }
     }
     fn channel(id: i64) -> Chat {
-        Chat { id, chat_type: ChatType::Channel, title: None, username: None }
+        Chat {
+            id,
+            chat_type: ChatType::Channel,
+            title: None,
+            username: None,
+        }
     }
 
     // ── from_chat() ───────────────────────────────────────────────────────────

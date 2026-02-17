@@ -3,10 +3,10 @@
 //! Manages conversation history and context for each session.
 //! Supports both in-memory storage (default) and persistent NATS KV storage.
 
+use crate::llm::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::llm::Message;
 
 /// Maximum messages to keep in history per session
 const MAX_HISTORY_SIZE: usize = 20;
@@ -95,7 +95,11 @@ impl ConversationManager {
                             return history;
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to deserialize conversation for {}: {}", session_id, e);
+                            tracing::warn!(
+                                "Failed to deserialize conversation for {}: {}",
+                                session_id,
+                                e
+                            );
                         }
                     }
                 }
@@ -116,7 +120,11 @@ impl ConversationManager {
 
         if let Some(ref kv) = self.kv {
             if let Err(e) = kv.delete(session_id).await {
-                tracing::warn!("Failed to delete conversation from KV for {}: {}", session_id, e);
+                tracing::warn!(
+                    "Failed to delete conversation from KV for {}: {}",
+                    session_id,
+                    e
+                );
             }
         }
     }
@@ -200,7 +208,10 @@ mod tests {
         assert_eq!(history.len(), MAX_HISTORY_SIZE);
         // Should keep the LAST MAX_HISTORY_SIZE messages
         assert_eq!(history[0].content, "msg 5");
-        assert_eq!(history[MAX_HISTORY_SIZE - 1].content, format!("msg {}", MAX_HISTORY_SIZE + 4));
+        assert_eq!(
+            history[MAX_HISTORY_SIZE - 1].content,
+            format!("msg {}", MAX_HISTORY_SIZE + 4)
+        );
     }
 
     #[tokio::test]

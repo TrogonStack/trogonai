@@ -4,7 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::chat::{Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, MessageEntity, PhotoSize, User, ShippingAddress, OrderInfo, SuccessfulPayment};
+use crate::chat::{
+    Chat, ChatInviteLink, ChatMember, FileInfo, ForumTopic, Message, MessageEntity, OrderInfo,
+    PhotoSize, ShippingAddress, SuccessfulPayment, User,
+};
 
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -509,7 +512,12 @@ mod tests {
         TgMessage {
             message_id: 42,
             date: 0,
-            chat: Chat { id: 123, chat_type: ChatType::Private, title: None, username: None },
+            chat: Chat {
+                id: 123,
+                chat_type: ChatType::Private,
+                title: None,
+                username: None,
+            },
             from: None,
             message_thread_id: None,
             is_topic_message: None,
@@ -525,7 +533,10 @@ mod tests {
 
     #[test]
     fn test_poll_type_serde() {
-        assert_eq!(serde_json::to_string(&PollType::Regular).unwrap(), "\"regular\"");
+        assert_eq!(
+            serde_json::to_string(&PollType::Regular).unwrap(),
+            "\"regular\""
+        );
         assert_eq!(serde_json::to_string(&PollType::Quiz).unwrap(), "\"quiz\"");
         let rt: PollType = serde_json::from_str("\"regular\"").unwrap();
         assert_eq!(rt, PollType::Regular);
@@ -539,8 +550,14 @@ mod tests {
             poll_id: "poll123".to_string(),
             question: "Best language?".to_string(),
             options: vec![
-                PollOption { text: "Rust".to_string(), voter_count: 10 },
-                PollOption { text: "Python".to_string(), voter_count: 5 },
+                PollOption {
+                    text: "Rust".to_string(),
+                    voter_count: 10,
+                },
+                PollOption {
+                    text: "Python".to_string(),
+                    voter_count: 5,
+                },
             ],
             total_voter_count: 15,
             is_closed: false,
@@ -561,8 +578,14 @@ mod tests {
             poll_id: "p1".to_string(),
             question: "Quiz?".to_string(),
             options: vec![
-                PollOption { text: "A".to_string(), voter_count: 1 },
-                PollOption { text: "B".to_string(), voter_count: 0 },
+                PollOption {
+                    text: "A".to_string(),
+                    voter_count: 1,
+                },
+                PollOption {
+                    text: "B".to_string(),
+                    voter_count: 0,
+                },
             ],
             total_voter_count: 1,
             is_closed: true,
@@ -650,7 +673,10 @@ mod tests {
         assert_eq!(meta.session_id, "tg-private-99");
         assert_eq!(meta.update_id, 42);
         // event_id should be a valid UUID (non-zero)
-        assert_ne!(meta.event_id.to_string(), "00000000-0000-0000-0000-000000000000");
+        assert_ne!(
+            meta.event_id.to_string(),
+            "00000000-0000-0000-0000-000000000000"
+        );
     }
 
     // ── StickerFormat / StickerKind serde ─────────────────────────────────────
@@ -701,9 +727,13 @@ mod tests {
         let event = MessagePhotoEvent {
             metadata: test_metadata(),
             message: test_message(),
-            photo: vec![
-                PhotoSize { file_id: "f1".to_string(), file_unique_id: "u1".to_string(), width: 320, height: 240, file_size: None },
-            ],
+            photo: vec![PhotoSize {
+                file_id: "f1".to_string(),
+                file_unique_id: "u1".to_string(),
+                width: 320,
+                height: 240,
+                file_size: None,
+            }],
             caption: Some("A photo".to_string()),
         };
         roundtrip(&event);
@@ -714,7 +744,13 @@ mod tests {
         let event = MessageVideoEvent {
             metadata: test_metadata(),
             message: test_message(),
-            video: FileInfo { file_id: "v1".to_string(), file_unique_id: "vu1".to_string(), file_size: Some(1024), file_name: Some("clip.mp4".to_string()), mime_type: Some("video/mp4".to_string()) },
+            video: FileInfo {
+                file_id: "v1".to_string(),
+                file_unique_id: "vu1".to_string(),
+                file_size: Some(1024),
+                file_name: Some("clip.mp4".to_string()),
+                mime_type: Some("video/mp4".to_string()),
+            },
             caption: None,
         };
         roundtrip(&event);
@@ -725,7 +761,13 @@ mod tests {
         let event = MessageAudioEvent {
             metadata: test_metadata(),
             message: test_message(),
-            audio: FileInfo { file_id: "a1".to_string(), file_unique_id: "au1".to_string(), file_size: None, file_name: Some("track.mp3".to_string()), mime_type: Some("audio/mpeg".to_string()) },
+            audio: FileInfo {
+                file_id: "a1".to_string(),
+                file_unique_id: "au1".to_string(),
+                file_size: None,
+                file_name: Some("track.mp3".to_string()),
+                mime_type: Some("audio/mpeg".to_string()),
+            },
             caption: None,
         };
         roundtrip(&event);
@@ -736,7 +778,13 @@ mod tests {
         let event = MessageDocumentEvent {
             metadata: test_metadata(),
             message: test_message(),
-            document: FileInfo { file_id: "d1".to_string(), file_unique_id: "du1".to_string(), file_size: Some(2048), file_name: Some("doc.pdf".to_string()), mime_type: Some("application/pdf".to_string()) },
+            document: FileInfo {
+                file_id: "d1".to_string(),
+                file_unique_id: "du1".to_string(),
+                file_size: Some(2048),
+                file_name: Some("doc.pdf".to_string()),
+                mime_type: Some("application/pdf".to_string()),
+            },
             caption: Some("See attached".to_string()),
         };
         roundtrip(&event);
@@ -747,7 +795,13 @@ mod tests {
         let event = MessageVoiceEvent {
             metadata: test_metadata(),
             message: test_message(),
-            voice: FileInfo { file_id: "vo1".to_string(), file_unique_id: "vou1".to_string(), file_size: Some(512), file_name: None, mime_type: Some("audio/ogg".to_string()) },
+            voice: FileInfo {
+                file_id: "vo1".to_string(),
+                file_unique_id: "vou1".to_string(),
+                file_size: Some(512),
+                file_name: None,
+                mime_type: Some("audio/ogg".to_string()),
+            },
         };
         roundtrip(&event);
     }
@@ -776,7 +830,13 @@ mod tests {
         let event = MessageAnimationEvent {
             metadata: test_metadata(),
             message: test_message(),
-            animation: FileInfo { file_id: "gif1".to_string(), file_unique_id: "gifu1".to_string(), file_size: None, file_name: Some("anim.gif".to_string()), mime_type: Some("image/gif".to_string()) },
+            animation: FileInfo {
+                file_id: "gif1".to_string(),
+                file_unique_id: "gifu1".to_string(),
+                file_size: None,
+                file_name: Some("anim.gif".to_string()),
+                mime_type: Some("image/gif".to_string()),
+            },
             width: 480,
             height: 270,
             duration: 3,
@@ -791,7 +851,13 @@ mod tests {
         let event = MessageVideoNoteEvent {
             metadata: test_metadata(),
             message: test_message(),
-            video_note: FileInfo { file_id: "vn1".to_string(), file_unique_id: "vnu1".to_string(), file_size: Some(4096), file_name: None, mime_type: None },
+            video_note: FileInfo {
+                file_id: "vn1".to_string(),
+                file_unique_id: "vnu1".to_string(),
+                file_size: Some(4096),
+                file_name: None,
+                mime_type: None,
+            },
             duration: 7,
             length: 240,
             thumbnail: None,
@@ -806,8 +872,20 @@ mod tests {
         let event = CallbackQueryEvent {
             metadata: test_metadata(),
             callback_query_id: "cq123".to_string(),
-            from: User { id: 10, is_bot: false, first_name: "Alice".to_string(), last_name: None, username: None, language_code: None },
-            chat: Chat { id: 999, chat_type: ChatType::Private, title: None, username: None },
+            from: User {
+                id: 10,
+                is_bot: false,
+                first_name: "Alice".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
+            chat: Chat {
+                id: 999,
+                chat_type: ChatType::Private,
+                title: None,
+                username: None,
+            },
             message_id: Some(5),
             data: "button:ok".to_string(),
         };
@@ -841,11 +919,21 @@ mod tests {
         let event = InlineQueryEvent {
             metadata: test_metadata(),
             inline_query_id: "iq1".to_string(),
-            from: User { id: 20, is_bot: false, first_name: "Bob".to_string(), last_name: None, username: Some("bob".to_string()), language_code: Some("es".to_string()) },
+            from: User {
+                id: 20,
+                is_bot: false,
+                first_name: "Bob".to_string(),
+                last_name: None,
+                username: Some("bob".to_string()),
+                language_code: Some("es".to_string()),
+            },
             query: "search term".to_string(),
             offset: "".to_string(),
             chat_type: Some("private".to_string()),
-            location: Some(Location { longitude: -3.7, latitude: 40.4 }),
+            location: Some(Location {
+                longitude: -3.7,
+                latitude: 40.4,
+            }),
         };
         roundtrip(&event);
     }
@@ -855,7 +943,14 @@ mod tests {
         let event = ChosenInlineResultEvent {
             metadata: test_metadata(),
             result_id: "r1".to_string(),
-            from: User { id: 30, is_bot: false, first_name: "Carol".to_string(), last_name: None, username: None, language_code: None },
+            from: User {
+                id: 30,
+                is_bot: false,
+                first_name: "Carol".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
             query: "my query".to_string(),
             inline_message_id: Some("im123".to_string()),
         };
@@ -868,7 +963,14 @@ mod tests {
     fn test_chat_member_updated_event_roundtrip() {
         use crate::chat::{ChatMember, ChatMemberStatus};
         let member = |status| ChatMember {
-            user: User { id: 50, is_bot: false, first_name: "Dave".to_string(), last_name: None, username: None, language_code: None },
+            user: User {
+                id: 50,
+                is_bot: false,
+                first_name: "Dave".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
             status,
             until_date: None,
             is_anonymous: None,
@@ -876,8 +978,20 @@ mod tests {
         };
         let event = ChatMemberUpdatedEvent {
             metadata: test_metadata(),
-            chat: Chat { id: -100999, chat_type: ChatType::Group, title: Some("G".to_string()), username: None },
-            from: User { id: 1, is_bot: true, first_name: "Bot".to_string(), last_name: None, username: None, language_code: None },
+            chat: Chat {
+                id: -100999,
+                chat_type: ChatType::Group,
+                title: Some("G".to_string()),
+                username: None,
+            },
+            from: User {
+                id: 1,
+                is_bot: true,
+                first_name: "Bot".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
             old_chat_member: member(ChatMemberStatus::Member),
             new_chat_member: member(ChatMemberStatus::Kicked),
             date: 1700000000,
@@ -895,7 +1009,14 @@ mod tests {
         let event = PreCheckoutQueryEvent {
             metadata: test_metadata(),
             pre_checkout_query_id: "pcq1".to_string(),
-            from: User { id: 60, is_bot: false, first_name: "Eve".to_string(), last_name: None, username: None, language_code: None },
+            from: User {
+                id: 60,
+                is_bot: false,
+                first_name: "Eve".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
             currency: "USD".to_string(),
             total_amount: 1000,
             invoice_payload: "order_42".to_string(),
@@ -911,7 +1032,14 @@ mod tests {
         let event = ShippingQueryEvent {
             metadata: test_metadata(),
             shipping_query_id: "sq1".to_string(),
-            from: User { id: 70, is_bot: false, first_name: "Frank".to_string(), last_name: None, username: None, language_code: None },
+            from: User {
+                id: 70,
+                is_bot: false,
+                first_name: "Frank".to_string(),
+                last_name: None,
+                username: None,
+                language_code: None,
+            },
             invoice_payload: "payload_1".to_string(),
             shipping_address: ShippingAddress {
                 country_code: "US".to_string(),
@@ -951,14 +1079,22 @@ mod tests {
         let event = ForumTopicCreatedEvent {
             metadata: test_metadata(),
             message: test_message(),
-            forum_topic: ForumTopic { message_thread_id: 1, name: "Support".to_string(), icon_color: 0x6FB9F0, icon_custom_emoji_id: None },
+            forum_topic: ForumTopic {
+                message_thread_id: 1,
+                name: "Support".to_string(),
+                icon_color: 0x6FB9F0,
+                icon_custom_emoji_id: None,
+            },
         };
         roundtrip(&event);
     }
 
     #[test]
     fn test_forum_topic_closed_event_roundtrip() {
-        let event = ForumTopicClosedEvent { metadata: test_metadata(), message: test_message() };
+        let event = ForumTopicClosedEvent {
+            metadata: test_metadata(),
+            message: test_message(),
+        };
         roundtrip(&event);
     }
 }

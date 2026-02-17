@@ -602,14 +602,23 @@ mod tests {
     fn test_bot_subjects() {
         assert_eq!(bot::message_text("prod"), "telegram.prod.bot.message.text");
         assert_eq!(bot::message_photo("dev"), "telegram.dev.bot.message.photo");
-        assert_eq!(bot::command("prod", "start"), "telegram.prod.bot.command.start");
+        assert_eq!(
+            bot::command("prod", "start"),
+            "telegram.prod.bot.command.start"
+        );
         assert_eq!(bot::all("prod"), "telegram.prod.bot.>");
     }
 
     #[test]
     fn test_agent_subjects() {
-        assert_eq!(agent::message_send("prod"), "telegram.prod.agent.message.send");
-        assert_eq!(agent::message_edit("dev"), "telegram.dev.agent.message.edit");
+        assert_eq!(
+            agent::message_send("prod"),
+            "telegram.prod.agent.message.send"
+        );
+        assert_eq!(
+            agent::message_edit("dev"),
+            "telegram.dev.agent.message.edit"
+        );
         assert_eq!(agent::all("prod"), "telegram.prod.agent.>");
     }
 
@@ -624,25 +633,58 @@ mod tests {
 
     #[test]
     fn test_bot_media_subjects() {
-        assert_eq!(bot::message_video("prod"), "telegram.prod.bot.message.video");
-        assert_eq!(bot::message_audio("prod"), "telegram.prod.bot.message.audio");
-        assert_eq!(bot::message_document("prod"), "telegram.prod.bot.message.document");
-        assert_eq!(bot::message_voice("prod"), "telegram.prod.bot.message.voice");
-        assert_eq!(bot::message_sticker("prod"), "telegram.prod.bot.message.sticker");
-        assert_eq!(bot::message_animation("prod"), "telegram.prod.bot.message.animation");
-        assert_eq!(bot::message_video_note("prod"), "telegram.prod.bot.message.video_note");
+        assert_eq!(
+            bot::message_video("prod"),
+            "telegram.prod.bot.message.video"
+        );
+        assert_eq!(
+            bot::message_audio("prod"),
+            "telegram.prod.bot.message.audio"
+        );
+        assert_eq!(
+            bot::message_document("prod"),
+            "telegram.prod.bot.message.document"
+        );
+        assert_eq!(
+            bot::message_voice("prod"),
+            "telegram.prod.bot.message.voice"
+        );
+        assert_eq!(
+            bot::message_sticker("prod"),
+            "telegram.prod.bot.message.sticker"
+        );
+        assert_eq!(
+            bot::message_animation("prod"),
+            "telegram.prod.bot.message.animation"
+        );
+        assert_eq!(
+            bot::message_video_note("prod"),
+            "telegram.prod.bot.message.video_note"
+        );
     }
 
     #[test]
     fn test_bot_location_subjects() {
-        assert_eq!(bot::message_location("prod"), "telegram.prod.bot.message.location");
-        assert_eq!(bot::message_venue("prod"), "telegram.prod.bot.message.venue");
-        assert_eq!(bot::message_contact("prod"), "telegram.prod.bot.message.contact");
+        assert_eq!(
+            bot::message_location("prod"),
+            "telegram.prod.bot.message.location"
+        );
+        assert_eq!(
+            bot::message_venue("prod"),
+            "telegram.prod.bot.message.venue"
+        );
+        assert_eq!(
+            bot::message_contact("prod"),
+            "telegram.prod.bot.message.contact"
+        );
     }
 
     #[test]
     fn test_bot_error_subject() {
-        assert_eq!(bot::command_error("prod"), "telegram.prod.bot.error.command");
+        assert_eq!(
+            bot::command_error("prod"),
+            "telegram.prod.bot.error.command"
+        );
     }
 
     // ── New agent subjects ────────────────────────────────────────────────────
@@ -655,27 +697,66 @@ mod tests {
 
     #[test]
     fn test_agent_media_subjects() {
-        assert_eq!(agent::message_send_video("prod"), "telegram.prod.agent.message.send_video");
-        assert_eq!(agent::message_send_audio("prod"), "telegram.prod.agent.message.send_audio");
-        assert_eq!(agent::message_send_document("prod"), "telegram.prod.agent.message.send_document");
-        assert_eq!(agent::message_send_voice("prod"), "telegram.prod.agent.message.send_voice");
-        assert_eq!(agent::message_send_media_group("prod"), "telegram.prod.agent.message.send_media_group");
+        assert_eq!(
+            agent::message_send_video("prod"),
+            "telegram.prod.agent.message.send_video"
+        );
+        assert_eq!(
+            agent::message_send_audio("prod"),
+            "telegram.prod.agent.message.send_audio"
+        );
+        assert_eq!(
+            agent::message_send_document("prod"),
+            "telegram.prod.agent.message.send_document"
+        );
+        assert_eq!(
+            agent::message_send_voice("prod"),
+            "telegram.prod.agent.message.send_voice"
+        );
+        assert_eq!(
+            agent::message_send_media_group("prod"),
+            "telegram.prod.agent.message.send_media_group"
+        );
     }
 
     #[test]
     fn test_agent_location_subjects() {
-        assert_eq!(agent::message_send_location("prod"), "telegram.prod.agent.message.send_location");
-        assert_eq!(agent::message_send_venue("prod"), "telegram.prod.agent.message.send_venue");
-        assert_eq!(agent::message_send_contact("prod"), "telegram.prod.agent.message.send_contact");
+        assert_eq!(
+            agent::message_send_location("prod"),
+            "telegram.prod.agent.message.send_location"
+        );
+        assert_eq!(
+            agent::message_send_venue("prod"),
+            "telegram.prod.agent.message.send_venue"
+        );
+        assert_eq!(
+            agent::message_send_contact("prod"),
+            "telegram.prod.agent.message.send_contact"
+        );
     }
 
     #[test]
     fn test_agent_sticker_subjects() {
-        assert_eq!(agent::message_send_sticker("prod"), "telegram.prod.agent.message.send_sticker");
-        assert_eq!(agent::message_send_animation("prod"), "telegram.prod.agent.message.send_animation");
-        assert_eq!(agent::message_send_video_note("prod"), "telegram.prod.agent.message.send_video_note");
-        assert_eq!(agent::sticker_get_set("prod"), "telegram.prod.agent.sticker.get_set");
-        assert_eq!(agent::sticker_create_set("prod"), "telegram.prod.agent.sticker.create_set");
+        assert_eq!(
+            agent::message_send_sticker("prod"),
+            "telegram.prod.agent.message.send_sticker"
+        );
+        assert_eq!(
+            agent::message_send_animation("prod"),
+            "telegram.prod.agent.message.send_animation"
+        );
+        assert_eq!(
+            agent::message_send_video_note("prod"),
+            "telegram.prod.agent.message.send_video_note"
+        );
+        assert_eq!(
+            agent::sticker_get_set("prod"),
+            "telegram.prod.agent.sticker.get_set"
+        );
+        assert_eq!(
+            agent::sticker_create_set("prod"),
+            "telegram.prod.agent.sticker.create_set"
+        );
     }
 
     #[test]
@@ -690,23 +771,53 @@ mod tests {
 
     #[test]
     fn test_agent_forward_copy_subjects() {
-        assert_eq!(agent::message_forward("prod"), "telegram.prod.agent.message.forward");
-        assert_eq!(agent::message_copy("prod"), "telegram.prod.agent.message.copy");
+        assert_eq!(
+            agent::message_forward("prod"),
+            "telegram.prod.agent.message.forward"
+        );
+        assert_eq!(
+            agent::message_copy("prod"),
+            "telegram.prod.agent.message.copy"
+        );
     }
 
     #[test]
     fn test_bot_edited_and_join_subjects() {
-        assert_eq!(bot::message_edited("prod"), "telegram.prod.bot.message.edited");
-        assert_eq!(bot::chat_join_request("prod"), "telegram.prod.bot.chat.join_request");
+        assert_eq!(
+            bot::message_edited("prod"),
+            "telegram.prod.bot.message.edited"
+        );
+        assert_eq!(
+            bot::chat_join_request("prod"),
+            "telegram.prod.bot.chat.join_request"
+        );
     }
 
     #[test]
     fn test_bot_forum_subjects() {
-        assert_eq!(bot::forum_topic_created("prod"), "telegram.prod.bot.forum.created");
-        assert_eq!(bot::forum_topic_edited("prod"), "telegram.prod.bot.forum.edited");
-        assert_eq!(bot::forum_topic_closed("prod"), "telegram.prod.bot.forum.closed");
-        assert_eq!(bot::forum_topic_reopened("prod"), "telegram.prod.bot.forum.reopened");
-        assert_eq!(bot::general_forum_topic_hidden("prod"), "telegram.prod.bot.forum.general_hidden");
-        assert_eq!(bot::general_forum_topic_unhidden("prod"), "telegram.prod.bot.forum.general_unhidden");
+        assert_eq!(
+            bot::forum_topic_created("prod"),
+            "telegram.prod.bot.forum.created"
+        );
+        assert_eq!(
+            bot::forum_topic_edited("prod"),
+            "telegram.prod.bot.forum.edited"
+        );
+        assert_eq!(
+            bot::forum_topic_closed("prod"),
+            "telegram.prod.bot.forum.closed"
+        );
+        assert_eq!(
+            bot::forum_topic_reopened("prod"),
+            "telegram.prod.bot.forum.reopened"
+        );
+        assert_eq!(
+            bot::general_forum_topic_hidden("prod"),
+            "telegram.prod.bot.forum.general_hidden"
+        );
+        assert_eq!(
+            bot::general_forum_topic_unhidden("prod"),
+            "telegram.prod.bot.forum.general_unhidden"
+        );
     }
 }

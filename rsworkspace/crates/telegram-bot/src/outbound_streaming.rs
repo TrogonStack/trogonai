@@ -1,6 +1,6 @@
 //! Streaming message handler with rate limiting and message tracking
 
-use crate::outbound::{OutboundProcessor, StreamingMessage, convert_parse_mode};
+use crate::outbound::{convert_parse_mode, OutboundProcessor, StreamingMessage};
 use anyhow::Result;
 use telegram_nats::subjects;
 use telegram_types::commands::StreamMessageCommand;
@@ -21,7 +21,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_stream(&prefix);
         info!("Subscribing to streaming messages: {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<StreamMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<StreamMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -42,7 +45,8 @@ impl OutboundProcessor {
         let chat_id = cmd.chat_id;
 
         // Use provided session_id or fallback to chat-based ID
-        let session_id = cmd.session_id
+        let session_id = cmd
+            .session_id
             .clone()
             .unwrap_or_else(|| format!("chat_{}", chat_id));
 
@@ -71,13 +75,16 @@ impl OutboundProcessor {
             }
 
             // Try to edit with retry logic
-            if let Err(e) = self.edit_message_with_retry(
-                chat_id,
-                message_id,
-                &cmd.text,
-                cmd.parse_mode.as_ref(),
-                cmd.message_thread_id,
-            ).await {
+            if let Err(e) = self
+                .edit_message_with_retry(
+                    chat_id,
+                    message_id,
+                    &cmd.text,
+                    cmd.parse_mode.as_ref(),
+                    cmd.message_thread_id,
+                )
+                .await
+            {
                 error!("Failed to edit message {} after retries: {}", message_id, e);
             } else {
                 // Update tracking info
@@ -94,16 +101,22 @@ impl OutboundProcessor {
             // Clean up if this is the final message
             if cmd.is_final {
                 messages.remove(&key);
-                info!("Streaming completed for chat {} (message {})", chat_id, message_id);
+                info!(
+                    "Streaming completed for chat {} (message {})",
+                    chat_id, message_id
+                );
             }
         } else {
             // Send new message and start tracking
-            match self.send_message_with_retry(
-                chat_id,
-                &cmd.text,
-                cmd.parse_mode.as_ref(),
-                cmd.message_thread_id,
-            ).await {
+            match self
+                .send_message_with_retry(
+                    chat_id,
+                    &cmd.text,
+                    cmd.parse_mode.as_ref(),
+                    cmd.message_thread_id,
+                )
+                .await
+            {
                 Ok(message) => {
                     let message_id = message.id.0;
                     info!(
@@ -146,11 +159,9 @@ impl OutboundProcessor {
         loop {
             attempts += 1;
 
-            let mut req = self.bot.edit_message_text(
-                ChatId(chat_id),
-                MessageId(message_id),
-                text,
-            );
+            let mut req = self
+                .bot
+                .edit_message_text(ChatId(chat_id), MessageId(message_id), text);
 
             if let Some(mode) = parse_mode {
                 req.parse_mode = Some(convert_parse_mode(mode.clone()));
@@ -158,7 +169,10 @@ impl OutboundProcessor {
 
             match req.await {
                 Ok(_) => {
-                    debug!("Successfully edited message {} (attempt {})", message_id, attempts);
+                    debug!(
+                        "Successfully edited message {} (attempt {})",
+                        message_id, attempts
+                    );
                     return Ok(());
                 }
                 Err(e) => {
@@ -170,10 +184,7 @@ impl OutboundProcessor {
                         ));
                     }
 
-                    warn!(
-                        "Edit failed (attempt {}): {}. Retrying...",
-                        attempts, e
-                    );
+                    warn!("Edit failed (attempt {}): {}. Retrying...", attempts, e);
 
                     // Exponential backoff
                     let backoff = Duration::from_millis(100 * 2u64.pow(attempts - 1));
@@ -220,10 +231,7 @@ impl OutboundProcessor {
                         ));
                     }
 
-                    warn!(
-                        "Send failed (attempt {}): {}. Retrying...",
-                        attempts, e
-                    );
+                    warn!("Send failed (attempt {}): {}. Retrying...", attempts, e);
 
                     // Exponential backoff
                     let backoff = Duration::from_millis(100 * 2u64.pow(attempts - 1));

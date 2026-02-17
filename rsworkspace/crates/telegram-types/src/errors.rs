@@ -191,9 +191,9 @@ impl TelegramErrorCode {
 
             Self::NetworkError | Self::IoError => ErrorCategory::Network,
 
-            Self::WebhookRequireHttps
-            | Self::BadWebhookPort
-            | Self::UnknownHost => ErrorCategory::WebhookError,
+            Self::WebhookRequireHttps | Self::BadWebhookPort | Self::UnknownHost => {
+                ErrorCategory::WebhookError
+            }
 
             _ => ErrorCategory::Unknown,
         }
@@ -241,7 +241,10 @@ mod tests {
             (ErrorCategory::BotBlocked, "\"bot_blocked\""),
             (ErrorCategory::NotFound, "\"not_found\""),
             (ErrorCategory::PermissionDenied, "\"permission_denied\""),
-            (ErrorCategory::MessageUnmodifiable, "\"message_unmodifiable\""),
+            (
+                ErrorCategory::MessageUnmodifiable,
+                "\"message_unmodifiable\"",
+            ),
             (ErrorCategory::ChatMigrated, "\"chat_migrated\""),
             (ErrorCategory::PayloadTooLarge, "\"payload_too_large\""),
             (ErrorCategory::InvalidInput, "\"invalid_input\""),
@@ -264,7 +267,10 @@ mod tests {
         for (code, expected) in [
             (TelegramErrorCode::BotBlocked, "\"bot_blocked\""),
             (TelegramErrorCode::ChatNotFound, "\"chat_not_found\""),
-            (TelegramErrorCode::MessageNotModified, "\"message_not_modified\""),
+            (
+                TelegramErrorCode::MessageNotModified,
+                "\"message_not_modified\"",
+            ),
             (TelegramErrorCode::FloodControl, "\"flood_control\""),
             (TelegramErrorCode::NetworkError, "\"network_error\""),
             (TelegramErrorCode::Unknown, "\"unknown\""),
@@ -280,24 +286,39 @@ mod tests {
 
     #[test]
     fn test_flood_control_is_rate_limit_category() {
-        assert_eq!(TelegramErrorCode::FloodControl.category(), ErrorCategory::RateLimit);
+        assert_eq!(
+            TelegramErrorCode::FloodControl.category(),
+            ErrorCategory::RateLimit
+        );
     }
 
     #[test]
     fn test_migrate_to_chat_id_is_chat_migrated_category() {
-        assert_eq!(TelegramErrorCode::MigrateToChatId.category(), ErrorCategory::ChatMigrated);
+        assert_eq!(
+            TelegramErrorCode::MigrateToChatId.category(),
+            ErrorCategory::ChatMigrated
+        );
     }
 
     #[test]
     fn test_request_entity_too_large_is_payload_category() {
-        assert_eq!(TelegramErrorCode::RequestEntityTooLarge.category(), ErrorCategory::PayloadTooLarge);
+        assert_eq!(
+            TelegramErrorCode::RequestEntityTooLarge.category(),
+            ErrorCategory::PayloadTooLarge
+        );
     }
 
     #[test]
     fn test_poll_errors_are_unknown_category() {
         // Poll errors fall through to Unknown category
-        assert_eq!(TelegramErrorCode::PollHasAlreadyClosed.category(), ErrorCategory::Unknown);
-        assert_eq!(TelegramErrorCode::PollMustHaveMoreOptions.category(), ErrorCategory::Unknown);
+        assert_eq!(
+            TelegramErrorCode::PollHasAlreadyClosed.category(),
+            ErrorCategory::Unknown
+        );
+        assert_eq!(
+            TelegramErrorCode::PollMustHaveMoreOptions.category(),
+            ErrorCategory::Unknown
+        );
     }
 
     #[test]

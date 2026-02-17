@@ -10,7 +10,7 @@ mod processor;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::agent::TelegramAgent;
@@ -36,7 +36,11 @@ struct Args {
     anthropic_api_key: Option<String>,
 
     /// Claude model to use
-    #[arg(long, env = "CLAUDE_MODEL", default_value = "claude-sonnet-4-5-20250929")]
+    #[arg(
+        long,
+        env = "CLAUDE_MODEL",
+        default_value = "claude-sonnet-4-5-20250929"
+    )]
     claude_model: String,
 
     /// Enable LLM mode (requires API key)
@@ -88,12 +92,15 @@ async fn main() -> Result<()> {
                 Some(kv)
             }
             Err(_) => {
-                match js.create_key_value(async_nats::jetstream::kv::Config {
-                    bucket: bucket.clone(),
-                    history: 1,
-                    storage: async_nats::jetstream::stream::StorageType::File,
-                    ..Default::default()
-                }).await {
+                match js
+                    .create_key_value(async_nats::jetstream::kv::Config {
+                        bucket: bucket.clone(),
+                        history: 1,
+                        storage: async_nats::jetstream::stream::StorageType::File,
+                        ..Default::default()
+                    })
+                    .await
+                {
                     Ok(kv) => {
                         info!("Created conversation KV bucket: {}", bucket);
                         Some(kv)
@@ -119,7 +126,9 @@ async fn main() -> Result<()> {
             })
         } else {
             error!("LLM mode enabled but ANTHROPIC_API_KEY not provided");
-            return Err(anyhow::anyhow!("ANTHROPIC_API_KEY required when --enable-llm is set"));
+            return Err(anyhow::anyhow!(
+                "ANTHROPIC_API_KEY required when --enable-llm is set"
+            ));
         }
     } else {
         info!("LLM mode disabled, running in echo mode");

@@ -17,7 +17,7 @@ use anyhow::Result;
 use clap::Parser;
 use teloxide::prelude::*;
 use teloxide::types::Message;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::bridge::TelegramBridge;
@@ -143,11 +143,8 @@ async fn main() -> Result<()> {
     );
 
     // Start outbound processor (NATS → Telegram)
-    let outbound = OutboundProcessor::new(
-        bot.clone(),
-        nats_client.clone(),
-        config.nats.prefix.clone(),
-    );
+    let outbound =
+        OutboundProcessor::new(bot.clone(), nats_client.clone(), config.nats.prefix.clone());
 
     tokio::spawn(async move {
         if let Err(e) = outbound.run().await {
@@ -236,44 +233,42 @@ async fn main() -> Result<()> {
                 .endpoint(handlers::handle_general_forum_topic_unhidden),
         );
 
-    let edited_message_handler = Update::filter_edited_message()
-        .endpoint(handlers::handle_edited_message);
+    let edited_message_handler =
+        Update::filter_edited_message().endpoint(handlers::handle_edited_message);
 
-    let channel_post_handler = Update::filter_channel_post()
-        .endpoint(handlers::handle_channel_post);
+    let channel_post_handler =
+        Update::filter_channel_post().endpoint(handlers::handle_channel_post);
 
-    let edited_channel_post_handler = Update::filter_edited_channel_post()
-        .endpoint(handlers::handle_edited_channel_post);
+    let edited_channel_post_handler =
+        Update::filter_edited_channel_post().endpoint(handlers::handle_edited_channel_post);
 
-    let chat_join_request_handler = Update::filter_chat_join_request()
-        .endpoint(handlers::handle_chat_join_request);
+    let chat_join_request_handler =
+        Update::filter_chat_join_request().endpoint(handlers::handle_chat_join_request);
 
-    let poll_update_handler = Update::filter_poll()
-        .endpoint(handlers::handle_poll_update);
+    let poll_update_handler = Update::filter_poll().endpoint(handlers::handle_poll_update);
 
-    let poll_answer_handler = Update::filter_poll_answer()
-        .endpoint(handlers::handle_poll_answer);
+    let poll_answer_handler = Update::filter_poll_answer().endpoint(handlers::handle_poll_answer);
 
-    let callback_handler = Update::filter_callback_query()
-        .endpoint(handlers::handle_callback_query);
+    let callback_handler =
+        Update::filter_callback_query().endpoint(handlers::handle_callback_query);
 
-    let inline_query_handler = Update::filter_inline_query()
-        .endpoint(handlers::handle_inline_query);
+    let inline_query_handler =
+        Update::filter_inline_query().endpoint(handlers::handle_inline_query);
 
-    let chosen_inline_result_handler = Update::filter_chosen_inline_result()
-        .endpoint(handlers::handle_chosen_inline_result);
+    let chosen_inline_result_handler =
+        Update::filter_chosen_inline_result().endpoint(handlers::handle_chosen_inline_result);
 
-    let chat_member_handler = Update::filter_chat_member()
-        .endpoint(handlers::handle_chat_member_updated);
+    let chat_member_handler =
+        Update::filter_chat_member().endpoint(handlers::handle_chat_member_updated);
 
-    let my_chat_member_handler = Update::filter_my_chat_member()
-        .endpoint(handlers::handle_my_chat_member_updated);
+    let my_chat_member_handler =
+        Update::filter_my_chat_member().endpoint(handlers::handle_my_chat_member_updated);
 
-    let pre_checkout_handler = Update::filter_pre_checkout_query()
-        .endpoint(handlers::handle_pre_checkout_query);
+    let pre_checkout_handler =
+        Update::filter_pre_checkout_query().endpoint(handlers::handle_pre_checkout_query);
 
-    let shipping_query_handler = Update::filter_shipping_query()
-        .endpoint(handlers::handle_shipping_query);
+    let shipping_query_handler =
+        Update::filter_shipping_query().endpoint(handlers::handle_shipping_query);
 
     // Successful payments arrive as messages with successful_payment field
     let successful_payment_handler = Update::filter_message()
@@ -306,7 +301,10 @@ async fn main() -> Result<()> {
     // Start bot based on update mode
     match &config.telegram.update_mode {
         crate::config::UpdateModeConfig::Polling { timeout, limit } => {
-            info!("Starting bot in POLLING mode (timeout: {}s, limit: {})", timeout, limit);
+            info!(
+                "Starting bot in POLLING mode (timeout: {}s, limit: {})",
+                timeout, limit
+            );
             dispatcher.dispatch().await;
         }
         crate::config::UpdateModeConfig::Webhook {
@@ -330,11 +328,13 @@ async fn main() -> Result<()> {
                 }
             };
 
-            let bind_addr: std::net::SocketAddr = format!("{}:{}", bind_address, port)
-                .parse()
-                .map_err(|e: std::net::AddrParseError| anyhow::anyhow!("Invalid bind address: {}", e))?;
+            let bind_addr: std::net::SocketAddr =
+                format!("{}:{}", bind_address, port).parse().map_err(
+                    |e: std::net::AddrParseError| anyhow::anyhow!("Invalid bind address: {}", e),
+                )?;
 
-            let mut options = teloxide::update_listeners::webhooks::Options::new(bind_addr, parsed_url);
+            let mut options =
+                teloxide::update_listeners::webhooks::Options::new(bind_addr, parsed_url);
 
             if let Some(token) = secret_token {
                 options = options.secret_token(token.clone());

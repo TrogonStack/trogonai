@@ -30,7 +30,12 @@ impl SessionManager {
     }
 
     /// Get or create a session
-    pub async fn get_or_create(&self, session_id: &SessionId, chat_id: i64, user_id: Option<i64>) -> Result<SessionState> {
+    pub async fn get_or_create(
+        &self,
+        session_id: &SessionId,
+        chat_id: i64,
+        user_id: Option<i64>,
+    ) -> Result<SessionState> {
         let key = session_id.as_str();
 
         // Try to get existing session

@@ -29,10 +29,7 @@ impl MockStreamingProcessor {
 
             if time_since_last < MIN_EDIT_INTERVAL {
                 let wait_time = MIN_EDIT_INTERVAL - time_since_last;
-                println!(
-                    "  ⏱️  Rate limiting: waiting {:?} before edit",
-                    wait_time
-                );
+                println!("  ⏱️  Rate limiting: waiting {:?} before edit", wait_time);
                 sleep(wait_time).await;
             }
 

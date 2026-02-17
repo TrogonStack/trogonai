@@ -73,8 +73,7 @@ mod tests {
 
     #[test]
     fn test_from_serde_json_error() {
-        let json_err: serde_json::Error = serde_json::from_str::<i32>("not_a_number")
-            .unwrap_err();
+        let json_err: serde_json::Error = serde_json::from_str::<i32>("not_a_number").unwrap_err();
         let err: Error = json_err.into();
         assert!(err.to_string().starts_with("Serialization error:"));
     }

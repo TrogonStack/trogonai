@@ -1,15 +1,10 @@
 //! Health check and metrics endpoint
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::SystemTime;
+use tokio::sync::RwLock;
 
 /// Health check status
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,10 +80,7 @@ impl AppState {
 
 /// Health check endpoint handler
 async fn health_handler(State(state): State<AppState>) -> (StatusCode, Json<HealthStatus>) {
-    let uptime = state.start_time
-        .elapsed()
-        .unwrap_or_default()
-        .as_secs();
+    let uptime = state.start_time.elapsed().unwrap_or_default().as_secs();
 
     let nats_connected = *state.nats_connected.read().await;
 

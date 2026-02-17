@@ -3,8 +3,8 @@
 //! This simulates an agent sending streaming messages to the bot
 
 use anyhow::Result;
-use telegram_nats::{MessagePublisher, NatsConfig, subjects};
-use telegram_types::commands::{StreamMessageCommand, ParseMode};
+use telegram_nats::{subjects, MessagePublisher, NatsConfig};
+use telegram_types::commands::{ParseMode, StreamMessageCommand};
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
@@ -58,7 +58,8 @@ async fn main() -> Result<()> {
             message_thread_id: None,
         };
 
-        println!("📤 Chunk {}/{}: \"{}{}\"",
+        println!(
+            "📤 Chunk {}/{}: \"{}{}\"",
             i + 1,
             chunks.len(),
             if accumulated.len() > 50 {
@@ -83,7 +84,9 @@ async fn main() -> Result<()> {
     println!("  - Final message length: {} chars", accumulated.len());
     println!("  - Rate limiting: Active (1 edit/second minimum)");
     println!("  - Retry logic: Enabled (up to 3 attempts)");
-    println!("\n✨ The bot should have received and processed these messages with proper rate limiting!");
+    println!(
+        "\n✨ The bot should have received and processed these messages with proper rate limiting!"
+    );
 
     Ok(())
 }
