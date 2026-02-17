@@ -57,10 +57,7 @@ pub async fn jetstream(client: &Client) -> async_nats::jetstream::Context {
 }
 
 /// Create or update JetStream stream for Telegram events
-pub async fn setup_event_stream(
-    js: &async_nats::jetstream::Context,
-    prefix: &str,
-) -> Result<()> {
+pub async fn setup_event_stream(js: &async_nats::jetstream::Context, prefix: &str) -> Result<()> {
     let stream_name = format!("telegram_events_{}", prefix);
     let subject_pattern = format!("telegram.{}.bot.>", prefix);
 

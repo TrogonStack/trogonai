@@ -1,13 +1,18 @@
 //! Message processor - handles business logic for different message types
 
-use telegram_types::events::{MessageTextEvent, MessagePhotoEvent, CommandEvent, CallbackQueryEvent};
-use telegram_types::commands::{SendMessageCommand, AnswerCallbackCommand, SendChatActionCommand, ChatAction, StreamMessageCommand};
-use telegram_nats::{MessagePublisher, subjects};
-use tracing::{debug, info, warn};
 use anyhow::Result;
+use telegram_nats::{subjects, MessagePublisher};
+use telegram_types::commands::{
+    AnswerCallbackCommand, ChatAction, SendChatActionCommand, SendMessageCommand,
+    StreamMessageCommand,
+};
+use telegram_types::events::{
+    CallbackQueryEvent, CommandEvent, MessagePhotoEvent, MessageTextEvent,
+};
+use tracing::{debug, info, warn};
 
-use crate::llm::{ClaudeClient, ClaudeConfig};
 use crate::conversation::ConversationManager;
+use crate::llm::{ClaudeClient, ClaudeConfig};
 
 /// Message processor
 pub struct MessageProcessor {
@@ -52,9 +57,14 @@ impl MessageProcessor {
                 the user specifically asks for more detail.";
 
             // Record user message before streaming starts
-            self.conversation_manager.add_message(session_id, "user", &event.text).await;
+            self.conversation_manager
+                .add_message(session_id, "user", &event.text)
+                .await;
 
-            match llm_client.generate_response_streaming(system_prompt, &event.text, &history).await {
+            match llm_client
+                .generate_response_streaming(system_prompt, &event.text, &history)
+                .await
+            {
                 Ok(mut rx) => {
                     let stream_subject = subjects::agent::message_stream(publisher.prefix());
                     let mut accumulated = String::new();
@@ -94,16 +104,33 @@ impl MessageProcessor {
                         };
                         publisher.publish(&stream_subject, &cmd).await?;
 
-                        self.conversation_manager.add_message(session_id, "assistant", &accumulated).await;
+                        self.conversation_manager
+                            .add_message(session_id, "assistant", &accumulated)
+                            .await;
                         debug!("Streamed response to chat {}", chat_id);
                     } else {
-                        warn!("LLM returned empty streaming response for session {}", session_id);
-                        self.send_error_reply(chat_id, event.message.message_id, message_thread_id, publisher).await?;
+                        warn!(
+                            "LLM returned empty streaming response for session {}",
+                            session_id
+                        );
+                        self.send_error_reply(
+                            chat_id,
+                            event.message.message_id,
+                            message_thread_id,
+                            publisher,
+                        )
+                        .await?;
                     }
                 }
                 Err(e) => {
                     warn!("LLM streaming failed for session {}: {}", session_id, e);
-                    self.send_error_reply(chat_id, event.message.message_id, message_thread_id, publisher).await?;
+                    self.send_error_reply(
+                        chat_id,
+                        event.message.message_id,
+                        message_thread_id,
+                        publisher,
+                    )
+                    .await?;
                 }
             }
         } else {
@@ -144,19 +171,30 @@ impl MessageProcessor {
             };
 
             let history = self.conversation_manager.get_history(session_id).await;
-            self.conversation_manager.add_message(session_id, "user", &photo_description).await;
+            self.conversation_manager
+                .add_message(session_id, "user", &photo_description)
+                .await;
 
             let system_prompt = "You are a helpful AI assistant in a Telegram chat. \
                 Be concise, friendly, and helpful.";
 
-            match llm_client.generate_response(system_prompt, &photo_description, &history).await {
+            match llm_client
+                .generate_response(system_prompt, &photo_description, &history)
+                .await
+            {
                 Ok(response) => {
-                    self.conversation_manager.add_message(session_id, "assistant", &response).await;
+                    self.conversation_manager
+                        .add_message(session_id, "assistant", &response)
+                        .await;
                     response
                 }
                 Err(e) => {
-                    warn!("LLM generation failed for photo in session {}: {}", session_id, e);
-                    "Sorry, I encountered an error processing your photo. Please try again.".to_string()
+                    warn!(
+                        "LLM generation failed for photo in session {}: {}",
+                        session_id, e
+                    );
+                    "Sorry, I encountered an error processing your photo. Please try again."
+                        .to_string()
                 }
             }
         } else {
@@ -217,7 +255,11 @@ impl MessageProcessor {
             }
             "status" => {
                 let active_sessions = self.conversation_manager.active_sessions().await;
-                let mode = if self.llm_client.is_some() { "LLM (Claude AI)" } else { "Echo mode" };
+                let mode = if self.llm_client.is_some() {
+                    "LLM (Claude AI)"
+                } else {
+                    "Echo mode"
+                };
                 &format!(
                     "Bot Status\n\nMode: {}\nActive sessions: {}\nReady to process messages!",
                     mode, active_sessions
@@ -295,7 +337,10 @@ impl MessageProcessor {
         let results = if let Some(ref llm_client) = self.llm_client {
             let system_prompt = "You are a helpful AI assistant. Provide a concise, helpful response to the user's query.";
 
-            let response = match llm_client.generate_response(system_prompt, &event.query, &[]).await {
+            let response = match llm_client
+                .generate_response(system_prompt, &event.query, &[])
+                .await
+            {
                 Ok(resp) => resp,
                 Err(e) => {
                     warn!("LLM generation failed for inline query: {}", e);
@@ -303,18 +348,16 @@ impl MessageProcessor {
                 }
             };
 
-            vec![
-                InlineQueryResult::Article(InlineQueryResultArticle {
-                    id: "1".to_string(),
-                    title: format!("AI Response: {}", truncate(&event.query, 50)),
-                    description: Some(truncate(&response, 100)),
-                    input_message_content: InputMessageContent {
-                        message_text: response,
-                        parse_mode: None,
-                    },
-                    thumb_url: None,
-                }),
-            ]
+            vec![InlineQueryResult::Article(InlineQueryResultArticle {
+                id: "1".to_string(),
+                title: format!("AI Response: {}", truncate(&event.query, 50)),
+                description: Some(truncate(&response, 100)),
+                input_message_content: InputMessageContent {
+                    message_text: response,
+                    parse_mode: None,
+                },
+                thumb_url: None,
+            })]
         } else {
             vec![
                 InlineQueryResult::Article(InlineQueryResultArticle {
@@ -393,7 +436,8 @@ impl MessageProcessor {
     ) -> Result<()> {
         let cmd = SendMessageCommand {
             chat_id,
-            text: "Sorry, I encountered an error generating a response. Please try again.".to_string(),
+            text: "Sorry, I encountered an error generating a response. Please try again."
+                .to_string(),
             parse_mode: None,
             reply_to_message_id: Some(reply_to_message_id),
             reply_markup: None,

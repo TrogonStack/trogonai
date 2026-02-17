@@ -237,23 +237,23 @@ pub struct ChatAdministratorRights {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageEntityType {
-    Mention,           // @username
-    Hashtag,           // #hashtag
-    Cashtag,           // $USD
-    BotCommand,        // /start
-    Url,               // https://telegram.org
-    Email,             // do-not-reply@telegram.org
-    PhoneNumber,       // +1-212-555-0123
-    Bold,              // bold text
-    Italic,            // italic text
-    Underline,         // underlined text
-    Strikethrough,     // strikethrough text
-    Spoiler,           // spoiler message
-    Code,              // monowidth string
-    Pre,               // monowidth block
-    TextLink,          // clickable text URLs
-    TextMention,       // users without usernames
-    CustomEmoji,       // inline custom emoji stickers
+    Mention,       // @username
+    Hashtag,       // #hashtag
+    Cashtag,       // $USD
+    BotCommand,    // /start
+    Url,           // https://telegram.org
+    Email,         // do-not-reply@telegram.org
+    PhoneNumber,   // +1-212-555-0123
+    Bold,          // bold text
+    Italic,        // italic text
+    Underline,     // underlined text
+    Strikethrough, // strikethrough text
+    Spoiler,       // spoiler message
+    Code,          // monowidth string
+    Pre,           // monowidth block
+    TextLink,      // clickable text URLs
+    TextMention,   // users without usernames
+    CustomEmoji,   // inline custom emoji stickers
 }
 
 /// Message entity (mention, hashtag, URL, etc.)
@@ -598,12 +598,22 @@ mod tests {
     fn test_inline_keyboard_roundtrip() {
         let kb = InlineKeyboardMarkup::new(vec![
             vec![
-                InlineKeyboardButton { text: "A".to_string(), callback_data: Some("a".to_string()), url: None },
-                InlineKeyboardButton { text: "B".to_string(), callback_data: None, url: Some("https://t.me".to_string()) },
+                InlineKeyboardButton {
+                    text: "A".to_string(),
+                    callback_data: Some("a".to_string()),
+                    url: None,
+                },
+                InlineKeyboardButton {
+                    text: "B".to_string(),
+                    callback_data: None,
+                    url: Some("https://t.me".to_string()),
+                },
             ],
-            vec![
-                InlineKeyboardButton { text: "C".to_string(), callback_data: Some("c".to_string()), url: None },
-            ],
+            vec![InlineKeyboardButton {
+                text: "C".to_string(),
+                callback_data: Some("c".to_string()),
+                url: None,
+            }],
         ]);
         roundtrip(&kb);
     }
@@ -654,7 +664,10 @@ mod tests {
             BotCommandScope::AllPrivateChats,
             BotCommandScope::AllGroupChats,
             BotCommandScope::Chat { chat_id: 12345 },
-            BotCommandScope::ChatMember { chat_id: 10, user_id: 20 },
+            BotCommandScope::ChatMember {
+                chat_id: 10,
+                user_id: 20,
+            },
         ];
         for scope in &scopes {
             let json = serde_json::to_string(scope).unwrap();

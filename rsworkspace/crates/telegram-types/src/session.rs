@@ -122,16 +122,36 @@ mod tests {
     use super::*;
 
     fn private_chat() -> Chat {
-        Chat { id: 123456789, chat_type: ChatType::Private, title: None, username: None }
+        Chat {
+            id: 123456789,
+            chat_type: ChatType::Private,
+            title: None,
+            username: None,
+        }
     }
     fn group_chat() -> Chat {
-        Chat { id: 987654321, chat_type: ChatType::Group, title: None, username: None }
+        Chat {
+            id: 987654321,
+            chat_type: ChatType::Group,
+            title: None,
+            username: None,
+        }
     }
     fn supergroup_chat() -> Chat {
-        Chat { id: 111222333, chat_type: ChatType::Supergroup, title: None, username: None }
+        Chat {
+            id: 111222333,
+            chat_type: ChatType::Supergroup,
+            title: None,
+            username: None,
+        }
     }
     fn channel_chat() -> Chat {
-        Chat { id: 444555666, chat_type: ChatType::Channel, title: None, username: None }
+        Chat {
+            id: 444555666,
+            chat_type: ChatType::Channel,
+            title: None,
+            username: None,
+        }
     }
 
     // ── Constructor functions ─────────────────────────────────────────────────

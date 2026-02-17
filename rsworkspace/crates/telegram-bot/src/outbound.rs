@@ -1,17 +1,17 @@
 //! Outbound message processor (NATS → Telegram)
 
-use async_nats::Client;
-use teloxide::{Bot, requests::Requester};
-use teloxide::types::{ChatId, MessageId, ParseMode as TgParseMode};
-use telegram_nats::{MessageSubscriber, subjects};
-use telegram_types::commands::*;
-use tracing::{debug, error, info, warn};
+use crate::errors::{classify, ErrorOutcome};
 use anyhow::Result;
+use async_nats::Client;
 use std::collections::HashMap;
 use std::sync::Arc;
+use telegram_nats::{subjects, MessageSubscriber};
+use telegram_types::commands::*;
+use teloxide::types::{ChatId, MessageId, ParseMode as TgParseMode};
+use teloxide::{requests::Requester, Bot};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
-use crate::errors::{classify, ErrorOutcome};
+use tracing::{debug, error, info, warn};
 
 /// Tracking info for streaming messages
 #[derive(Debug, Clone)]
@@ -121,8 +121,14 @@ impl OutboundProcessor {
 
         info!("Subscribing to {} and {}", send_subject, stop_subject);
 
-        let mut send_stream = self.subscriber.subscribe::<SendPollCommand>(&send_subject).await?;
-        let mut stop_stream = self.subscriber.subscribe::<StopPollCommand>(&stop_subject).await?;
+        let mut send_stream = self
+            .subscriber
+            .subscribe::<SendPollCommand>(&send_subject)
+            .await?;
+        let mut stop_stream = self
+            .subscriber
+            .subscribe::<StopPollCommand>(&stop_subject)
+            .await?;
 
         loop {
             tokio::select! {
@@ -211,7 +217,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -225,15 +234,19 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(convert_inline_keyboard(markup)));
+                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                            convert_inline_keyboard(markup),
+                        ));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -252,17 +265,23 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_edit(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<EditMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<EditMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received edit message command for chat {} msg {}", cmd.chat_id, cmd.message_id);
+                    debug!(
+                        "Received edit message command for chat {} msg {}",
+                        cmd.chat_id, cmd.message_id
+                    );
 
                     let mut req = self.bot.edit_message_text(
                         ChatId(cmd.chat_id),
                         MessageId(cmd.message_id),
-                        cmd.text
+                        cmd.text,
                     );
 
                     if let Some(parse_mode) = cmd.parse_mode {
@@ -289,14 +308,24 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_delete(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<DeleteMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<DeleteMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received delete message command for chat {} msg {}", cmd.chat_id, cmd.message_id);
+                    debug!(
+                        "Received delete message command for chat {} msg {}",
+                        cmd.chat_id, cmd.message_id
+                    );
 
-                    if let Err(e) = self.bot.delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id)).await {
+                    if let Err(e) = self
+                        .bot
+                        .delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id))
+                        .await
+                    {
                         self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
@@ -312,7 +341,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_photo(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendPhotoCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendPhotoCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -331,11 +363,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -354,7 +388,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_video(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendVideoCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendVideoCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -389,11 +426,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -412,7 +451,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_audio(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendAudioCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendAudioCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -443,11 +485,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -466,7 +510,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_document(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendDocumentCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendDocumentCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -485,11 +532,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -508,7 +557,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_voice(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendVoiceCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendVoiceCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -531,11 +583,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -552,28 +606,55 @@ impl OutboundProcessor {
     /// Handle send media group commands
     async fn handle_send_media_groups(&self, prefix: String) -> Result<()> {
         use telegram_types::commands::InputMediaItem;
-        use teloxide::types::{InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo};
+        use teloxide::types::{
+            InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
+        };
 
         let subject = subjects::agent::message_send_media_group(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendMediaGroupCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendMediaGroupCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received send media group command for chat {} ({} items)", cmd.chat_id, cmd.media.len());
+                    debug!(
+                        "Received send media group command for chat {} ({} items)",
+                        cmd.chat_id,
+                        cmd.media.len()
+                    );
 
-                    let media: Vec<InputMedia> = cmd.media.into_iter().map(|item| {
-                        match item {
-                            InputMediaItem::Photo { media, caption, parse_mode } => {
-                                let mut m = InputMediaPhoto::new(teloxide::types::InputFile::file_id(media));
+                    let media: Vec<InputMedia> = cmd
+                        .media
+                        .into_iter()
+                        .map(|item| match item {
+                            InputMediaItem::Photo {
+                                media,
+                                caption,
+                                parse_mode,
+                            } => {
+                                let mut m = InputMediaPhoto::new(
+                                    teloxide::types::InputFile::file_id(media),
+                                );
                                 m.caption = caption;
                                 m.parse_mode = parse_mode.map(convert_parse_mode);
                                 InputMedia::Photo(m)
                             }
-                            InputMediaItem::Video { media, caption, parse_mode, duration, width, height, supports_streaming } => {
-                                let mut m = InputMediaVideo::new(teloxide::types::InputFile::file_id(media));
+                            InputMediaItem::Video {
+                                media,
+                                caption,
+                                parse_mode,
+                                duration,
+                                width,
+                                height,
+                                supports_streaming,
+                            } => {
+                                let mut m = InputMediaVideo::new(
+                                    teloxide::types::InputFile::file_id(media),
+                                );
                                 m.caption = caption;
                                 m.parse_mode = parse_mode.map(convert_parse_mode);
                                 m.duration = duration.map(|d| d as u16);
@@ -582,8 +663,17 @@ impl OutboundProcessor {
                                 m.supports_streaming = supports_streaming;
                                 InputMedia::Video(m)
                             }
-                            InputMediaItem::Audio { media, caption, parse_mode, duration, performer, title } => {
-                                let mut m = InputMediaAudio::new(teloxide::types::InputFile::file_id(media));
+                            InputMediaItem::Audio {
+                                media,
+                                caption,
+                                parse_mode,
+                                duration,
+                                performer,
+                                title,
+                            } => {
+                                let mut m = InputMediaAudio::new(
+                                    teloxide::types::InputFile::file_id(media),
+                                );
                                 m.caption = caption;
                                 m.parse_mode = parse_mode.map(convert_parse_mode);
                                 m.duration = duration.map(|d| d as u16);
@@ -591,23 +681,31 @@ impl OutboundProcessor {
                                 m.title = title;
                                 InputMedia::Audio(m)
                             }
-                            InputMediaItem::Document { media, caption, parse_mode } => {
-                                let mut m = InputMediaDocument::new(teloxide::types::InputFile::file_id(media));
+                            InputMediaItem::Document {
+                                media,
+                                caption,
+                                parse_mode,
+                            } => {
+                                let mut m = InputMediaDocument::new(
+                                    teloxide::types::InputFile::file_id(media),
+                                );
                                 m.caption = caption;
                                 m.parse_mode = parse_mode.map(convert_parse_mode);
                                 InputMedia::Document(m)
                             }
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     let mut req = self.bot.send_media_group(ChatId(cmd.chat_id), media);
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -626,7 +724,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_sticker(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendStickerCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendStickerCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -637,15 +738,19 @@ impl OutboundProcessor {
                     let mut req = self.bot.send_sticker(ChatId(cmd.chat_id), sticker);
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(convert_inline_keyboard(markup)));
+                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                            convert_inline_keyboard(markup),
+                        ));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -664,7 +769,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_animation(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendAnimationCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendAnimationCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -695,15 +803,19 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(convert_inline_keyboard(markup)));
+                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                            convert_inline_keyboard(markup),
+                        ));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -722,7 +834,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_video_note(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendVideoNoteCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendVideoNoteCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -741,11 +856,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -764,14 +881,19 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_location(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendLocationCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendLocationCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     debug!("Received send location command for chat {}", cmd.chat_id);
 
-                    let mut req = self.bot.send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
+                    let mut req =
+                        self.bot
+                            .send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
 
                     if let Some(live_period) = cmd.live_period {
                         req.live_period = Some(live_period.into());
@@ -790,11 +912,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -813,7 +937,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_venue(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendVenueCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendVenueCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -845,11 +972,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -868,14 +997,21 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_contact(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendContactCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendContactCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     debug!("Received send contact command for chat {}", cmd.chat_id);
 
-                    let mut req = self.bot.send_contact(ChatId(cmd.chat_id), cmd.phone_number, cmd.first_name);
+                    let mut req = self.bot.send_contact(
+                        ChatId(cmd.chat_id),
+                        cmd.phone_number,
+                        cmd.first_name,
+                    );
 
                     if let Some(last_name) = cmd.last_name {
                         req.last_name = Some(last_name);
@@ -886,11 +1022,13 @@ impl OutboundProcessor {
                     }
 
                     if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
                     }
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -909,7 +1047,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::callback_answer(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<AnswerCallbackCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<AnswerCallbackCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -942,7 +1083,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::chat_action(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<SendChatActionCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<SendChatActionCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -953,7 +1097,8 @@ impl OutboundProcessor {
                     let mut req = self.bot.send_chat_action(ChatId(cmd.chat_id), action);
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
 
                     if let Err(e) = req.await {
@@ -969,8 +1114,8 @@ impl OutboundProcessor {
 
     /// Handle forum topic management commands
     async fn handle_forum_topics(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
         use telegram_nats::subjects;
+        use telegram_types::commands::*;
 
         let create_subject = subjects::agent::forum_create(&prefix);
         let edit_subject = subjects::agent::forum_edit(&prefix);
@@ -987,26 +1132,68 @@ impl OutboundProcessor {
 
         info!("Subscribing to forum topic commands");
 
-        let create_stream = self.subscriber.subscribe::<CreateForumTopicCommand>(&create_subject);
-        let edit_stream = self.subscriber.subscribe::<EditForumTopicCommand>(&edit_subject);
-        let close_stream = self.subscriber.subscribe::<CloseForumTopicCommand>(&close_subject);
-        let reopen_stream = self.subscriber.subscribe::<ReopenForumTopicCommand>(&reopen_subject);
-        let delete_stream = self.subscriber.subscribe::<DeleteForumTopicCommand>(&delete_subject);
-        let unpin_stream = self.subscriber.subscribe::<UnpinAllForumTopicMessagesCommand>(&unpin_subject);
-        let edit_general_stream = self.subscriber.subscribe::<EditGeneralForumTopicCommand>(&edit_general_subject);
-        let close_general_stream = self.subscriber.subscribe::<CloseGeneralForumTopicCommand>(&close_general_subject);
-        let reopen_general_stream = self.subscriber.subscribe::<ReopenGeneralForumTopicCommand>(&reopen_general_subject);
-        let hide_general_stream = self.subscriber.subscribe::<HideGeneralForumTopicCommand>(&hide_general_subject);
-        let unhide_general_stream = self.subscriber.subscribe::<UnhideGeneralForumTopicCommand>(&unhide_general_subject);
-        let unpin_general_stream = self.subscriber.subscribe::<UnpinAllGeneralForumTopicMessagesCommand>(&unpin_general_subject);
+        let create_stream = self
+            .subscriber
+            .subscribe::<CreateForumTopicCommand>(&create_subject);
+        let edit_stream = self
+            .subscriber
+            .subscribe::<EditForumTopicCommand>(&edit_subject);
+        let close_stream = self
+            .subscriber
+            .subscribe::<CloseForumTopicCommand>(&close_subject);
+        let reopen_stream = self
+            .subscriber
+            .subscribe::<ReopenForumTopicCommand>(&reopen_subject);
+        let delete_stream = self
+            .subscriber
+            .subscribe::<DeleteForumTopicCommand>(&delete_subject);
+        let unpin_stream = self
+            .subscriber
+            .subscribe::<UnpinAllForumTopicMessagesCommand>(&unpin_subject);
+        let edit_general_stream = self
+            .subscriber
+            .subscribe::<EditGeneralForumTopicCommand>(&edit_general_subject);
+        let close_general_stream = self
+            .subscriber
+            .subscribe::<CloseGeneralForumTopicCommand>(&close_general_subject);
+        let reopen_general_stream = self
+            .subscriber
+            .subscribe::<ReopenGeneralForumTopicCommand>(&reopen_general_subject);
+        let hide_general_stream = self
+            .subscriber
+            .subscribe::<HideGeneralForumTopicCommand>(&hide_general_subject);
+        let unhide_general_stream = self
+            .subscriber
+            .subscribe::<UnhideGeneralForumTopicCommand>(&unhide_general_subject);
+        let unpin_general_stream = self
+            .subscriber
+            .subscribe::<UnpinAllGeneralForumTopicMessagesCommand>(&unpin_general_subject);
 
-        let (mut create_stream, mut edit_stream, mut close_stream, mut reopen_stream,
-             mut delete_stream, mut unpin_stream, mut edit_general_stream, mut close_general_stream,
-             mut reopen_general_stream, mut hide_general_stream, mut unhide_general_stream,
-             mut unpin_general_stream) = tokio::try_join!(
-            create_stream, edit_stream, close_stream, reopen_stream,
-            delete_stream, unpin_stream, edit_general_stream, close_general_stream,
-            reopen_general_stream, hide_general_stream, unhide_general_stream,
+        let (
+            mut create_stream,
+            mut edit_stream,
+            mut close_stream,
+            mut reopen_stream,
+            mut delete_stream,
+            mut unpin_stream,
+            mut edit_general_stream,
+            mut close_general_stream,
+            mut reopen_general_stream,
+            mut hide_general_stream,
+            mut unhide_general_stream,
+            mut unpin_general_stream,
+        ) = tokio::try_join!(
+            create_stream,
+            edit_stream,
+            close_stream,
+            reopen_stream,
+            delete_stream,
+            unpin_stream,
+            edit_general_stream,
+            close_general_stream,
+            reopen_general_stream,
+            hide_general_stream,
+            unhide_general_stream,
             unpin_general_stream
         )?;
 
@@ -1147,8 +1334,8 @@ impl OutboundProcessor {
 
     /// Handle admin commands (permissions, pinning, etc.)
     async fn handle_admin_commands(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
         use telegram_nats::subjects;
+        use telegram_types::commands::*;
 
         let promote_subject = subjects::agent::admin_promote(&prefix);
         let restrict_subject = subjects::agent::admin_restrict(&prefix);
@@ -1164,24 +1351,64 @@ impl OutboundProcessor {
 
         info!("Subscribing to admin commands");
 
-        let promote_stream = self.subscriber.subscribe::<PromoteChatMemberCommand>(&promote_subject);
-        let restrict_stream = self.subscriber.subscribe::<RestrictChatMemberCommand>(&restrict_subject);
-        let ban_stream = self.subscriber.subscribe::<BanChatMemberCommand>(&ban_subject);
-        let unban_stream = self.subscriber.subscribe::<UnbanChatMemberCommand>(&unban_subject);
-        let set_permissions_stream = self.subscriber.subscribe::<SetChatPermissionsCommand>(&set_permissions_subject);
-        let set_title_stream = self.subscriber.subscribe::<SetChatAdministratorCustomTitleCommand>(&set_title_subject);
-        let pin_stream = self.subscriber.subscribe::<PinChatMessageCommand>(&pin_subject);
-        let unpin_stream = self.subscriber.subscribe::<UnpinChatMessageCommand>(&unpin_subject);
-        let unpin_all_stream = self.subscriber.subscribe::<UnpinAllChatMessagesCommand>(&unpin_all_subject);
-        let set_chat_title_stream = self.subscriber.subscribe::<SetChatTitleCommand>(&set_chat_title_subject);
-        let set_chat_description_stream = self.subscriber.subscribe::<SetChatDescriptionCommand>(&set_chat_description_subject);
+        let promote_stream = self
+            .subscriber
+            .subscribe::<PromoteChatMemberCommand>(&promote_subject);
+        let restrict_stream = self
+            .subscriber
+            .subscribe::<RestrictChatMemberCommand>(&restrict_subject);
+        let ban_stream = self
+            .subscriber
+            .subscribe::<BanChatMemberCommand>(&ban_subject);
+        let unban_stream = self
+            .subscriber
+            .subscribe::<UnbanChatMemberCommand>(&unban_subject);
+        let set_permissions_stream = self
+            .subscriber
+            .subscribe::<SetChatPermissionsCommand>(&set_permissions_subject);
+        let set_title_stream = self
+            .subscriber
+            .subscribe::<SetChatAdministratorCustomTitleCommand>(&set_title_subject);
+        let pin_stream = self
+            .subscriber
+            .subscribe::<PinChatMessageCommand>(&pin_subject);
+        let unpin_stream = self
+            .subscriber
+            .subscribe::<UnpinChatMessageCommand>(&unpin_subject);
+        let unpin_all_stream = self
+            .subscriber
+            .subscribe::<UnpinAllChatMessagesCommand>(&unpin_all_subject);
+        let set_chat_title_stream = self
+            .subscriber
+            .subscribe::<SetChatTitleCommand>(&set_chat_title_subject);
+        let set_chat_description_stream = self
+            .subscriber
+            .subscribe::<SetChatDescriptionCommand>(&set_chat_description_subject);
 
-        let (mut promote_stream, mut restrict_stream, mut ban_stream, mut unban_stream,
-             mut set_permissions_stream, mut set_title_stream, mut pin_stream, mut unpin_stream,
-             mut unpin_all_stream, mut set_chat_title_stream, mut set_chat_description_stream) = tokio::try_join!(
-            promote_stream, restrict_stream, ban_stream, unban_stream,
-            set_permissions_stream, set_title_stream, pin_stream, unpin_stream,
-            unpin_all_stream, set_chat_title_stream, set_chat_description_stream
+        let (
+            mut promote_stream,
+            mut restrict_stream,
+            mut ban_stream,
+            mut unban_stream,
+            mut set_permissions_stream,
+            mut set_title_stream,
+            mut pin_stream,
+            mut unpin_stream,
+            mut unpin_all_stream,
+            mut set_chat_title_stream,
+            mut set_chat_description_stream,
+        ) = tokio::try_join!(
+            promote_stream,
+            restrict_stream,
+            ban_stream,
+            unban_stream,
+            set_permissions_stream,
+            set_title_stream,
+            pin_stream,
+            unpin_stream,
+            unpin_all_stream,
+            set_chat_title_stream,
+            set_chat_description_stream
         )?;
 
         loop {
@@ -1368,21 +1595,23 @@ impl OutboundProcessor {
 
     /// Handle file download commands (getFile and download)
     async fn handle_file_commands(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
         use telegram_nats::subjects;
+        use telegram_types::commands::*;
 
         let get_file_subject = subjects::agent::file_get(&prefix);
         let download_file_subject = subjects::agent::file_download(&prefix);
 
         info!("Subscribing to file commands");
 
-        let get_file_stream = self.subscriber.subscribe::<GetFileCommand>(&get_file_subject);
-        let download_file_stream = self.subscriber.subscribe::<DownloadFileCommand>(&download_file_subject);
+        let get_file_stream = self
+            .subscriber
+            .subscribe::<GetFileCommand>(&get_file_subject);
+        let download_file_stream = self
+            .subscriber
+            .subscribe::<DownloadFileCommand>(&download_file_subject);
 
-        let (mut get_file_stream, mut download_file_stream) = tokio::try_join!(
-            get_file_stream,
-            download_file_stream
-        )?;
+        let (mut get_file_stream, mut download_file_stream) =
+            tokio::try_join!(get_file_stream, download_file_stream)?;
 
         loop {
             tokio::select! {
@@ -1521,8 +1750,8 @@ impl OutboundProcessor {
 
     /// Handle payment commands (invoices, pre-checkout, shipping)
     async fn handle_payment_commands(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
         use telegram_nats::subjects;
+        use telegram_types::commands::*;
 
         let send_invoice_subject = subjects::agent::payment_send_invoice(&prefix);
         let answer_pre_checkout_subject = subjects::agent::payment_answer_pre_checkout(&prefix);
@@ -1530,15 +1759,22 @@ impl OutboundProcessor {
 
         info!("Subscribing to payment commands");
 
-        let send_invoice_stream = self.subscriber.subscribe::<SendInvoiceCommand>(&send_invoice_subject);
-        let answer_pre_checkout_stream = self.subscriber.subscribe::<AnswerPreCheckoutQueryCommand>(&answer_pre_checkout_subject);
-        let answer_shipping_stream = self.subscriber.subscribe::<AnswerShippingQueryCommand>(&answer_shipping_subject);
+        let send_invoice_stream = self
+            .subscriber
+            .subscribe::<SendInvoiceCommand>(&send_invoice_subject);
+        let answer_pre_checkout_stream = self
+            .subscriber
+            .subscribe::<AnswerPreCheckoutQueryCommand>(&answer_pre_checkout_subject);
+        let answer_shipping_stream = self
+            .subscriber
+            .subscribe::<AnswerShippingQueryCommand>(&answer_shipping_subject);
 
-        let (mut send_invoice_stream, mut answer_pre_checkout_stream, mut answer_shipping_stream) = tokio::try_join!(
-            send_invoice_stream,
-            answer_pre_checkout_stream,
-            answer_shipping_stream
-        )?;
+        let (mut send_invoice_stream, mut answer_pre_checkout_stream, mut answer_shipping_stream) =
+            tokio::try_join!(
+                send_invoice_stream,
+                answer_pre_checkout_stream,
+                answer_shipping_stream
+            )?;
 
         loop {
             tokio::select! {
@@ -1657,8 +1893,8 @@ impl OutboundProcessor {
 
     /// Handle bot commands setup (setMyCommands, deleteMyCommands, getMyCommands)
     async fn handle_bot_commands(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
         use telegram_nats::subjects;
+        use telegram_types::commands::*;
 
         let set_commands_subject = subjects::agent::bot_commands_set(&prefix);
         let delete_commands_subject = subjects::agent::bot_commands_delete(&prefix);
@@ -1666,9 +1902,15 @@ impl OutboundProcessor {
 
         info!("Subscribing to bot commands");
 
-        let set_commands_stream = self.subscriber.subscribe::<SetMyCommandsCommand>(&set_commands_subject);
-        let delete_commands_stream = self.subscriber.subscribe::<DeleteMyCommandsCommand>(&delete_commands_subject);
-        let get_commands_stream = self.subscriber.subscribe::<GetMyCommandsCommand>(&get_commands_subject);
+        let set_commands_stream = self
+            .subscriber
+            .subscribe::<SetMyCommandsCommand>(&set_commands_subject);
+        let delete_commands_stream = self
+            .subscriber
+            .subscribe::<DeleteMyCommandsCommand>(&delete_commands_subject);
+        let get_commands_stream = self
+            .subscriber
+            .subscribe::<GetMyCommandsCommand>(&get_commands_subject);
 
         let (mut set_commands_stream, mut delete_commands_stream, mut get_commands_stream) = tokio::try_join!(
             set_commands_stream,
@@ -1769,39 +2011,59 @@ impl OutboundProcessor {
     async fn handle_sticker_management(&self, prefix: String) -> Result<()> {
         use telegram_types::commands::*;
 
-        let get_set_subject        = subjects::agent::sticker_get_set(&prefix);
-        let upload_subject         = subjects::agent::sticker_upload_file(&prefix);
-        let create_subject         = subjects::agent::sticker_create_set(&prefix);
-        let add_subject            = subjects::agent::sticker_add_to_set(&prefix);
-        let set_position_subject   = subjects::agent::sticker_set_position(&prefix);
-        let delete_from_subject    = subjects::agent::sticker_delete_from_set(&prefix);
-        let set_title_subject      = subjects::agent::sticker_set_title(&prefix);
-        let set_thumbnail_subject  = subjects::agent::sticker_set_thumbnail(&prefix);
-        let delete_set_subject     = subjects::agent::sticker_delete_set(&prefix);
-        let set_emoji_subject      = subjects::agent::sticker_set_emoji_list(&prefix);
-        let set_keywords_subject   = subjects::agent::sticker_set_keywords(&prefix);
-        let set_mask_subject       = subjects::agent::sticker_set_mask_position(&prefix);
+        let get_set_subject = subjects::agent::sticker_get_set(&prefix);
+        let upload_subject = subjects::agent::sticker_upload_file(&prefix);
+        let create_subject = subjects::agent::sticker_create_set(&prefix);
+        let add_subject = subjects::agent::sticker_add_to_set(&prefix);
+        let set_position_subject = subjects::agent::sticker_set_position(&prefix);
+        let delete_from_subject = subjects::agent::sticker_delete_from_set(&prefix);
+        let set_title_subject = subjects::agent::sticker_set_title(&prefix);
+        let set_thumbnail_subject = subjects::agent::sticker_set_thumbnail(&prefix);
+        let delete_set_subject = subjects::agent::sticker_delete_set(&prefix);
+        let set_emoji_subject = subjects::agent::sticker_set_emoji_list(&prefix);
+        let set_keywords_subject = subjects::agent::sticker_set_keywords(&prefix);
+        let set_mask_subject = subjects::agent::sticker_set_mask_position(&prefix);
 
         info!("Subscribing to sticker management commands");
 
         let (
-            mut get_set_stream, mut upload_stream, mut create_stream, mut add_stream,
-            mut set_position_stream, mut delete_from_stream, mut set_title_stream,
-            mut set_thumbnail_stream, mut delete_set_stream, mut set_emoji_stream,
-            mut set_keywords_stream, mut set_mask_stream,
+            mut get_set_stream,
+            mut upload_stream,
+            mut create_stream,
+            mut add_stream,
+            mut set_position_stream,
+            mut delete_from_stream,
+            mut set_title_stream,
+            mut set_thumbnail_stream,
+            mut delete_set_stream,
+            mut set_emoji_stream,
+            mut set_keywords_stream,
+            mut set_mask_stream,
         ) = tokio::try_join!(
-            self.subscriber.subscribe::<GetStickerSetCommand>(&get_set_subject),
-            self.subscriber.subscribe::<UploadStickerFileCommand>(&upload_subject),
-            self.subscriber.subscribe::<CreateNewStickerSetCommand>(&create_subject),
-            self.subscriber.subscribe::<AddStickerToSetCommand>(&add_subject),
-            self.subscriber.subscribe::<SetStickerPositionInSetCommand>(&set_position_subject),
-            self.subscriber.subscribe::<DeleteStickerFromSetCommand>(&delete_from_subject),
-            self.subscriber.subscribe::<SetStickerSetTitleCommand>(&set_title_subject),
-            self.subscriber.subscribe::<SetStickerSetThumbnailCommand>(&set_thumbnail_subject),
-            self.subscriber.subscribe::<DeleteStickerSetCommand>(&delete_set_subject),
-            self.subscriber.subscribe::<SetStickerEmojiListCommand>(&set_emoji_subject),
-            self.subscriber.subscribe::<SetStickerKeywordsCommand>(&set_keywords_subject),
-            self.subscriber.subscribe::<SetStickerMaskPositionCommand>(&set_mask_subject),
+            self.subscriber
+                .subscribe::<GetStickerSetCommand>(&get_set_subject),
+            self.subscriber
+                .subscribe::<UploadStickerFileCommand>(&upload_subject),
+            self.subscriber
+                .subscribe::<CreateNewStickerSetCommand>(&create_subject),
+            self.subscriber
+                .subscribe::<AddStickerToSetCommand>(&add_subject),
+            self.subscriber
+                .subscribe::<SetStickerPositionInSetCommand>(&set_position_subject),
+            self.subscriber
+                .subscribe::<DeleteStickerFromSetCommand>(&delete_from_subject),
+            self.subscriber
+                .subscribe::<SetStickerSetTitleCommand>(&set_title_subject),
+            self.subscriber
+                .subscribe::<SetStickerSetThumbnailCommand>(&set_thumbnail_subject),
+            self.subscriber
+                .subscribe::<DeleteStickerSetCommand>(&delete_set_subject),
+            self.subscriber
+                .subscribe::<SetStickerEmojiListCommand>(&set_emoji_subject),
+            self.subscriber
+                .subscribe::<SetStickerKeywordsCommand>(&set_keywords_subject),
+            self.subscriber
+                .subscribe::<SetStickerMaskPositionCommand>(&set_mask_subject),
         )?;
 
         loop {
@@ -1987,12 +2249,18 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_forward(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<ForwardMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<ForwardMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received forward message command: from_chat={} msg={} to_chat={}", cmd.from_chat_id, cmd.message_id, cmd.chat_id);
+                    debug!(
+                        "Received forward message command: from_chat={} msg={} to_chat={}",
+                        cmd.from_chat_id, cmd.message_id, cmd.chat_id
+                    );
 
                     let mut req = self.bot.forward_message(
                         ChatId(cmd.chat_id),
@@ -2001,7 +2269,8 @@ impl OutboundProcessor {
                     );
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
                     req.disable_notification = cmd.disable_notification;
                     req.protect_content = cmd.protect_content;
@@ -2022,12 +2291,18 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_copy(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<CopyMessageCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<CopyMessageCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received copy message command: from_chat={} msg={} to_chat={}", cmd.from_chat_id, cmd.message_id, cmd.chat_id);
+                    debug!(
+                        "Received copy message command: from_chat={} msg={} to_chat={}",
+                        cmd.from_chat_id, cmd.message_id, cmd.chat_id
+                    );
 
                     let mut req = self.bot.copy_message(
                         ChatId(cmd.chat_id),
@@ -2036,7 +2311,8 @@ impl OutboundProcessor {
                     );
 
                     if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                        req.message_thread_id =
+                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
                     }
                     if let Some(caption) = cmd.caption {
                         req.caption = Some(caption);
@@ -2049,7 +2325,8 @@ impl OutboundProcessor {
                         });
                     }
                     if let Some(reply_id) = cmd.reply_to_message_id {
-                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
+                        req.reply_parameters =
+                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
                     }
                     req.disable_notification = cmd.disable_notification;
                     req.protect_content = cmd.protect_content;
@@ -2113,11 +2390,16 @@ impl OutboundProcessor {
         let error_subject = subjects::bot::command_error(prefix);
         match serde_json::to_vec(&evt) {
             Ok(payload) => {
-                if let Err(e) = self.subscriber.client()
+                if let Err(e) = self
+                    .subscriber
+                    .client()
                     .publish(error_subject.clone(), payload.into())
                     .await
                 {
-                    error!("Failed to publish command error to '{}': {}", error_subject, e);
+                    error!(
+                        "Failed to publish command error to '{}': {}",
+                        error_subject, e
+                    );
                 }
             }
             Err(e) => error!("Failed to serialize CommandErrorEvent: {}", e),
@@ -2160,15 +2442,22 @@ impl OutboundProcessor {
         let subject = subjects::agent::inline_answer(&prefix);
         info!("Subscribing to {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<AnswerInlineQueryCommand>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<AnswerInlineQueryCommand>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    debug!("Received answer inline query command for query {}", cmd.inline_query_id);
+                    debug!(
+                        "Received answer inline query command for query {}",
+                        cmd.inline_query_id
+                    );
 
                     // Convert our inline results to teloxide format
-                    let results: Vec<teloxide::types::InlineQueryResult> = cmd.results
+                    let results: Vec<teloxide::types::InlineQueryResult> = cmd
+                        .results
                         .into_iter()
                         .filter_map(|r| convert_inline_query_result(r))
                         .collect();
@@ -2200,31 +2489,30 @@ impl OutboundProcessor {
 }
 
 /// Convert our InlineQueryResult to Teloxide's
-fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResult) -> Option<teloxide::types::InlineQueryResult> {
-    use teloxide::types::{
-        InlineQueryResult as TgResult, InlineQueryResultArticle, InlineQueryResultPhoto,
-        InlineQueryResultCachedPhoto, InlineQueryResultCachedSticker, InlineQueryResultGif,
-        InlineQueryResultCachedGif, InlineQueryResultMpeg4Gif, InlineQueryResultCachedMpeg4Gif,
-        InlineQueryResultVideo, InlineQueryResultCachedVideo, InlineQueryResultAudio,
-        InlineQueryResultCachedAudio, InlineQueryResultVoice, InlineQueryResultCachedVoice,
-        InlineQueryResultDocument, InlineQueryResultCachedDocument, InlineQueryResultLocation,
-        InlineQueryResultVenue, InlineQueryResultContact, InlineQueryResultGame,
-        InputMessageContent, InputMessageContentText
-    };
+fn convert_inline_query_result(
+    result: telegram_types::commands::InlineQueryResult,
+) -> Option<teloxide::types::InlineQueryResult> {
     use telegram_types::commands::InlineQueryResult as OurResult;
+    use teloxide::types::{
+        InlineQueryResult as TgResult, InlineQueryResultArticle, InlineQueryResultAudio,
+        InlineQueryResultCachedAudio, InlineQueryResultCachedDocument, InlineQueryResultCachedGif,
+        InlineQueryResultCachedMpeg4Gif, InlineQueryResultCachedPhoto,
+        InlineQueryResultCachedSticker, InlineQueryResultCachedVideo, InlineQueryResultCachedVoice,
+        InlineQueryResultContact, InlineQueryResultDocument, InlineQueryResultGame,
+        InlineQueryResultGif, InlineQueryResultLocation, InlineQueryResultMpeg4Gif,
+        InlineQueryResultPhoto, InlineQueryResultVenue, InlineQueryResultVideo,
+        InlineQueryResultVoice, InputMessageContent, InputMessageContentText,
+    };
     use url::Url;
 
     match result {
         OurResult::Article(article) => {
             let input_content = InputMessageContent::Text(InputMessageContentText::new(
-                article.input_message_content.message_text
+                article.input_message_content.message_text,
             ));
 
-            let mut result = InlineQueryResultArticle::new(
-                article.id,
-                article.title,
-                input_content
-            );
+            let mut result =
+                InlineQueryResultArticle::new(article.id, article.title, input_content);
 
             if let Some(desc) = article.description {
                 result.description = Some(desc);
@@ -2259,10 +2547,8 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::CachedSticker(sticker) => {
-            let mut result = InlineQueryResultCachedSticker::new(
-                sticker.id,
-                sticker.sticker_file_id
-            );
+            let mut result =
+                InlineQueryResultCachedSticker::new(sticker.id, sticker.sticker_file_id);
 
             if let Some(markup) = sticker.reply_markup {
                 result.reply_markup = Some(convert_inline_keyboard(markup));
@@ -2301,10 +2587,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::CachedGif(gif) => {
-            let mut result = InlineQueryResultCachedGif::new(
-                gif.id,
-                gif.gif_file_id
-            );
+            let mut result = InlineQueryResultCachedGif::new(gif.id, gif.gif_file_id);
 
             result.title = gif.title;
             result.caption = gif.caption;
@@ -2334,7 +2617,9 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
 
             result.mpeg4_width = mp4.mpeg4_width;
             result.mpeg4_height = mp4.mpeg4_height;
-            result.mpeg4_duration = mp4.mpeg4_duration.map(teloxide::types::Seconds::from_seconds);
+            result.mpeg4_duration = mp4
+                .mpeg4_duration
+                .map(teloxide::types::Seconds::from_seconds);
             result.title = mp4.title;
             result.caption = mp4.caption;
             result.parse_mode = mp4.parse_mode.map(convert_parse_mode);
@@ -2343,10 +2628,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::CachedMpeg4Gif(mp4) => {
-            let mut result = InlineQueryResultCachedMpeg4Gif::new(
-                mp4.id,
-                mp4.mpeg4_file_id
-            );
+            let mut result = InlineQueryResultCachedMpeg4Gif::new(mp4.id, mp4.mpeg4_file_id);
 
             result.title = mp4.title;
             result.caption = mp4.caption;
@@ -2380,30 +2662,24 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 }
             };
 
-            let mut result = InlineQueryResultVideo::new(
-                video.id,
-                video_url,
-                mime_type,
-                thumb_url,
-                video.title
-            );
+            let mut result =
+                InlineQueryResultVideo::new(video.id, video_url, mime_type, thumb_url, video.title);
 
             result.caption = video.caption;
             result.parse_mode = video.parse_mode.map(convert_parse_mode);
             result.video_width = video.video_width;
             result.video_height = video.video_height;
-            result.video_duration = video.video_duration.map(teloxide::types::Seconds::from_seconds);
+            result.video_duration = video
+                .video_duration
+                .map(teloxide::types::Seconds::from_seconds);
             result.description = video.description;
 
             Some(TgResult::Video(result))
         }
 
         OurResult::CachedVideo(video) => {
-            let mut result = InlineQueryResultCachedVideo::new(
-                video.id,
-                video.video_file_id,
-                video.title
-            );
+            let mut result =
+                InlineQueryResultCachedVideo::new(video.id, video.video_file_id, video.title);
 
             result.description = video.description;
             result.caption = video.caption;
@@ -2421,25 +2697,20 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 }
             };
 
-            let mut result = InlineQueryResultAudio::new(
-                audio.id,
-                audio_url,
-                audio.title
-            );
+            let mut result = InlineQueryResultAudio::new(audio.id, audio_url, audio.title);
 
             result.caption = audio.caption;
             result.parse_mode = audio.parse_mode.map(convert_parse_mode);
             result.performer = audio.performer;
-            result.audio_duration = audio.audio_duration.map(teloxide::types::Seconds::from_seconds);
+            result.audio_duration = audio
+                .audio_duration
+                .map(teloxide::types::Seconds::from_seconds);
 
             Some(TgResult::Audio(result))
         }
 
         OurResult::CachedAudio(audio) => {
-            let mut result = InlineQueryResultCachedAudio::new(
-                audio.id,
-                audio.audio_file_id
-            );
+            let mut result = InlineQueryResultCachedAudio::new(audio.id, audio.audio_file_id);
 
             result.caption = audio.caption;
             result.parse_mode = audio.parse_mode.map(convert_parse_mode);
@@ -2456,25 +2727,20 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 }
             };
 
-            let mut result = InlineQueryResultVoice::new(
-                voice.id,
-                voice_url,
-                voice.title
-            );
+            let mut result = InlineQueryResultVoice::new(voice.id, voice_url, voice.title);
 
             result.caption = voice.caption;
             result.parse_mode = voice.parse_mode.map(convert_parse_mode);
-            result.voice_duration = voice.voice_duration.map(teloxide::types::Seconds::from_seconds);
+            result.voice_duration = voice
+                .voice_duration
+                .map(teloxide::types::Seconds::from_seconds);
 
             Some(TgResult::Voice(result))
         }
 
         OurResult::CachedVoice(voice) => {
-            let mut result = InlineQueryResultCachedVoice::new(
-                voice.id,
-                voice.voice_file_id,
-                voice.title
-            );
+            let mut result =
+                InlineQueryResultCachedVoice::new(voice.id, voice.voice_file_id, voice.title);
 
             result.caption = voice.caption;
             result.parse_mode = voice.parse_mode.map(convert_parse_mode);
@@ -2499,8 +2765,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 }
             };
 
-            let thumbnail_url = document.thumbnail_url
-                .and_then(|s| Url::parse(&s).ok());
+            let thumbnail_url = document.thumbnail_url.and_then(|s| Url::parse(&s).ok());
 
             let result = InlineQueryResultDocument {
                 id: document.id,
@@ -2525,7 +2790,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
             let mut result = InlineQueryResultCachedDocument::new(
                 document.id,
                 document.title,
-                document.document_file_id
+                document.document_file_id,
             );
 
             result.description = document.description;
@@ -2536,10 +2801,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::CachedPhoto(photo) => {
-            let mut result = InlineQueryResultCachedPhoto::new(
-                photo.id,
-                photo.photo_file_id
-            );
+            let mut result = InlineQueryResultCachedPhoto::new(photo.id, photo.photo_file_id);
 
             result.title = photo.title;
             result.description = photo.description;
@@ -2554,11 +2816,13 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 location.id,
                 location.title,
                 location.latitude,
-                location.longitude
+                location.longitude,
             );
 
             result.horizontal_accuracy = location.horizontal_accuracy;
-            result.live_period = location.live_period.map(|s| teloxide::types::LivePeriod::from_seconds(teloxide::types::Seconds::from_seconds(s)));
+            result.live_period = location.live_period.map(|s| {
+                teloxide::types::LivePeriod::from_seconds(teloxide::types::Seconds::from_seconds(s))
+            });
             result.heading = location.heading.map(|h| h as u16);
             result.proximity_alert_radius = location.proximity_alert_radius;
 
@@ -2580,7 +2844,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
                 venue.latitude,
                 venue.longitude,
                 venue.title,
-                venue.address
+                venue.address,
             );
 
             result.foursquare_id = venue.foursquare_id;
@@ -2601,11 +2865,8 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::Contact(contact) => {
-            let mut result = InlineQueryResultContact::new(
-                contact.id,
-                contact.phone_number,
-                contact.first_name
-            );
+            let mut result =
+                InlineQueryResultContact::new(contact.id, contact.phone_number, contact.first_name);
 
             result.last_name = contact.last_name;
             result.vcard = contact.vcard;
@@ -2623,10 +2884,7 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
         }
 
         OurResult::Game(game) => {
-            let result = InlineQueryResultGame::new(
-                game.id,
-                game.game_short_name
-            );
+            let result = InlineQueryResultGame::new(game.id, game.game_short_name);
 
             Some(TgResult::Game(result))
         }
@@ -2634,7 +2892,9 @@ fn convert_inline_query_result(result: telegram_types::commands::InlineQueryResu
 }
 
 /// Convert our InlineKeyboardMarkup to Teloxide's
-fn convert_inline_keyboard(markup: telegram_types::chat::InlineKeyboardMarkup) -> teloxide::types::InlineKeyboardMarkup {
+fn convert_inline_keyboard(
+    markup: telegram_types::chat::InlineKeyboardMarkup,
+) -> teloxide::types::InlineKeyboardMarkup {
     use teloxide::types::{InlineKeyboardButton, InlineKeyboardButtonKind};
 
     let buttons: Vec<Vec<InlineKeyboardButton>> = markup
@@ -2646,7 +2906,10 @@ fn convert_inline_keyboard(markup: telegram_types::chat::InlineKeyboardMarkup) -
                     let kind = if let Some(data) = btn.callback_data {
                         InlineKeyboardButtonKind::CallbackData(data)
                     } else if let Some(url) = btn.url {
-                        InlineKeyboardButtonKind::Url(url.parse().unwrap_or_else(|_| "https://example.com".parse().unwrap()))
+                        InlineKeyboardButtonKind::Url(
+                            url.parse()
+                                .unwrap_or_else(|_| "https://example.com".parse().unwrap()),
+                        )
                     } else {
                         // Default to callback with empty data
                         InlineKeyboardButtonKind::CallbackData(String::new())
@@ -2661,7 +2924,9 @@ fn convert_inline_keyboard(markup: telegram_types::chat::InlineKeyboardMarkup) -
 }
 
 /// Convert our ChatPermissions to Teloxide's ChatPermissions
-fn convert_chat_permissions(perms: &telegram_types::chat::ChatPermissions) -> teloxide::types::ChatPermissions {
+fn convert_chat_permissions(
+    perms: &telegram_types::chat::ChatPermissions,
+) -> teloxide::types::ChatPermissions {
     use teloxide::types::ChatPermissions as CP;
 
     let mut result = CP::empty();
@@ -2670,7 +2935,12 @@ fn convert_chat_permissions(perms: &telegram_types::chat::ChatPermissions) -> te
         result |= CP::SEND_MESSAGES;
     }
     if perms.can_send_media_messages.unwrap_or(false) {
-        result |= CP::SEND_AUDIOS | CP::SEND_DOCUMENTS | CP::SEND_PHOTOS | CP::SEND_VIDEOS | CP::SEND_VIDEO_NOTES | CP::SEND_VOICE_NOTES;
+        result |= CP::SEND_AUDIOS
+            | CP::SEND_DOCUMENTS
+            | CP::SEND_PHOTOS
+            | CP::SEND_VIDEOS
+            | CP::SEND_VIDEO_NOTES
+            | CP::SEND_VOICE_NOTES;
     }
     if perms.can_send_polls.unwrap_or(false) {
         result |= CP::SEND_POLLS;
@@ -2698,22 +2968,36 @@ fn convert_chat_permissions(perms: &telegram_types::chat::ChatPermissions) -> te
 }
 
 /// Convert our BotCommandScope to Teloxide's BotCommandScope
-fn convert_bot_command_scope(scope: telegram_types::chat::BotCommandScope) -> teloxide::types::BotCommandScope {
+fn convert_bot_command_scope(
+    scope: telegram_types::chat::BotCommandScope,
+) -> teloxide::types::BotCommandScope {
     match scope {
         telegram_types::chat::BotCommandScope::Default => teloxide::types::BotCommandScope::Default,
-        telegram_types::chat::BotCommandScope::AllPrivateChats => teloxide::types::BotCommandScope::AllPrivateChats,
-        telegram_types::chat::BotCommandScope::AllGroupChats => teloxide::types::BotCommandScope::AllGroupChats,
-        telegram_types::chat::BotCommandScope::AllChatAdministrators => teloxide::types::BotCommandScope::AllChatAdministrators,
-        telegram_types::chat::BotCommandScope::Chat { chat_id } => teloxide::types::BotCommandScope::Chat {
-            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
-        },
-        telegram_types::chat::BotCommandScope::ChatAdministrators { chat_id } => teloxide::types::BotCommandScope::ChatAdministrators {
-            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
-        },
-        telegram_types::chat::BotCommandScope::ChatMember { chat_id, user_id } => teloxide::types::BotCommandScope::ChatMember {
-            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
-            user_id: teloxide::types::UserId(user_id as u64),
-        },
+        telegram_types::chat::BotCommandScope::AllPrivateChats => {
+            teloxide::types::BotCommandScope::AllPrivateChats
+        }
+        telegram_types::chat::BotCommandScope::AllGroupChats => {
+            teloxide::types::BotCommandScope::AllGroupChats
+        }
+        telegram_types::chat::BotCommandScope::AllChatAdministrators => {
+            teloxide::types::BotCommandScope::AllChatAdministrators
+        }
+        telegram_types::chat::BotCommandScope::Chat { chat_id } => {
+            teloxide::types::BotCommandScope::Chat {
+                chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+            }
+        }
+        telegram_types::chat::BotCommandScope::ChatAdministrators { chat_id } => {
+            teloxide::types::BotCommandScope::ChatAdministrators {
+                chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+            }
+        }
+        telegram_types::chat::BotCommandScope::ChatMember { chat_id, user_id } => {
+            teloxide::types::BotCommandScope::ChatMember {
+                chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+                user_id: teloxide::types::UserId(user_id as u64),
+            }
+        }
     }
 }
 
@@ -2721,17 +3005,17 @@ fn convert_bot_command_scope(scope: telegram_types::chat::BotCommandScope) -> te
 fn convert_sticker_format(format: &str) -> teloxide::types::StickerFormat {
     match format {
         "animated" => teloxide::types::StickerFormat::Animated,
-        "video"    => teloxide::types::StickerFormat::Video,
-        _          => teloxide::types::StickerFormat::Static,
+        "video" => teloxide::types::StickerFormat::Video,
+        _ => teloxide::types::StickerFormat::Static,
     }
 }
 
 /// Convert our sticker type string to Teloxide's StickerType
 fn convert_sticker_type(kind: &str) -> teloxide::types::StickerType {
     match kind {
-        "mask"         => teloxide::types::StickerType::Mask,
+        "mask" => teloxide::types::StickerType::Mask,
         "custom_emoji" => teloxide::types::StickerType::CustomEmoji,
-        _              => teloxide::types::StickerType::Regular,
+        _ => teloxide::types::StickerType::Regular,
     }
 }
 
@@ -2741,7 +3025,10 @@ fn convert_input_sticker(s: &telegram_types::chat::InputSticker) -> teloxide::ty
 
     let sticker_file = teloxide::types::InputFile::file_id(&s.sticker);
     let format = convert_sticker_format(&s.format);
-    let mask_position = s.mask_position.as_ref().map(|mp| convert_mask_position(mp.clone()));
+    let mask_position = s
+        .mask_position
+        .as_ref()
+        .map(|mp| convert_mask_position(mp.clone()));
 
     InputSticker {
         sticker: sticker_file,
@@ -2758,9 +3045,9 @@ fn convert_mask_position(mp: telegram_types::chat::MaskPosition) -> teloxide::ty
 
     let point = match mp.point {
         telegram_types::chat::MaskPoint::Forehead => MaskPoint::Forehead,
-        telegram_types::chat::MaskPoint::Eyes     => MaskPoint::Eyes,
-        telegram_types::chat::MaskPoint::Mouth    => MaskPoint::Mouth,
-        telegram_types::chat::MaskPoint::Chin     => MaskPoint::Chin,
+        telegram_types::chat::MaskPoint::Eyes => MaskPoint::Eyes,
+        telegram_types::chat::MaskPoint::Mouth => MaskPoint::Mouth,
+        telegram_types::chat::MaskPoint::Chin => MaskPoint::Chin,
     };
 
     MaskPosition::new(point, mp.x_shift, mp.y_shift, mp.scale)

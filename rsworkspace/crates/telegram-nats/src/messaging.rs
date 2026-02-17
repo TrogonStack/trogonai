@@ -29,16 +29,15 @@ impl MessagePublisher {
     }
 
     /// Publish a message to a subject
-    pub async fn publish<T: Serialize>(
-        &self,
-        subject: impl AsRef<str>,
-        message: &T,
-    ) -> Result<()> {
+    pub async fn publish<T: Serialize>(&self, subject: impl AsRef<str>, message: &T) -> Result<()> {
         let subject = subject.as_ref();
-        let payload = serde_json::to_vec(message)
-            .map_err(|e| Error::Serialization(e))?;
+        let payload = serde_json::to_vec(message).map_err(|e| Error::Serialization(e))?;
 
-        trace!("Publishing to subject: {}, size: {} bytes", subject, payload.len());
+        trace!(
+            "Publishing to subject: {}, size: {} bytes",
+            subject,
+            payload.len()
+        );
 
         self.client
             .publish(subject.to_string(), payload.into())
@@ -57,8 +56,7 @@ impl MessagePublisher {
         headers: async_nats::HeaderMap,
     ) -> Result<()> {
         let subject = subject.as_ref();
-        let payload = serde_json::to_vec(message)
-            .map_err(|e| Error::Serialization(e))?;
+        let payload = serde_json::to_vec(message).map_err(|e| Error::Serialization(e))?;
 
         trace!("Publishing to subject: {} with headers", subject);
 
@@ -125,13 +123,18 @@ impl MessageSubscriber {
     ) -> Result<MessageStream<T>> {
         let subject = subject.as_ref();
         let queue_group = queue_group.into();
-        debug!("Queue subscribing to subject: {} (group: {})", subject, queue_group);
+        debug!(
+            "Queue subscribing to subject: {} (group: {})",
+            subject, queue_group
+        );
 
         let subscriber = self
             .client
             .queue_subscribe(subject.to_string(), queue_group)
             .await
-            .map_err(|e| Error::Subscribe(format!("Failed to queue subscribe to {}: {}", subject, e)))?;
+            .map_err(|e| {
+                Error::Subscribe(format!("Failed to queue subscribe to {}: {}", subject, e))
+            })?;
 
         Ok(MessageStream {
             subscriber,

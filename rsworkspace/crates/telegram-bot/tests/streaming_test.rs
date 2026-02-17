@@ -32,9 +32,13 @@ async fn test_rate_limiting_timing() {
 
     // Verify edits are at least 1 second apart
     for i in 1..edit_times.len() {
-        let gap = edit_times[i] - edit_times[i-1];
-        assert!(gap >= MIN_EDIT_INTERVAL,
-            "Edit {} happened too soon: {:?} after previous", i, gap);
+        let gap = edit_times[i] - edit_times[i - 1];
+        assert!(
+            gap >= MIN_EDIT_INTERVAL,
+            "Edit {} happened too soon: {:?} after previous",
+            i,
+            gap
+        );
     }
 }
 

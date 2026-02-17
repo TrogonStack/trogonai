@@ -3,8 +3,8 @@
 //! Handles communication with Claude API for generating responses
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 /// Claude API configuration
@@ -66,7 +66,8 @@ impl ClaudeClient {
 
         debug!("Sending request to Claude API");
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -83,10 +84,13 @@ impl ClaudeClient {
             anyhow::bail!("Claude API error: {}", status);
         }
 
-        let claude_response: ClaudeResponse = response.json().await
+        let claude_response: ClaudeResponse = response
+            .json()
+            .await
             .context("Failed to parse Claude API response")?;
 
-        let response_text = claude_response.content
+        let response_text = claude_response
+            .content
             .iter()
             .filter_map(|block| {
                 if block.block_type == "text" {
@@ -98,7 +102,10 @@ impl ClaudeClient {
             .collect::<Vec<_>>()
             .join("\n");
 
-        debug!("Received response from Claude: {} tokens", claude_response.usage.output_tokens);
+        debug!(
+            "Received response from Claude: {} tokens",
+            claude_response.usage.output_tokens
+        );
 
         Ok(response_text)
     }
@@ -130,7 +137,8 @@ impl ClaudeClient {
 
         debug!("Sending streaming request to Claude API");
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -170,13 +178,16 @@ impl ClaudeClient {
                                     if data == "[DONE]" {
                                         return;
                                     }
-                                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                                    if let Ok(event) =
+                                        serde_json::from_str::<serde_json::Value>(data)
+                                    {
                                         if event["type"] == "content_block_delta"
                                             && event["delta"]["type"] == "text_delta"
                                         {
                                             if let Some(text) = event["delta"]["text"].as_str() {
                                                 if !text.is_empty() {
-                                                    if tx.send(Ok(text.to_string())).await.is_err() {
+                                                    if tx.send(Ok(text.to_string())).await.is_err()
+                                                    {
                                                         return; // receiver dropped
                                                     }
                                                 }
@@ -190,7 +201,9 @@ impl ClaudeClient {
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(Err(anyhow::anyhow!("Stream read error: {}", e))).await;
+                        let _ = tx
+                            .send(Err(anyhow::anyhow!("Stream read error: {}", e)))
+                            .await;
                         return;
                     }
                 }
