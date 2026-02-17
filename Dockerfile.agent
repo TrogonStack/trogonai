@@ -1,37 +1,18 @@
 # Dockerfile for telegram-agent
+#
+# Expected build context: rsworkspace/
+# Binary must be pre-built: cargo build --release --package telegram-agent
+# Build: docker build -f Dockerfile.agent -t telegram-agent rsworkspace/
 
-FROM rust:1.85-slim AS builder
-
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build/rsworkspace
-
-# Copy workspace manifests first (for layer caching)
-COPY rsworkspace/Cargo.toml rsworkspace/Cargo.lock ./
-
-# Copy all crate sources
-COPY rsworkspace/crates ./crates/
-
-# Build only telegram-agent
-RUN cargo build --release --locked --package telegram-agent
-
-# Runtime stage
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder
-COPY --from=builder /build/rsworkspace/target/release/telegram-agent /usr/local/bin/telegram-agent
+COPY target/release/telegram-agent /usr/local/bin/telegram-agent
 
-# Run as non-root user
 RUN useradd -m -u 1000 trogonai
 USER trogonai
 
