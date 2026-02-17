@@ -160,6 +160,16 @@ pub mod bot {
         format!("telegram.{}.bot.bot_commands.response", prefix)
     }
 
+    /// Sticker set info response subject
+    pub fn sticker_set_info(prefix: &str) -> String {
+        format!("telegram.{}.bot.sticker.set_info", prefix)
+    }
+
+    /// Uploaded sticker file response subject
+    pub fn sticker_uploaded(prefix: &str) -> String {
+        format!("telegram.{}.bot.sticker.uploaded", prefix)
+    }
+
     /// Error event subject for failed agent commands
     pub fn command_error(prefix: &str) -> String {
         format!("telegram.{}.bot.error.command", prefix)
@@ -376,6 +386,66 @@ pub mod agent {
     /// Get bot commands command subject
     pub fn bot_commands_get(prefix: &str) -> String {
         format!("telegram.{}.agent.bot_commands.get", prefix)
+    }
+
+    /// Get sticker set command subject
+    pub fn sticker_get_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.get_set", prefix)
+    }
+
+    /// Upload sticker file command subject
+    pub fn sticker_upload_file(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.upload_file", prefix)
+    }
+
+    /// Create new sticker set command subject
+    pub fn sticker_create_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.create_set", prefix)
+    }
+
+    /// Add sticker to set command subject
+    pub fn sticker_add_to_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.add_to_set", prefix)
+    }
+
+    /// Set sticker position in set command subject
+    pub fn sticker_set_position(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_position", prefix)
+    }
+
+    /// Delete sticker from set command subject
+    pub fn sticker_delete_from_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.delete_from_set", prefix)
+    }
+
+    /// Set sticker set title command subject
+    pub fn sticker_set_title(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_title", prefix)
+    }
+
+    /// Set sticker set thumbnail command subject
+    pub fn sticker_set_thumbnail(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_thumbnail", prefix)
+    }
+
+    /// Delete sticker set command subject
+    pub fn sticker_delete_set(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.delete_set", prefix)
+    }
+
+    /// Set sticker emoji list command subject
+    pub fn sticker_set_emoji_list(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_emoji_list", prefix)
+    }
+
+    /// Set sticker keywords command subject
+    pub fn sticker_set_keywords(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_keywords", prefix)
+    }
+
+    /// Set sticker mask position command subject
+    pub fn sticker_set_mask_position(prefix: &str) -> String {
+        format!("telegram.{}.agent.sticker.set_mask_position", prefix)
     }
 
     /// Wildcard subject for all agent commands
