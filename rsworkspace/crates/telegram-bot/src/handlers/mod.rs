@@ -191,6 +191,94 @@ async fn handle_command(msg: Message, bridge: TelegramBridge, health: AppState, 
     Ok(())
 }
 
+/// Handle inline queries (@bot query)
+pub async fn handle_inline_query(_bot: Bot, query: teloxide::types::InlineQuery, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    use telegram_types::events::{InlineQueryEvent, Location};
+
+    let update_id = 0; // Inline queries don't have update_id
+
+    debug!("Received inline query: {}", query.query);
+    health.increment_messages_received().await;
+
+    // Check access control
+    let user_id = query.from.id.0 as i64;
+    if !bridge.access_config.is_admin(user_id) && !bridge.check_dm_access(user_id) {
+        warn!("Access denied for inline query from user {}", user_id);
+        return Ok(());
+    }
+
+    // Create session ID for inline queries (user-specific)
+    let session_id = format!("tg-inline-{}", user_id);
+
+    // Convert location if present
+    let location = query.location.map(|loc| Location {
+        longitude: loc.longitude,
+        latitude: loc.latitude,
+    });
+
+    // Create inline query event
+    let event = InlineQueryEvent {
+        metadata: telegram_types::events::EventMetadata::new(session_id, update_id),
+        inline_query_id: query.id.clone(),
+        from: telegram_types::chat::User {
+            id: user_id,
+            is_bot: query.from.is_bot,
+            first_name: query.from.first_name.clone(),
+            last_name: query.from.last_name.clone(),
+            username: query.from.username.clone(),
+            language_code: query.from.language_code.clone(),
+        },
+        query: query.query.clone(),
+        offset: query.offset.clone(),
+        chat_type: query.chat_type.map(|ct| format!("{:?}", ct)),
+        location,
+    };
+
+    // Publish to NATS
+    if let Err(e) = bridge.publish_inline_query(&event).await {
+        error!("Failed to publish inline query: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle chosen inline results
+pub async fn handle_chosen_inline_result(_bot: Bot, result: teloxide::types::ChosenInlineResult, bridge: TelegramBridge, health: AppState) -> ResponseResult<()> {
+    use telegram_types::events::ChosenInlineResultEvent;
+
+    let update_id = 0;
+
+    debug!("Inline result chosen: {}", result.result_id);
+    health.increment_messages_received().await;
+
+    let user_id = result.from.id.0 as i64;
+    let session_id = format!("tg-inline-{}", user_id);
+
+    let event = ChosenInlineResultEvent {
+        metadata: telegram_types::events::EventMetadata::new(session_id, update_id),
+        result_id: result.result_id.clone(),
+        from: telegram_types::chat::User {
+            id: user_id,
+            is_bot: result.from.is_bot,
+            first_name: result.from.first_name.clone(),
+            last_name: result.from.last_name.clone(),
+            username: result.from.username.clone(),
+            language_code: result.from.language_code.clone(),
+        },
+        query: result.query.clone(),
+        inline_message_id: result.inline_message_id.clone(),
+    };
+
+    // Publish to NATS
+    if let Err(e) = bridge.publish_chosen_inline_result(&event).await {
+        error!("Failed to publish chosen inline result: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
     use teloxide::types::ChatKind;

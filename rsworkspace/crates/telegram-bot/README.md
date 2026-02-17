@@ -5,12 +5,14 @@ A Telegram bot that acts as a bridge between Telegram and NATS, enabling AI agen
 ## Features
 
 - **Bidirectional Bridge**: Converts Telegram updates to NATS events and processes NATS commands to send messages back to Telegram
-- **Message Types**: Supports text, photos, videos, and callback queries (button clicks)
+- **Message Types**: Supports text, photos, videos, audio, documents, voice, and callback queries (button clicks)
 - **Command Handling**: Parses and routes bot commands to appropriate NATS subjects
+- **Inline Mode**: Users can invoke the bot from any chat with `@bot query` to get instant results
 - **Access Control**: Configurable allow/deny lists for users and groups
 - **Session Management**: Tracks user sessions using JetStream KV store
 - **Streaming Support**: Progressive message updates for long-running AI responses
 - **Inline Keyboards**: Support for interactive buttons in messages
+- **Health Monitoring**: Built-in health check endpoints and operational metrics
 
 ## Architecture
 
@@ -49,8 +51,13 @@ The bot publishes events to the following subjects:
 - `{prefix}.telegram.bot.message.text` - Text messages
 - `{prefix}.telegram.bot.message.photo` - Photo messages
 - `{prefix}.telegram.bot.message.video` - Video messages
+- `{prefix}.telegram.bot.message.audio` - Audio messages
+- `{prefix}.telegram.bot.message.document` - Document messages
+- `{prefix}.telegram.bot.message.voice` - Voice messages
 - `{prefix}.telegram.bot.command.{command_name}` - Bot commands (e.g., `/start`)
 - `{prefix}.telegram.bot.callback_query` - Button clicks
+- `{prefix}.telegram.bot.inline.query` - Inline queries (`@bot query`)
+- `{prefix}.telegram.bot.inline.chosen` - Chosen inline results
 
 ### Outbound (Agent Commands)
 
@@ -61,6 +68,7 @@ The bot publishes events to the following subjects:
 - `{prefix}.telegram.agent.message.stream` - Streaming message update
 - `{prefix}.telegram.agent.callback.answer` - Answer callback query
 - `{prefix}.telegram.agent.chat.action` - Send chat action (typing indicator)
+- `{prefix}.telegram.agent.inline.answer` - Answer inline query
 
 ## Configuration
 
@@ -211,6 +219,46 @@ The bot supports three levels of access control:
 3. **Allowed Groups**: Groups where the bot is active
 
 Configure these in the `[telegram.access]` section of your config file.
+
+## Inline Mode
+
+Inline mode allows users to invoke the bot from any chat by typing `@your_bot_username query`.
+
+### Setup
+
+1. **Enable inline mode in BotFather**:
+   - Send `/mybots` to @BotFather
+   - Select your bot
+   - Go to "Bot Settings" → "Inline Mode" → "Turn on"
+   - Optionally set inline placeholder text
+
+2. **How it works**:
+   - User types `@your_bot_username search query` in any chat
+   - Bot receives an inline query event via NATS
+   - Agent processes the query and returns results
+   - User sees results as they type and can tap to send
+
+3. **Access control**:
+   - Inline queries respect the same access control as regular messages
+   - Only allowed users can use inline mode
+
+### Example Usage
+
+```
+@mybot hello world
+```
+
+The agent can respond with multiple results:
+- In **echo mode**: Original, uppercase, lowercase versions
+- In **LLM mode**: AI-generated response from Claude
+
+### Events & Commands
+
+- **Event**: `{prefix}.telegram.bot.inline.query` - When user types inline query
+- **Event**: `{prefix}.telegram.bot.inline.chosen` - When user selects a result
+- **Command**: `{prefix}.telegram.agent.inline.answer` - Send results back to user
+
+See `examples/inline_mode_demo.rs` for a complete example.
 
 ## Session Management
 

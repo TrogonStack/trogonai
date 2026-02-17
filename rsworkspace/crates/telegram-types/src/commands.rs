@@ -105,6 +105,62 @@ pub struct StreamMessageCommand {
     pub session_id: Option<String>,
 }
 
+/// Answer inline query
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnswerInlineQueryCommand {
+    pub inline_query_id: String,
+    pub results: Vec<InlineQueryResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_time: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_personal: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<String>,
+}
+
+/// Inline query result types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InlineQueryResult {
+    Article(InlineQueryResultArticle),
+    Photo(InlineQueryResultPhoto),
+    // Can add more types: Video, Audio, Document, etc.
+}
+
+/// Inline query result article (text-based result)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultArticle {
+    pub id: String,
+    pub title: String,
+    pub input_message_content: InputMessageContent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_url: Option<String>,
+}
+
+/// Inline query result photo
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineQueryResultPhoto {
+    pub id: String,
+    pub photo_url: String,
+    pub thumb_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+}
+
+/// Input message content for inline results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputMessageContent {
+    pub message_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_mode: Option<ParseMode>,
+}
+
 impl SendMessageCommand {
     /// Create a simple text message
     pub fn new(chat_id: i64, text: impl Into<String>) -> Self {
