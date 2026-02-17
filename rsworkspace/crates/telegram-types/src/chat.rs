@@ -40,6 +40,12 @@ pub struct Message {
     pub date: i64,
     pub chat: Chat,
     pub from: Option<User>,
+    /// Unique identifier of a message thread (topic) to which the message belongs; for supergroups only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_thread_id: Option<i32>,
+    /// True, if the message is sent to a forum topic
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_topic_message: Option<bool>,
 }
 
 /// File information for media messages
@@ -85,4 +91,18 @@ impl InlineKeyboardMarkup {
             inline_keyboard: rows,
         }
     }
+}
+
+/// Forum topic information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForumTopic {
+    /// Unique identifier of the forum topic
+    pub message_thread_id: i32,
+    /// Name of the topic
+    pub name: String,
+    /// Color of the topic icon in RGB format
+    pub icon_color: i32,
+    /// Unique identifier of the custom emoji shown as the topic icon
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_custom_emoji_id: Option<String>,
 }

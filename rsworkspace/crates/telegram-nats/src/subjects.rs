@@ -134,6 +134,66 @@ pub mod agent {
         format!("telegram.{}.agent.inline.answer", prefix)
     }
 
+    /// Create forum topic command subject
+    pub fn forum_create(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.create", prefix)
+    }
+
+    /// Edit forum topic command subject
+    pub fn forum_edit(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.edit", prefix)
+    }
+
+    /// Close forum topic command subject
+    pub fn forum_close(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.close", prefix)
+    }
+
+    /// Reopen forum topic command subject
+    pub fn forum_reopen(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.reopen", prefix)
+    }
+
+    /// Delete forum topic command subject
+    pub fn forum_delete(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.delete", prefix)
+    }
+
+    /// Unpin all forum topic messages command subject
+    pub fn forum_unpin(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.unpin", prefix)
+    }
+
+    /// Edit general forum topic command subject
+    pub fn forum_edit_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.edit_general", prefix)
+    }
+
+    /// Close general forum topic command subject
+    pub fn forum_close_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.close_general", prefix)
+    }
+
+    /// Reopen general forum topic command subject
+    pub fn forum_reopen_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.reopen_general", prefix)
+    }
+
+    /// Hide general forum topic command subject
+    pub fn forum_hide_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.hide_general", prefix)
+    }
+
+    /// Unhide general forum topic command subject
+    pub fn forum_unhide_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.unhide_general", prefix)
+    }
+
+    /// Unpin all general forum topic messages command subject
+    pub fn forum_unpin_general(prefix: &str) -> String {
+        format!("telegram.{}.agent.forum.unpin_general", prefix)
+    }
+
     /// Wildcard subject for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("telegram.{}.agent.>", prefix)

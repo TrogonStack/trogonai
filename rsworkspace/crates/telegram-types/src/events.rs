@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::chat::{Chat, FileInfo, Message, PhotoSize, User};
+use crate::chat::{Chat, FileInfo, ForumTopic, Message, PhotoSize, User};
 
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,4 +130,49 @@ impl EventMetadata {
             update_id,
         }
     }
+}
+
+/// Forum topic created event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForumTopicCreatedEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub forum_topic: ForumTopic,
+}
+
+/// Forum topic edited event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForumTopicEditedEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+    pub name: Option<String>,
+    pub icon_custom_emoji_id: Option<String>,
+}
+
+/// Forum topic closed event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForumTopicClosedEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+}
+
+/// Forum topic reopened event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForumTopicReopenedEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+}
+
+/// General forum topic hidden event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralForumTopicHiddenEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
+}
+
+/// General forum topic unhidden event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralForumTopicUnhiddenEvent {
+    pub metadata: EventMetadata,
+    pub message: Message,
 }
