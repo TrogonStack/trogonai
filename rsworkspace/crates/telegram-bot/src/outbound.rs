@@ -54,6 +54,9 @@ impl OutboundProcessor {
         let sticker_task = self.handle_send_stickers(prefix.clone());
         let animation_task = self.handle_send_animations(prefix.clone());
         let video_note_task = self.handle_send_video_notes(prefix.clone());
+        let location_task = self.handle_send_locations(prefix.clone());
+        let venue_task = self.handle_send_venues(prefix.clone());
+        let contact_task = self.handle_send_contacts(prefix.clone());
         let callback_task = self.handle_answer_callbacks(prefix.clone());
         let action_task = self.handle_chat_actions(prefix.clone());
         let stream_task = self.handle_stream_messages(prefix.clone());
@@ -74,6 +77,9 @@ impl OutboundProcessor {
             sticker_task,
             animation_task,
             video_note_task,
+            location_task,
+            venue_task,
+            contact_task,
             callback_task,
             action_task,
             stream_task,
@@ -364,6 +370,151 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => error!("Failed to deserialize send video note command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send location commands
+    async fn handle_send_locations(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_location(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendLocationCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send location command for chat {}", cmd.chat_id);
+
+                    let mut req = self.bot.send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
+
+                    if let Some(live_period) = cmd.live_period {
+                        req.live_period = Some(live_period.into());
+                    }
+
+                    if let Some(horizontal_accuracy) = cmd.horizontal_accuracy {
+                        req.horizontal_accuracy = Some(horizontal_accuracy);
+                    }
+
+                    if let Some(heading) = cmd.heading {
+                        req.heading = Some(heading);
+                    }
+
+                    if let Some(proximity_alert_radius) = cmd.proximity_alert_radius {
+                        req.proximity_alert_radius = Some(proximity_alert_radius);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send location command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send venue commands
+    async fn handle_send_venues(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_venue(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendVenueCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send venue command for chat {}", cmd.chat_id);
+
+                    let mut req = self.bot.send_venue(
+                        ChatId(cmd.chat_id),
+                        cmd.latitude,
+                        cmd.longitude,
+                        cmd.title,
+                        cmd.address,
+                    );
+
+                    if let Some(foursquare_id) = cmd.foursquare_id {
+                        req.foursquare_id = Some(foursquare_id);
+                    }
+
+                    if let Some(foursquare_type) = cmd.foursquare_type {
+                        req.foursquare_type = Some(foursquare_type);
+                    }
+
+                    if let Some(google_place_id) = cmd.google_place_id {
+                        req.google_place_id = Some(google_place_id);
+                    }
+
+                    if let Some(google_place_type) = cmd.google_place_type {
+                        req.google_place_type = Some(google_place_type);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send venue command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle send contact commands
+    async fn handle_send_contacts(&self, prefix: String) -> Result<()> {
+        let subject = subjects::agent::message_send_contact(&prefix);
+        info!("Subscribing to {}", subject);
+
+        let mut stream = self.subscriber.subscribe::<SendContactCommand>(&subject).await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    debug!("Received send contact command for chat {}", cmd.chat_id);
+
+                    let mut req = self.bot.send_contact(ChatId(cmd.chat_id), cmd.phone_number, cmd.first_name);
+
+                    if let Some(last_name) = cmd.last_name {
+                        req.last_name = Some(last_name);
+                    }
+
+                    if let Some(vcard) = cmd.vcard {
+                        req.vcard = Some(vcard);
+                    }
+
+                    if let Some(reply_to) = cmd.reply_to_message_id {
+                        req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                    }
+
+                    if let Some(thread_id) = cmd.message_thread_id {
+                        req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+                    }
+
+                    if let Err(e) = req.await {
+                        self.handle_telegram_error(&subject, e, &prefix).await;
+                    }
+                }
+                Err(e) => error!("Failed to deserialize send contact command: {}", e),
             }
         }
 
