@@ -169,34 +169,27 @@ impl ClaudeClient {
                         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
                         // Process all complete lines in the buffer
-                        loop {
-                            if let Some(newline_pos) = buffer.find('\n') {
-                                let line = buffer[..newline_pos].trim_end_matches('\r').to_string();
-                                buffer = buffer[newline_pos + 1..].to_string();
+                        while let Some(newline_pos) = buffer.find('\n') {
+                            let line = buffer[..newline_pos].trim_end_matches('\r').to_string();
+                            buffer = buffer[newline_pos + 1..].to_string();
 
-                                if let Some(data) = line.strip_prefix("data: ") {
-                                    if data == "[DONE]" {
-                                        return;
-                                    }
-                                    if let Ok(event) =
-                                        serde_json::from_str::<serde_json::Value>(data)
+                            if let Some(data) = line.strip_prefix("data: ") {
+                                if data == "[DONE]" {
+                                    return;
+                                }
+                                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                                    if event["type"] == "content_block_delta"
+                                        && event["delta"]["type"] == "text_delta"
                                     {
-                                        if event["type"] == "content_block_delta"
-                                            && event["delta"]["type"] == "text_delta"
-                                        {
-                                            if let Some(text) = event["delta"]["text"].as_str() {
-                                                if !text.is_empty() {
-                                                    if tx.send(Ok(text.to_string())).await.is_err()
-                                                    {
-                                                        return; // receiver dropped
-                                                    }
-                                                }
+                                        if let Some(text) = event["delta"]["text"].as_str() {
+                                            if !text.is_empty()
+                                                && tx.send(Ok(text.to_string())).await.is_err()
+                                            {
+                                                return; // receiver dropped
                                             }
                                         }
                                     }
                                 }
-                            } else {
-                                break;
                             }
                         }
                     }

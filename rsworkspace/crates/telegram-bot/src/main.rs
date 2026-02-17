@@ -341,7 +341,7 @@ async fn main() -> Result<()> {
             }
 
             if *max_connections > 0 {
-                options = options.max_connections(*max_connections as u8);
+                options = options.max_connections(*max_connections);
             }
 
             let listener = match teloxide::update_listeners::webhooks::axum(bot, options).await {

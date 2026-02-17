@@ -31,7 +31,7 @@ impl MessagePublisher {
     /// Publish a message to a subject
     pub async fn publish<T: Serialize>(&self, subject: impl AsRef<str>, message: &T) -> Result<()> {
         let subject = subject.as_ref();
-        let payload = serde_json::to_vec(message).map_err(|e| Error::Serialization(e))?;
+        let payload = serde_json::to_vec(message).map_err(Error::Serialization)?;
 
         trace!(
             "Publishing to subject: {}, size: {} bytes",
@@ -56,7 +56,7 @@ impl MessagePublisher {
         headers: async_nats::HeaderMap,
     ) -> Result<()> {
         let subject = subject.as_ref();
-        let payload = serde_json::to_vec(message).map_err(|e| Error::Serialization(e))?;
+        let payload = serde_json::to_vec(message).map_err(Error::Serialization)?;
 
         trace!("Publishing to subject: {} with headers", subject);
 
@@ -176,7 +176,6 @@ impl<T: DeserializeOwned> MessageStream<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_message_publisher_creation() {
