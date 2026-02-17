@@ -111,14 +111,14 @@ jobs:
 
       - name: Upload telegram-bot binary
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: telegram-bot-linux
           path: rsworkspace/target/release/telegram-bot
 
       - name: Upload telegram-agent binary
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: telegram-agent-linux
           path: rsworkspace/target/release/telegram-agent
