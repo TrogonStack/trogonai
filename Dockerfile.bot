@@ -1,6 +1,6 @@
 # Dockerfile for telegram-bot
 
-FROM rust:1.85-slim as builder
+FROM rust:1.85-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -8,14 +8,16 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /build/rsworkspace
 
-# Copy workspace files
+# Copy workspace manifests first (for layer caching)
 COPY rsworkspace/Cargo.toml rsworkspace/Cargo.lock ./
+
+# Copy all crate sources
 COPY rsworkspace/crates ./crates/
 
 # Build only telegram-bot
-RUN cargo build --release --package telegram-bot
+RUN cargo build --release --locked --package telegram-bot
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -27,7 +29,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/telegram-bot /usr/local/bin/telegram-bot
+COPY --from=builder /build/rsworkspace/target/release/telegram-bot /usr/local/bin/telegram-bot
 
 # Run as non-root user
 RUN useradd -m -u 1000 trogonai
