@@ -18,10 +18,16 @@ pub struct TelegramAgent {
 
 impl TelegramAgent {
     /// Create a new Telegram agent
-    pub fn new(client: Client, prefix: String, agent_name: String, llm_config: Option<ClaudeConfig>) -> Self {
+    pub fn new(
+        client: Client,
+        prefix: String,
+        agent_name: String,
+        llm_config: Option<ClaudeConfig>,
+        conversation_kv: Option<async_nats::jetstream::kv::Store>,
+    ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
-        let processor = MessageProcessor::new(llm_config);
+        let processor = MessageProcessor::new(llm_config, conversation_kv);
 
         Self {
             subscriber,
@@ -124,7 +130,7 @@ impl TelegramAgent {
         use telegram_types::events::CommandEvent;
 
         // Subscribe to all commands using wildcard
-        let subject = format!("{}.telegram.bot.command.*", self.subscriber.prefix());
+        let subject = telegram_nats::subjects::bot::all_commands(self.subscriber.prefix());
         info!("Subscribing to commands: {}", subject);
 
         let mut stream = self.subscriber.subscribe::<CommandEvent>(&subject).await?;
