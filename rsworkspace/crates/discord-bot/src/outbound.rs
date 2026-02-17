@@ -3,6 +3,9 @@
 //! Subscribes to agent command subjects and performs the corresponding
 //! Discord API calls via serenity's HTTP client.
 
+#[path = "outbound_tests.rs"]
+mod outbound_tests;
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -13,8 +16,8 @@ use discord_types::{
     SendMessageCommand, TypingCommand,
 };
 use serenity::builder::{
-    CreateInteractionResponse, CreateInteractionResponseFollowup,
-    CreateInteractionResponseMessage, CreateMessage, EditMessage,
+    CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage,
+    CreateMessage, EditMessage,
 };
 use serenity::http::Http;
 use serenity::model::id::{ChannelId, MessageId};
@@ -98,7 +101,10 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = channel.send_message(&*http, builder).await {
-                        error!("Failed to send message to channel {}: {}", cmd.channel_id, e);
+                        error!(
+                            "Failed to send message to channel {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
                 Err(e) => {
@@ -155,7 +161,9 @@ impl OutboundProcessor {
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteMessageCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteMessageCommand>(&subject)
+            .await?;
 
         info!("Listening for delete_message commands on {}", subject);
 
@@ -262,10 +270,7 @@ impl OutboundProcessor {
                         )
                         .await
                     {
-                        error!(
-                            "Failed to defer interaction {}: {}",
-                            cmd.interaction_id, e
-                        );
+                        error!("Failed to defer interaction {}: {}", cmd.interaction_id, e);
                     }
                 }
                 Err(e) => {
@@ -338,10 +343,7 @@ impl OutboundProcessor {
                     let message_id = MessageId::new(cmd.message_id);
                     let reaction = parse_reaction_type(&cmd.emoji);
 
-                    if let Err(e) = http
-                        .create_reaction(channel, message_id, &reaction)
-                        .await
-                    {
+                    if let Err(e) = http.create_reaction(channel, message_id, &reaction).await {
                         error!(
                             "Failed to add reaction '{}' to message {}: {}",
                             cmd.emoji, cmd.message_id, e

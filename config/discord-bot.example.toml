@@ -1,0 +1,49 @@
+# TrogonAI Discord Bot Configuration Example
+
+[discord]
+# Bot token from the Discord Developer Portal
+# https://discord.com/developers/applications → Your App → Bot → Token
+bot_token = "YOUR_BOT_TOKEN_HERE"
+
+# ============================================================================
+# ACCESS CONTROL
+# ============================================================================
+
+[discord.access]
+# DM policy: "open" | "allowlist" | "disabled"
+#   open      — any user can DM the bot
+#   allowlist — only users in user_allowlist can DM the bot
+#   disabled  — direct messages are not accepted
+dm_policy = "allowlist"
+
+# Guild policy: "allowlist" | "disabled"
+#   allowlist — only guilds in guild_allowlist are served
+#   disabled  — the bot does not respond in any guild
+guild_policy = "allowlist"
+
+# Admin user IDs — bypass all access restrictions
+admin_users = [123456789]
+
+# Allowed user IDs for direct messages (used when dm_policy = "allowlist")
+user_allowlist = [123456789, 987654321]
+
+# Allowed guild (server) IDs (used when guild_policy = "allowlist")
+guild_allowlist = [1234567890123456789]
+
+# ============================================================================
+# NATS
+# ============================================================================
+
+[nats]
+# NATS server URLs
+servers = ["nats://localhost:4222"]
+
+# Subject prefix — must match the prefix used by the discord-agent
+prefix = "prod"
+
+# Optional: NATS username / password authentication
+# username = "nats_user"
+# password = "nats_password"
+
+# Optional: path to a NATS credentials file (.creds)
+# credentials_file = "/path/to/nats.creds"
