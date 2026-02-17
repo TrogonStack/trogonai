@@ -257,10 +257,17 @@ async fn main() -> Result<()> {
         .branch(poll_update_handler)
         .branch(poll_answer_handler);
 
+    // Build dispatcher
+    let mut dispatcher = Dispatcher::builder(bot.clone(), all_handlers)
+        .dependencies(dptree::deps![bridge, health_state])
+        .enable_ctrlc_handler()
+        .build();
+
     // Start bot based on update mode
     match &config.telegram.update_mode {
         crate::config::UpdateModeConfig::Polling { timeout, limit } => {
             info!("Starting bot in POLLING mode (timeout: {}s, limit: {})", timeout, limit);
+            dispatcher.dispatch().await;
         }
         crate::config::UpdateModeConfig::Webhook {
             url,
@@ -274,7 +281,6 @@ async fn main() -> Result<()> {
             info!("Webhook URL: {}{}", url, path);
             info!("Listening on: {}:{}", bind_address, port);
 
-            // Parse webhook URL
             let webhook_url = format!("{}{}", url, path);
             let parsed_url = match webhook_url.parse::<url::Url>() {
                 Ok(u) => u,
@@ -284,36 +290,38 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Set webhook on Telegram
-            let mut set_webhook = bot.set_webhook(parsed_url);
+            let bind_addr: std::net::SocketAddr = format!("{}:{}", bind_address, port)
+                .parse()
+                .map_err(|e: std::net::AddrParseError| anyhow::anyhow!("Invalid bind address: {}", e))?;
+
+            let mut options = teloxide::update_listeners::webhooks::Options::new(bind_addr, parsed_url);
 
             if let Some(token) = secret_token {
-                set_webhook.secret_token = Some(token.clone());
+                options = options.secret_token(token.clone());
             }
 
             if *max_connections > 0 {
-                set_webhook.max_connections = Some(*max_connections);
+                options = options.max_connections(*max_connections as u8);
             }
 
-            if let Err(e) = set_webhook.await {
-                error!("Failed to set webhook: {}", e);
-                return Err(e.into());
-            }
+            let listener = match teloxide::update_listeners::webhooks::axum(bot, options).await {
+                Ok(l) => l,
+                Err(e) => {
+                    error!("Failed to set up webhook: {}", e);
+                    return Err(e.into());
+                }
+            };
 
-            info!("Webhook registered with Telegram successfully");
-            info!("NOTE: Webhook mode configured - using polling until webhook listener is fully implemented");
-            info!("The bot will receive updates via polling, but webhook is set on Telegram's side");
+            info!("Webhook listener started, waiting for updates from Telegram");
+
+            dispatcher
+                .dispatch_with_listener(
+                    listener,
+                    std::sync::Arc::new(teloxide::error_handlers::IgnoringErrorHandlerSafe),
+                )
+                .await;
         }
     }
-
-    // Start dispatcher (currently using polling for both modes)
-    // TODO: Implement proper webhook listener for webhook mode
-    Dispatcher::builder(bot, all_handlers)
-        .dependencies(dptree::deps![bridge, health_state])
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
 
     info!("Telegram bot stopped");
     Ok(())
