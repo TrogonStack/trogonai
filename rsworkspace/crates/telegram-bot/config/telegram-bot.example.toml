@@ -1,0 +1,77 @@
+# Telegram Bot Configuration Example
+
+[telegram]
+# Bot token from @BotFather
+bot_token = "YOUR_BOT_TOKEN_HERE"
+
+# Update mode: Choose between "polling" or "webhook"
+
+# ============================================================================
+# OPTION 1: POLLING MODE (Default - Simple, works everywhere)
+# ============================================================================
+# Good for: Development, testing, simple deployments
+# Pros: Easy setup, works behind NAT/firewall
+# Cons: Slightly higher latency, more resource usage
+
+[telegram.update_mode]
+mode = "polling"
+timeout = 30          # Long polling timeout in seconds
+limit = 100          # Max updates per request (1-100)
+
+# ============================================================================
+# OPTION 2: WEBHOOK MODE (Production - Efficient, lower latency)
+# ============================================================================
+# Good for: Production deployments with public HTTPS endpoint
+# Pros: Lower latency, more efficient, real-time updates
+# Cons: Requires public HTTPS URL, SSL certificate, open port
+# Requirements:
+#   - Public domain with HTTPS (Let's Encrypt recommended)
+#   - Port 443, 80, 88, or 8443 must be accessible
+#   - Valid SSL certificate (self-signed works for ports 8443, 88)
+
+# [telegram.update_mode]
+# mode = "webhook"
+# url = "https://your-domain.com"           # Your public HTTPS URL
+# port = 8443                                # Port to listen on (443, 80, 88, or 8443)
+# path = "/webhook"                          # Webhook path (will be: https://your-domain.com/webhook)
+# secret_token = "your-secret-token-here"    # Optional: Secret token to validate requests
+# bind_address = "0.0.0.0"                   # IP to bind to
+# max_connections = 40                       # Max simultaneous HTTPS connections (1-100)
+
+# Access Control
+[telegram.access]
+# Admin user IDs (can always use the bot)
+admin_user_ids = [123456789]
+
+# Allowed user IDs for direct messages
+allowed_user_ids = [123456789, 987654321]
+
+# Allowed group/channel IDs
+allowed_group_ids = [-1001234567890]
+
+# Features
+[telegram.features]
+inline_buttons = true        # Enable inline keyboard buttons
+streaming = "partial"        # Message streaming: "disabled", "partial", or "full"
+
+# Rate Limits
+[telegram.limits]
+text_chunk_limit = 4096                  # Max text message size (Telegram limit)
+media_max_mb = 50                        # Max media file size in MB
+history_limit = 100                      # Messages to keep in session history
+rate_limit_messages_per_minute = 20      # Rate limit per user
+
+# NATS Configuration
+[nats]
+servers = ["localhost:4222"]
+prefix = "prod"
+
+# Optional: NATS authentication
+# username = "nats_user"
+# password = "nats_password"
+
+# Optional: TLS configuration
+# [nats.tls]
+# client_cert = "/path/to/client-cert.pem"
+# client_key = "/path/to/client-key.pem"
+# ca_cert = "/path/to/ca-cert.pem"
