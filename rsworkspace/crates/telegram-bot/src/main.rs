@@ -17,8 +17,33 @@ use anyhow::Result;
 use clap::Parser;
 use teloxide::prelude::*;
 use teloxide::types::Message;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Custom error handler for the polling listener that silences expected
+/// `TerminatedByOtherGetUpdates` errors (409 from Telegram when restarting).
+struct PollingErrorHandler;
+
+impl<E: std::fmt::Debug + Send + Sync + 'static> teloxide::error_handlers::ErrorHandler<E>
+    for PollingErrorHandler
+{
+    fn handle_error(
+        self: std::sync::Arc<Self>,
+        error: E,
+    ) -> futures::future::BoxFuture<'static, ()> {
+        Box::pin(async move {
+            let err_str = format!("{error:?}");
+            if err_str.contains("TerminatedByOtherGetUpdates") {
+                tracing::debug!(
+                    "Polling session replaced by a new instance (expected on restart): {}",
+                    err_str
+                );
+            } else {
+                tracing::error!("Update listener error: {}", err_str);
+            }
+        })
+    }
+}
 
 use crate::bridge::TelegramBridge;
 use crate::config::Config;
@@ -130,7 +155,7 @@ async fn main() -> Result<()> {
     let health_port = args.health_port;
     tokio::spawn(async move {
         if let Err(e) = health::start_health_server(health_state_clone, health_port).await {
-            error!("Health check server error: {}", e);
+            warn!("Health check server failed to start on port {} (non-fatal): {}", health_port, e);
         }
     });
 
@@ -305,7 +330,13 @@ async fn main() -> Result<()> {
                 "Starting bot in POLLING mode (timeout: {}s, limit: {})",
                 timeout, limit
             );
-            dispatcher.dispatch().await;
+            let listener = teloxide::update_listeners::polling_default(bot).await;
+            dispatcher
+                .dispatch_with_listener(
+                    listener,
+                    std::sync::Arc::new(PollingErrorHandler),
+                )
+                .await;
         }
         crate::config::UpdateModeConfig::Webhook {
             url,
