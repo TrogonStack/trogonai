@@ -141,8 +141,8 @@ mod tests {
 
     #[test]
     fn test_with_credentials() {
-        let cfg = NatsConfig::from_url("localhost:4222", "test")
-            .with_credentials("/path/to/creds.nk");
+        let cfg =
+            NatsConfig::from_url("localhost:4222", "test").with_credentials("/path/to/creds.nk");
         assert_eq!(cfg.credentials_file, Some("/path/to/creds.nk".to_string()));
         assert!(cfg.username.is_none());
         assert!(cfg.password.is_none());
@@ -150,8 +150,7 @@ mod tests {
 
     #[test]
     fn test_with_auth() {
-        let cfg = NatsConfig::from_url("localhost:4222", "test")
-            .with_auth("alice", "secret123");
+        let cfg = NatsConfig::from_url("localhost:4222", "test").with_auth("alice", "secret123");
         assert_eq!(cfg.username, Some("alice".to_string()));
         assert_eq!(cfg.password, Some("secret123".to_string()));
         assert!(cfg.credentials_file.is_none());
@@ -182,8 +181,7 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip_with_auth() {
-        let cfg = NatsConfig::from_url("n1:4222", "prod")
-            .with_auth("user", "pw");
+        let cfg = NatsConfig::from_url("n1:4222", "prod").with_auth("user", "pw");
         let json = serde_json::to_string(&cfg).unwrap();
         let back: NatsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.username, Some("user".to_string()));

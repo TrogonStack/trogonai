@@ -124,14 +124,12 @@ impl Config {
 
     /// Load configuration from environment variables
     pub fn from_env() -> Result<Self> {
-        let bot_token = std::env::var("TELEGRAM_BOT_TOKEN")
-            .context("TELEGRAM_BOT_TOKEN not set")?;
+        let bot_token =
+            std::env::var("TELEGRAM_BOT_TOKEN").context("TELEGRAM_BOT_TOKEN not set")?;
 
-        let nats_url = std::env::var("NATS_URL")
-            .unwrap_or_else(|_| "localhost:4222".to_string());
+        let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
 
-        let prefix = std::env::var("TELEGRAM_PREFIX")
-            .unwrap_or_else(|_| "prod".to_string());
+        let prefix = std::env::var("TELEGRAM_PREFIX").unwrap_or_else(|_| "prod".to_string());
 
         // Check for webhook mode from environment
         let update_mode = if let Ok(webhook_url) = std::env::var("TELEGRAM_WEBHOOK_URL") {
@@ -139,8 +137,8 @@ impl Config {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(8443);
-            let path = std::env::var("TELEGRAM_WEBHOOK_PATH")
-                .unwrap_or_else(|_| "/webhook".to_string());
+            let path =
+                std::env::var("TELEGRAM_WEBHOOK_PATH").unwrap_or_else(|_| "/webhook".to_string());
             let secret_token = std::env::var("TELEGRAM_WEBHOOK_SECRET").ok();
 
             UpdateModeConfig::Webhook {

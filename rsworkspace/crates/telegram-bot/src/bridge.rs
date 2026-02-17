@@ -6,16 +6,19 @@
 #[path = "bridge_tests.rs"]
 mod bridge_tests;
 
-use async_nats::{Client, jetstream::kv::Store};
-use teloxide::types::{Message, CallbackQuery};
-use telegram_nats::{MessagePublisher, subjects};
-use telegram_types::{
-    AccessConfig, SessionId,
-    events::*,
-    chat::{Chat, ChatType, User, Message as TgMessage, PhotoSize, FileInfo, ForumTopic, ChatMember, ChatMemberStatus, ChatInviteLink, MessageEntity, MessageEntityType},
-};
-use tracing::{debug, info, warn};
 use anyhow::Result;
+use async_nats::{jetstream::kv::Store, Client};
+use telegram_nats::{subjects, MessagePublisher};
+use telegram_types::{
+    chat::{
+        Chat, ChatInviteLink, ChatMember, ChatMemberStatus, ChatType, FileInfo, ForumTopic,
+        Message as TgMessage, MessageEntity, MessageEntityType, PhotoSize, User,
+    },
+    events::*,
+    AccessConfig, SessionId,
+};
+use teloxide::types::{CallbackQuery, Message};
+use tracing::{debug, info, warn};
 
 use crate::session::SessionManager;
 
@@ -54,7 +57,7 @@ impl TelegramBridge {
             date: msg.date.timestamp(),
             chat: self.convert_chat(&msg.chat),
             from: msg.from.as_ref().map(|u| self.convert_user(u)),
-            message_thread_id: msg.thread_id.as_ref().map(|t| t.0.0),
+            message_thread_id: msg.thread_id.as_ref().map(|t| t.0 .0),
             is_topic_message: Some(msg.is_topic_message),
         }
     }
@@ -98,7 +101,9 @@ impl TelegramBridge {
 
         // Update session
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         // Convert entities (mentions, hashtags, etc.)
         let entities = msg.entities().map(|ents| {
@@ -129,15 +134,20 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
-        let photo: Vec<PhotoSize> = photos.iter().map(|p| PhotoSize {
-            file_id: p.file.id.clone(),
-            file_unique_id: p.file.unique_id.clone(),
-            width: p.width,
-            height: p.height,
-            file_size: Some(p.file.size as u64),
-        }).collect();
+        let photo: Vec<PhotoSize> = photos
+            .iter()
+            .map(|p| PhotoSize {
+                file_id: p.file.id.clone(),
+                file_unique_id: p.file.unique_id.clone(),
+                width: p.width,
+                height: p.height,
+                file_size: Some(p.file.size as u64),
+            })
+            .collect();
 
         let event = MessagePhotoEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -161,7 +171,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageVideoEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -191,7 +203,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageAudioEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -221,7 +235,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageDocumentEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -250,7 +266,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageVoiceEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -281,7 +299,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let format = if sticker.flags.is_video {
             StickerFormat::Video
@@ -335,7 +355,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let thumbnail = animation.thumbnail.as_ref().map(|t| PhotoSize {
             file_id: t.file.id.clone(),
@@ -376,7 +398,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let thumbnail = video_note.thumbnail.as_ref().map(|t| PhotoSize {
             file_id: t.file.id.clone(),
@@ -415,7 +439,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageLocationEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -445,7 +471,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageVenueEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -474,7 +502,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessageContactEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -494,7 +524,11 @@ impl TelegramBridge {
     }
 
     /// Publish a callback query event
-    pub async fn publish_callback_query(&self, query: &CallbackQuery, update_id: i64) -> Result<()> {
+    pub async fn publish_callback_query(
+        &self,
+        query: &CallbackQuery,
+        update_id: i64,
+    ) -> Result<()> {
         let data = query.data.clone().unwrap_or_default();
 
         // Get chat from message or use a default
@@ -532,12 +566,20 @@ impl TelegramBridge {
     }
 
     /// Publish a command event
-    pub async fn publish_command(&self, msg: &Message, command: &str, args: Vec<String>, update_id: i64) -> Result<()> {
+    pub async fn publish_command(
+        &self,
+        msg: &Message,
+        command: &str,
+        args: Vec<String>,
+        update_id: i64,
+    ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = CommandEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -554,7 +596,10 @@ impl TelegramBridge {
     }
 
     /// Publish an inline query event
-    pub async fn publish_inline_query(&self, event: &telegram_types::events::InlineQueryEvent) -> Result<()> {
+    pub async fn publish_inline_query(
+        &self,
+        event: &telegram_types::events::InlineQueryEvent,
+    ) -> Result<()> {
         let subject = subjects::bot::inline_query(self.publisher.prefix());
         self.publisher.publish(&subject, event).await?;
 
@@ -563,7 +608,10 @@ impl TelegramBridge {
     }
 
     /// Publish a chosen inline result event
-    pub async fn publish_chosen_inline_result(&self, event: &telegram_types::events::ChosenInlineResultEvent) -> Result<()> {
+    pub async fn publish_chosen_inline_result(
+        &self,
+        event: &telegram_types::events::ChosenInlineResultEvent,
+    ) -> Result<()> {
         let subject = subjects::bot::chosen_inline_result(self.publisher.prefix());
         self.publisher.publish(&subject, event).await?;
 
@@ -575,7 +623,7 @@ impl TelegramBridge {
     pub async fn publish_chat_member_updated(
         &self,
         update: &teloxide::types::ChatMemberUpdated,
-        update_id: i64
+        update_id: i64,
     ) -> Result<()> {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
@@ -587,7 +635,10 @@ impl TelegramBridge {
             old_chat_member: self.convert_chat_member(&update.old_chat_member),
             new_chat_member: self.convert_chat_member(&update.new_chat_member),
             date: update.date.timestamp(),
-            invite_link: update.invite_link.as_ref().map(|link| self.convert_invite_link(link)),
+            invite_link: update
+                .invite_link
+                .as_ref()
+                .map(|link| self.convert_invite_link(link)),
             via_join_request: Some(update.via_join_request),
             via_chat_folder_invite_link: Some(update.via_chat_folder_invite_link),
         };
@@ -603,7 +654,7 @@ impl TelegramBridge {
     pub async fn publish_my_chat_member_updated(
         &self,
         update: &teloxide::types::ChatMemberUpdated,
-        update_id: i64
+        update_id: i64,
     ) -> Result<()> {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
@@ -615,7 +666,10 @@ impl TelegramBridge {
             old_chat_member: self.convert_chat_member(&update.old_chat_member),
             new_chat_member: self.convert_chat_member(&update.new_chat_member),
             date: update.date.timestamp(),
-            invite_link: update.invite_link.as_ref().map(|link| self.convert_invite_link(link)),
+            invite_link: update
+                .invite_link
+                .as_ref()
+                .map(|link| self.convert_invite_link(link)),
             via_join_request: Some(update.via_join_request),
             via_chat_folder_invite_link: Some(update.via_chat_folder_invite_link),
         };
@@ -689,7 +743,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = SuccessfulPaymentEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -729,12 +785,7 @@ impl TelegramBridge {
                 Some(admin.is_anonymous),
                 admin.custom_title.clone(),
             ),
-            ChatMemberKind::Member => (
-                ChatMemberStatus::Member,
-                None,
-                None,
-                None,
-            ),
+            ChatMemberKind::Member => (ChatMemberStatus::Member, None, None, None),
             ChatMemberKind::Restricted(restricted) => {
                 use teloxide::types::UntilDate;
                 let until = match restricted.until_date {
@@ -742,13 +793,8 @@ impl TelegramBridge {
                     UntilDate::Forever => None,
                 };
                 (ChatMemberStatus::Restricted, until, None, None)
-            },
-            ChatMemberKind::Left => (
-                ChatMemberStatus::Left,
-                None,
-                None,
-                None,
-            ),
+            }
+            ChatMemberKind::Left => (ChatMemberStatus::Left, None, None, None),
             ChatMemberKind::Banned(banned) => {
                 use teloxide::types::UntilDate;
                 let until = match banned.until_date {
@@ -756,7 +802,7 @@ impl TelegramBridge {
                     UntilDate::Forever => None,
                 };
                 (ChatMemberStatus::Kicked, until, None, None)
-            },
+            }
         };
 
         ChatMember {
@@ -832,25 +878,40 @@ impl TelegramBridge {
     }
 
     /// Convert teloxide OrderInfo to our OrderInfo type
-    fn convert_order_info(&self, info: &teloxide::types::OrderInfo) -> telegram_types::chat::OrderInfo {
+    fn convert_order_info(
+        &self,
+        info: &teloxide::types::OrderInfo,
+    ) -> telegram_types::chat::OrderInfo {
         telegram_types::chat::OrderInfo {
             name: info.name.clone(),
             phone_number: info.phone_number.clone(),
             email: info.email.clone(),
-            shipping_address: info.shipping_address.as_ref().map(|addr| self.convert_shipping_address(addr)),
+            shipping_address: info
+                .shipping_address
+                .as_ref()
+                .map(|addr| self.convert_shipping_address(addr)),
         }
     }
 
     /// Convert teloxide Poll to our PollOption vec
-    fn convert_poll_options(&self, options: &[teloxide::types::PollOption]) -> Vec<telegram_types::events::PollOption> {
-        options.iter().map(|o| telegram_types::events::PollOption {
-            text: o.text.clone(),
-            voter_count: o.voter_count,
-        }).collect()
+    fn convert_poll_options(
+        &self,
+        options: &[teloxide::types::PollOption],
+    ) -> Vec<telegram_types::events::PollOption> {
+        options
+            .iter()
+            .map(|o| telegram_types::events::PollOption {
+                text: o.text.clone(),
+                voter_count: o.voter_count,
+            })
+            .collect()
     }
 
     /// Convert teloxide PollType to our PollType
-    fn convert_poll_type(&self, pt: &teloxide::types::PollType) -> telegram_types::events::PollType {
+    fn convert_poll_type(
+        &self,
+        pt: &teloxide::types::PollType,
+    ) -> telegram_types::events::PollType {
         match pt {
             teloxide::types::PollType::Quiz => telegram_types::events::PollType::Quiz,
             teloxide::types::PollType::Regular => telegram_types::events::PollType::Regular,
@@ -864,7 +925,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = MessagePollEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -889,7 +952,11 @@ impl TelegramBridge {
     }
 
     /// Publish a standalone poll update event (poll state changed)
-    pub async fn publish_poll_update(&self, poll: &teloxide::types::Poll, update_id: i64) -> Result<()> {
+    pub async fn publish_poll_update(
+        &self,
+        poll: &teloxide::types::Poll,
+        update_id: i64,
+    ) -> Result<()> {
         // Standalone polls have no chat context — use poll_id as session key
         let session_id = format!("tg-poll-{}", poll.id);
 
@@ -914,7 +981,11 @@ impl TelegramBridge {
     }
 
     /// Publish a poll answer event (user voted)
-    pub async fn publish_poll_answer(&self, answer: &teloxide::types::PollAnswer, update_id: i64) -> Result<()> {
+    pub async fn publish_poll_answer(
+        &self,
+        answer: &teloxide::types::PollAnswer,
+        update_id: i64,
+    ) -> Result<()> {
         use teloxide::types::MaybeAnonymousUser;
 
         let (voter_user_id, voter_chat_id) = match &answer.voter {
@@ -949,9 +1020,11 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
-        let message_thread_id = msg.thread_id.as_ref().map(|t| t.0.0).unwrap_or(0);
+        let message_thread_id = msg.thread_id.as_ref().map(|t| t.0 .0).unwrap_or(0);
 
         let teloxide::types::Rgb { r, g, b } = topic.icon_color;
         let icon_color = ((r as i32) << 16) | ((g as i32) << 8) | (b as i32);
@@ -981,7 +1054,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = ForumTopicEditedEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -1003,7 +1078,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = ForumTopicClosedEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -1023,7 +1100,9 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = ForumTopicReopenedEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -1038,12 +1117,18 @@ impl TelegramBridge {
     }
 
     /// Publish a general forum topic hidden event
-    pub async fn publish_general_forum_topic_hidden(&self, msg: &Message, update_id: i64) -> Result<()> {
+    pub async fn publish_general_forum_topic_hidden(
+        &self,
+        msg: &Message,
+        update_id: i64,
+    ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = GeneralForumTopicHiddenEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -1063,10 +1148,14 @@ impl TelegramBridge {
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let entities = msg.entities().map(|ents| {
-            ents.iter().map(|e| self.convert_message_entity(e)).collect()
+            ents.iter()
+                .map(|e| self.convert_message_entity(e))
+                .collect()
         });
 
         let event = EditedMessageEvent {
@@ -1099,7 +1188,10 @@ impl TelegramBridge {
             from: self.convert_user(&request.from),
             date: request.date.timestamp(),
             bio: request.bio.clone(),
-            invite_link: request.invite_link.as_ref().map(|l| self.convert_invite_link(l)),
+            invite_link: request
+                .invite_link
+                .as_ref()
+                .map(|l| self.convert_invite_link(l)),
         };
 
         let subject = subjects::bot::chat_join_request(self.publisher.prefix());
@@ -1110,12 +1202,18 @@ impl TelegramBridge {
     }
 
     /// Publish a general forum topic unhidden event
-    pub async fn publish_general_forum_topic_unhidden(&self, msg: &Message, update_id: i64) -> Result<()> {
+    pub async fn publish_general_forum_topic_unhidden(
+        &self,
+        msg: &Message,
+        update_id: i64,
+    ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
-        self.session_manager.get_or_create(&session_id, chat.id, user_id).await?;
+        self.session_manager
+            .get_or_create(&session_id, chat.id, user_id)
+            .await?;
 
         let event = GeneralForumTopicUnhiddenEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -1125,12 +1223,18 @@ impl TelegramBridge {
         let subject = subjects::bot::general_forum_topic_unhidden(self.publisher.prefix());
         self.publisher.publish(&subject, &event).await?;
 
-        debug!("Published general forum topic unhidden event to {}", subject);
+        debug!(
+            "Published general forum topic unhidden event to {}",
+            subject
+        );
         Ok(())
     }
 
     /// Convert teloxide ShippingAddress to our ShippingAddress type
-    fn convert_shipping_address(&self, addr: &teloxide::types::ShippingAddress) -> telegram_types::chat::ShippingAddress {
+    fn convert_shipping_address(
+        &self,
+        addr: &teloxide::types::ShippingAddress,
+    ) -> telegram_types::chat::ShippingAddress {
         // CountryCode is an enum, use serde_json to get ISO 3166-1 alpha-2 string
         let country_code = serde_json::to_string(&addr.country_code)
             .unwrap_or_default()

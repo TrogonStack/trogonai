@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::{BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup, InputSticker, LabeledPrice, MaskPosition, ShippingOption, StickerSet};
+use crate::chat::{
+    BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup,
+    InputSticker, LabeledPrice, MaskPosition, ShippingOption, StickerSet,
+};
 
 /// Parse mode for message formatting
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1565,7 +1568,11 @@ mod tests {
         let cmd = SendMediaGroupCommand {
             chat_id: 500,
             media: vec![
-                InputMediaItem::Photo { media: "p1".to_string(), caption: None, parse_mode: None },
+                InputMediaItem::Photo {
+                    media: "p1".to_string(),
+                    caption: None,
+                    parse_mode: None,
+                },
                 InputMediaItem::Video {
                     media: "v1".to_string(),
                     caption: Some("vid".to_string()),
@@ -1660,7 +1667,11 @@ mod tests {
         let cmd = SendPollCommand {
             chat_id: 901,
             question: "Capital of France?".to_string(),
-            options: vec!["London".to_string(), "Paris".to_string(), "Madrid".to_string()],
+            options: vec![
+                "London".to_string(),
+                "Paris".to_string(),
+                "Madrid".to_string(),
+            ],
             is_anonymous: Some(true),
             poll_type: Some(PollKind::Quiz),
             allows_multiple_answers: None,
@@ -1689,7 +1700,10 @@ mod tests {
 
     #[test]
     fn test_poll_kind_serde() {
-        assert_eq!(serde_json::to_string(&PollKind::Regular).unwrap(), "\"regular\"");
+        assert_eq!(
+            serde_json::to_string(&PollKind::Regular).unwrap(),
+            "\"regular\""
+        );
         assert_eq!(serde_json::to_string(&PollKind::Quiz).unwrap(), "\"quiz\"");
         let rt: PollKind = serde_json::from_str("\"quiz\"").unwrap();
         assert_eq!(rt, PollKind::Quiz);
@@ -1698,8 +1712,14 @@ mod tests {
     #[test]
     fn test_parse_mode_serde() {
         assert_eq!(serde_json::to_string(&ParseMode::HTML).unwrap(), "\"HTML\"");
-        assert_eq!(serde_json::to_string(&ParseMode::Markdown).unwrap(), "\"Markdown\"");
-        assert_eq!(serde_json::to_string(&ParseMode::MarkdownV2).unwrap(), "\"MarkdownV2\"");
+        assert_eq!(
+            serde_json::to_string(&ParseMode::Markdown).unwrap(),
+            "\"Markdown\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ParseMode::MarkdownV2).unwrap(),
+            "\"MarkdownV2\""
+        );
     }
 
     // ── ChatAction serde ──────────────────────────────────────────────────────
@@ -1766,7 +1786,10 @@ mod tests {
 
     #[test]
     fn test_delete_message_command_roundtrip() {
-        let cmd = DeleteMessageCommand { chat_id: 999, message_id: 55 };
+        let cmd = DeleteMessageCommand {
+            chat_id: 999,
+            message_id: 55,
+        };
         roundtrip(&cmd);
     }
 
@@ -1855,18 +1878,16 @@ mod tests {
     fn test_answer_inline_query_command_roundtrip() {
         let cmd = AnswerInlineQueryCommand {
             inline_query_id: "iq_1".to_string(),
-            results: vec![
-                InlineQueryResult::Article(InlineQueryResultArticle {
-                    id: "r1".to_string(),
-                    title: "Result Title".to_string(),
-                    input_message_content: InputMessageContent {
-                        message_text: "The answer".to_string(),
-                        parse_mode: None,
-                    },
-                    description: Some("Brief description".to_string()),
-                    thumb_url: None,
-                }),
-            ],
+            results: vec![InlineQueryResult::Article(InlineQueryResultArticle {
+                id: "r1".to_string(),
+                title: "Result Title".to_string(),
+                input_message_content: InputMessageContent {
+                    message_text: "The answer".to_string(),
+                    parse_mode: None,
+                },
+                description: Some("Brief description".to_string()),
+                thumb_url: None,
+            })],
             cache_time: Some(300),
             is_personal: Some(true),
             next_offset: None,
@@ -1879,7 +1900,10 @@ mod tests {
         let result = InlineQueryResult::Article(InlineQueryResultArticle {
             id: "1".to_string(),
             title: "T".to_string(),
-            input_message_content: InputMessageContent { message_text: "M".to_string(), parse_mode: None },
+            input_message_content: InputMessageContent {
+                message_text: "M".to_string(),
+                parse_mode: None,
+            },
             description: None,
             thumb_url: None,
         });

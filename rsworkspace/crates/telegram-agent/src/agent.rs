@@ -1,9 +1,9 @@
 //! Main agent implementation
 
-use async_nats::Client;
-use telegram_nats::{MessageSubscriber, MessagePublisher};
-use tracing::{info, error};
 use anyhow::Result;
+use async_nats::Client;
+use telegram_nats::{MessagePublisher, MessageSubscriber};
+use tracing::{error, info};
 
 use crate::llm::ClaudeConfig;
 use crate::processor::MessageProcessor;
@@ -67,22 +67,25 @@ impl TelegramAgent {
         let subject = telegram_nats::subjects::bot::message_text(self.subscriber.prefix());
         info!("Subscribing to text messages: {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<MessageTextEvent>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<MessageTextEvent>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(event) => {
                     info!(
                         "Received text message from session {}: {}",
-                        event.metadata.session_id,
-                        event.text
+                        event.metadata.session_id, event.text
                     );
 
                     // Process the message
-                    if let Err(e) = self.processor.process_text_message(
-                        &event,
-                        &self.publisher
-                    ).await {
+                    if let Err(e) = self
+                        .processor
+                        .process_text_message(&event, &self.publisher)
+                        .await
+                    {
                         error!("Failed to process text message: {}", e);
                     }
                 }
@@ -100,7 +103,10 @@ impl TelegramAgent {
         let subject = telegram_nats::subjects::bot::message_photo(self.subscriber.prefix());
         info!("Subscribing to photo messages: {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<MessagePhotoEvent>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<MessagePhotoEvent>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
@@ -111,10 +117,11 @@ impl TelegramAgent {
                     );
 
                     // Process the photo message
-                    if let Err(e) = self.processor.process_photo_message(
-                        &event,
-                        &self.publisher
-                    ).await {
+                    if let Err(e) = self
+                        .processor
+                        .process_photo_message(&event, &self.publisher)
+                        .await
+                    {
                         error!("Failed to process photo message: {}", e);
                     }
                 }
@@ -140,15 +147,15 @@ impl TelegramAgent {
                 Ok(event) => {
                     info!(
                         "Received command /{} from session {}",
-                        event.command,
-                        event.metadata.session_id
+                        event.command, event.metadata.session_id
                     );
 
                     // Process the command
-                    if let Err(e) = self.processor.process_command(
-                        &event,
-                        &self.publisher
-                    ).await {
+                    if let Err(e) = self
+                        .processor
+                        .process_command(&event, &self.publisher)
+                        .await
+                    {
                         error!("Failed to process command: {}", e);
                     }
                 }
@@ -166,22 +173,25 @@ impl TelegramAgent {
         let subject = telegram_nats::subjects::bot::callback_query(self.subscriber.prefix());
         info!("Subscribing to callback queries: {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<CallbackQueryEvent>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<CallbackQueryEvent>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(event) => {
                     info!(
                         "Received callback query from session {}: {}",
-                        event.metadata.session_id,
-                        event.data
+                        event.metadata.session_id, event.data
                     );
 
                     // Process the callback
-                    if let Err(e) = self.processor.process_callback(
-                        &event,
-                        &self.publisher
-                    ).await {
+                    if let Err(e) = self
+                        .processor
+                        .process_callback(&event, &self.publisher)
+                        .await
+                    {
                         error!("Failed to process callback: {}", e);
                     }
                 }
@@ -199,22 +209,25 @@ impl TelegramAgent {
         let subject = telegram_nats::subjects::bot::inline_query(self.subscriber.prefix());
         info!("Subscribing to inline queries: {}", subject);
 
-        let mut stream = self.subscriber.subscribe::<InlineQueryEvent>(&subject).await?;
+        let mut stream = self
+            .subscriber
+            .subscribe::<InlineQueryEvent>(&subject)
+            .await?;
 
         while let Some(result) = stream.next().await {
             match result {
                 Ok(event) => {
                     info!(
                         "Received inline query from user {}: {}",
-                        event.from.id,
-                        event.query
+                        event.from.id, event.query
                     );
 
                     // Process the inline query
-                    if let Err(e) = self.processor.process_inline_query(
-                        &event,
-                        &self.publisher
-                    ).await {
+                    if let Err(e) = self
+                        .processor
+                        .process_inline_query(&event, &self.publisher)
+                        .await
+                    {
                         error!("Failed to process inline query: {}", e);
                     }
                 }

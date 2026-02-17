@@ -228,7 +228,9 @@ prefix = "test"
     fn test_streaming_mode_toml_serde() {
         // TOML requires a key, so we wrap in a helper struct
         #[derive(serde::Serialize, serde::Deserialize)]
-        struct Helper { streaming: StreamingMode }
+        struct Helper {
+            streaming: StreamingMode,
+        }
 
         for (variant, expected) in [
             ("full", StreamingMode::Full),
