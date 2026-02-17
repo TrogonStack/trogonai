@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
+use crate::errors::{classify, ErrorOutcome};
 
 /// Tracking info for streaming messages
 #[derive(Debug, Clone)]
@@ -111,7 +112,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        error!("Failed to send message: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize send message command: {}", e),
@@ -148,7 +149,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        error!("Failed to edit message: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize edit message command: {}", e),
@@ -171,7 +172,7 @@ impl OutboundProcessor {
                     debug!("Received delete message command for chat {} msg {}", cmd.chat_id, cmd.message_id);
 
                     if let Err(e) = self.bot.delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id)).await {
-                        error!("Failed to delete message: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize delete message command: {}", e),
@@ -213,7 +214,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        error!("Failed to send photo: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize send photo command: {}", e),
@@ -246,7 +247,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        error!("Failed to answer callback: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize answer callback command: {}", e),
@@ -276,7 +277,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        warn!("Failed to send chat action: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize chat action command: {}", e),
@@ -346,7 +347,7 @@ impl OutboundProcessor {
                             icon_custom_emoji_id
                         );
                         if let Err(e) = req.await {
-                            error!("Failed to create forum topic: {}", e);
+                            self.handle_telegram_error(&create_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -362,7 +363,7 @@ impl OutboundProcessor {
                             req.icon_custom_emoji_id = Some(emoji_id);
                         }
                         if let Err(e) = req.await {
-                            error!("Failed to edit forum topic: {}", e);
+                            self.handle_telegram_error(&edit_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -371,7 +372,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Closing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
                         if let Err(e) = self.bot.close_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            error!("Failed to close forum topic: {}", e);
+                            self.handle_telegram_error(&close_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -380,7 +381,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Reopening forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
                         if let Err(e) = self.bot.reopen_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            error!("Failed to reopen forum topic: {}", e);
+                            self.handle_telegram_error(&reopen_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -389,7 +390,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Deleting forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
                         if let Err(e) = self.bot.delete_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            error!("Failed to delete forum topic: {}", e);
+                            self.handle_telegram_error(&delete_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -398,7 +399,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Unpinning all messages in topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
                         if let Err(e) = self.bot.unpin_all_forum_topic_messages(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            error!("Failed to unpin forum topic messages: {}", e);
+                            self.handle_telegram_error(&unpin_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -407,7 +408,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Editing general forum topic in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name).await {
-                            error!("Failed to edit general forum topic: {}", e);
+                            self.handle_telegram_error(&edit_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -416,7 +417,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Closing general forum topic in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.close_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            error!("Failed to close general forum topic: {}", e);
+                            self.handle_telegram_error(&close_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -425,7 +426,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Reopening general forum topic in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.reopen_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            error!("Failed to reopen general forum topic: {}", e);
+                            self.handle_telegram_error(&reopen_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -434,7 +435,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Hiding general forum topic in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.hide_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            error!("Failed to hide general forum topic: {}", e);
+                            self.handle_telegram_error(&hide_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -443,7 +444,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Unhiding general forum topic in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.unhide_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            error!("Failed to unhide general forum topic: {}", e);
+                            self.handle_telegram_error(&unhide_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -452,7 +453,7 @@ impl OutboundProcessor {
                     if let Ok(cmd) = result {
                         debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
                         if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
-                            error!("Failed to unpin general forum topic messages: {}", e);
+                            self.handle_telegram_error(&unpin_general_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -529,7 +530,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to promote chat member: {}", e);
+                            self.handle_telegram_error(&promote_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -548,7 +549,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to restrict chat member: {}", e);
+                            self.handle_telegram_error(&restrict_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -570,7 +571,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to ban chat member: {}", e);
+                            self.handle_telegram_error(&ban_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -585,7 +586,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to unban chat member: {}", e);
+                            self.handle_telegram_error(&unban_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -596,7 +597,7 @@ impl OutboundProcessor {
                         let perms = convert_chat_permissions(&cmd.permissions);
 
                         if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
-                            error!("Failed to set chat permissions: {}", e);
+                            self.handle_telegram_error(&set_permissions_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -610,7 +611,7 @@ impl OutboundProcessor {
                             teloxide::types::UserId(cmd.user_id as u64),
                             cmd.custom_title
                         ).await {
-                            error!("Failed to set administrator custom title: {}", e);
+                            self.handle_telegram_error(&set_title_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -625,7 +626,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to pin message: {}", e);
+                            self.handle_telegram_error(&pin_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -640,7 +641,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to unpin message: {}", e);
+                            self.handle_telegram_error(&unpin_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -650,7 +651,7 @@ impl OutboundProcessor {
                         debug!("Unpinning all messages in chat {}", cmd.chat_id);
 
                         if let Err(e) = self.bot.unpin_all_chat_messages(ChatId(cmd.chat_id)).await {
-                            error!("Failed to unpin all messages: {}", e);
+                            self.handle_telegram_error(&unpin_all_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -660,7 +661,7 @@ impl OutboundProcessor {
                         debug!("Setting chat title in chat {}", cmd.chat_id);
 
                         if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
-                            error!("Failed to set chat title: {}", e);
+                            self.handle_telegram_error(&set_chat_title_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -673,7 +674,7 @@ impl OutboundProcessor {
                         req.description = Some(cmd.description);
 
                         if let Err(e) = req.await {
-                            error!("Failed to set chat description: {}", e);
+                            self.handle_telegram_error(&set_chat_description_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -740,7 +741,7 @@ impl OutboundProcessor {
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to get file info for {}: {}", cmd.file_id, e);
+                                self.handle_telegram_error(&get_file_subject, e, &prefix).await;
                             }
                         }
                     }
@@ -807,13 +808,14 @@ impl OutboundProcessor {
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to get file info for download {}: {}", cmd.file_id, e);
+                                let e_str = e.to_string();
+                                self.handle_telegram_error(&download_file_subject, e, &prefix).await;
                                 let response = FileDownloadResponse {
                                     file_id: cmd.file_id.clone(),
                                     local_path: cmd.destination_path.clone(),
                                     file_size: 0,
                                     success: false,
-                                    error: Some(format!("Failed to get file info: {}", e)),
+                                    error: Some(format!("Failed to get file info: {}", e_str)),
                                     request_id: cmd.request_id,
                                 };
 
@@ -914,7 +916,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to send invoice: {}", e);
+                            self.handle_telegram_error(&send_invoice_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -932,7 +934,7 @@ impl OutboundProcessor {
                         };
 
                         if let Err(e) = req.await {
-                            error!("Failed to answer pre-checkout query: {}", e);
+                            self.handle_telegram_error(&answer_pre_checkout_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -961,7 +963,7 @@ impl OutboundProcessor {
                         }
 
                         if let Err(e) = req.await {
-                            error!("Failed to answer shipping query: {}", e);
+                            self.handle_telegram_error(&answer_shipping_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -1013,7 +1015,7 @@ impl OutboundProcessor {
                         req.language_code = cmd.language_code;
 
                         if let Err(e) = req.await {
-                            error!("Failed to set bot commands: {}", e);
+                            self.handle_telegram_error(&set_commands_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -1031,7 +1033,7 @@ impl OutboundProcessor {
                         req.language_code = cmd.language_code;
 
                         if let Err(e) = req.await {
-                            error!("Failed to delete bot commands: {}", e);
+                            self.handle_telegram_error(&delete_commands_subject, e, &prefix).await;
                         }
                     }
                 }
@@ -1070,7 +1072,7 @@ impl OutboundProcessor {
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to get bot commands: {}", e);
+                                self.handle_telegram_error(&get_commands_subject, e, &prefix).await;
                             }
                         }
                     }
@@ -1081,6 +1083,47 @@ impl OutboundProcessor {
         }
 
         Ok(())
+    }
+
+    /// Classify a Telegram API error and publish a CommandErrorEvent to NATS.
+    ///
+    /// - `Retry`    → logs a warning (actual re-execution is the caller's responsibility)
+    /// - `Migrated` → logs the new chat ID
+    /// - `Permanent` / `Transient` → publishes the event to `telegram.{prefix}.bot.error.command`
+    pub(crate) async fn handle_telegram_error(
+        &self,
+        command_subject: &str,
+        err: teloxide::RequestError,
+        prefix: &str,
+    ) {
+        match classify(command_subject, &err) {
+            ErrorOutcome::Retry(duration) => {
+                warn!(
+                    "Rate limited on '{}': would retry after {:?} (retry not implemented)",
+                    command_subject, duration
+                );
+            }
+            ErrorOutcome::Migrated(new_chat_id) => {
+                warn!(
+                    "Chat migrated on '{}': new chat_id={}",
+                    command_subject, new_chat_id
+                );
+            }
+            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => {
+                let error_subject = subjects::bot::command_error(prefix);
+                match serde_json::to_vec(&evt) {
+                    Ok(payload) => {
+                        if let Err(e) = self.subscriber.client()
+                            .publish(error_subject.clone(), payload.into())
+                            .await
+                        {
+                            error!("Failed to publish command error to '{}': {}", error_subject, e);
+                        }
+                    }
+                    Err(e) => error!("Failed to serialize CommandErrorEvent: {}", e),
+                }
+            }
+        }
     }
 
     // Stream message handling moved to outbound_streaming.rs module
@@ -1147,7 +1190,7 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = req.await {
-                        error!("Failed to answer inline query: {}", e);
+                        self.handle_telegram_error(&subject, e, &prefix).await;
                     }
                 }
                 Err(e) => error!("Failed to deserialize answer inline query command: {}", e),
