@@ -83,14 +83,7 @@ impl TelegramBridge {
 
     /// Convert teloxide User to our User type
     fn convert_user(&self, user: &teloxide::types::User) -> User {
-        User {
-            id: user.id.0 as i64,
-            is_bot: user.is_bot,
-            first_name: user.first_name.clone(),
-            last_name: user.last_name.clone(),
-            username: user.username.clone(),
-            language_code: user.language_code.clone(),
-        }
+        tg_user_to_msg_user(user)
     }
 
     /// Publish a text message event
@@ -830,51 +823,7 @@ impl TelegramBridge {
 
     /// Convert teloxide MessageEntity to our MessageEntity type
     fn convert_message_entity(&self, entity: &teloxide::types::MessageEntity) -> MessageEntity {
-        use teloxide::types::MessageEntityKind;
-
-        let entity_type = match &entity.kind {
-            MessageEntityKind::Mention => MessageEntityType::Mention,
-            MessageEntityKind::Hashtag => MessageEntityType::Hashtag,
-            MessageEntityKind::Cashtag => MessageEntityType::Cashtag,
-            MessageEntityKind::BotCommand => MessageEntityType::BotCommand,
-            MessageEntityKind::Url => MessageEntityType::Url,
-            MessageEntityKind::Email => MessageEntityType::Email,
-            MessageEntityKind::PhoneNumber => MessageEntityType::PhoneNumber,
-            MessageEntityKind::Bold => MessageEntityType::Bold,
-            MessageEntityKind::Italic => MessageEntityType::Italic,
-            MessageEntityKind::Underline => MessageEntityType::Underline,
-            MessageEntityKind::Strikethrough => MessageEntityType::Strikethrough,
-            MessageEntityKind::Spoiler => MessageEntityType::Spoiler,
-            MessageEntityKind::Code => MessageEntityType::Code,
-            MessageEntityKind::Pre { language: _ } => MessageEntityType::Pre,
-            MessageEntityKind::TextLink { url: _ } => MessageEntityType::TextLink,
-            MessageEntityKind::TextMention { user: _ } => MessageEntityType::TextMention,
-            MessageEntityKind::CustomEmoji { custom_emoji_id: _ } => MessageEntityType::CustomEmoji,
-            MessageEntityKind::Blockquote => MessageEntityType::Code, // Map blockquote to code for now
-            MessageEntityKind::ExpandableBlockquote => MessageEntityType::Code, // Map expandable blockquote to code for now
-        };
-
-        MessageEntity {
-            entity_type,
-            offset: entity.offset as i32,
-            length: entity.length as i32,
-            url: match &entity.kind {
-                MessageEntityKind::TextLink { url } => Some(url.to_string()),
-                _ => None,
-            },
-            user: match &entity.kind {
-                MessageEntityKind::TextMention { user } => Some(self.convert_user(user)),
-                _ => None,
-            },
-            language: match &entity.kind {
-                MessageEntityKind::Pre { language } => language.clone(),
-                _ => None,
-            },
-            custom_emoji_id: match &entity.kind {
-                MessageEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id.clone()),
-                _ => None,
-            },
-        }
+        tg_entity_to_msg_entity(entity)
     }
 
     /// Convert teloxide OrderInfo to our OrderInfo type
@@ -1249,5 +1198,66 @@ impl TelegramBridge {
             street_line2: addr.street_line2.clone(),
             post_code: addr.post_code.clone(),
         }
+    }
+}
+
+/// Convert a teloxide User to our internal User type (pure, testable).
+pub(crate) fn tg_user_to_msg_user(user: &teloxide::types::User) -> User {
+    User {
+        id: user.id.0 as i64,
+        is_bot: user.is_bot,
+        first_name: user.first_name.clone(),
+        last_name: user.last_name.clone(),
+        username: user.username.clone(),
+        language_code: user.language_code.clone(),
+    }
+}
+
+/// Convert a teloxide MessageEntity to our internal MessageEntity type (pure, testable).
+pub(crate) fn tg_entity_to_msg_entity(entity: &teloxide::types::MessageEntity) -> MessageEntity {
+    use teloxide::types::MessageEntityKind;
+
+    let entity_type = match &entity.kind {
+        MessageEntityKind::Mention => MessageEntityType::Mention,
+        MessageEntityKind::Hashtag => MessageEntityType::Hashtag,
+        MessageEntityKind::Cashtag => MessageEntityType::Cashtag,
+        MessageEntityKind::BotCommand => MessageEntityType::BotCommand,
+        MessageEntityKind::Url => MessageEntityType::Url,
+        MessageEntityKind::Email => MessageEntityType::Email,
+        MessageEntityKind::PhoneNumber => MessageEntityType::PhoneNumber,
+        MessageEntityKind::Bold => MessageEntityType::Bold,
+        MessageEntityKind::Italic => MessageEntityType::Italic,
+        MessageEntityKind::Underline => MessageEntityType::Underline,
+        MessageEntityKind::Strikethrough => MessageEntityType::Strikethrough,
+        MessageEntityKind::Spoiler => MessageEntityType::Spoiler,
+        MessageEntityKind::Code => MessageEntityType::Code,
+        MessageEntityKind::Pre { language: _ } => MessageEntityType::Pre,
+        MessageEntityKind::TextLink { url: _ } => MessageEntityType::TextLink,
+        MessageEntityKind::TextMention { user: _ } => MessageEntityType::TextMention,
+        MessageEntityKind::CustomEmoji { custom_emoji_id: _ } => MessageEntityType::CustomEmoji,
+        MessageEntityKind::Blockquote => MessageEntityType::Code,
+        MessageEntityKind::ExpandableBlockquote => MessageEntityType::Code,
+    };
+
+    MessageEntity {
+        entity_type,
+        offset: entity.offset as i32,
+        length: entity.length as i32,
+        url: match &entity.kind {
+            MessageEntityKind::TextLink { url } => Some(url.to_string()),
+            _ => None,
+        },
+        user: match &entity.kind {
+            MessageEntityKind::TextMention { user } => Some(tg_user_to_msg_user(user)),
+            _ => None,
+        },
+        language: match &entity.kind {
+            MessageEntityKind::Pre { language } => language.clone(),
+            _ => None,
+        },
+        custom_emoji_id: match &entity.kind {
+            MessageEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id.clone()),
+            _ => None,
+        },
     }
 }

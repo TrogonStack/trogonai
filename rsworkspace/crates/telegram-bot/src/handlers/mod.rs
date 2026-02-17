@@ -889,20 +889,139 @@ pub async fn handle_general_forum_topic_unhidden(
 
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
+    check_message_access(msg, &bridge.access_config)
+}
+
+/// Pure access-control check that only depends on AccessConfig (testable without NATS).
+pub(crate) fn check_message_access(
+    msg: &Message,
+    config: &telegram_types::AccessConfig,
+) -> bool {
     use teloxide::types::ChatKind;
 
     let user_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);
 
-    // Admins always have access
-    if bridge.access_config.is_admin(user_id) {
+    if config.is_admin(user_id) {
         return true;
     }
 
     match &msg.chat.kind {
-        ChatKind::Private(_) => bridge.check_dm_access(user_id),
-        ChatKind::Public(_) => {
-            let chat_id = msg.chat.id.0;
-            bridge.check_group_access(chat_id)
+        ChatKind::Private(_) => config.can_access_dm(user_id),
+        ChatKind::Public(_) => config.can_access_group(msg.chat.id.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use telegram_types::policies::{DmPolicy, GroupPolicy};
+    use telegram_types::AccessConfig;
+
+    fn private_msg(user_id: u64) -> Message {
+        serde_json::from_value(serde_json::json!({
+            "message_id": 1,
+            "date": 0,
+            "chat": {"id": user_id as i64, "type": "private", "first_name": "User"},
+            "from": {"id": user_id, "is_bot": false, "first_name": "User"}
+        }))
+        .unwrap()
+    }
+
+    fn group_msg(user_id: u64, group_id: i64) -> Message {
+        serde_json::from_value(serde_json::json!({
+            "message_id": 1,
+            "date": 0,
+            "chat": {
+                "id": group_id,
+                "type": "group",
+                "title": "Test Group",
+                "all_members_are_administrators": false
+            },
+            "from": {"id": user_id, "is_bot": false, "first_name": "User"}
+        }))
+        .unwrap()
+    }
+
+    fn allowlist_config() -> AccessConfig {
+        AccessConfig {
+            dm_policy: DmPolicy::Allowlist,
+            group_policy: GroupPolicy::Allowlist,
+            user_allowlist: vec![10, 20],
+            group_allowlist: vec![100, 200],
+            admin_users: vec![999],
         }
+    }
+
+    // ── Private chat access ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_private_allowed_user_gets_access() {
+        let msg = private_msg(10);
+        assert!(check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_private_unlisted_user_denied() {
+        let msg = private_msg(99);
+        assert!(!check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_private_admin_always_allowed() {
+        let msg = private_msg(999);
+        assert!(check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_private_open_policy_allows_anyone() {
+        let cfg = AccessConfig {
+            dm_policy: DmPolicy::Open,
+            ..AccessConfig::default()
+        };
+        let msg = private_msg(42);
+        assert!(check_message_access(&msg, &cfg));
+    }
+
+    #[test]
+    fn test_private_disabled_policy_blocks_all() {
+        let cfg = AccessConfig {
+            dm_policy: DmPolicy::Disabled,
+            user_allowlist: vec![10],
+            ..AccessConfig::default()
+        };
+        let msg = private_msg(10);
+        assert!(!check_message_access(&msg, &cfg));
+    }
+
+    // ── Group chat access ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_group_allowed_group_gets_access() {
+        let msg = group_msg(10, 100);
+        assert!(check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_group_unlisted_group_denied() {
+        let msg = group_msg(10, 999);
+        assert!(!check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_group_admin_user_always_allowed() {
+        // Even in an unlisted group, an admin gets through
+        let msg = group_msg(999, 999);
+        assert!(check_message_access(&msg, &allowlist_config()));
+    }
+
+    #[test]
+    fn test_group_disabled_policy_blocks_all() {
+        let cfg = AccessConfig {
+            group_policy: GroupPolicy::Disabled,
+            group_allowlist: vec![100],
+            ..AccessConfig::default()
+        };
+        let msg = group_msg(10, 100);
+        assert!(!check_message_access(&msg, &cfg));
     }
 }
