@@ -328,6 +328,76 @@ pub async fn handle_my_chat_member_updated(
     Ok(())
 }
 
+/// Handle pre-checkout query (before payment is confirmed)
+pub async fn handle_pre_checkout_query(
+    _bot: Bot,
+    query: teloxide::types::PreCheckoutQuery,
+    bridge: TelegramBridge,
+    health: AppState
+) -> ResponseResult<()> {
+    debug!("Pre-checkout query from user {}: {} {}",
+        query.from.id,
+        query.total_amount,
+        query.currency
+    );
+
+    let update_id = 0; // Update ID is not available directly on PreCheckoutQuery
+    health.increment_messages_received().await;
+
+    if let Err(e) = bridge.publish_pre_checkout_query(&query, update_id).await {
+        error!("Failed to publish pre-checkout query: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
+/// Handle successful payment
+pub async fn handle_successful_payment(
+    _bot: Bot,
+    msg: Message,
+    bridge: TelegramBridge,
+    health: AppState
+) -> ResponseResult<()> {
+    if let Some(payment) = msg.successful_payment() {
+        debug!("Successful payment: {} {} from chat {}",
+            payment.total_amount,
+            payment.currency,
+            msg.chat.id
+        );
+
+        let update_id = msg.id.0 as i64;
+        health.increment_messages_received().await;
+
+        if let Err(e) = bridge.publish_successful_payment(&msg, payment, update_id).await {
+            error!("Failed to publish successful payment: {}", e);
+            health.increment_errors().await;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle shipping query (for physical goods)
+pub async fn handle_shipping_query(
+    _bot: Bot,
+    query: teloxide::types::ShippingQuery,
+    bridge: TelegramBridge,
+    health: AppState
+) -> ResponseResult<()> {
+    debug!("Shipping query from user {}", query.from.id);
+
+    let update_id = 0;
+    health.increment_messages_received().await;
+
+    if let Err(e) = bridge.publish_shipping_query(&query, update_id).await {
+        error!("Failed to publish shipping query: {}", e);
+        health.increment_errors().await;
+    }
+
+    Ok(())
+}
+
 /// Check if the message sender has access
 fn check_access(msg: &Message, bridge: &TelegramBridge) -> bool {
     use teloxide::types::ChatKind;

@@ -56,6 +56,9 @@ impl OutboundProcessor {
         let inline_task = self.handle_answer_inline_queries(prefix.clone());
         let forum_task = self.handle_forum_topics(prefix.clone());
         let admin_task = self.handle_admin_commands(prefix.clone());
+        let file_task = self.handle_file_commands(prefix.clone());
+        let payment_task = self.handle_payment_commands(prefix.clone());
+        let bot_commands_task = self.handle_bot_commands(prefix.clone());
 
         // Run all tasks concurrently
         tokio::try_join!(
@@ -68,7 +71,10 @@ impl OutboundProcessor {
             stream_task,
             inline_task,
             forum_task,
-            admin_task
+            admin_task,
+            file_task,
+            payment_task,
+            bot_commands_task
         )?;
 
         Ok(())
@@ -679,6 +685,404 @@ impl OutboundProcessor {
         Ok(())
     }
 
+    /// Handle file download commands (getFile and download)
+    async fn handle_file_commands(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::*;
+        use telegram_nats::subjects;
+
+        let get_file_subject = subjects::agent::file_get(&prefix);
+        let download_file_subject = subjects::agent::file_download(&prefix);
+
+        info!("Subscribing to file commands");
+
+        let get_file_stream = self.subscriber.subscribe::<GetFileCommand>(&get_file_subject);
+        let download_file_stream = self.subscriber.subscribe::<DownloadFileCommand>(&download_file_subject);
+
+        let (mut get_file_stream, mut download_file_stream) = tokio::try_join!(
+            get_file_stream,
+            download_file_stream
+        )?;
+
+        loop {
+            tokio::select! {
+                Some(result) = get_file_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Getting file info for file_id: {}", cmd.file_id);
+
+                        match self.bot.get_file(&cmd.file_id).await {
+                            Ok(file) => {
+                                // Construct download URL
+                                let bot_token = self.bot.token();
+                                let download_url = format!(
+                                    "https://api.telegram.org/file/bot{}/{}",
+                                    bot_token,
+                                    file.path
+                                );
+
+                                let response = FileInfoResponse {
+                                    file_id: cmd.file_id.clone(),
+                                    file_unique_id: file.unique_id.clone(),
+                                    file_size: Some(file.size as u64),
+                                    file_path: file.path.clone(),
+                                    download_url,
+                                    request_id: cmd.request_id,
+                                };
+
+                                // Publish response
+                                let response_subject = subjects::bot::file_info(&prefix);
+                                if let Err(e) = self.subscriber.client()
+                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                                    .await
+                                {
+                                    error!("Failed to publish file info response: {}", e);
+                                } else {
+                                    debug!("Published file info response to {}", response_subject);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to get file info for {}: {}", cmd.file_id, e);
+                            }
+                        }
+                    }
+                }
+
+                Some(result) = download_file_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Downloading file {} to {}", cmd.file_id, cmd.destination_path);
+
+                        // Get file info first
+                        match self.bot.get_file(&cmd.file_id).await {
+                            Ok(file) => {
+                                // Construct download URL
+                                let bot_token = self.bot.token();
+                                let download_url = format!(
+                                    "https://api.telegram.org/file/bot{}/{}",
+                                    bot_token,
+                                    file.path
+                                );
+
+                                // Download file using reqwest
+                                match download_file_from_url(&download_url, &cmd.destination_path).await {
+                                    Ok(file_size) => {
+                                        let response = FileDownloadResponse {
+                                            file_id: cmd.file_id.clone(),
+                                            local_path: cmd.destination_path.clone(),
+                                            file_size,
+                                            success: true,
+                                            error: None,
+                                            request_id: cmd.request_id,
+                                        };
+
+                                        // Publish response
+                                        let response_subject = subjects::bot::file_downloaded(&prefix);
+                                        if let Err(e) = self.subscriber.client()
+                                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                                            .await
+                                        {
+                                            error!("Failed to publish file download response: {}", e);
+                                        } else {
+                                            debug!("Published file download response to {}", response_subject);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to download file {}: {}", cmd.file_id, e);
+                                        let response = FileDownloadResponse {
+                                            file_id: cmd.file_id.clone(),
+                                            local_path: cmd.destination_path.clone(),
+                                            file_size: 0,
+                                            success: false,
+                                            error: Some(e.to_string()),
+                                            request_id: cmd.request_id,
+                                        };
+
+                                        // Publish error response
+                                        let response_subject = subjects::bot::file_downloaded(&prefix);
+                                        if let Err(e) = self.subscriber.client()
+                                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                                            .await
+                                        {
+                                            error!("Failed to publish file download error response: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to get file info for download {}: {}", cmd.file_id, e);
+                                let response = FileDownloadResponse {
+                                    file_id: cmd.file_id.clone(),
+                                    local_path: cmd.destination_path.clone(),
+                                    file_size: 0,
+                                    success: false,
+                                    error: Some(format!("Failed to get file info: {}", e)),
+                                    request_id: cmd.request_id,
+                                };
+
+                                // Publish error response
+                                let response_subject = subjects::bot::file_downloaded(&prefix);
+                                if let Err(e) = self.subscriber.client()
+                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                                    .await
+                                {
+                                    error!("Failed to publish file download error response: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle payment commands (invoices, pre-checkout, shipping)
+    async fn handle_payment_commands(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::*;
+        use telegram_nats::subjects;
+
+        let send_invoice_subject = subjects::agent::payment_send_invoice(&prefix);
+        let answer_pre_checkout_subject = subjects::agent::payment_answer_pre_checkout(&prefix);
+        let answer_shipping_subject = subjects::agent::payment_answer_shipping(&prefix);
+
+        info!("Subscribing to payment commands");
+
+        let send_invoice_stream = self.subscriber.subscribe::<SendInvoiceCommand>(&send_invoice_subject);
+        let answer_pre_checkout_stream = self.subscriber.subscribe::<AnswerPreCheckoutQueryCommand>(&answer_pre_checkout_subject);
+        let answer_shipping_stream = self.subscriber.subscribe::<AnswerShippingQueryCommand>(&answer_shipping_subject);
+
+        let (mut send_invoice_stream, mut answer_pre_checkout_stream, mut answer_shipping_stream) = tokio::try_join!(
+            send_invoice_stream,
+            answer_pre_checkout_stream,
+            answer_shipping_stream
+        )?;
+
+        loop {
+            tokio::select! {
+                Some(result) = send_invoice_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Sending invoice to chat {}", cmd.chat_id);
+
+                        // Convert prices (amount in smallest currency units as u32)
+                        let prices: Vec<teloxide::types::LabeledPrice> = cmd.prices.iter()
+                            .map(|p| teloxide::types::LabeledPrice {
+                                label: p.label.clone(),
+                                amount: p.amount as u32,
+                            })
+                            .collect();
+
+                        let mut req = self.bot.send_invoice(
+                            ChatId(cmd.chat_id),
+                            cmd.title,
+                            cmd.description,
+                            cmd.payload,
+                            cmd.currency,
+                            prices
+                        );
+
+                        // Set optional fields
+                        if !cmd.provider_token.is_empty() {
+                            req.provider_token = Some(cmd.provider_token);
+                        }
+                        req.max_tip_amount = cmd.max_tip_amount.map(|a| a as u32);
+                        req.suggested_tip_amounts = cmd.suggested_tip_amounts.map(|amounts|
+                            amounts.iter().map(|&a| a as u32).collect()
+                        );
+                        req.start_parameter = cmd.start_parameter;
+                        req.provider_data = cmd.provider_data;
+                        req.photo_url = cmd.photo_url.and_then(|u| u.parse().ok());
+                        req.photo_size = cmd.photo_size.map(|s| s as u32);
+                        req.photo_width = cmd.photo_width.map(|w| w as u32);
+                        req.photo_height = cmd.photo_height.map(|h| h as u32);
+                        req.need_name = cmd.need_name;
+                        req.need_phone_number = cmd.need_phone_number;
+                        req.need_email = cmd.need_email;
+                        req.need_shipping_address = cmd.need_shipping_address;
+                        req.send_phone_number_to_provider = cmd.send_phone_number_to_provider;
+                        req.send_email_to_provider = cmd.send_email_to_provider;
+                        req.is_flexible = cmd.is_flexible;
+                        req.disable_notification = cmd.disable_notification;
+                        req.protect_content = cmd.protect_content;
+
+                        if let Some(reply_to) = cmd.reply_to_message_id {
+                            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+                        }
+
+                        if let Some(markup) = cmd.reply_markup {
+                            req.reply_markup = Some(convert_inline_keyboard(markup));
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to send invoice: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = answer_pre_checkout_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Answering pre-checkout query {}: ok={}", cmd.pre_checkout_query_id, cmd.ok);
+
+                        let req = if cmd.ok {
+                            self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, true)
+                        } else {
+                            let mut req = self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, false);
+                            req.error_message = cmd.error_message;
+                            req
+                        };
+
+                        if let Err(e) = req.await {
+                            error!("Failed to answer pre-checkout query: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = answer_shipping_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Answering shipping query {}: ok={}", cmd.shipping_query_id, cmd.ok);
+
+                        let mut req = self.bot.answer_shipping_query(&cmd.shipping_query_id, cmd.ok);
+
+                        if cmd.ok {
+                            let options: Vec<teloxide::types::ShippingOption> = cmd.shipping_options.unwrap_or_default()
+                                .into_iter()
+                                .map(|opt| teloxide::types::ShippingOption {
+                                    id: opt.id,
+                                    title: opt.title,
+                                    prices: opt.prices.iter().map(|p| teloxide::types::LabeledPrice {
+                                        label: p.label.clone(),
+                                        amount: p.amount as u32,
+                                    }).collect(),
+                                })
+                                .collect();
+                            req.shipping_options = Some(options);
+                        } else {
+                            req.error_message = cmd.error_message;
+                        }
+
+                        if let Err(e) = req.await {
+                            error!("Failed to answer shipping query: {}", e);
+                        }
+                    }
+                }
+
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle bot commands setup (setMyCommands, deleteMyCommands, getMyCommands)
+    async fn handle_bot_commands(&self, prefix: String) -> Result<()> {
+        use telegram_types::commands::*;
+        use telegram_nats::subjects;
+
+        let set_commands_subject = subjects::agent::bot_commands_set(&prefix);
+        let delete_commands_subject = subjects::agent::bot_commands_delete(&prefix);
+        let get_commands_subject = subjects::agent::bot_commands_get(&prefix);
+
+        info!("Subscribing to bot commands");
+
+        let set_commands_stream = self.subscriber.subscribe::<SetMyCommandsCommand>(&set_commands_subject);
+        let delete_commands_stream = self.subscriber.subscribe::<DeleteMyCommandsCommand>(&delete_commands_subject);
+        let get_commands_stream = self.subscriber.subscribe::<GetMyCommandsCommand>(&get_commands_subject);
+
+        let (mut set_commands_stream, mut delete_commands_stream, mut get_commands_stream) = tokio::try_join!(
+            set_commands_stream,
+            delete_commands_stream,
+            get_commands_stream
+        )?;
+
+        loop {
+            tokio::select! {
+                Some(result) = set_commands_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Setting bot commands ({} commands)", cmd.commands.len());
+
+                        let commands: Vec<teloxide::types::BotCommand> = cmd.commands.iter()
+                            .map(|c| teloxide::types::BotCommand::new(c.command.clone(), c.description.clone()))
+                            .collect();
+
+                        let mut req = self.bot.set_my_commands(commands);
+
+                        if let Some(scope) = cmd.scope {
+                            req.scope = Some(convert_bot_command_scope(scope));
+                        }
+
+                        req.language_code = cmd.language_code;
+
+                        if let Err(e) = req.await {
+                            error!("Failed to set bot commands: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = delete_commands_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Deleting bot commands");
+
+                        let mut req = self.bot.delete_my_commands();
+
+                        if let Some(scope) = cmd.scope {
+                            req.scope = Some(convert_bot_command_scope(scope));
+                        }
+
+                        req.language_code = cmd.language_code;
+
+                        if let Err(e) = req.await {
+                            error!("Failed to delete bot commands: {}", e);
+                        }
+                    }
+                }
+
+                Some(result) = get_commands_stream.next() => {
+                    if let Ok(cmd) = result {
+                        debug!("Getting bot commands");
+
+                        let mut req = self.bot.get_my_commands();
+
+                        if let Some(scope) = cmd.scope {
+                            req.scope = Some(convert_bot_command_scope(scope));
+                        }
+
+                        req.language_code = cmd.language_code;
+
+                        match req.await {
+                            Ok(commands) => {
+                                let response = BotCommandsResponse {
+                                    commands: commands.iter().map(|c| telegram_types::chat::BotCommand {
+                                        command: c.command.clone(),
+                                        description: c.description.clone(),
+                                    }).collect(),
+                                    request_id: cmd.request_id,
+                                };
+
+                                // Publish response
+                                let response_subject = subjects::bot::bot_commands_response(&prefix);
+                                if let Err(e) = self.subscriber.client()
+                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                                    .await
+                                {
+                                    error!("Failed to publish bot commands response: {}", e);
+                                } else {
+                                    debug!("Published bot commands response to {}", response_subject);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to get bot commands: {}", e);
+                            }
+                        }
+                    }
+                }
+
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
     // Stream message handling moved to outbound_streaming.rs module
 }
 
@@ -1250,4 +1654,55 @@ fn convert_chat_permissions(perms: &telegram_types::chat::ChatPermissions) -> te
     }
 
     result
+}
+
+/// Convert our BotCommandScope to Teloxide's BotCommandScope
+fn convert_bot_command_scope(scope: telegram_types::chat::BotCommandScope) -> teloxide::types::BotCommandScope {
+    match scope {
+        telegram_types::chat::BotCommandScope::Default => teloxide::types::BotCommandScope::Default,
+        telegram_types::chat::BotCommandScope::AllPrivateChats => teloxide::types::BotCommandScope::AllPrivateChats,
+        telegram_types::chat::BotCommandScope::AllGroupChats => teloxide::types::BotCommandScope::AllGroupChats,
+        telegram_types::chat::BotCommandScope::AllChatAdministrators => teloxide::types::BotCommandScope::AllChatAdministrators,
+        telegram_types::chat::BotCommandScope::Chat { chat_id } => teloxide::types::BotCommandScope::Chat {
+            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+        },
+        telegram_types::chat::BotCommandScope::ChatAdministrators { chat_id } => teloxide::types::BotCommandScope::ChatAdministrators {
+            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+        },
+        telegram_types::chat::BotCommandScope::ChatMember { chat_id, user_id } => teloxide::types::BotCommandScope::ChatMember {
+            chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(chat_id)),
+            user_id: teloxide::types::UserId(user_id as u64),
+        },
+    }
+}
+
+/// Download a file from URL to local path
+async fn download_file_from_url(url: &str, destination_path: &str) -> Result<u64> {
+    use tokio::fs::File;
+    use tokio::io::AsyncWriteExt;
+
+    // Create parent directories if they don't exist
+    if let Some(parent) = std::path::Path::new(destination_path).parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    // Download file
+    let response = reqwest::get(url).await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to download file: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let bytes = response.bytes().await?;
+    let file_size = bytes.len() as u64;
+
+    // Write to file
+    let mut file = File::create(destination_path).await?;
+    file.write_all(&bytes).await?;
+    file.flush().await?;
+
+    Ok(file_size)
 }
