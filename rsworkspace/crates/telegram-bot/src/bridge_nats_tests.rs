@@ -7,13 +7,15 @@
 #[cfg(test)]
 mod nats_tests {
     use crate::bridge::TelegramBridge;
+    use crate::handlers;
+    use crate::health::AppState;
     use async_nats::jetstream;
     use futures::StreamExt;
     use telegram_types::{
         policies::{DmPolicy, GroupPolicy},
         AccessConfig,
     };
-    use teloxide::types::Message;
+    use teloxide::{types::Message, Bot};
 
     const DEFAULT_NATS_URL: &str = "nats://localhost:14222";
 
@@ -240,5 +242,156 @@ mod nats_tests {
         assert_eq!(event["voice"]["file_id"], "voc1");
         assert_eq!(event["voice"]["mime_type"], "audio/ogg");
         assert!(event["voice"]["file_name"].is_null());
+    }
+
+    // ── Handler routing ───────────────────────────────────────────────────────
+
+    fn fake_bot() -> Bot {
+        Bot::new("0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    }
+
+    fn health() -> AppState {
+        AppState::new(Some("testbot".to_string()))
+    }
+
+    #[tokio::test]
+    async fn test_handler_routes_text_to_nats() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "route-text";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(10);
+        json["text"] = serde_json::json!("routed text");
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["text"], "routed text");
+    }
+
+    #[tokio::test]
+    async fn test_handler_routes_photo_to_nats() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "route-photo";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(11);
+        json["photo"] = serde_json::json!([
+            {"file_id": "ph2", "file_unique_id": "uph2", "width": 800, "height": 600, "file_size": 3000}
+        ]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_photo_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["photo"][0]["file_id"], "ph2");
+    }
+
+    // ── Access denied blocks publish ──────────────────────────────────────────
+
+    async fn make_bridge_restricted(
+        client: async_nats::Client,
+        js: jetstream::Context,
+        prefix: &str,
+    ) -> TelegramBridge {
+        let bucket = format!("sessions-{}", uuid::Uuid::new_v4().simple());
+        let kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        TelegramBridge::new(
+            client,
+            prefix.to_string(),
+            AccessConfig {
+                dm_policy: DmPolicy::Allowlist,
+                user_allowlist: vec![],   // nobody allowed
+                ..Default::default()
+            },
+            kv,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_access_denied_does_not_publish() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "deny-text";
+        let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
+
+        let mut json = private_base(99); // user 99 not in allowlist
+        json["text"] = serde_json::json!("should not arrive");
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        // Nothing should arrive — wait 500ms then assert no message
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            sub.next(),
+        )
+        .await;
+        assert!(result.is_err(), "denied message must NOT be published to NATS");
+    }
+
+    // ── Text with entities end-to-end ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_text_with_entities_published() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = "entity-text";
+        let bridge = make_bridge(client.clone(), js, prefix).await;
+
+        let mut json = private_base(20);
+        json["text"] = serde_json::json!("@alice hello #world");
+        json["entities"] = serde_json::json!([
+            {"type": "mention",  "offset": 0, "length": 6},
+            {"type": "hashtag",  "offset": 13, "length": 6}
+        ]);
+        let message: Message = serde_json::from_value(json).unwrap();
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        handlers::handle_text_message(fake_bot(), message, bridge, health())
+            .await
+            .unwrap();
+
+        let event = recv(&mut sub).await;
+        assert_eq!(event["text"], "@alice hello #world");
+        let entities = event["entities"].as_array().unwrap();
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0]["type"], "mention");
+        assert_eq!(entities[1]["type"], "hashtag");
     }
 }
