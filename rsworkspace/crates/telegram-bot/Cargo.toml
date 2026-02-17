@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 telegram-types = { path = "../telegram-types" }
 telegram-nats = { path = "../telegram-nats" }
-teloxide = { version = "0.14", features = ["macros"] }
+teloxide = { version = "0.14", features = ["macros", "webhooks-axum"] }
 async-nats = "0.45"
 tokio = { version = "1.49", features = ["full"] }
 futures = "0.3"
