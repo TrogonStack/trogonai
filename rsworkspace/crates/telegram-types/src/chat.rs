@@ -429,6 +429,266 @@ pub struct InputSticker {
     pub keywords: Vec<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn roundtrip<T: Serialize + for<'de> Deserialize<'de>>(val: &T) {
+        let json = serde_json::to_string(val).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        let json2 = serde_json::to_string(&back).expect("re-serialize");
+        assert_eq!(json, json2, "roundtrip produced different JSON");
+    }
+
+    // ── ChatType ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chat_type_serde() {
+        for (variant, expected) in [
+            (ChatType::Private, "\"private\""),
+            (ChatType::Group, "\"group\""),
+            (ChatType::Supergroup, "\"supergroup\""),
+            (ChatType::Channel, "\"channel\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+            let back: ChatType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chat_roundtrip_private() {
+        let chat = Chat {
+            id: 12345,
+            chat_type: ChatType::Private,
+            title: None,
+            username: Some("alice".to_string()),
+        };
+        roundtrip(&chat);
+    }
+
+    #[test]
+    fn test_chat_roundtrip_group() {
+        let chat = Chat {
+            id: -1001234567890,
+            chat_type: ChatType::Group,
+            title: Some("My Group".to_string()),
+            username: None,
+        };
+        roundtrip(&chat);
+    }
+
+    #[test]
+    fn test_chat_type_field_is_renamed_to_type() {
+        let chat = Chat {
+            id: 1,
+            chat_type: ChatType::Private,
+            title: None,
+            username: None,
+        };
+        let json = serde_json::to_string(&chat).unwrap();
+        assert!(json.contains("\"type\":\"private\""));
+        assert!(!json.contains("\"chat_type\""));
+    }
+
+    // ── User ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_user_roundtrip_minimal() {
+        let user = User {
+            id: 999,
+            is_bot: false,
+            first_name: "Alice".to_string(),
+            last_name: None,
+            username: None,
+            language_code: None,
+        };
+        roundtrip(&user);
+    }
+
+    #[test]
+    fn test_user_roundtrip_full() {
+        let user = User {
+            id: 42,
+            is_bot: true,
+            first_name: "TestBot".to_string(),
+            last_name: Some("Bot".to_string()),
+            username: Some("testbot".to_string()),
+            language_code: Some("en".to_string()),
+        };
+        roundtrip(&user);
+    }
+
+    // ── FileInfo ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_file_info_roundtrip() {
+        let fi = FileInfo {
+            file_id: "AgACAgIAAxk".to_string(),
+            file_unique_id: "AQADuJ0xG".to_string(),
+            file_size: Some(102400),
+            file_name: Some("document.pdf".to_string()),
+            mime_type: Some("application/pdf".to_string()),
+        };
+        roundtrip(&fi);
+    }
+
+    #[test]
+    fn test_file_info_optional_fields_serialize_as_null() {
+        // FileInfo fields are Option but not marked skip_serializing_if,
+        // so None serializes as null (not omitted)
+        let fi = FileInfo {
+            file_id: "id".to_string(),
+            file_unique_id: "uid".to_string(),
+            file_size: None,
+            file_name: None,
+            mime_type: None,
+        };
+        let json = serde_json::to_string(&fi).unwrap();
+        assert!(json.contains("\"file_size\":null"));
+        assert!(json.contains("\"file_name\":null"));
+        assert!(json.contains("\"mime_type\":null"));
+    }
+
+    // ── PhotoSize ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_photo_size_roundtrip() {
+        let ps = PhotoSize {
+            file_id: "file123".to_string(),
+            file_unique_id: "unique123".to_string(),
+            width: 1920,
+            height: 1080,
+            file_size: Some(512000),
+        };
+        roundtrip(&ps);
+    }
+
+    // ── InlineKeyboardMarkup ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_inline_keyboard_new() {
+        let btn = InlineKeyboardButton {
+            text: "Click me".to_string(),
+            callback_data: Some("action:1".to_string()),
+            url: None,
+        };
+        let kb = InlineKeyboardMarkup::new(vec![vec![btn]]);
+        assert_eq!(kb.inline_keyboard.len(), 1);
+        assert_eq!(kb.inline_keyboard[0].len(), 1);
+        assert_eq!(kb.inline_keyboard[0][0].text, "Click me");
+    }
+
+    #[test]
+    fn test_inline_keyboard_button_url_omitted_when_none() {
+        let btn = InlineKeyboardButton {
+            text: "Btn".to_string(),
+            callback_data: Some("cb".to_string()),
+            url: None,
+        };
+        let json = serde_json::to_string(&btn).unwrap();
+        assert!(!json.contains("\"url\""));
+        assert!(json.contains("\"callback_data\""));
+    }
+
+    #[test]
+    fn test_inline_keyboard_roundtrip() {
+        let kb = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton { text: "A".to_string(), callback_data: Some("a".to_string()), url: None },
+                InlineKeyboardButton { text: "B".to_string(), callback_data: None, url: Some("https://t.me".to_string()) },
+            ],
+            vec![
+                InlineKeyboardButton { text: "C".to_string(), callback_data: Some("c".to_string()), url: None },
+            ],
+        ]);
+        roundtrip(&kb);
+    }
+
+    // ── ChatMemberStatus ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chat_member_status_serde() {
+        for (variant, expected) in [
+            (ChatMemberStatus::Creator, "\"creator\""),
+            (ChatMemberStatus::Administrator, "\"administrator\""),
+            (ChatMemberStatus::Member, "\"member\""),
+            (ChatMemberStatus::Restricted, "\"restricted\""),
+            (ChatMemberStatus::Left, "\"left\""),
+            (ChatMemberStatus::Kicked, "\"kicked\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+            let back: ChatMemberStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    // ── MessageEntityType ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_message_entity_type_serde() {
+        for (variant, expected) in [
+            (MessageEntityType::Mention, "\"mention\""),
+            (MessageEntityType::BotCommand, "\"bot_command\""),
+            (MessageEntityType::Url, "\"url\""),
+            (MessageEntityType::Bold, "\"bold\""),
+            (MessageEntityType::Code, "\"code\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+            let back: MessageEntityType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    // ── BotCommandScope (tagged enum) ─────────────────────────────────────────
+
+    #[test]
+    fn test_bot_command_scope_serde() {
+        let scopes = [
+            BotCommandScope::Default,
+            BotCommandScope::AllPrivateChats,
+            BotCommandScope::AllGroupChats,
+            BotCommandScope::Chat { chat_id: 12345 },
+            BotCommandScope::ChatMember { chat_id: 10, user_id: 20 },
+        ];
+        for scope in &scopes {
+            let json = serde_json::to_string(scope).unwrap();
+            let back: BotCommandScope = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&back).unwrap();
+            assert_eq!(json, json2);
+        }
+    }
+
+    #[test]
+    fn test_bot_command_scope_default_has_type_field() {
+        let scope = BotCommandScope::Default;
+        let json = serde_json::to_string(&scope).unwrap();
+        assert_eq!(json, "{\"type\":\"default\"}");
+    }
+
+    // ── MaskPoint ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_mask_point_serde() {
+        for (variant, expected) in [
+            (MaskPoint::Forehead, "\"forehead\""),
+            (MaskPoint::Eyes, "\"eyes\""),
+            (MaskPoint::Mouth, "\"mouth\""),
+            (MaskPoint::Chin, "\"chin\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+            let back: MaskPoint = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+}
+
 /// Successful payment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessfulPayment {
