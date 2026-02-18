@@ -264,6 +264,271 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
+    // ── modal_respond ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_modal_respond_command_is_consumed() {
+        use discord_types::ModalRespondCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-modal-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::interaction_modal_respond(&prefix), &ModalRespondCommand {
+            interaction_id: 1111,
+            interaction_token: "fake-token".to_string(),
+            custom_id: "my_modal".to_string(),
+            title: "Test Modal".to_string(),
+            inputs: vec![],
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── autocomplete_respond ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_autocomplete_respond_command_is_consumed() {
+        use discord_types::{AutocompleteChoice, AutocompleteRespondCommand};
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-ac-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::interaction_autocomplete_respond(&prefix), &AutocompleteRespondCommand {
+            interaction_id: 2222,
+            interaction_token: "fake-token".to_string(),
+            choices: vec![AutocompleteChoice { name: "Option A".to_string(), value: "a".to_string() }],
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── ban ───────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ban_user_command_is_consumed() {
+        use discord_types::BanUserCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-ban-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::guild_ban(&prefix), &BanUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            reason: Some("spam".to_string()),
+            delete_message_seconds: 0,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── kick ──────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_kick_user_command_is_consumed() {
+        use discord_types::KickUserCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-kick-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::guild_kick(&prefix), &KickUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            reason: None,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── timeout ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_timeout_user_command_is_consumed() {
+        use discord_types::TimeoutUserCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-timeout-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::guild_timeout(&prefix), &TimeoutUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            duration_secs: 3600,
+            reason: Some("cooling off".to_string()),
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── create_channel ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_create_channel_command_is_consumed() {
+        use discord_types::{ChannelType, CreateChannelCommand};
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-ch-create-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::channel_create(&prefix), &CreateChannelCommand {
+            guild_id: 200,
+            name: "new-channel".to_string(),
+            channel_type: ChannelType::GuildText,
+            category_id: None,
+            topic: None,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── edit_channel ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_edit_channel_command_is_consumed() {
+        use discord_types::EditChannelCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-ch-edit-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::channel_edit(&prefix), &EditChannelCommand {
+            channel_id: 300,
+            name: Some("renamed".to_string()),
+            topic: None,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── delete_channel ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_delete_channel_command_is_consumed() {
+        use discord_types::DeleteChannelCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-ch-del-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::channel_delete(&prefix), &DeleteChannelCommand { channel_id: 300 }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── create_role ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_create_role_command_is_consumed() {
+        use discord_types::CreateRoleCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-role-create-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::role_create(&prefix), &CreateRoleCommand {
+            guild_id: 200,
+            name: "VIP".to_string(),
+            color: Some(0xFFD700),
+            hoist: true,
+            mentionable: false,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── assign_role ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_assign_role_command_is_consumed() {
+        use discord_types::AssignRoleCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-role-assign-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::role_assign(&prefix), &AssignRoleCommand {
+            guild_id: 200, user_id: 42, role_id: 111,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── remove_role ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_remove_role_command_is_consumed() {
+        use discord_types::RemoveRoleCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-role-remove-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::role_remove(&prefix), &RemoveRoleCommand {
+            guild_id: 200, user_id: 42, role_id: 111,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── delete_role ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_delete_role_command_is_consumed() {
+        use discord_types::DeleteRoleCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-role-del-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::role_delete(&prefix), &DeleteRoleCommand {
+            guild_id: 200, role_id: 111,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── pin ───────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_pin_message_command_is_consumed() {
+        use discord_types::PinMessageCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-pin-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::message_pin(&prefix), &PinMessageCommand {
+            channel_id: 100, message_id: 50,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── unpin ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_unpin_message_command_is_consumed() {
+        use discord_types::UnpinMessageCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-unpin-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::message_unpin(&prefix), &UnpinMessageCommand {
+            channel_id: 100, message_id: 50,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── bulk_delete ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_bulk_delete_messages_command_is_consumed() {
+        use discord_types::BulkDeleteMessagesCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-bulk-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::message_bulk_delete(&prefix), &BulkDeleteMessagesCommand {
+            channel_id: 100,
+            message_ids: vec![1, 2, 3],
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── create_thread ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_create_thread_command_is_consumed() {
+        use discord_types::CreateThreadCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-thread-create-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::thread_create(&prefix), &CreateThreadCommand {
+            channel_id: 100,
+            name: "Discussion".to_string(),
+            message_id: None,
+            auto_archive_mins: 1440,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // ── archive_thread ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_archive_thread_command_is_consumed() {
+        use discord_types::ArchiveThreadCommand;
+        let Some(client) = try_connect().await else { eprintln!("SKIP: NATS not available"); return; };
+        let prefix = format!("test-out-thread-archive-{}", uuid::Uuid::new_v4().simple());
+        start_processor(client.clone(), &prefix).await;
+        publish(&client, &subjects::agent::thread_archive(&prefix), &ArchiveThreadCommand {
+            channel_id: 100,
+            locked: false,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
     // ── multiple commands in sequence ─────────────────────────────────────────
 
     #[tokio::test]
