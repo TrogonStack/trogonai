@@ -354,6 +354,33 @@ pub struct ThreadMemberRemoveEvent {
     pub user_ids: Vec<u64>,
 }
 
+/// An invite was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InviteCreateEvent {
+    pub metadata: EventMetadata,
+    pub code: String,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inviter_id: Option<u64>,
+    /// Expiry in seconds (0 = never)
+    pub max_age_secs: u64,
+    /// Maximum uses (0 = unlimited)
+    pub max_uses: u64,
+    pub temporary: bool,
+}
+
+/// An invite was deleted or expired
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InviteDeleteEvent {
+    pub metadata: EventMetadata,
+    pub code: String,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

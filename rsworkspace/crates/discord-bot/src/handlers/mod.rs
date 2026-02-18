@@ -619,6 +619,50 @@ impl EventHandler for Handler {
         }
     }
 
+    async fn invite_create(
+        &self,
+        ctx: Context,
+        data: serenity::model::event::InviteCreateEvent,
+    ) {
+        let bridge = {
+            let d = ctx.data.read().await;
+            match d.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Some(guild_id) = data.guild_id {
+            if !bridge.check_guild_access(guild_id.get()) {
+                return;
+            }
+        }
+        if let Err(e) = bridge.publish_invite_create(&data).await {
+            error!("Failed to publish invite_create: {}", e);
+        }
+    }
+
+    async fn invite_delete(
+        &self,
+        ctx: Context,
+        data: serenity::model::event::InviteDeleteEvent,
+    ) {
+        let bridge = {
+            let d = ctx.data.read().await;
+            match d.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Some(guild_id) = data.guild_id {
+            if !bridge.check_guild_access(guild_id.get()) {
+                return;
+            }
+        }
+        if let Err(e) = bridge.publish_invite_delete(&data).await {
+            error!("Failed to publish invite_delete: {}", e);
+        }
+    }
+
     async fn thread_create(&self, ctx: Context, thread: GuildChannel) {
         let bridge = {
             let data = ctx.data.read().await;

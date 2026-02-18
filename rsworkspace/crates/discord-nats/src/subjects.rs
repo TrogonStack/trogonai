@@ -186,6 +186,16 @@ pub mod bot {
         format!("discord.{}.bot.thread.member_remove", prefix)
     }
 
+    /// Invite created event subject
+    pub fn invite_create(prefix: &str) -> String {
+        format!("discord.{}.bot.invite.create", prefix)
+    }
+
+    /// Invite deleted event subject
+    pub fn invite_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.invite.delete", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -379,6 +389,36 @@ pub mod agent {
         format!("discord.{}.agent.voice.disconnect", prefix)
     }
 
+    /// Create invite command subject
+    pub fn invite_create(prefix: &str) -> String {
+        format!("discord.{}.agent.invite.create", prefix)
+    }
+
+    /// Revoke invite command subject
+    pub fn invite_revoke(prefix: &str) -> String {
+        format!("discord.{}.agent.invite.revoke", prefix)
+    }
+
+    /// Create emoji command subject
+    pub fn emoji_create(prefix: &str) -> String {
+        format!("discord.{}.agent.emoji.create", prefix)
+    }
+
+    /// Delete emoji command subject
+    pub fn emoji_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.emoji.delete", prefix)
+    }
+
+    /// Create scheduled event command subject
+    pub fn scheduled_event_create(prefix: &str) -> String {
+        format!("discord.{}.agent.scheduled_event.create", prefix)
+    }
+
+    /// Delete scheduled event command subject
+    pub fn scheduled_event_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.scheduled_event.delete", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)
@@ -517,6 +557,20 @@ mod tests {
         assert_eq!(agent::bot_presence("prod"),                    "discord.prod.agent.bot.presence");
         assert_eq!(agent::fetch_messages("prod"),                  "discord.prod.agent.fetch.messages");
         assert_eq!(agent::fetch_member("prod"),                    "discord.prod.agent.fetch.member");
+    }
+
+    #[test]
+    fn test_medium_impact_subjects() {
+        // Bot events
+        assert_eq!(bot::invite_create("prod"),  "discord.prod.bot.invite.create");
+        assert_eq!(bot::invite_delete("prod"),  "discord.prod.bot.invite.delete");
+        // Agent commands
+        assert_eq!(agent::invite_create("prod"),           "discord.prod.agent.invite.create");
+        assert_eq!(agent::invite_revoke("prod"),           "discord.prod.agent.invite.revoke");
+        assert_eq!(agent::emoji_create("prod"),            "discord.prod.agent.emoji.create");
+        assert_eq!(agent::emoji_delete("prod"),            "discord.prod.agent.emoji.delete");
+        assert_eq!(agent::scheduled_event_create("prod"),  "discord.prod.agent.scheduled_event.create");
+        assert_eq!(agent::scheduled_event_delete("prod"),  "discord.prod.agent.scheduled_event.delete");
     }
 
     #[test]
