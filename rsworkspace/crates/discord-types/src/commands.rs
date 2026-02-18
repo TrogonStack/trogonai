@@ -446,4 +446,276 @@ mod tests {
             "optional field must be omitted"
         );
     }
+
+    #[test]
+    fn test_autocomplete_choice_roundtrip() {
+        roundtrip(&AutocompleteChoice {
+            name: "Option A".to_string(),
+            value: "a".to_string(),
+        });
+    }
+
+    #[test]
+    fn test_modal_respond_command_roundtrip() {
+        roundtrip(&ModalRespondCommand {
+            interaction_id: 1234,
+            interaction_token: "tok".to_string(),
+            custom_id: "my_modal".to_string(),
+            title: "Fill in details".to_string(),
+            inputs: vec![ModalInput {
+                custom_id: "name".to_string(),
+                value: "placeholder".to_string(),
+            }],
+        });
+    }
+
+    #[test]
+    fn test_modal_respond_command_empty_inputs() {
+        let cmd = ModalRespondCommand {
+            interaction_id: 1,
+            interaction_token: "tok".to_string(),
+            custom_id: "m".to_string(),
+            title: "T".to_string(),
+            inputs: vec![],
+        };
+        // inputs uses #[serde(default)] — empty vec must still round-trip
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_autocomplete_respond_command_roundtrip() {
+        roundtrip(&AutocompleteRespondCommand {
+            interaction_id: 5555,
+            interaction_token: "ac-tok".to_string(),
+            choices: vec![
+                AutocompleteChoice {
+                    name: "foo".to_string(),
+                    value: "foo".to_string(),
+                },
+                AutocompleteChoice {
+                    name: "bar".to_string(),
+                    value: "bar".to_string(),
+                },
+            ],
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_respond_command_empty_choices() {
+        roundtrip(&AutocompleteRespondCommand {
+            interaction_id: 1,
+            interaction_token: "tok".to_string(),
+            choices: vec![],
+        });
+    }
+
+    #[test]
+    fn test_ban_user_command_roundtrip() {
+        roundtrip(&BanUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            reason: Some("Spamming".to_string()),
+            delete_message_seconds: 86400,
+        });
+    }
+
+    #[test]
+    fn test_ban_user_command_no_reason_omitted() {
+        let cmd = BanUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            reason: None,
+            delete_message_seconds: 0,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("reason"), "reason must be omitted when None");
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_kick_user_command_roundtrip() {
+        roundtrip(&KickUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            reason: Some("Rule violation".to_string()),
+        });
+    }
+
+    #[test]
+    fn test_timeout_user_command_roundtrip() {
+        roundtrip(&TimeoutUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            duration_secs: 3600,
+            reason: Some("Cooling off".to_string()),
+        });
+    }
+
+    #[test]
+    fn test_timeout_user_remove_timeout() {
+        // duration_secs = 0 means remove timeout
+        roundtrip(&TimeoutUserCommand {
+            guild_id: 200,
+            user_id: 42,
+            duration_secs: 0,
+            reason: None,
+        });
+    }
+
+    #[test]
+    fn test_create_channel_command_roundtrip() {
+        use crate::types::ChannelType;
+        roundtrip(&CreateChannelCommand {
+            guild_id: 200,
+            name: "announcements".to_string(),
+            channel_type: ChannelType::GuildText,
+            category_id: Some(999),
+            topic: Some("Official news".to_string()),
+        });
+    }
+
+    #[test]
+    fn test_create_channel_command_optional_omitted() {
+        use crate::types::ChannelType;
+        let cmd = CreateChannelCommand {
+            guild_id: 200,
+            name: "voice-chat".to_string(),
+            channel_type: ChannelType::GuildVoice,
+            category_id: None,
+            topic: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("category_id"), "category_id must be omitted when None");
+        assert!(!json.contains("topic"), "topic must be omitted when None");
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_edit_channel_command_roundtrip() {
+        roundtrip(&EditChannelCommand {
+            channel_id: 300,
+            name: Some("renamed".to_string()),
+            topic: Some("New topic".to_string()),
+        });
+    }
+
+    #[test]
+    fn test_delete_channel_command_roundtrip() {
+        roundtrip(&DeleteChannelCommand { channel_id: 300 });
+    }
+
+    #[test]
+    fn test_create_role_command_roundtrip() {
+        roundtrip(&CreateRoleCommand {
+            guild_id: 200,
+            name: "VIP".to_string(),
+            color: Some(0xFFD700),
+            hoist: true,
+            mentionable: false,
+        });
+    }
+
+    #[test]
+    fn test_create_role_command_no_color_omitted() {
+        let cmd = CreateRoleCommand {
+            guild_id: 200,
+            name: "member".to_string(),
+            color: None,
+            hoist: false,
+            mentionable: false,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("color"), "color must be omitted when None");
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_assign_role_command_roundtrip() {
+        roundtrip(&AssignRoleCommand {
+            guild_id: 200,
+            user_id: 42,
+            role_id: 111,
+        });
+    }
+
+    #[test]
+    fn test_remove_role_command_roundtrip() {
+        roundtrip(&RemoveRoleCommand {
+            guild_id: 200,
+            user_id: 42,
+            role_id: 111,
+        });
+    }
+
+    #[test]
+    fn test_delete_role_command_roundtrip() {
+        roundtrip(&DeleteRoleCommand {
+            guild_id: 200,
+            role_id: 111,
+        });
+    }
+
+    #[test]
+    fn test_pin_message_command_roundtrip() {
+        roundtrip(&PinMessageCommand {
+            channel_id: 100,
+            message_id: 50,
+        });
+    }
+
+    #[test]
+    fn test_unpin_message_command_roundtrip() {
+        roundtrip(&UnpinMessageCommand {
+            channel_id: 100,
+            message_id: 50,
+        });
+    }
+
+    #[test]
+    fn test_bulk_delete_messages_command_roundtrip() {
+        roundtrip(&BulkDeleteMessagesCommand {
+            channel_id: 100,
+            message_ids: vec![1, 2, 3, 4, 5],
+        });
+    }
+
+    #[test]
+    fn test_bulk_delete_messages_command_empty() {
+        roundtrip(&BulkDeleteMessagesCommand {
+            channel_id: 100,
+            message_ids: vec![],
+        });
+    }
+
+    #[test]
+    fn test_create_thread_command_roundtrip() {
+        roundtrip(&CreateThreadCommand {
+            channel_id: 100,
+            name: "Discussion thread".to_string(),
+            message_id: Some(50),
+            auto_archive_mins: 1440,
+        });
+    }
+
+    #[test]
+    fn test_create_thread_command_standalone() {
+        // No message_id = standalone thread
+        let cmd = CreateThreadCommand {
+            channel_id: 100,
+            name: "New thread".to_string(),
+            message_id: None,
+            auto_archive_mins: 60,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(!json.contains("message_id"), "message_id must be omitted when None");
+        roundtrip(&cmd);
+    }
+
+    #[test]
+    fn test_archive_thread_command_roundtrip() {
+        roundtrip(&ArchiveThreadCommand {
+            channel_id: 100,
+            locked: true,
+        });
+    }
 }
