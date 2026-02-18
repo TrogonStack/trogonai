@@ -256,6 +256,26 @@ pub mod bot {
         format!("discord.{}.bot.webhooks.update", prefix)
     }
 
+    /// Guild stickers updated event subject
+    pub fn guild_stickers_update(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.stickers_update", prefix)
+    }
+
+    /// Guild integrations updated event subject
+    pub fn guild_integrations_update(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.integrations_update", prefix)
+    }
+
+    /// User subscribed to scheduled event subject
+    pub fn scheduled_event_user_add(prefix: &str) -> String {
+        format!("discord.{}.bot.scheduled_event.user_add", prefix)
+    }
+
+    /// User unsubscribed from scheduled event subject
+    pub fn scheduled_event_user_remove(prefix: &str) -> String {
+        format!("discord.{}.bot.scheduled_event.user_remove", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -542,6 +562,56 @@ pub mod agent {
     /// Fetch channel invites subject (request-reply)
     pub fn fetch_invites(prefix: &str) -> String {
         format!("discord.{}.agent.fetch.invites", prefix)
+    }
+
+    /// Edit scheduled event command subject
+    pub fn scheduled_event_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.scheduled_event.edit", prefix)
+    }
+
+    /// Edit emoji command subject
+    pub fn emoji_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.emoji.edit", prefix)
+    }
+
+    /// Fetch guild members subject (request-reply)
+    pub fn fetch_guild_members(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.guild_members", prefix)
+    }
+
+    /// Fetch guild channels subject (request-reply)
+    pub fn fetch_guild_channels(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.guild_channels", prefix)
+    }
+
+    /// Fetch pinned messages subject (request-reply)
+    pub fn fetch_pinned(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.pinned", prefix)
+    }
+
+    /// Fetch guild roles subject (request-reply)
+    pub fn fetch_roles(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.roles", prefix)
+    }
+
+    /// Edit original interaction response command subject
+    pub fn interaction_edit_response(prefix: &str) -> String {
+        format!("discord.{}.agent.interaction.edit_response", prefix)
+    }
+
+    /// Delete original interaction response command subject
+    pub fn interaction_delete_response(prefix: &str) -> String {
+        format!("discord.{}.agent.interaction.delete_response", prefix)
+    }
+
+    /// Set channel permission overwrite command subject
+    pub fn channel_set_permissions(prefix: &str) -> String {
+        format!("discord.{}.agent.channel.set_permissions", prefix)
+    }
+
+    /// Delete channel permission overwrite command subject
+    pub fn channel_delete_permissions(prefix: &str) -> String {
+        format!("discord.{}.agent.channel.delete_permissions", prefix)
     }
 
     /// Wildcard for all agent commands

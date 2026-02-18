@@ -410,6 +410,25 @@ pub struct FetchedInvite {
     pub temporary: bool,
 }
 
+/// A guild role returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedRole {
+    pub id: u64,
+    pub name: String,
+    pub color: u32,
+    pub hoist: bool,
+    pub mentionable: bool,
+    /// Permissions bitfield
+    pub permissions: u64,
+}
+
+/// Minimal sticker info from a guild stickers update
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StickerInfo {
+    pub id: u64,
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
