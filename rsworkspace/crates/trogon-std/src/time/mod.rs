@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```
-//! use trogonstd::time::{GetNow, GetElapsed, SystemClock};
+//! use trogon_std::time::{GetNow, GetElapsed, SystemClock};
 //! use std::time::Duration;
 //!
 //! fn is_expired<C: GetNow + GetElapsed>(clock: &C, started_at: C::Instant, ttl: Duration) -> bool {
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! ```ignore
-//! use trogonstd::time::{GetNow, GetElapsed, MockClock};
+//! use trogon_std::time::{GetNow, GetElapsed, MockClock};
 //! use std::time::Duration;
 //!
 //! let clock = MockClock::new();

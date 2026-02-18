@@ -13,7 +13,7 @@
 //!
 //! ```rust,no_run
 //! use trogon_nats::{NatsConfig, connect};
-//! use trogonstd::env::SystemEnv;
+//! use trogon_std::env::SystemEnv;
 //!
 //! #[tokio::main]
 //! async fn main() {
