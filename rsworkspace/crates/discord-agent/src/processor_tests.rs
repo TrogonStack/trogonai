@@ -484,6 +484,270 @@ mod tests {
         );
     }
 
+    // ── lifecycle event stubs (no NATS needed) ────────────────────────────
+
+    fn make_typing_event(session_id: &str, user_id: u64, channel_id: u64) -> discord_types::events::TypingStartEvent {
+        use discord_types::events::{EventMetadata, TypingStartEvent};
+        TypingStartEvent { metadata: EventMetadata::new(session_id, 1), user_id, channel_id, guild_id: None }
+    }
+
+    fn make_voice_event(session_id: &str, user_id: u64) -> discord_types::events::VoiceStateUpdateEvent {
+        use discord_types::events::{EventMetadata, VoiceStateUpdateEvent};
+        use discord_types::types::VoiceState;
+        VoiceStateUpdateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id: Some(200),
+            old_channel_id: None,
+            new_state: VoiceState { user_id, channel_id: Some(500), guild_id: Some(200), self_mute: false, self_deaf: false },
+        }
+    }
+
+    fn make_guild_create_event(session_id: &str) -> discord_types::events::GuildCreateEvent {
+        use discord_types::events::{EventMetadata, GuildCreateEvent};
+        use discord_types::types::DiscordGuild;
+        GuildCreateEvent { metadata: EventMetadata::new(session_id, 1), guild: DiscordGuild { id: 200, name: "Test".to_string() }, member_count: 10 }
+    }
+
+    fn make_guild_update_event(session_id: &str) -> discord_types::events::GuildUpdateEvent {
+        use discord_types::events::{EventMetadata, GuildUpdateEvent};
+        use discord_types::types::DiscordGuild;
+        GuildUpdateEvent { metadata: EventMetadata::new(session_id, 1), guild: DiscordGuild { id: 200, name: "Updated".to_string() } }
+    }
+
+    fn make_guild_delete_event(session_id: &str) -> discord_types::events::GuildDeleteEvent {
+        use discord_types::events::{EventMetadata, GuildDeleteEvent};
+        GuildDeleteEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, unavailable: false }
+    }
+
+    fn make_channel_create_event(session_id: &str) -> discord_types::events::ChannelCreateEvent {
+        use discord_types::events::{EventMetadata, ChannelCreateEvent};
+        use discord_types::types::{ChannelType, DiscordChannel};
+        ChannelCreateEvent { metadata: EventMetadata::new(session_id, 1), channel: DiscordChannel { id: 300, channel_type: ChannelType::GuildText, guild_id: Some(200), name: Some("general".to_string()) } }
+    }
+
+    fn make_channel_update_event(session_id: &str) -> discord_types::events::ChannelUpdateEvent {
+        use discord_types::events::{EventMetadata, ChannelUpdateEvent};
+        use discord_types::types::{ChannelType, DiscordChannel};
+        ChannelUpdateEvent { metadata: EventMetadata::new(session_id, 1), channel: DiscordChannel { id: 300, channel_type: ChannelType::GuildText, guild_id: Some(200), name: Some("renamed".to_string()) } }
+    }
+
+    fn make_channel_delete_event(session_id: &str) -> discord_types::events::ChannelDeleteEvent {
+        use discord_types::events::{EventMetadata, ChannelDeleteEvent};
+        ChannelDeleteEvent { metadata: EventMetadata::new(session_id, 1), channel_id: 300, guild_id: 200 }
+    }
+
+    fn make_role_create_event(session_id: &str) -> discord_types::events::RoleCreateEvent {
+        use discord_types::events::{EventMetadata, RoleCreateEvent};
+        use discord_types::types::DiscordRole;
+        RoleCreateEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role: DiscordRole { id: 111, name: "Mod".to_string(), color: 0, hoist: false, position: 1, permissions: "0".to_string(), mentionable: false } }
+    }
+
+    fn make_role_update_event(session_id: &str) -> discord_types::events::RoleUpdateEvent {
+        use discord_types::events::{EventMetadata, RoleUpdateEvent};
+        use discord_types::types::DiscordRole;
+        RoleUpdateEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role: DiscordRole { id: 111, name: "Admin".to_string(), color: 0xFF0000, hoist: true, position: 1, permissions: "8".to_string(), mentionable: true } }
+    }
+
+    fn make_role_delete_event(session_id: &str) -> discord_types::events::RoleDeleteEvent {
+        use discord_types::events::{EventMetadata, RoleDeleteEvent};
+        RoleDeleteEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role_id: 111 }
+    }
+
+    fn make_presence_event(session_id: &str) -> discord_types::events::PresenceUpdateEvent {
+        use discord_types::events::{EventMetadata, PresenceUpdateEvent};
+        PresenceUpdateEvent { metadata: EventMetadata::new(session_id, 1), user_id: 42, guild_id: 200, status: "online".to_string() }
+    }
+
+    fn make_bot_ready_event(session_id: &str) -> discord_types::events::BotReadyEvent {
+        use discord_types::events::{EventMetadata, BotReadyEvent};
+        use discord_types::types::DiscordUser;
+        BotReadyEvent { metadata: EventMetadata::new(session_id, 1), bot_user: DiscordUser { id: 999, username: "bot".to_string(), global_name: None, bot: true }, guild_count: 3 }
+    }
+
+    fn make_autocomplete_event(session_id: &str, interaction_id: u64) -> discord_types::events::AutocompleteEvent {
+        use discord_types::events::{AutocompleteEvent, EventMetadata};
+        use discord_types::types::DiscordUser;
+        AutocompleteEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            interaction_id,
+            interaction_token: "ac-tok".to_string(),
+            guild_id: None,
+            channel_id: 100,
+            user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+            command_name: "ask".to_string(),
+            focused_option: "question".to_string(),
+            current_value: "how".to_string(),
+        }
+    }
+
+    fn make_modal_submit_event(session_id: &str, interaction_id: u64) -> discord_types::events::ModalSubmitEvent {
+        use discord_types::events::{EventMetadata, ModalSubmitEvent};
+        use discord_types::types::DiscordUser;
+        ModalSubmitEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            interaction_id,
+            interaction_token: "modal-tok".to_string(),
+            guild_id: None,
+            channel_id: 100,
+            user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+            custom_id: "my_modal".to_string(),
+            inputs: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_typing_start_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_typing_start(&make_typing_event("dc-dm-100", 42, 100)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_voice_state_update_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_voice_state_update(&make_voice_event("dc-guild-200-500", 42)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_guild_create_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_guild_create(&make_guild_create_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_guild_update_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_guild_update(&make_guild_update_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_guild_delete_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_guild_delete(&make_guild_delete_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_channel_create_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_channel_create(&make_channel_create_event("dc-guild-200-300")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_channel_update_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_channel_update(&make_channel_update_event("dc-guild-200-300")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_channel_delete_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_channel_delete(&make_channel_delete_event("dc-guild-200-300")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_role_create_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_role_create(&make_role_create_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_role_update_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_role_update(&make_role_update_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_role_delete_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_role_delete(&make_role_delete_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_presence_update_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_presence_update(&make_presence_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_bot_ready_is_noop() {
+        let processor = MessageProcessor::default();
+        let result = processor.process_bot_ready(&make_bot_ready_event("dc-guild-200-100")).await;
+        assert!(result.is_ok());
+    }
+
+    // ── autocomplete & modal (publish to NATS) ─────────────────────────────
+
+    #[tokio::test]
+    async fn test_autocomplete_responds_with_empty_choices() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available at {}", NATS_URL);
+            return;
+        };
+
+        let prefix = format!("test-proc-ac-{}", uuid::Uuid::new_v4().simple());
+        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
+        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
+
+        let subject = discord_nats::subjects::agent::interaction_autocomplete_respond(&prefix);
+        let mut stream = subscriber
+            .subscribe::<discord_types::AutocompleteRespondCommand>(&subject)
+            .await
+            .unwrap();
+
+        let processor = MessageProcessor::default();
+        let event = make_autocomplete_event("dc-dm-100", 6666);
+        processor.process_autocomplete(&event, &publisher).await.unwrap();
+
+        let cmd = stream.next().await.unwrap().unwrap();
+        assert_eq!(cmd.interaction_id, 6666);
+        assert_eq!(cmd.interaction_token, "ac-tok");
+        assert!(cmd.choices.is_empty(), "default autocomplete must return empty choices");
+    }
+
+    #[tokio::test]
+    async fn test_modal_submit_responds_ephemeral() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available at {}", NATS_URL);
+            return;
+        };
+
+        let prefix = format!("test-proc-modal-{}", uuid::Uuid::new_v4().simple());
+        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
+        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
+
+        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
+        let mut stream = subscriber
+            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
+            .await
+            .unwrap();
+
+        let processor = MessageProcessor::default();
+        let event = make_modal_submit_event("dc-dm-100", 7777);
+        processor.process_modal_submit(&event, &publisher).await.unwrap();
+
+        let cmd = stream.next().await.unwrap().unwrap();
+        assert_eq!(cmd.interaction_id, 7777);
+        assert_eq!(cmd.interaction_token, "modal-tok");
+        assert!(cmd.ephemeral, "modal ack must be ephemeral");
+        let content = cmd.content.unwrap_or_default();
+        assert!(
+            content.contains("Received"),
+            "modal ack content must say Received, got: {}",
+            content
+        );
+    }
+
     #[tokio::test]
     async fn test_unknown_slash_command_responds_with_help_hint() {
         let Some(client) = try_connect().await else {

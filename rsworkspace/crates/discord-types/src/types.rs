@@ -281,4 +281,78 @@ mod tests {
         };
         roundtrip(&embed);
     }
+
+    #[test]
+    fn test_discord_role_roundtrip() {
+        let role = DiscordRole {
+            id: 111,
+            name: "Moderator".to_string(),
+            color: 0x00FF00,
+            hoist: true,
+            position: 3,
+            permissions: "8".to_string(),
+            mentionable: true,
+        };
+        roundtrip(&role);
+    }
+
+    #[test]
+    fn test_discord_role_optional_fields_omitted() {
+        // permissions bitmask must serialize as string, not number
+        let role = DiscordRole {
+            id: 1,
+            name: "everyone".to_string(),
+            color: 0,
+            hoist: false,
+            position: 0,
+            permissions: "104320065".to_string(),
+            mentionable: false,
+        };
+        let json = serde_json::to_string(&role).unwrap();
+        // permissions must be a JSON string
+        assert!(
+            json.contains("\"104320065\""),
+            "permissions must be a string, got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_voice_state_roundtrip() {
+        let state = VoiceState {
+            user_id: 42,
+            channel_id: Some(500),
+            guild_id: Some(200),
+            self_mute: true,
+            self_deaf: false,
+        };
+        roundtrip(&state);
+    }
+
+    #[test]
+    fn test_voice_state_no_channel_omitted() {
+        let state = VoiceState {
+            user_id: 42,
+            channel_id: None,
+            guild_id: None,
+            self_mute: false,
+            self_deaf: false,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            !json.contains("channel_id"),
+            "channel_id must be omitted when None"
+        );
+        assert!(!json.contains("guild_id"), "guild_id must be omitted when None");
+        roundtrip(&state);
+    }
+
+    #[test]
+    fn test_modal_input_roundtrip() {
+        let input = ModalInput {
+            custom_id: "name_field".to_string(),
+            value: "Alice".to_string(),
+        };
+        roundtrip(&input);
+    }
 }
