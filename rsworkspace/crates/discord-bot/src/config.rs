@@ -25,6 +25,10 @@ pub struct DiscordBotConfig {
     /// Publish presence update events to NATS (requires GUILD_PRESENCES privileged intent)
     #[serde(default)]
     pub presence_enabled: bool,
+    /// When set, slash commands are registered to this guild (instant propagation).
+    /// When absent, commands are registered globally (takes ~1 hour to propagate).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_commands_guild_id: Option<u64>,
     /// Access control configuration
     #[serde(default)]
     pub access: AccessConfig,
@@ -91,10 +95,15 @@ impl Config {
             .to_lowercase()
             == "true";
 
+        let guild_commands_guild_id = std::env::var("DISCORD_GUILD_COMMANDS_GUILD_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok());
+
         Ok(Config {
             discord: DiscordBotConfig {
                 bot_token,
                 presence_enabled,
+                guild_commands_guild_id,
                 access: AccessConfig {
                     dm_policy,
                     guild_policy,

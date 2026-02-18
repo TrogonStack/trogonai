@@ -74,6 +74,30 @@ pub struct EmbedField {
     pub inline: bool,
 }
 
+/// Embed author
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbedAuthor {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+/// Embed footer
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbedFooter {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+/// Embed image or thumbnail (just a URL)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbedMedia {
+    pub url: String,
+}
+
 /// Message embed
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Embed {
@@ -87,6 +111,17 @@ pub struct Embed {
     pub fields: Vec<EmbedField>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<EmbedAuthor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub footer: Option<EmbedFooter>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<EmbedMedia>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<EmbedMedia>,
+    /// ISO 8601 timestamp string
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
 }
 
 /// Discord emoji
@@ -188,6 +223,156 @@ pub struct ModalInput {
     pub value: String,
 }
 
+/// Button style
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ButtonStyle {
+    Primary,
+    Secondary,
+    Success,
+    Danger,
+    /// Link buttons open a URL instead of firing an interaction
+    Link,
+}
+
+/// A button component
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Button {
+    pub style: ButtonStyle,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<Emoji>,
+    /// Required for non-Link buttons (used as the interaction custom_id)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_id: Option<String>,
+    /// Required for Link buttons
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+}
+
+/// One option in a string select menu
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectOption {
+    pub label: String,
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<Emoji>,
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// A string select menu component
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StringSelectMenu {
+    pub custom_id: String,
+    #[serde(default)]
+    pub options: Vec<SelectOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(default = "default_min_values")]
+    pub min_values: u8,
+    #[serde(default = "default_max_values")]
+    pub max_values: u8,
+    #[serde(default)]
+    pub disabled: bool,
+}
+
+fn default_min_values() -> u8 {
+    1
+}
+fn default_max_values() -> u8 {
+    1
+}
+
+/// A component inside an action row
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ActionRowComponent {
+    Button(Button),
+    StringSelect(StringSelectMenu),
+}
+
+/// An action row — holds up to 5 buttons or 1 select menu
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionRow {
+    #[serde(default)]
+    pub components: Vec<ActionRowComponent>,
+}
+
+/// A file to attach to a message via local filesystem path on the bot host
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttachedFile {
+    pub filename: String,
+    /// Absolute path on the bot's filesystem
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Bot activity type (for rich presence)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityType {
+    Playing,
+    Streaming,
+    Listening,
+    Watching,
+    Custom,
+    Competing,
+}
+
+/// Bot activity/game shown in presence
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BotActivity {
+    pub kind: ActivityType,
+    pub name: String,
+    /// Stream URL — only used when kind = Streaming
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Bot online status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BotStatus {
+    Online,
+    Idle,
+    DoNotDisturb,
+    Invisible,
+}
+
+/// A Discord message returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedMessage {
+    pub id: u64,
+    pub channel_id: u64,
+    pub author: DiscordUser,
+    pub content: String,
+    pub timestamp: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub embeds: Vec<Embed>,
+}
+
+/// A guild member returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedMember {
+    pub user: DiscordUser,
+    pub guild_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub joined_at: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +463,11 @@ mod tests {
                 inline: false,
             }],
             color: Some(0xFF0000),
+            author: None,
+            footer: None,
+            image: None,
+            thumbnail: None,
+            timestamp: None,
         };
         roundtrip(&embed);
     }

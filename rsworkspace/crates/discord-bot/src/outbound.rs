@@ -15,16 +15,23 @@ use discord_types::{
     AddReactionCommand, ArchiveThreadCommand, AssignRoleCommand, AutocompleteRespondCommand,
     BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateRoleCommand,
     CreateThreadCommand, DeleteChannelCommand, DeleteMessageCommand, DeleteRoleCommand,
-    EditChannelCommand, EditMessageCommand, InteractionDeferCommand, InteractionFollowupCommand,
-    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
-    RemoveReactionCommand, RemoveRoleCommand, SendMessageCommand, TimeoutUserCommand,
-    TypingCommand, UnpinMessageCommand,
+    EditChannelCommand, EditMessageCommand, FetchMemberCommand, FetchMessagesCommand,
+    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand,
+    ModalRespondCommand, PinMessageCommand, RemoveReactionCommand, RemoveRoleCommand,
+    SendMessageCommand, SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnpinMessageCommand,
+};
+use discord_types::types::{
+    ActionRowComponent, AttachedFile, ButtonStyle as DcButtonStyle, DiscordUser,
+    Embed, EmbedField, FetchedMember, FetchedMessage,
 };
 use serenity::builder::{
-    CreateAutocompleteResponse, CreateChannel, CreateInteractionResponse,
+    CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
+    CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, CreateInteractionResponse,
     CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
-    CreateThread, EditChannel, EditMember, EditMessage, EditRole, EditThread,
+    CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, CreateThread, EditChannel,
+    EditMember, EditMessage, EditRole, EditThread, GetMessages,
 };
+use serenity::model::application::ButtonStyle as SerenityButtonStyle;
 use serenity::http::Http;
 use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, UserId};
 use tokio::sync::RwLock;
@@ -50,6 +57,218 @@ fn truncate(s: &str) -> &str {
             end -= 1;
         }
         &s[..end]
+    }
+}
+
+/// Convert a discord-types `Embed` into a serenity `CreateEmbed`.
+fn build_embed(embed: &Embed) -> CreateEmbed {
+    let mut builder = CreateEmbed::new();
+    if let Some(ref title) = embed.title {
+        builder = builder.title(title);
+    }
+    if let Some(ref desc) = embed.description {
+        builder = builder.description(desc);
+    }
+    if let Some(ref url) = embed.url {
+        builder = builder.url(url);
+    }
+    if let Some(color) = embed.color {
+        builder = builder.color(color);
+    }
+    for field in &embed.fields {
+        builder = builder.field(&field.name, &field.value, field.inline);
+    }
+    if let Some(ref author) = embed.author {
+        let mut a = CreateEmbedAuthor::new(&author.name);
+        if let Some(ref url) = author.url {
+            a = a.url(url);
+        }
+        if let Some(ref icon) = author.icon_url {
+            a = a.icon_url(icon);
+        }
+        builder = builder.author(a);
+    }
+    if let Some(ref footer) = embed.footer {
+        let mut f = CreateEmbedFooter::new(&footer.text);
+        if let Some(ref icon) = footer.icon_url {
+            f = f.icon_url(icon);
+        }
+        builder = builder.footer(f);
+    }
+    if let Some(ref image) = embed.image {
+        builder = builder.image(&image.url);
+    }
+    if let Some(ref thumbnail) = embed.thumbnail {
+        builder = builder.thumbnail(&thumbnail.url);
+    }
+    if let Some(ref ts) = embed.timestamp {
+        if let Ok(timestamp) = serenity::model::Timestamp::parse(ts) {
+            builder = builder.timestamp(timestamp);
+        }
+    }
+    builder
+}
+
+/// Convert discord-types `ActionRow` slice into serenity `CreateActionRow` vec.
+fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActionRow> {
+    rows.iter()
+        .filter_map(|row| {
+            let has_buttons = row
+                .components
+                .iter()
+                .any(|c| matches!(c, ActionRowComponent::Button(_)));
+            let has_select = row
+                .components
+                .iter()
+                .any(|c| matches!(c, ActionRowComponent::StringSelect(_)));
+
+            if has_buttons && !has_select {
+                let buttons: Vec<CreateButton> = row
+                    .components
+                    .iter()
+                    .filter_map(|c| {
+                        if let ActionRowComponent::Button(btn) = c {
+                            let mut b = match btn.style {
+                                DcButtonStyle::Link => {
+                                    CreateButton::new_link(
+                                        btn.url.as_deref().unwrap_or(""),
+                                    )
+                                }
+                                _ => {
+                                    let style = match btn.style {
+                                        DcButtonStyle::Secondary => {
+                                            SerenityButtonStyle::Secondary
+                                        }
+                                        DcButtonStyle::Success => SerenityButtonStyle::Success,
+                                        DcButtonStyle::Danger => SerenityButtonStyle::Danger,
+                                        _ => SerenityButtonStyle::Primary,
+                                    };
+                                    CreateButton::new(
+                                        btn.custom_id.as_deref().unwrap_or(""),
+                                    )
+                                    .style(style)
+                                }
+                            };
+                            if let Some(ref label) = btn.label {
+                                b = b.label(label);
+                            }
+                            if btn.disabled {
+                                b = b.disabled(true);
+                            }
+                            Some(b)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                Some(CreateActionRow::Buttons(buttons))
+            } else if has_select {
+                let menu = row.components.iter().find_map(|c| {
+                    if let ActionRowComponent::StringSelect(m) = c {
+                        Some(m)
+                    } else {
+                        None
+                    }
+                })?;
+                let options: Vec<CreateSelectMenuOption> = menu
+                    .options
+                    .iter()
+                    .map(|opt| {
+                        let mut o = CreateSelectMenuOption::new(&opt.label, &opt.value);
+                        if let Some(ref desc) = opt.description {
+                            o = o.description(desc);
+                        }
+                        if opt.default {
+                            o = o.default_selection(true);
+                        }
+                        o
+                    })
+                    .collect();
+                let mut select = CreateSelectMenu::new(
+                    &menu.custom_id,
+                    CreateSelectMenuKind::String { options },
+                )
+                .min_values(menu.min_values)
+                .max_values(menu.max_values)
+                .disabled(menu.disabled);
+                if let Some(ref placeholder) = menu.placeholder {
+                    select = select.placeholder(placeholder);
+                }
+                Some(CreateActionRow::SelectMenu(select))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Load file attachments from local paths into serenity `CreateAttachment` values.
+async fn load_attachments(files: &[AttachedFile]) -> Vec<CreateAttachment> {
+    let mut result = Vec::with_capacity(files.len());
+    for file in files {
+        match CreateAttachment::path(&file.path).await {
+            Ok(mut a) => {
+                if let Some(ref desc) = file.description {
+                    a = a.description(desc);
+                }
+                result.push(a);
+            }
+            Err(e) => {
+                error!("Failed to load attachment '{}': {}", file.path, e);
+            }
+        }
+    }
+    result
+}
+
+/// Convert a serenity `Message` to a discord-types `FetchedMessage`.
+fn to_fetched_message(m: &serenity::model::channel::Message) -> FetchedMessage {
+    FetchedMessage {
+        id: m.id.get(),
+        channel_id: m.channel_id.get(),
+        author: DiscordUser {
+            id: m.author.id.get(),
+            username: m.author.name.clone(),
+            global_name: m.author.global_name.as_deref().map(String::from),
+            bot: m.author.bot,
+        },
+        content: m.content.clone(),
+        timestamp: m.timestamp.to_rfc3339().unwrap_or_default(),
+        attachments: m
+            .attachments
+            .iter()
+            .map(|a| discord_types::types::Attachment {
+                id: a.id.get(),
+                filename: a.filename.clone(),
+                url: a.url.clone(),
+                content_type: a.content_type.clone(),
+                size: a.size as u64,
+            })
+            .collect(),
+        embeds: m
+            .embeds
+            .iter()
+            .map(|e| Embed {
+                title: e.title.clone(),
+                description: e.description.clone(),
+                url: e.url.clone(),
+                fields: e
+                    .fields
+                    .iter()
+                    .map(|f| EmbedField {
+                        name: f.name.clone(),
+                        value: f.value.clone(),
+                        inline: f.inline,
+                    })
+                    .collect(),
+                color: e.colour.map(|c| c.0),
+                author: None,
+                footer: None,
+                image: None,
+                thumbnail: None,
+                timestamp: None,
+            })
+            .collect(),
     }
 }
 
@@ -84,7 +303,7 @@ impl OutboundProcessor {
         let (
             r1, r2, r3, r4, r5, r6, r7, r8, r9, r10,
             r11, r12, r13, r14, r15, r16, r17, r18, r19, r20,
-            r21, r22, r23, r24, r25, r26, r27,
+            r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -148,6 +367,9 @@ impl OutboundProcessor {
             Self::handle_bulk_delete(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
             Self::handle_create_thread(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
             Self::handle_archive_thread(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_bot_presence(client.clone(), prefix.clone()),
+            Self::handle_fetch_messages(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_member(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -179,6 +401,9 @@ impl OutboundProcessor {
             ("bulk_delete", r25),
             ("create_thread", r26),
             ("archive_thread", r27),
+            ("bot_presence", r28),
+            ("fetch_messages", r29),
+            ("fetch_member", r30),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -206,10 +431,20 @@ impl OutboundProcessor {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let context = format!("Failed to send message to channel {}", cmd.channel_id);
+                    // Load attachments before the retry loop (async path reads)
+                    let attachments = load_attachments(&cmd.files).await;
                     let mut builder = CreateMessage::new().content(truncate(&cmd.content));
                     if let Some(reply_id) = cmd.reply_to_message_id {
                         builder = builder.reference_message((channel, MessageId::new(reply_id)));
                     }
+                    if !cmd.embeds.is_empty() {
+                        let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
+                        builder = builder.embeds(embeds);
+                    }
+                    if !cmd.components.is_empty() {
+                        builder = builder.components(build_action_rows(&cmd.components));
+                    }
+                    builder = builder.add_files(attachments);
                     for attempt in 0..=MAX_RETRIES {
                         match channel.send_message(&*http, builder.clone()).await {
                             Ok(_) => break,
@@ -361,6 +596,13 @@ impl OutboundProcessor {
                     if cmd.ephemeral {
                         msg = msg.ephemeral(true);
                     }
+                    if !cmd.embeds.is_empty() {
+                        let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
+                        msg = msg.embeds(embeds);
+                    }
+                    if !cmd.components.is_empty() {
+                        msg = msg.components(build_action_rows(&cmd.components));
+                    }
 
                     let response = CreateInteractionResponse::Message(msg);
 
@@ -455,6 +697,7 @@ impl OutboundProcessor {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
+                    let attachments = load_attachments(&cmd.files).await;
                     let mut builder = CreateInteractionResponseFollowup::new();
                     if let Some(content) = &cmd.content {
                         builder = builder.content(truncate(content));
@@ -462,9 +705,16 @@ impl OutboundProcessor {
                     if cmd.ephemeral {
                         builder = builder.ephemeral(true);
                     }
+                    if !cmd.embeds.is_empty() {
+                        let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
+                        builder = builder.embeds(embeds);
+                    }
+                    if !cmd.components.is_empty() {
+                        builder = builder.components(build_action_rows(&cmd.components));
+                    }
 
                     match http
-                        .create_followup_message(&cmd.interaction_token, &builder, Vec::new())
+                        .create_followup_message(&cmd.interaction_token, &builder, attachments)
                         .await
                     {
                         Ok(msg) => {
@@ -1461,6 +1711,174 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => warn!("Failed to deserialize archive_thread command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle `SetBotPresenceCommand`.
+    ///
+    /// Setting presence requires access to the shard WebSocket connection via
+    /// `ShardManager`, which is not available in `OutboundProcessor`. This handler
+    /// acknowledges the subscription but cannot execute the command.
+    async fn handle_bot_presence(
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::bot_presence(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+
+        info!("Listening for bot_presence commands on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            match serde_json::from_slice::<SetBotPresenceCommand>(&msg.payload) {
+                Ok(_cmd) => {
+                    warn!(
+                        "bot_presence command received but cannot be applied: \
+                         OutboundProcessor has no shard manager access. \
+                         To change bot presence, call ctx.set_presence() from a handler."
+                    );
+                }
+                Err(e) => warn!("Failed to deserialize bot_presence command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle `FetchMessagesCommand` (request-reply pattern).
+    ///
+    /// The agent sends a `FetchMessagesCommand` via `client.request()`. This
+    /// handler fetches the messages from Discord and publishes the result as
+    /// `Vec<FetchedMessage>` JSON to the NATS reply inbox.
+    async fn handle_fetch_messages(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_messages(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+
+        info!("Listening for fetch_messages requests on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_messages: received message without reply subject");
+                    continue;
+                }
+            };
+
+            let cmd: FetchMessagesCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_messages: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+
+            let channel = ChannelId::new(cmd.channel_id);
+            let limit = cmd.limit.clamp(1, 100);
+            let mut get_messages = GetMessages::new().limit(limit);
+            if let Some(before_id) = cmd.before_id {
+                get_messages = get_messages.before(MessageId::new(before_id));
+            }
+
+            let response_bytes = match channel.messages(http.as_ref(), get_messages).await {
+                Ok(messages) => {
+                    let fetched: Vec<FetchedMessage> =
+                        messages.iter().map(to_fetched_message).collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!(
+                        "fetch_messages: Discord API error for channel {}: {}",
+                        cmd.channel_id, e
+                    );
+                    serde_json::to_vec::<Vec<FetchedMessage>>(&vec![]).unwrap_or_default()
+                }
+            };
+
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_messages: failed to send reply: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle `FetchMemberCommand` (request-reply pattern).
+    ///
+    /// The agent sends a `FetchMemberCommand` via `client.request()`. This
+    /// handler fetches the guild member from Discord and publishes the result as
+    /// `Option<FetchedMember>` JSON to the NATS reply inbox (`null` on error).
+    async fn handle_fetch_member(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_member(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+
+        info!("Listening for fetch_member requests on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_member: received message without reply subject");
+                    continue;
+                }
+            };
+
+            let cmd: FetchMemberCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_member: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+
+            let guild = GuildId::new(cmd.guild_id);
+            let user = UserId::new(cmd.user_id);
+
+            let response_bytes =
+                match guild.member(http.as_ref(), user).await {
+                    Ok(member) => {
+                        let fetched = FetchedMember {
+                            user: DiscordUser {
+                                id: member.user.id.get(),
+                                username: member.user.name.clone(),
+                                global_name: member
+                                    .user
+                                    .global_name
+                                    .as_deref()
+                                    .map(String::from),
+                                bot: member.user.bot,
+                            },
+                            guild_id: cmd.guild_id,
+                            nick: member.nick.clone(),
+                            roles: member.roles.iter().map(|r| r.get()).collect(),
+                            joined_at: member.joined_at.and_then(|t| t.to_rfc3339()),
+                        };
+                        serde_json::to_vec(&fetched).unwrap_or_default()
+                    }
+                    Err(e) => {
+                        error!(
+                            "fetch_member: Discord API error for user {} in guild {}: {}",
+                            cmd.user_id, cmd.guild_id, e
+                        );
+                        b"null".to_vec()
+                    }
+                };
+
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_member: failed to send reply: {}", e);
             }
         }
 

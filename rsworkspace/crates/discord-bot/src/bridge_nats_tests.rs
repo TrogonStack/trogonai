@@ -35,6 +35,7 @@ mod nats_tests {
                 ..Default::default()
             },
             false,
+            None,
         )
     }
 

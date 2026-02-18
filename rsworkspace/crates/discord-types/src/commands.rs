@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{ChannelType, Embed, ModalInput};
+use crate::types::{ActionRow, AttachedFile, BotActivity, BotStatus, ChannelType, Embed, ModalInput};
 
 /// Send a new message to a channel
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13,6 +13,12 @@ pub struct SendMessageCommand {
     pub embeds: Vec<Embed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to_message_id: Option<u64>,
+    /// Local files to attach (paths resolved on the bot host)
+    #[serde(default)]
+    pub files: Vec<AttachedFile>,
+    /// Interactive action rows (buttons / select menus)
+    #[serde(default)]
+    pub components: Vec<ActionRow>,
 }
 
 /// Edit an existing message
@@ -43,6 +49,9 @@ pub struct InteractionRespondCommand {
     #[serde(default)]
     pub embeds: Vec<Embed>,
     pub ephemeral: bool,
+    /// Interactive action rows (buttons / select menus)
+    #[serde(default)]
+    pub components: Vec<ActionRow>,
 }
 
 /// Defer an interaction response (acknowledge immediately, follow up later)
@@ -70,6 +79,12 @@ pub struct InteractionFollowupCommand {
     /// so it can be progressively edited via StreamMessageCommand.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Local files to attach (paths resolved on the bot host)
+    #[serde(default)]
+    pub files: Vec<AttachedFile>,
+    /// Interactive action rows (buttons / select menus)
+    #[serde(default)]
+    pub components: Vec<ActionRow>,
 }
 
 /// Add a reaction to a message
@@ -278,6 +293,42 @@ pub struct ArchiveThreadCommand {
     pub locked: bool,
 }
 
+/// Set the bot's online status and activity (requires shard access on the bot side)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetBotPresenceCommand {
+    pub status: BotStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<BotActivity>,
+}
+
+/// Fetch recent messages from a channel (request-reply over NATS)
+///
+/// The bot replies with `Vec<FetchedMessage>` serialized as JSON to the
+/// NATS reply inbox. Use `client.request(subject, payload)` on the agent side.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchMessagesCommand {
+    pub channel_id: u64,
+    /// Number of messages to fetch (1-100, default 20)
+    #[serde(default = "default_fetch_limit")]
+    pub limit: u8,
+    /// Fetch messages before this message ID (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_id: Option<u64>,
+}
+
+fn default_fetch_limit() -> u8 {
+    20
+}
+
+/// Fetch a single guild member (request-reply over NATS)
+///
+/// The bot replies with `FetchedMember` serialized as JSON to the NATS reply inbox.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchMemberCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +351,8 @@ mod tests {
             content: "Hello".to_string(),
             embeds: vec![],
             reply_to_message_id: Some(50),
+            files: vec![],
+            components: vec![],
         });
     }
 
@@ -310,6 +363,8 @@ mod tests {
             content: "Hello".to_string(),
             embeds: vec![],
             reply_to_message_id: None,
+            files: vec![],
+            components: vec![],
         });
     }
 
@@ -339,6 +394,7 @@ mod tests {
             content: Some("pong".to_string()),
             embeds: vec![],
             ephemeral: false,
+            components: vec![],
         });
     }
 
@@ -359,6 +415,8 @@ mod tests {
             embeds: vec![],
             ephemeral: false,
             session_id: None,
+            files: vec![],
+            components: vec![],
         });
     }
 
@@ -370,6 +428,8 @@ mod tests {
             embeds: vec![],
             ephemeral: false,
             session_id: Some("ask_guild_100_200_300".to_string()),
+            files: vec![],
+            components: vec![],
         });
         // session_id must be omitted when None
         let cmd = InteractionFollowupCommand {
@@ -378,6 +438,8 @@ mod tests {
             embeds: vec![],
             ephemeral: false,
             session_id: None,
+            files: vec![],
+            components: vec![],
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(

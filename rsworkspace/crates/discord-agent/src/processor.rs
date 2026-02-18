@@ -272,6 +272,8 @@ impl MessageProcessor {
                 content: format!("You said: {}", content),
                 embeds: vec![],
                 reply_to_message_id: Some(message_id),
+                files: vec![],
+                components: vec![],
             };
             let subject = subjects::agent::message_send(publisher.prefix());
             publisher.publish(&subject, &cmd).await?;
@@ -425,6 +427,8 @@ impl MessageProcessor {
                                 embeds: vec![],
                                 ephemeral: false,
                                 session_id: Some(ask_session.clone()),
+                                files: vec![],
+                                components: vec![],
                             },
                         )
                         .await?;
@@ -650,6 +654,8 @@ impl MessageProcessor {
                                 embeds: vec![],
                                 ephemeral: false,
                                 session_id: Some(ask_session.clone()),
+                                files: vec![],
+                                components: vec![],
                             },
                         )
                         .await?;
@@ -840,6 +846,8 @@ impl MessageProcessor {
             content,
             embeds: vec![],
             reply_to_message_id: None,
+            files: vec![],
+            components: vec![],
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -874,6 +882,8 @@ impl MessageProcessor {
             content,
             embeds: vec![],
             reply_to_message_id: None,
+            files: vec![],
+            components: vec![],
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -1180,6 +1190,8 @@ impl MessageProcessor {
             content: format!("<@{}> Conversation history cleared! 🗑️", event.user_id),
             embeds: vec![],
             reply_to_message_id: None,
+            files: vec![],
+            components: vec![],
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -1279,6 +1291,7 @@ impl MessageProcessor {
             content: Some(content.to_string()),
             embeds: vec![],
             ephemeral,
+            components: vec![],
         };
         let subject = subjects::agent::interaction_respond(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -1443,6 +1456,7 @@ impl MessageProcessor {
             content: Some("Received.".to_string()),
             embeds: vec![],
             ephemeral: true,
+            components: vec![],
         };
         let subject = subjects::agent::interaction_respond(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
