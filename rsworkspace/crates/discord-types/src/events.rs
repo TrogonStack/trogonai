@@ -381,6 +381,35 @@ pub struct InviteDeleteEvent {
     pub guild_id: Option<u64>,
 }
 
+/// A stage instance was created in a stage channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StageInstanceCreateEvent {
+    pub metadata: EventMetadata,
+    pub stage_id: u64,
+    pub guild_id: u64,
+    pub channel_id: u64,
+    pub topic: String,
+}
+
+/// A stage instance's topic was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StageInstanceUpdateEvent {
+    pub metadata: EventMetadata,
+    pub stage_id: u64,
+    pub guild_id: u64,
+    pub channel_id: u64,
+    pub topic: String,
+}
+
+/// A stage instance ended (deleted)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StageInstanceDeleteEvent {
+    pub metadata: EventMetadata,
+    pub stage_id: u64,
+    pub guild_id: u64,
+    pub channel_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

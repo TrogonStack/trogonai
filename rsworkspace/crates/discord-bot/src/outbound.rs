@@ -12,15 +12,16 @@ use std::sync::Arc;
 use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
-    AddReactionCommand, ArchiveThreadCommand, AssignRoleCommand, AutocompleteRespondCommand,
-    BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateEmojiCommand,
-    CreateInviteCommand, CreateRoleCommand, CreateScheduledEventCommand, CreateThreadCommand,
-    CreateWebhookCommand, DeleteChannelCommand, DeleteEmojiCommand, DeleteMessageCommand,
-    DeleteRoleCommand, DeleteScheduledEventCommand, DeleteWebhookCommand, EditChannelCommand,
-    EditMessageCommand, ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand,
-    GuildMemberNickCommand, InteractionDeferCommand, InteractionFollowupCommand,
-    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
-    RemoveReactionCommand, RemoveRoleCommand, RevokeInviteCommand, SendMessageCommand,
+    AddReactionCommand, AddThreadMemberCommand, ArchiveThreadCommand, AssignRoleCommand,
+    AutocompleteRespondCommand, BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand,
+    CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand, CreateRoleCommand,
+    CreateScheduledEventCommand, CreateThreadCommand, CreateWebhookCommand, CrosspostMessageCommand,
+    DeleteChannelCommand, DeleteEmojiCommand, DeleteMessageCommand, DeleteRoleCommand,
+    DeleteScheduledEventCommand, DeleteWebhookCommand, EditChannelCommand, EditMessageCommand,
+    ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand, GuildMemberNickCommand,
+    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand,
+    ModalRespondCommand, PinMessageCommand, RemoveAllReactionsCommand, RemoveReactionCommand,
+    RemoveRoleCommand, RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand,
     SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnbanUserCommand,
     UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
 };
@@ -341,6 +342,7 @@ impl OutboundProcessor {
             r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
             r31, r32, r33, r34, r35, r36, r37,
             r38, r39, r40, r41, r42, r43,
+            r44, r45, r46, r47, r48,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -420,6 +422,11 @@ impl OutboundProcessor {
             Self::handle_emoji_delete(http.clone(), client.clone(), prefix.clone()),
             Self::handle_scheduled_event_create(http.clone(), client.clone(), prefix.clone()),
             Self::handle_scheduled_event_delete(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_reaction_remove_all(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_message_crosspost(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_forum_post_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_thread_member_add(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_thread_member_remove(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -467,6 +474,11 @@ impl OutboundProcessor {
             ("emoji_delete", r41),
             ("scheduled_event_create", r42),
             ("scheduled_event_delete", r43),
+            ("reaction_remove_all", r44),
+            ("message_crosspost", r45),
+            ("forum_post_create", r46),
+            ("thread_member_add", r47),
+            ("thread_member_remove", r48),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -2450,6 +2462,148 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => warn!("Failed to deserialize scheduled_event_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_reaction_remove_all(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::reaction_remove_all(&prefix);
+        let mut stream = subscriber.subscribe::<RemoveAllReactionsCommand>(&subject).await?;
+        info!("Listening for reaction_remove_all commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let msg = MessageId::new(cmd.message_id);
+                    if let Some(ref emoji_str) = cmd.emoji {
+                        // Parse as ReactionType and remove only that emoji
+                        match emoji_str.parse::<serenity::model::channel::ReactionType>() {
+                            Ok(rt) => {
+                                if let Err(e) = http.delete_message_reaction_emoji(channel, msg, &rt).await {
+                                    warn!("Failed to remove emoji reactions {} from {}/{}: {}", emoji_str, cmd.channel_id, cmd.message_id, e);
+                                }
+                            }
+                            Err(e) => warn!("Failed to parse emoji '{}': {}", emoji_str, e),
+                        }
+                    } else {
+                        if let Err(e) = http.delete_message_reactions(channel, msg).await {
+                            warn!("Failed to remove all reactions from {}/{}: {}", cmd.channel_id, cmd.message_id, e);
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize reaction_remove_all command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_message_crosspost(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::message_crosspost(&prefix);
+        let mut stream = subscriber.subscribe::<CrosspostMessageCommand>(&subject).await?;
+        info!("Listening for message_crosspost commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let msg = MessageId::new(cmd.message_id);
+                    if let Err(e) = http.crosspost_message(channel, msg).await {
+                        warn!("Failed to crosspost message {}/{}: {}", cmd.channel_id, cmd.message_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize message_crosspost command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_forum_post_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::builder::{CreateForumPost, CreateMessage};
+
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::forum_post_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateForumPostCommand>(&subject).await?;
+        info!("Listening for forum_post_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let msg = CreateMessage::new().content(truncate(&cmd.content));
+                    let mut builder = CreateForumPost::new(&cmd.name, msg);
+                    if !cmd.tags.is_empty() {
+                        let tag_ids: Vec<serenity::model::id::ForumTagId> = cmd.tags
+                            .iter()
+                            .map(|&id| serenity::model::id::ForumTagId::new(id))
+                            .collect();
+                        builder = builder.set_applied_tags(tag_ids);
+                    }
+                    if let Err(e) = channel.create_forum_post(&*http, builder).await {
+                        warn!("Failed to create forum post '{}' in {}: {}", cmd.name, cmd.channel_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize forum_post_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_thread_member_add(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::thread_member_add(&prefix);
+        let mut stream = subscriber.subscribe::<AddThreadMemberCommand>(&subject).await?;
+        info!("Listening for thread_member_add commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let thread = ChannelId::new(cmd.thread_id);
+                    let user = UserId::new(cmd.user_id);
+                    if let Err(e) = http.add_thread_channel_member(thread, user).await {
+                        warn!("Failed to add user {} to thread {}: {}", cmd.user_id, cmd.thread_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize thread_member_add command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_thread_member_remove(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::thread_member_remove(&prefix);
+        let mut stream = subscriber.subscribe::<RemoveThreadMemberCommand>(&subject).await?;
+        info!("Listening for thread_member_remove commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let thread = ChannelId::new(cmd.thread_id);
+                    let user = UserId::new(cmd.user_id);
+                    if let Err(e) = http.remove_thread_channel_member(thread, user).await {
+                        warn!("Failed to remove user {} from thread {}: {}", cmd.user_id, cmd.thread_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize thread_member_remove command: {}", e),
             }
         }
         Ok(())

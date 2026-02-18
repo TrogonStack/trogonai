@@ -461,6 +461,48 @@ pub struct DeleteScheduledEventCommand {
     pub event_id: u64,
 }
 
+/// Remove all reactions from a message (optionally filtered to one emoji)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemoveAllReactionsCommand {
+    pub channel_id: u64,
+    pub message_id: u64,
+    /// If set, removes only reactions for this emoji (unicode char or `name:id`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+}
+
+/// Crosspost (publish) an announcement-channel message to follower channels
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrosspostMessageCommand {
+    pub channel_id: u64,
+    pub message_id: u64,
+}
+
+/// Create a new post (thread + first message) in a forum channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateForumPostCommand {
+    pub channel_id: u64,
+    pub name: String,
+    pub content: String,
+    /// Applied forum tag IDs
+    #[serde(default)]
+    pub tags: Vec<u64>,
+}
+
+/// Add a member to a thread
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AddThreadMemberCommand {
+    pub thread_id: u64,
+    pub user_id: u64,
+}
+
+/// Remove a member from a thread
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemoveThreadMemberCommand {
+    pub thread_id: u64,
+    pub user_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

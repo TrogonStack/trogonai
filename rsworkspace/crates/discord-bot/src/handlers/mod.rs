@@ -765,4 +765,64 @@ impl EventHandler for Handler {
             }
         }
     }
+
+    async fn stage_instance_create(
+        &self,
+        ctx: Context,
+        stage: serenity::model::channel::StageInstance,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(stage.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_stage_instance_create(&stage).await {
+            error!("Failed to publish stage_instance_create: {}", e);
+        }
+    }
+
+    async fn stage_instance_update(
+        &self,
+        ctx: Context,
+        stage: serenity::model::channel::StageInstance,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(stage.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_stage_instance_update(&stage).await {
+            error!("Failed to publish stage_instance_update: {}", e);
+        }
+    }
+
+    async fn stage_instance_delete(
+        &self,
+        ctx: Context,
+        stage: serenity::model::channel::StageInstance,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(stage.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_stage_instance_delete(&stage).await {
+            error!("Failed to publish stage_instance_delete: {}", e);
+        }
+    }
 }
