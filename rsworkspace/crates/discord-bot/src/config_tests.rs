@@ -259,4 +259,29 @@ prefix = "prod"
 
         std::env::remove_var("DISCORD_BOT_TOKEN");
     }
+
+    #[test]
+    fn test_from_env_channel_allowlist_parsed() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_CHANNEL_ALLOWLIST", "701, 702, 703");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.channel_allowlist, vec![701, 702, 703]);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_CHANNEL_ALLOWLIST");
+    }
+
+    #[test]
+    fn test_from_env_channel_allowlist_default_empty() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::remove_var("DISCORD_CHANNEL_ALLOWLIST");
+
+        let cfg = Config::from_env().unwrap();
+        assert!(cfg.discord.access.channel_allowlist.is_empty());
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+    }
 }

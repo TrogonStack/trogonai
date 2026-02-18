@@ -43,6 +43,7 @@ services:
       # - DISCORD_USER_ALLOWLIST=${DISCORD_USER_ALLOWLIST:-}         # comma-separated user IDs
       # - DISCORD_ADMIN_USERS=${DISCORD_ADMIN_USERS:-}               # comma-separated user IDs
       # - DISCORD_REQUIRE_MENTION=${DISCORD_REQUIRE_MENTION:-false}  # true|false
+      # - DISCORD_CHANNEL_ALLOWLIST=${DISCORD_CHANNEL_ALLOWLIST:-}   # comma-separated channel IDs (empty = all)
     ports:
       - "3001:3001"
     depends_on:

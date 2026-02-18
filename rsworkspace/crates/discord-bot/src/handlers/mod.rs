@@ -42,6 +42,7 @@ impl EventHandler for Handler {
             CreateCommand::new("help").description("Show available commands"),
             CreateCommand::new("status").description("Show agent status"),
             CreateCommand::new("clear").description("Clear your conversation history"),
+            CreateCommand::new("summarize").description("Summarize your conversation so far"),
             CreateCommand::new("ask")
                 .description("Ask the AI a question")
                 .add_option(
@@ -83,6 +84,11 @@ impl EventHandler for Handler {
                 return;
             }
             if !bridge.check_require_mention(&msg.mentions) && !bridge.is_admin(msg.author.id.get())
+            {
+                return;
+            }
+            if !bridge.check_channel_access(msg.channel_id.get())
+                && !bridge.is_admin(msg.author.id.get())
             {
                 return;
             }
