@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::types::{
     CommandOption, ComponentType, DiscordChannel, DiscordGuild, DiscordMember, DiscordMessage,
-    DiscordRole, DiscordUser, Embed, Emoji, ModalInput, VoiceState,
+    DiscordRole, DiscordUser, Embed, Emoji, ModalInput, StickerInfo, VoiceState,
 };
 
 /// Base event metadata shared across all Discord events
@@ -496,6 +496,39 @@ pub struct WebhooksUpdateEvent {
     pub metadata: EventMetadata,
     pub guild_id: u64,
     pub channel_id: u64,
+}
+
+/// Guild sticker list changed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildStickersUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub stickers: Vec<StickerInfo>,
+}
+
+/// Guild integrations were updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildIntegrationsUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+}
+
+/// A user subscribed to a guild scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildScheduledEventUserAddEvent {
+    pub metadata: EventMetadata,
+    pub event_id: u64,
+    pub user_id: u64,
+    pub guild_id: u64,
+}
+
+/// A user unsubscribed from a guild scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildScheduledEventUserRemoveEvent {
+    pub metadata: EventMetadata,
+    pub event_id: u64,
+    pub user_id: u64,
+    pub guild_id: u64,
 }
 
 #[cfg(test)]

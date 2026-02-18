@@ -19,7 +19,8 @@ use discord_types::{
     types::{
         Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordChannel,
         DiscordGuild, DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, EmbedAuthor,
-        EmbedField, EmbedFooter, EmbedMedia, Emoji, ModalInput, VoiceState as BridgeVoiceState,
+        EmbedField, EmbedFooter, EmbedMedia, Emoji, ModalInput, StickerInfo,
+        VoiceState as BridgeVoiceState,
     },
     AccessConfig,
 };
@@ -29,6 +30,8 @@ use serenity::model::application::{
 };
 use serenity::model::channel::GuildChannel;
 use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
+use serenity::model::event::GuildScheduledEventUserAddEvent as SerenityScheduledEventUserAddEvent;
+use serenity::model::event::GuildScheduledEventUserRemoveEvent as SerenityScheduledEventUserRemoveEvent;
 use serenity::model::event::TypingStartEvent as SerenityTypingStartEvent;
 use serenity::model::guild::ScheduledEvent;
 use std::collections::HashMap;
@@ -1364,6 +1367,70 @@ impl DiscordBridge {
         let subject = subjects::bot::webhooks_update(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published webhooks_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_stickers_update(
+        &self,
+        guild_id: GuildId,
+        current_state: &HashMap<serenity::model::id::StickerId, serenity::model::sticker::Sticker>,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let stickers: Vec<StickerInfo> = current_state
+            .values()
+            .map(|s| StickerInfo { id: s.id.get(), name: s.name.clone() })
+            .collect();
+        let ev = GuildStickersUpdateEvent { metadata: meta, guild_id: gid, stickers };
+        let subject = subjects::bot::guild_stickers_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_stickers_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_integrations_update(&self, guild_id: GuildId) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildIntegrationsUpdateEvent { metadata: meta, guild_id: gid };
+        let subject = subjects::bot::guild_integrations_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_integrations_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_scheduled_event_user_add(
+        &self,
+        event: &SerenityScheduledEventUserAddEvent,
+    ) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildScheduledEventUserAddEvent {
+            metadata: meta,
+            event_id: event.scheduled_event_id.get(),
+            user_id: event.user_id.get(),
+            guild_id: gid,
+        };
+        let subject = subjects::bot::scheduled_event_user_add(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published scheduled_event_user_add to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_scheduled_event_user_remove(
+        &self,
+        event: &SerenityScheduledEventUserRemoveEvent,
+    ) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildScheduledEventUserRemoveEvent {
+            metadata: meta,
+            event_id: event.scheduled_event_id.get(),
+            user_id: event.user_id.get(),
+            guild_id: gid,
+        };
+        let subject = subjects::bot::scheduled_event_user_remove(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published scheduled_event_user_remove to {}", subject);
         Ok(())
     }
 }

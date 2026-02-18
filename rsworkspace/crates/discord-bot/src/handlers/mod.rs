@@ -4,7 +4,10 @@ use serenity::async_trait;
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::application::{Command, CommandOptionType, Interaction};
 use serenity::model::channel::{GuildChannel, Message};
-use serenity::model::event::{ChannelPinsUpdateEvent, MessageUpdateEvent, TypingStartEvent};
+use serenity::model::event::{
+    ChannelPinsUpdateEvent, GuildScheduledEventUserAddEvent, GuildScheduledEventUserRemoveEvent,
+    MessageUpdateEvent, TypingStartEvent,
+};
 use serenity::model::gateway::{Presence, Ready};
 use serenity::model::guild::{Guild, Member, PartialGuild, Role, ScheduledEvent, UnavailableGuild};
 use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId};
@@ -986,6 +989,83 @@ impl EventHandler for Handler {
         }
         if let Err(e) = bridge.publish_webhooks_update(guild_id, belongs_to_channel_id).await {
             error!("Failed to publish webhooks_update: {}", e);
+        }
+    }
+
+    async fn guild_stickers_update(
+        &self,
+        ctx: Context,
+        guild_id: GuildId,
+        current_state: HashMap<serenity::model::id::StickerId, serenity::model::sticker::Sticker>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_stickers_update(guild_id, &current_state).await {
+            error!("Failed to publish guild_stickers_update: {}", e);
+        }
+    }
+
+    async fn guild_integrations_update(&self, ctx: Context, guild_id: GuildId) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_integrations_update(guild_id).await {
+            error!("Failed to publish guild_integrations_update: {}", e);
+        }
+    }
+
+    async fn guild_scheduled_event_user_add(
+        &self,
+        ctx: Context,
+        subscribed: GuildScheduledEventUserAddEvent,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(subscribed.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_scheduled_event_user_add(&subscribed).await {
+            error!("Failed to publish scheduled_event_user_add: {}", e);
+        }
+    }
+
+    async fn guild_scheduled_event_user_remove(
+        &self,
+        ctx: Context,
+        unsubscribed: GuildScheduledEventUserRemoveEvent,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(unsubscribed.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_scheduled_event_user_remove(&unsubscribed).await {
+            error!("Failed to publish scheduled_event_user_remove: {}", e);
         }
     }
 }

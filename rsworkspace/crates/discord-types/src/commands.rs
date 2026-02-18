@@ -566,6 +566,96 @@ pub struct FetchInvitesCommand {
     pub channel_id: u64,
 }
 
+/// Edit a guild scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditScheduledEventCommand {
+    pub guild_id: u64,
+    pub event_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// ISO 8601 start time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+}
+
+/// Rename a custom emoji
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditEmojiCommand {
+    pub guild_id: u64,
+    pub emoji_id: u64,
+    pub name: String,
+}
+
+/// Fetch guild members (request-reply: returns `Vec<FetchedMember>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchGuildMembersCommand {
+    pub guild_id: u64,
+    /// Max number of members to return (1–1000, default 100)
+    #[serde(default)]
+    pub limit: Option<u64>,
+    /// Fetch members after this user ID (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_id: Option<u64>,
+}
+
+/// Fetch all channels in a guild (request-reply: returns `Vec<FetchedChannel>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchGuildChannelsCommand {
+    pub guild_id: u64,
+}
+
+/// Fetch pinned messages in a channel (request-reply: returns `Vec<FetchedMessage>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchPinnedMessagesCommand {
+    pub channel_id: u64,
+}
+
+/// Fetch all roles in a guild (request-reply: returns `Vec<FetchedRole>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchRolesCommand {
+    pub guild_id: u64,
+}
+
+/// Edit the original response to an interaction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditInteractionResponseCommand {
+    pub interaction_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub embeds: Vec<crate::types::Embed>,
+}
+
+/// Delete the original response to an interaction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteInteractionResponseCommand {
+    pub interaction_token: String,
+}
+
+/// Set (create or update) a permission overwrite on a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetChannelPermissionsCommand {
+    pub channel_id: u64,
+    /// ID of the role or user
+    pub target_id: u64,
+    /// "role" or "member"
+    pub target_type: String,
+    /// Allowed permissions bitfield
+    pub allow: u64,
+    /// Denied permissions bitfield
+    pub deny: u64,
+}
+
+/// Delete a permission overwrite from a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteChannelPermissionsCommand {
+    pub channel_id: u64,
+    /// ID of the role or user whose overwrite to remove
+    pub target_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
