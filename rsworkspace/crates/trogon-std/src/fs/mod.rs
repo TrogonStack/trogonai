@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```
-//! use trogonstd::fs::{ReadFile, SystemFs};
+//! use trogon_std::fs::{ReadFile, SystemFs};
 //! use std::path::Path;
 //!
 //! fn read_config<F: ReadFile>(fs: &F, path: &Path) -> String {
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! ```ignore
-//! use trogonstd::fs::{ReadFile, WriteFile, MemFs};
+//! use trogon_std::fs::{ReadFile, WriteFile, MemFs};
 //! use std::path::Path;
 //!
 //! let fs = MemFs::new();

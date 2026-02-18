@@ -1268,11 +1268,11 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
- "trogonstd",
+ "trogon-std",
 ]
 
 [[package]]
-name = "trogonstd"
+name = "trogon-std"
 version = "0.1.0"
 
 [[package]]

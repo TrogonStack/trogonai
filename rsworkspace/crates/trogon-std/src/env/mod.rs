@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```
-//! use trogonstd::env::{ReadEnv, SystemEnv};
+//! use trogon_std::env::{ReadEnv, SystemEnv};
 //!
 //! fn get_database_url<E: ReadEnv>(env: &E) -> String {
 //!     env.var("DATABASE_URL")
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! ```ignore
-//! use trogonstd::env::{ReadEnv, InMemoryEnv};
+//! use trogon_std::env::{ReadEnv, InMemoryEnv};
 //!
 //! let env = InMemoryEnv::new();
 //! env.set("DATABASE_URL", "postgres://test"); // &self — no `mut` needed

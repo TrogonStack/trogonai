@@ -13,7 +13,7 @@ use super::{GetElapsed, GetNow};
 /// # Examples
 ///
 /// ```ignore
-/// use trogonstd::time::{GetNow, GetElapsed, MockClock};
+/// use trogon_std::time::{GetNow, GetElapsed, MockClock};
 /// use std::time::Duration;
 ///
 /// let clock = MockClock::new();
