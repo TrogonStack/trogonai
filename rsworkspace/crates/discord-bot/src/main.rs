@@ -119,6 +119,8 @@ async fn main() -> Result<()> {
         config.discord.access.clone(),
         config.discord.presence_enabled,
         config.discord.guild_commands_guild_id,
+        config.discord.reaction_mode.clone(),
+        config.discord.ack_reaction.clone(),
     ));
 
     // Extract pairing_state before bridge is moved into TypeMap so it can be

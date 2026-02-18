@@ -844,6 +844,21 @@ pub mod agent {
         format!("discord.{}.agent.pairing.reject", prefix)
     }
 
+    /// Create a native poll in a channel
+    pub fn create_poll(prefix: &str) -> String {
+        format!("discord.{}.agent.poll.create", prefix)
+    }
+
+    /// Create a new guild sticker
+    pub fn create_sticker(prefix: &str) -> String {
+        format!("discord.{}.agent.sticker.create", prefix)
+    }
+
+    /// Fetch all custom emojis for a guild (request-reply)
+    pub fn fetch_emojis(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.emojis", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)

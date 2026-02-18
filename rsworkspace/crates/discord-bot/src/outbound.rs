@@ -15,14 +15,15 @@ use discord_types::{
     AddReactionCommand, AddThreadMemberCommand, ArchiveThreadCommand, AssignRoleCommand,
     AutocompleteRespondCommand, BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand,
     CreateDmChannelCommand, CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand,
-    CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand, CreateThreadCommand,
+    CreatePollCommand, CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand,
+    CreateStickerCommand, CreateThreadCommand,
     CreateWebhookCommand, CrosspostMessageCommand, DeleteChannelCommand, DeleteChannelPermissionsCommand,
     DeleteEmojiCommand, DeleteIntegrationCommand, DeleteInteractionResponseCommand,
     DeleteMessageCommand, DeleteRoleCommand, DeleteScheduledEventCommand, DeleteStickerCommand,
     DeleteStageInstanceCommand, DeleteWebhookCommand, EditChannelCommand,
     EditEmojiCommand, EditInteractionResponseCommand, EditMessageCommand, EditRoleCommand,
     EditScheduledEventCommand, EditStickerCommand, EditWebhookCommand, ExecuteWebhookCommand,
-    FetchAuditLogCommand, FetchChannelCommand,
+    FetchAuditLogCommand, FetchChannelCommand, FetchEmojisCommand,
     FetchGuildChannelsCommand, FetchGuildCommand, FetchGuildMembersCommand, FetchInvitesCommand,
     FetchMemberCommand, FetchMessagesCommand, FetchPinnedMessagesCommand, FetchRolesCommand,
     FetchScheduledEventUsersCommand,
@@ -35,7 +36,7 @@ use discord_types::{
 };
 use discord_types::types::{
     ActionRowComponent, AppInfo, AttachedFile, AuditLogEntryInfo, ButtonStyle as DcButtonStyle,
-    ChannelType, DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia,
+    ChannelType, DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji,
     FetchedChannel, FetchedGuild, FetchedInvite, FetchedMember, FetchedMessage, FetchedRole,
     ScheduledEventUserInfo, VoiceRegionInfo,
 };
@@ -43,9 +44,9 @@ use serenity::builder::{
     CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
     CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, CreateInteractionResponse,
     CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
-    CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, CreateStageInstance,
-    CreateThread, EditChannel, EditInteractionResponse, EditMember, EditMessage, EditRole,
-    EditScheduledEvent, EditThread, EditWebhook, GetMessages,
+    CreatePoll, CreatePollAnswer, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption,
+    CreateStageInstance, CreateSticker, CreateThread, EditChannel, EditInteractionResponse,
+    EditMember, EditMessage, EditRole, EditScheduledEvent, EditThread, EditWebhook, GetMessages,
 };
 use serenity::model::application::ButtonStyle as SerenityButtonStyle;
 use serenity::http::Http;
@@ -365,6 +366,7 @@ impl OutboundProcessor {
             r57, r58, r59, r60, r61, r62, r63, r64, r65, r66,
             r67, r68, r69, r70, r71, r72, r73, r74, r75,
             r76, r77,
+            r78, r79, r80,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -478,6 +480,9 @@ impl OutboundProcessor {
             Self::handle_fetch_application_info(http.clone(), client.clone(), prefix.clone()),
             Self::handle_pairing_approve(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
             Self::handle_pairing_reject(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
+            Self::handle_create_poll(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_create_sticker(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_emojis(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -559,6 +564,9 @@ impl OutboundProcessor {
             ("fetch_application_info", r75),
             ("pairing_approve", r76),
             ("pairing_reject", r77),
+            ("create_poll", r78),
+            ("create_sticker", r79),
+            ("fetch_emojis", r80),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -588,18 +596,26 @@ impl OutboundProcessor {
                     let context = format!("Failed to send message to channel {}", cmd.channel_id);
                     // Load attachments before the retry loop (async path reads)
                     let attachments = load_attachments(&cmd.files).await;
-                    let mut builder = CreateMessage::new().content(truncate(&cmd.content));
-                    if let Some(reply_id) = cmd.reply_to_message_id {
-                        builder = builder.reference_message((channel, MessageId::new(reply_id)));
-                    }
-                    if !cmd.embeds.is_empty() {
-                        let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
-                        builder = builder.embeds(embeds);
-                    }
-                    if !cmd.components.is_empty() {
-                        builder = builder.components(build_action_rows(&cmd.components));
-                    }
-                    builder = builder.add_files(attachments);
+                    let builder = if cmd.as_voice && !attachments.is_empty() {
+                        // Voice messages: empty content + IS_VOICE_MESSAGE flag (bit 13)
+                        CreateMessage::new()
+                            .content("")
+                            .flags(serenity::model::channel::MessageFlags::from_bits_truncate(1 << 13))
+                            .add_files(attachments)
+                    } else {
+                        let mut b = CreateMessage::new().content(truncate(&cmd.content));
+                        if let Some(reply_id) = cmd.reply_to_message_id {
+                            b = b.reference_message((channel, MessageId::new(reply_id)));
+                        }
+                        if !cmd.embeds.is_empty() {
+                            let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
+                            b = b.embeds(embeds);
+                        }
+                        if !cmd.components.is_empty() {
+                            b = b.components(build_action_rows(&cmd.components));
+                        }
+                        b.add_files(attachments)
+                    };
                     for attempt in 0..=MAX_RETRIES {
                         match channel.send_message(&*http, builder.clone()).await {
                             Ok(_) => break,
@@ -3806,6 +3822,134 @@ impl OutboundProcessor {
                 None => {
                     warn!(code = %cmd.code, "pairing_reject: code not found");
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_poll(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::create_poll(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for create_poll on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let cmd: CreatePollCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("create_poll: bad payload: {}", e);
+                    continue;
+                }
+            };
+
+            let channel_id = ChannelId::new(cmd.channel_id);
+            let answers: Vec<CreatePollAnswer> = cmd.answers.iter()
+                .map(|a| CreatePollAnswer::new().text(a))
+                .collect();
+            let mut poll = CreatePoll::new()
+                .question(cmd.question.as_str())
+                .answers(answers)
+                .duration(std::time::Duration::from_secs(cmd.duration_hours as u64 * 3600));
+            if cmd.allow_multiselect {
+                poll = poll.allow_multiselect();
+            }
+            let builder = CreateMessage::new().poll(poll);
+            if let Err(e) = channel_id.send_message(&*http, builder).await {
+                warn!("create_poll failed for channel {}: {}", cmd.channel_id, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_sticker(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::create_sticker(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for create_sticker on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let cmd: CreateStickerCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("create_sticker: bad payload: {}", e);
+                    continue;
+                }
+            };
+
+            let guild = GuildId::new(cmd.guild_id);
+            let file = match CreateAttachment::path(&cmd.file_path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!("create_sticker: failed to load '{}': {}", cmd.file_path, e);
+                    continue;
+                }
+            };
+            let sticker = CreateSticker::new(&cmd.name, file)
+                .description(&cmd.description)
+                .tags(&cmd.tags);
+            if let Err(e) = guild.create_sticker(&*http, sticker).await {
+                warn!("create_sticker failed in guild {}: {}", cmd.guild_id, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_fetch_emojis(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::fetch_emojis(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_emojis requests on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_emojis: message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchEmojisCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_emojis: bad payload: {}", e);
+                    continue;
+                }
+            };
+            let guild = GuildId::new(cmd.guild_id);
+            let response_bytes = match guild.emojis(&*http).await {
+                Ok(emojis) => {
+                    let fetched: Vec<Emoji> = emojis.iter().map(|e| Emoji {
+                        id: Some(e.id.get()),
+                        name: e.name.clone(),
+                        animated: e.animated,
+                    }).collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_emojis: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    serde_json::to_vec::<Vec<Emoji>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_emojis: failed to publish reply: {}", e);
             }
         }
 
