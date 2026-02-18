@@ -32,6 +32,8 @@ impl DiscordAgent {
         farewell: Option<WelcomeConfig>,
         conversation_ttl: Option<Duration>,
         metrics: Option<AgentMetrics>,
+        max_history: usize,
+        stream_timeout_secs: u64,
     ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
@@ -43,6 +45,8 @@ impl DiscordAgent {
             farewell,
             conversation_ttl,
             metrics,
+            max_history,
+            Duration::from_secs(stream_timeout_secs),
         );
 
         Self {

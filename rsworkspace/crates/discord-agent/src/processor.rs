@@ -52,10 +52,13 @@ pub struct MessageProcessor {
     welcome: Option<WelcomeConfig>,
     farewell: Option<WelcomeConfig>,
     metrics: Option<AgentMetrics>,
+    /// Maximum wall-clock time allowed for a single LLM streaming response.
+    stream_timeout: Duration,
 }
 
 impl MessageProcessor {
     /// Create a new message processor
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
@@ -64,10 +67,12 @@ impl MessageProcessor {
         farewell: Option<WelcomeConfig>,
         conversation_ttl: Option<Duration>,
         metrics: Option<AgentMetrics>,
+        max_history: usize,
+        stream_timeout: Duration,
     ) -> Self {
         let conversation_manager = match conversation_kv {
-            Some(kv) => ConversationManager::with_kv(kv),
-            None => ConversationManager::new(),
+            Some(kv) => ConversationManager::with_kv_and_max_history(kv, max_history),
+            None => ConversationManager::with_max_history(max_history),
         };
         if let Some(ttl) = conversation_ttl {
             conversation_manager.start_cleanup(ttl);
@@ -79,6 +84,7 @@ impl MessageProcessor {
             welcome,
             farewell,
             metrics,
+            stream_timeout,
         }
     }
 
@@ -149,25 +155,65 @@ impl MessageProcessor {
             let mut accumulated = String::new();
             let mut last_publish = Instant::now();
 
-            // Consume chunks and publish throttled updates
+            // Consume chunks and publish throttled updates (with overall timeout)
+            let stream_deadline = tokio::time::sleep(self.stream_timeout);
+            tokio::pin!(stream_deadline);
+            let mut timed_out = false;
 
-            while let Some(chunk) = chunk_rx.recv().await {
-                accumulated.push_str(&chunk);
-                if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
-                    publisher
-                        .publish(
-                            &stream_subject,
-                            &StreamMessageCommand {
-                                channel_id,
-                                content: format!("{}{}", accumulated, STREAM_CURSOR),
-                                is_final: false,
-                                session_id: session_id.clone(),
-                                reply_to_message_id: None,
-                            },
-                        )
-                        .await?;
-                    last_publish = Instant::now();
+            loop {
+                tokio::select! {
+                    chunk = chunk_rx.recv() => {
+                        match chunk {
+                            Some(c) => {
+                                accumulated.push_str(&c);
+                                if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                    publisher
+                                        .publish(
+                                            &stream_subject,
+                                            &StreamMessageCommand {
+                                                channel_id,
+                                                content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                                is_final: false,
+                                                session_id: session_id.clone(),
+                                                reply_to_message_id: None,
+                                            },
+                                        )
+                                        .await?;
+                                    last_publish = Instant::now();
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = &mut stream_deadline => {
+                        timed_out = true;
+                        llm_handle.abort();
+                        break;
+                    }
                 }
+            }
+
+            if timed_out {
+                warn!(
+                    "LLM response timed out after {:?} for session {}",
+                    self.stream_timeout, session_id
+                );
+                if let Some(ref m) = self.metrics {
+                    m.inc_llm_errors();
+                }
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id,
+                            content: "Sorry, the response timed out. Please try again.".to_string(),
+                            is_final: true,
+                            session_id: session_id.clone(),
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+                return Ok(());
             }
 
             match llm_handle.await? {
@@ -384,23 +430,65 @@ impl MessageProcessor {
                     let mut accumulated = String::new();
                     let mut last_publish = Instant::now();
 
-                    while let Some(chunk) = chunk_rx.recv().await {
-                        accumulated.push_str(&chunk);
-                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
-                            publisher
-                                .publish(
-                                    &stream_subject,
-                                    &StreamMessageCommand {
-                                        channel_id: event.channel_id,
-                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
-                                        is_final: false,
-                                        session_id: ask_session.clone(),
-                                        reply_to_message_id: None,
-                                    },
-                                )
-                                .await?;
-                            last_publish = Instant::now();
+                    let stream_deadline = tokio::time::sleep(self.stream_timeout);
+                    tokio::pin!(stream_deadline);
+                    let mut timed_out = false;
+
+                    loop {
+                        tokio::select! {
+                            chunk = chunk_rx.recv() => {
+                                match chunk {
+                                    Some(c) => {
+                                        accumulated.push_str(&c);
+                                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                            publisher
+                                                .publish(
+                                                    &stream_subject,
+                                                    &StreamMessageCommand {
+                                                        channel_id: event.channel_id,
+                                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                                        is_final: false,
+                                                        session_id: ask_session.clone(),
+                                                        reply_to_message_id: None,
+                                                    },
+                                                )
+                                                .await?;
+                                            last_publish = Instant::now();
+                                        }
+                                    }
+                                    None => break,
+                                }
+                            }
+                            _ = &mut stream_deadline => {
+                                timed_out = true;
+                                llm_handle.abort();
+                                break;
+                            }
                         }
+                    }
+
+                    if timed_out {
+                        warn!(
+                            "LLM summarize timed out after {:?} for session {}",
+                            self.stream_timeout, session_id
+                        );
+                        if let Some(ref m) = self.metrics {
+                            m.inc_llm_errors();
+                        }
+                        publisher
+                            .publish(
+                                &stream_subject,
+                                &StreamMessageCommand {
+                                    channel_id: event.channel_id,
+                                    content: "Sorry, the summary timed out. Please try again."
+                                        .to_string(),
+                                    is_final: true,
+                                    session_id: ask_session,
+                                    reply_to_message_id: None,
+                                },
+                            )
+                            .await?;
+                        return Ok(());
                     }
 
                     match llm_handle.await? {
@@ -585,23 +673,65 @@ impl MessageProcessor {
                     let mut accumulated = String::new();
                     let mut last_publish = Instant::now();
 
-                    while let Some(chunk) = chunk_rx.recv().await {
-                        accumulated.push_str(&chunk);
-                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
-                            publisher
-                                .publish(
-                                    &stream_subject,
-                                    &StreamMessageCommand {
-                                        channel_id: event.channel_id,
-                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
-                                        is_final: false,
-                                        session_id: ask_session.clone(),
-                                        reply_to_message_id: None,
-                                    },
-                                )
-                                .await?;
-                            last_publish = Instant::now();
+                    let stream_deadline = tokio::time::sleep(self.stream_timeout);
+                    tokio::pin!(stream_deadline);
+                    let mut timed_out = false;
+
+                    loop {
+                        tokio::select! {
+                            chunk = chunk_rx.recv() => {
+                                match chunk {
+                                    Some(c) => {
+                                        accumulated.push_str(&c);
+                                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                            publisher
+                                                .publish(
+                                                    &stream_subject,
+                                                    &StreamMessageCommand {
+                                                        channel_id: event.channel_id,
+                                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                                        is_final: false,
+                                                        session_id: ask_session.clone(),
+                                                        reply_to_message_id: None,
+                                                    },
+                                                )
+                                                .await?;
+                                            last_publish = Instant::now();
+                                        }
+                                    }
+                                    None => break,
+                                }
+                            }
+                            _ = &mut stream_deadline => {
+                                timed_out = true;
+                                llm_handle.abort();
+                                break;
+                            }
                         }
+                    }
+
+                    if timed_out {
+                        warn!(
+                            "LLM /ask timed out after {:?} for session {}",
+                            self.stream_timeout, session_id
+                        );
+                        if let Some(ref m) = self.metrics {
+                            m.inc_llm_errors();
+                        }
+                        publisher
+                            .publish(
+                                &stream_subject,
+                                &StreamMessageCommand {
+                                    channel_id: event.channel_id,
+                                    content: "Sorry, the response timed out. Please try again."
+                                        .to_string(),
+                                    is_final: true,
+                                    session_id: ask_session,
+                                    reply_to_message_id: None,
+                                },
+                            )
+                            .await?;
+                        return Ok(());
                     }
 
                     match llm_handle.await? {
@@ -924,23 +1054,64 @@ impl MessageProcessor {
         let mut accumulated = String::new();
         let mut last_publish = Instant::now();
 
-        while let Some(chunk) = chunk_rx.recv().await {
-            accumulated.push_str(&chunk);
-            if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
-                publisher
-                    .publish(
-                        &stream_subject,
-                        &StreamMessageCommand {
-                            channel_id: event.channel_id,
-                            content: format!("{}{}", accumulated, STREAM_CURSOR),
-                            is_final: false,
-                            session_id: regen_session.clone(),
-                            reply_to_message_id: None,
-                        },
-                    )
-                    .await?;
-                last_publish = Instant::now();
+        let stream_deadline = tokio::time::sleep(self.stream_timeout);
+        tokio::pin!(stream_deadline);
+        let mut timed_out = false;
+
+        loop {
+            tokio::select! {
+                chunk = chunk_rx.recv() => {
+                    match chunk {
+                        Some(c) => {
+                            accumulated.push_str(&c);
+                            if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                publisher
+                                    .publish(
+                                        &stream_subject,
+                                        &StreamMessageCommand {
+                                            channel_id: event.channel_id,
+                                            content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                            is_final: false,
+                                            session_id: regen_session.clone(),
+                                            reply_to_message_id: None,
+                                        },
+                                    )
+                                    .await?;
+                                last_publish = Instant::now();
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut stream_deadline => {
+                    timed_out = true;
+                    llm_handle.abort();
+                    break;
+                }
             }
+        }
+
+        if timed_out {
+            warn!(
+                "LLM regenerate timed out after {:?} for session {}",
+                self.stream_timeout, session_id
+            );
+            if let Some(ref m) = self.metrics {
+                m.inc_llm_errors();
+            }
+            publisher
+                .publish(
+                    &stream_subject,
+                    &StreamMessageCommand {
+                        channel_id: event.channel_id,
+                        content: "Sorry, the response timed out. Please try again.".to_string(),
+                        is_final: true,
+                        session_id: regen_session,
+                        reply_to_message_id: None,
+                    },
+                )
+                .await?;
+            return Ok(());
         }
 
         match llm_handle.await? {
@@ -1131,6 +1302,16 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None, None, None, None, None, None, None)
+        Self::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            20,
+            Duration::from_secs(120),
+        )
     }
 }

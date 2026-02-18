@@ -82,6 +82,14 @@ struct Args {
     /// Farewell message template ({user} = mention, {username} = display name)
     #[arg(long, env = "FAREWELL_MESSAGE")]
     farewell_message: Option<String>,
+
+    /// Maximum number of messages to retain per conversation session (0 = use default of 20)
+    #[arg(long, env = "DISCORD_MAX_HISTORY", default_value = "20")]
+    max_history: usize,
+
+    /// Maximum seconds to wait for an LLM streaming response before timing out (0 = no timeout)
+    #[arg(long, env = "CLAUDE_STREAM_TIMEOUT_SECS", default_value = "120")]
+    stream_timeout_secs: u64,
 }
 
 #[tokio::main]
@@ -101,6 +109,12 @@ async fn main() -> Result<()> {
     info!("Agent name: {}", args.agent_name);
     info!("NATS URL: {}", args.nats_url);
     info!("NATS prefix: {}", args.prefix);
+    info!("Conversation max history: {} messages", args.max_history);
+    if args.stream_timeout_secs == 0 {
+        info!("LLM stream timeout: disabled");
+    } else {
+        info!("LLM stream timeout: {}s", args.stream_timeout_secs);
+    }
 
     // Connect to NATS
     let nats_config = discord_nats::NatsConfig::from_url(&args.nats_url, args.prefix.clone());
@@ -237,6 +251,13 @@ async fn main() -> Result<()> {
     let health_state = AgentHealthState::new(args.agent_name.clone(), mode.clone());
     let metrics = Some(health_state.metrics.clone());
 
+    let stream_timeout_secs = if args.stream_timeout_secs == 0 {
+        // 0 means "no timeout" — use a very large value (10 hours) to effectively disable
+        36000u64
+    } else {
+        args.stream_timeout_secs
+    };
+
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
@@ -248,6 +269,8 @@ async fn main() -> Result<()> {
         farewell,
         conversation_ttl,
         metrics,
+        args.max_history,
+        stream_timeout_secs,
     );
 
     info!("Agent initialized, starting message processing...");
