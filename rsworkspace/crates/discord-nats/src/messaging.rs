@@ -7,6 +7,19 @@ use tracing::{debug, error, trace};
 
 use crate::error::{Error, Result};
 
+/// Trait for publishing messages to a transport layer.
+/// Implemented by `MessagePublisher` (real NATS) and `MockPublisher` (in-memory, tests).
+#[allow(async_fn_in_trait)]
+pub trait Publish {
+    fn prefix(&self) -> &str;
+
+    async fn publish<T: serde::Serialize>(
+        &self,
+        subject: impl AsRef<str>,
+        message: &T,
+    ) -> crate::error::Result<()>;
+}
+
 /// Message publisher for sending events and commands
 #[derive(Clone)]
 pub struct MessagePublisher {
@@ -67,6 +80,20 @@ impl MessagePublisher {
 
         debug!("Published message with headers to {}", subject);
         Ok(())
+    }
+}
+
+impl Publish for MessagePublisher {
+    fn prefix(&self) -> &str {
+        self.prefix()
+    }
+
+    async fn publish<T: serde::Serialize>(
+        &self,
+        subject: impl AsRef<str>,
+        message: &T,
+    ) -> crate::error::Result<()> {
+        MessagePublisher::publish(self, subject, message).await
     }
 }
 

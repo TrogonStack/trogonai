@@ -1,7 +1,7 @@
 //! Message processor - handles business logic for different Discord event types
 
 use anyhow::Result;
-use discord_nats::{subjects, MessagePublisher};
+use discord_nats::{subjects, Publish};
 use discord_types::{
     events::{
         AutocompleteEvent, BotReadyEvent, ChannelCreateEvent, ChannelDeleteEvent,
@@ -96,7 +96,7 @@ impl MessageProcessor {
     pub async fn process_message(
         &self,
         event: &MessageCreatedEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let channel_id = event.message.channel_id;
         let message_id = event.message.id;
@@ -287,7 +287,7 @@ impl MessageProcessor {
     pub async fn process_slash_command(
         &self,
         event: &SlashCommandEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let session_id = &event.metadata.session_id;
 
@@ -823,7 +823,7 @@ impl MessageProcessor {
     pub async fn process_member_add(
         &self,
         event: &GuildMemberAddEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let Some(ref cfg) = self.welcome else {
             return Ok(());
@@ -864,7 +864,7 @@ impl MessageProcessor {
     pub async fn process_member_remove(
         &self,
         event: &GuildMemberRemoveEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let Some(ref cfg) = self.farewell else {
             return Ok(());
@@ -1019,7 +1019,7 @@ impl MessageProcessor {
     pub async fn process_reaction_add(
         &self,
         event: &ReactionAddEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         match event.emoji.name.as_str() {
             "🔁" | "🔄" => self.handle_reaction_regenerate(event, publisher).await,
@@ -1038,7 +1038,7 @@ impl MessageProcessor {
     pub async fn process_reaction_remove(
         &self,
         event: &ReactionRemoveEvent,
-        _publisher: &MessagePublisher,
+        _publisher: &impl Publish,
     ) -> Result<()> {
         debug!(
             "Reaction '{}' removed by user {} on message {} in channel {}",
@@ -1051,7 +1051,7 @@ impl MessageProcessor {
     async fn handle_reaction_regenerate(
         &self,
         event: &ReactionAddEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let Some(ref llm_client) = self.llm_client else {
             // Echo mode — nothing to regenerate
@@ -1226,7 +1226,7 @@ impl MessageProcessor {
     async fn handle_reaction_clear(
         &self,
         event: &ReactionAddEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let session_id = Self::session_id_for_reaction(event);
         self.conversation_manager.clear_session(&session_id).await;
@@ -1268,7 +1268,7 @@ impl MessageProcessor {
     pub async fn process_component_interaction(
         &self,
         event: &ComponentInteractionEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let session_id = &event.metadata.session_id;
         let channel_id = event.channel_id;
@@ -1487,7 +1487,7 @@ impl MessageProcessor {
         lines
     }
 
-    async fn send_typing(&self, channel_id: u64, publisher: &MessagePublisher) -> Result<()> {
+    async fn send_typing(&self, channel_id: u64, publisher: &impl Publish) -> Result<()> {
         let cmd = TypingCommand { channel_id };
         let subject = subjects::agent::channel_typing(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -1500,7 +1500,7 @@ impl MessageProcessor {
         interaction_token: &str,
         content: &str,
         ephemeral: bool,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let cmd = InteractionRespondCommand {
             interaction_id,
@@ -1520,7 +1520,7 @@ impl MessageProcessor {
         interaction_id: u64,
         interaction_token: &str,
         ephemeral: bool,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let cmd = InteractionDeferCommand {
             interaction_id,
@@ -1653,7 +1653,7 @@ impl MessageProcessor {
     pub async fn process_autocomplete(
         &self,
         event: &AutocompleteEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let choices = if event.current_value.is_empty() {
             vec![]
@@ -1686,7 +1686,7 @@ impl MessageProcessor {
     pub async fn process_modal_submit(
         &self,
         event: &ModalSubmitEvent,
-        publisher: &MessagePublisher,
+        publisher: &impl Publish,
     ) -> Result<()> {
         let session_id = &event.metadata.session_id;
         let channel_id = event.channel_id;
