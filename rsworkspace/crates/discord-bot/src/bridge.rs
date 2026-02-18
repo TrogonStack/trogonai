@@ -97,6 +97,11 @@ impl DiscordBridge {
         self.access_config.can_access_dm(user_id)
     }
 
+    /// Check if a channel is allowed
+    pub fn check_channel_access(&self, channel_id: u64) -> bool {
+        self.access_config.can_access_channel(channel_id)
+    }
+
     /// Check if a user is an admin
     pub fn is_admin(&self, user_id: u64) -> bool {
         self.access_config.is_admin(user_id)

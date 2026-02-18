@@ -39,6 +39,9 @@ pub struct AccessConfig {
     pub user_allowlist: Vec<u64>,
     /// Allowed guild IDs
     pub guild_allowlist: Vec<u64>,
+    /// Allowed channel IDs (empty = all channels allowed)
+    #[serde(default)]
+    pub channel_allowlist: Vec<u64>,
     /// If true, bot only responds in guilds when @mentioned
     #[serde(default)]
     pub require_mention: bool,
@@ -52,6 +55,7 @@ impl Default for AccessConfig {
             admin_users: Vec::new(),
             user_allowlist: Vec::new(),
             guild_allowlist: Vec::new(),
+            channel_allowlist: Vec::new(),
             require_mention: false,
         }
     }
@@ -79,6 +83,11 @@ impl AccessConfig {
         }
     }
 
+    /// Check if a channel is allowed (empty list = all channels allowed)
+    pub fn can_access_channel(&self, channel_id: u64) -> bool {
+        self.channel_allowlist.is_empty() || self.channel_allowlist.contains(&channel_id)
+    }
+
     /// Check if a user is an admin
     pub fn is_admin(&self, user_id: u64) -> bool {
         self.admin_users.contains(&user_id)
@@ -96,6 +105,7 @@ mod tests {
             guild_allowlist: vec![100, 200],
             user_allowlist: vec![],
             admin_users: vec![],
+            channel_allowlist: vec![],
             require_mention: false,
         }
     }
@@ -107,6 +117,7 @@ mod tests {
             user_allowlist: vec![10, 20, 30],
             guild_allowlist: vec![100, 200],
             admin_users: vec![999],
+            channel_allowlist: vec![],
             require_mention: false,
         }
     }
@@ -118,6 +129,7 @@ mod tests {
             user_allowlist: vec![10],
             guild_allowlist: vec![100],
             admin_users: vec![],
+            channel_allowlist: vec![],
             require_mention: false,
         }
     }
@@ -222,5 +234,30 @@ mod tests {
             let back: GuildPolicy = serde_json::from_str(&json).unwrap();
             assert_eq!(back, v);
         }
+    }
+
+    #[test]
+    fn test_channel_allowlist_empty_allows_all() {
+        let cfg = allowlist_config(); // channel_allowlist is empty
+        assert!(cfg.can_access_channel(1));
+        assert!(cfg.can_access_channel(999999));
+    }
+
+    #[test]
+    fn test_channel_allowlist_permits_listed() {
+        let cfg = AccessConfig {
+            channel_allowlist: vec![500, 600],
+            ..allowlist_config()
+        };
+        assert!(cfg.can_access_channel(500));
+        assert!(cfg.can_access_channel(600));
+        assert!(!cfg.can_access_channel(501));
+    }
+
+    #[test]
+    fn test_default_channel_allowlist_empty() {
+        let cfg = AccessConfig::default();
+        assert!(cfg.channel_allowlist.is_empty());
+        assert!(cfg.can_access_channel(1)); // empty = allow all
     }
 }
