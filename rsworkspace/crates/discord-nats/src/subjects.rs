@@ -396,6 +396,46 @@ pub mod bot {
         format!("discord.{}.bot.reaction.remove_emoji", prefix)
     }
 
+    /// Bulk presence replace event (sent when joining large guilds)
+    pub fn presence_replace(prefix: &str) -> String {
+        format!("discord.{}.bot.presence.replace", prefix)
+    }
+
+    /// Shard connection stage changed event subject
+    pub fn shard_stage_update(prefix: &str) -> String {
+        format!("discord.{}.bot.shard.stage_update", prefix)
+    }
+
+    /// All soundboard sounds for a guild received subject
+    pub fn soundboard_sounds(prefix: &str) -> String {
+        format!("discord.{}.bot.soundboard.sounds", prefix)
+    }
+
+    /// New soundboard sound created subject
+    pub fn soundboard_sound_create(prefix: &str) -> String {
+        format!("discord.{}.bot.soundboard.sound_create", prefix)
+    }
+
+    /// Soundboard sound updated subject
+    pub fn soundboard_sound_update(prefix: &str) -> String {
+        format!("discord.{}.bot.soundboard.sound_update", prefix)
+    }
+
+    /// Multiple soundboard sounds updated subject
+    pub fn soundboard_sounds_update(prefix: &str) -> String {
+        format!("discord.{}.bot.soundboard.sounds_update", prefix)
+    }
+
+    /// Soundboard sound deleted subject
+    pub fn soundboard_sound_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.soundboard.sound_delete", prefix)
+    }
+
+    /// HTTP rate limit hit subject
+    pub fn ratelimit(prefix: &str) -> String {
+        format!("discord.{}.bot.ratelimit", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)

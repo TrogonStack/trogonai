@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    AuditLogEntryInfo, CommandOption, ComponentType, DiscordChannel, DiscordGuild, DiscordMember,
-    DiscordMessage, DiscordRole, DiscordUser, Embed, Emoji, FetchedMember, ModalInput,
-    ScheduledEventUserInfo, StickerInfo, VoiceRegionInfo, AppInfo, VoiceState,
+    AppInfo, AuditLogEntryInfo, CommandOption, ComponentType, DiscordChannel, DiscordGuild,
+    DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, Emoji, FetchedMember,
+    ModalInput, ScheduledEventUserInfo, SoundInfo, StickerInfo, VoiceRegionInfo, VoiceState,
 };
 
 /// Base event metadata shared across all Discord events
@@ -809,6 +809,69 @@ pub struct FetchVoiceRegionsResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FetchApplicationInfoResult {
     pub app: Option<AppInfo>,
+}
+
+/// Bulk presence replace — sent by Discord when joining large guilds (count only, not full data)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PresenceReplaceEvent {
+    pub metadata: EventMetadata,
+    pub count: u32,
+}
+
+/// Shard connection stage changed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ShardStageUpdateEvent {
+    pub metadata: EventMetadata,
+    pub shard_id: u64,
+    pub old: String,
+    pub new: String,
+}
+
+/// All soundboard sounds for a guild received
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SoundboardSoundsEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub sounds: Vec<SoundInfo>,
+}
+
+/// New soundboard sound created in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SoundboardSoundCreateEvent {
+    pub metadata: EventMetadata,
+    pub sound: SoundInfo,
+}
+
+/// Soundboard sound updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SoundboardSoundUpdateEvent {
+    pub metadata: EventMetadata,
+    pub sound: SoundInfo,
+}
+
+/// Multiple soundboard sounds updated for a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SoundboardSoundsUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub sounds: Vec<SoundInfo>,
+}
+
+/// Soundboard sound deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SoundboardSoundDeleteEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub sound_id: u64,
+}
+
+/// HTTP rate limit hit while processing a Discord API request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RatelimitEvent {
+    pub metadata: EventMetadata,
+    pub path: String,
+    pub timeout_ms: u64,
+    pub global: bool,
 }
 
 #[cfg(test)]
