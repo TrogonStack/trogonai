@@ -1,13 +1,24 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::Config;
+    use crate::config::{Config, ReadEnv};
     use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
+    use std::collections::HashMap;
     use std::io::Write;
-    use std::sync::Mutex;
     use tempfile::NamedTempFile;
 
-    /// Serialize all tests that read/write process-wide env vars to avoid races.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+    struct InMemoryEnv(HashMap<&'static str, &'static str>);
+
+    impl InMemoryEnv {
+        fn new(pairs: &[(&'static str, &'static str)]) -> Self {
+            Self(pairs.iter().cloned().collect())
+        }
+    }
+
+    impl ReadEnv for InMemoryEnv {
+        fn var(&self, key: &str) -> Option<String> {
+            self.0.get(key).map(|v| v.to_string())
+        }
+    }
 
     fn write_toml(content: &str) -> NamedTempFile {
         let mut f = NamedTempFile::new().unwrap();
@@ -114,174 +125,120 @@ prefix = "prod"
     }
 
     // ── from_env ──────────────────────────────────────────────────────────────
-    //
-    // These three tests all mutate DISCORD_BOT_TOKEN (a process-wide resource)
-    // and must therefore run sequentially under ENV_MUTEX.
 
     #[test]
     fn test_from_env_missing_token_returns_error() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        let result = Config::from_env();
+        let env = InMemoryEnv::new(&[]);
+        let result = Config::from_env_impl(&env);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_from_env_reads_token() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "env-token-abc");
-        std::env::set_var("NATS_URL", "nats://nats-env:4222");
-        std::env::set_var("DISCORD_PREFIX", "staging");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "env-token-abc"),
+            ("NATS_URL", "nats://nats-env:4222"),
+            ("DISCORD_PREFIX", "staging"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.bot_token, "env-token-abc");
         assert_eq!(cfg.nats.prefix, "staging");
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("NATS_URL");
-        std::env::remove_var("DISCORD_PREFIX");
     }
 
     #[test]
     fn test_from_env_defaults_nats_url() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::remove_var("NATS_URL");
-        std::env::remove_var("DISCORD_PREFIX");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.nats.prefix, "prod");
-        // servers should include a localhost address
         assert!(!cfg.nats.servers.is_empty());
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
     }
 
     #[test]
     fn test_from_env_guild_policy_open() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_GUILD_POLICY", "open");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_GUILD_POLICY", "open"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Open);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_GUILD_POLICY");
     }
 
     #[test]
     fn test_from_env_guild_allowlist_parsed() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_GUILD_POLICY", "allowlist");
-        std::env::set_var("DISCORD_GUILD_ALLOWLIST", "111, 222, 333");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_GUILD_POLICY", "allowlist"),
+            ("DISCORD_GUILD_ALLOWLIST", "111, 222, 333"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Allowlist);
         assert_eq!(cfg.discord.access.guild_allowlist, vec![111, 222, 333]);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_GUILD_POLICY");
-        std::env::remove_var("DISCORD_GUILD_ALLOWLIST");
     }
 
     #[test]
     fn test_from_env_dm_policy_disabled() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_DM_POLICY", "disabled");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_DM_POLICY", "disabled"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.dm_policy, DmPolicy::Disabled);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_DM_POLICY");
     }
 
     #[test]
     fn test_from_env_user_and_admin_lists() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_USER_ALLOWLIST", "10,20,30");
-        std::env::set_var("DISCORD_ADMIN_USERS", "999");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_USER_ALLOWLIST", "10,20,30"),
+            ("DISCORD_ADMIN_USERS", "999"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.user_allowlist, vec![10, 20, 30]);
         assert_eq!(cfg.discord.access.admin_users, vec![999]);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_USER_ALLOWLIST");
-        std::env::remove_var("DISCORD_ADMIN_USERS");
     }
 
     #[test]
     fn test_from_env_require_mention_true() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_REQUIRE_MENTION", "true");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_REQUIRE_MENTION", "true"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert!(cfg.discord.access.require_mention);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_REQUIRE_MENTION");
     }
 
     #[test]
     fn test_from_env_require_mention_default_false() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::remove_var("DISCORD_REQUIRE_MENTION");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert!(!cfg.discord.access.require_mention);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
     }
 
     #[test]
     fn test_from_env_defaults_all_policies() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::remove_var("DISCORD_GUILD_POLICY");
-        std::env::remove_var("DISCORD_DM_POLICY");
-        std::env::remove_var("DISCORD_GUILD_ALLOWLIST");
-        std::env::remove_var("DISCORD_USER_ALLOWLIST");
-        std::env::remove_var("DISCORD_ADMIN_USERS");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Allowlist);
         assert_eq!(cfg.discord.access.dm_policy, DmPolicy::Allowlist);
         assert!(cfg.discord.access.guild_allowlist.is_empty());
         assert!(cfg.discord.access.user_allowlist.is_empty());
         assert!(cfg.discord.access.admin_users.is_empty());
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
     }
 
     #[test]
     fn test_from_env_channel_allowlist_parsed() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::set_var("DISCORD_CHANNEL_ALLOWLIST", "701, 702, 703");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[
+            ("DISCORD_BOT_TOKEN", "tok"),
+            ("DISCORD_CHANNEL_ALLOWLIST", "701, 702, 703"),
+        ]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.channel_allowlist, vec![701, 702, 703]);
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
-        std::env::remove_var("DISCORD_CHANNEL_ALLOWLIST");
     }
 
     #[test]
     fn test_from_env_channel_allowlist_default_empty() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
-        std::env::remove_var("DISCORD_CHANNEL_ALLOWLIST");
-
-        let cfg = Config::from_env().unwrap();
+        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let cfg = Config::from_env_impl(&env).unwrap();
         assert!(cfg.discord.access.channel_allowlist.is_empty());
-
-        std::env::remove_var("DISCORD_BOT_TOKEN");
     }
 }

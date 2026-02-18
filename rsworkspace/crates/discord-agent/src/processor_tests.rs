@@ -3,12 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::processor::MessageProcessor;
-
-    const NATS_URL: &str = "nats://localhost:14222";
-
-    async fn try_connect() -> Option<async_nats::Client> {
-        async_nats::connect(NATS_URL).await.ok()
-    }
+    use discord_nats::MockPublisher;
 
     /// Build a minimal MessageCreatedEvent for testing.
     fn make_message_event(
@@ -70,28 +65,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_echo_mode_sends_reply() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-echo-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        // Subscribe to message.send before processing
-        let subject = discord_nats::subjects::agent::message_send(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::SendMessageCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default(); // echo mode (no LLM)
         let event = make_message_event("dc-dm-123", "hello world", 100, 50);
 
-        processor.process_message(&event, &publisher).await.unwrap();
+        processor.process_message(&event, &mock).await.unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        // send_typing + message_send
+        assert_eq!(messages.len(), 2);
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(messages[1].1.clone()).unwrap();
         assert_eq!(cmd.channel_id, 100);
         assert!(
             cmd.content.contains("hello world"),
@@ -102,48 +86,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_echo_mode_skips_empty_message() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-empty-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let event = make_message_event("dc-dm-123", "", 100, 50);
 
-        // Should not error and should not publish anything
-        let result = processor.process_message(&event, &publisher).await;
+        let result = processor.process_message(&event, &mock).await;
         assert!(result.is_ok(), "empty message must not return an error");
+        assert!(mock.is_empty(), "empty message must not publish anything");
     }
 
     #[tokio::test]
     async fn test_ping_slash_command_responds() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-ping-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let event = make_slash_command_event("dc-dm-123", "ping", 100);
 
-        processor
-            .process_slash_command(&event, &publisher)
-            .await
-            .unwrap();
+        processor.process_slash_command(&event, &mock).await.unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert_eq!(cmd.interaction_id, 9999);
         assert_eq!(cmd.interaction_token, "test-token");
         let content = cmd.content.unwrap_or_default();
@@ -156,21 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_slash_command_clears_session() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-clear-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let session_id = "dc-dm-999";
 
@@ -190,7 +139,7 @@ mod tests {
 
         let event = make_slash_command_event(session_id, "clear", 100);
         processor
-            .process_slash_command(&event, &publisher)
+            .process_slash_command(&event, &mock)
             .await
             .unwrap();
 
@@ -202,7 +151,9 @@ mod tests {
             .is_empty());
 
         // And we should get an ephemeral response
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert!(cmd.ephemeral, "clear response must be ephemeral");
     }
 
@@ -344,21 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_forget_slash_command_removes_last_exchange() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-forget-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let session_id = "dc-dm-forget-1";
 
@@ -373,7 +310,7 @@ mod tests {
 
         let event = make_slash_command_event(session_id, "forget", 100);
         processor
-            .process_slash_command(&event, &publisher)
+            .process_slash_command(&event, &mock)
             .await
             .unwrap();
 
@@ -385,7 +322,9 @@ mod tests {
         assert!(history.is_empty(), "last exchange must be forgotten");
 
         // Must get an ephemeral confirmation
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert!(cmd.ephemeral, "forget response must be ephemeral");
         let content = cmd.content.unwrap_or_default();
         assert!(
@@ -397,30 +336,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_forget_slash_command_empty_history() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-forget-empty-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let event = make_slash_command_event("dc-dm-forget-2", "forget", 100);
 
         processor
-            .process_slash_command(&event, &publisher)
+            .process_slash_command(&event, &mock)
             .await
             .unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert!(cmd.ephemeral);
         let content = cmd.content.unwrap_or_default();
         assert!(
@@ -434,21 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reaction_clear_clears_session() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-react-clear-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::message_send(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::SendMessageCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         // DM reaction → session_id = dc-dm-{channel_id}
         let session_id = "dc-dm-100";
@@ -460,7 +373,7 @@ mod tests {
         // user_id=42, channel_id=100, no guild_id → DM session
         let event = make_reaction_add_event(session_id, 42, 100, 77, "❌");
         processor
-            .process_reaction_add(&event, &publisher)
+            .process_reaction_add(&event, &mock)
             .await
             .unwrap();
 
@@ -475,7 +388,9 @@ mod tests {
         );
 
         // And a confirmation message must be published
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert_eq!(cmd.channel_id, 100);
         assert!(
             cmd.content.contains("cleared"),
@@ -484,87 +399,187 @@ mod tests {
         );
     }
 
-    // ── lifecycle event stubs (no NATS needed) ────────────────────────────
+    // ── lifecycle event stubs (no publisher needed) ────────────────────────
 
-    fn make_typing_event(session_id: &str, user_id: u64, channel_id: u64) -> discord_types::events::TypingStartEvent {
+    fn make_typing_event(
+        session_id: &str,
+        user_id: u64,
+        channel_id: u64,
+    ) -> discord_types::events::TypingStartEvent {
         use discord_types::events::{EventMetadata, TypingStartEvent};
-        TypingStartEvent { metadata: EventMetadata::new(session_id, 1), user_id, channel_id, guild_id: None }
+        TypingStartEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            user_id,
+            channel_id,
+            guild_id: None,
+        }
     }
 
-    fn make_voice_event(session_id: &str, user_id: u64) -> discord_types::events::VoiceStateUpdateEvent {
+    fn make_voice_event(
+        session_id: &str,
+        user_id: u64,
+    ) -> discord_types::events::VoiceStateUpdateEvent {
         use discord_types::events::{EventMetadata, VoiceStateUpdateEvent};
         use discord_types::types::VoiceState;
         VoiceStateUpdateEvent {
             metadata: EventMetadata::new(session_id, 1),
             guild_id: Some(200),
             old_channel_id: None,
-            new_state: VoiceState { user_id, channel_id: Some(500), guild_id: Some(200), self_mute: false, self_deaf: false },
+            new_state: VoiceState {
+                user_id,
+                channel_id: Some(500),
+                guild_id: Some(200),
+                self_mute: false,
+                self_deaf: false,
+            },
         }
     }
 
     fn make_guild_create_event(session_id: &str) -> discord_types::events::GuildCreateEvent {
         use discord_types::events::{EventMetadata, GuildCreateEvent};
         use discord_types::types::DiscordGuild;
-        GuildCreateEvent { metadata: EventMetadata::new(session_id, 1), guild: DiscordGuild { id: 200, name: "Test".to_string() }, member_count: 10 }
+        GuildCreateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild: DiscordGuild {
+                id: 200,
+                name: "Test".to_string(),
+            },
+            member_count: 10,
+        }
     }
 
     fn make_guild_update_event(session_id: &str) -> discord_types::events::GuildUpdateEvent {
         use discord_types::events::{EventMetadata, GuildUpdateEvent};
         use discord_types::types::DiscordGuild;
-        GuildUpdateEvent { metadata: EventMetadata::new(session_id, 1), guild: DiscordGuild { id: 200, name: "Updated".to_string() } }
+        GuildUpdateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild: DiscordGuild {
+                id: 200,
+                name: "Updated".to_string(),
+            },
+        }
     }
 
     fn make_guild_delete_event(session_id: &str) -> discord_types::events::GuildDeleteEvent {
         use discord_types::events::{EventMetadata, GuildDeleteEvent};
-        GuildDeleteEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, unavailable: false }
+        GuildDeleteEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id: 200,
+            unavailable: false,
+        }
     }
 
     fn make_channel_create_event(session_id: &str) -> discord_types::events::ChannelCreateEvent {
         use discord_types::events::{EventMetadata, ChannelCreateEvent};
         use discord_types::types::{ChannelType, DiscordChannel};
-        ChannelCreateEvent { metadata: EventMetadata::new(session_id, 1), channel: DiscordChannel { id: 300, channel_type: ChannelType::GuildText, guild_id: Some(200), name: Some("general".to_string()) } }
+        ChannelCreateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            channel: DiscordChannel {
+                id: 300,
+                channel_type: ChannelType::GuildText,
+                guild_id: Some(200),
+                name: Some("general".to_string()),
+            },
+        }
     }
 
     fn make_channel_update_event(session_id: &str) -> discord_types::events::ChannelUpdateEvent {
         use discord_types::events::{EventMetadata, ChannelUpdateEvent};
         use discord_types::types::{ChannelType, DiscordChannel};
-        ChannelUpdateEvent { metadata: EventMetadata::new(session_id, 1), channel: DiscordChannel { id: 300, channel_type: ChannelType::GuildText, guild_id: Some(200), name: Some("renamed".to_string()) } }
+        ChannelUpdateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            channel: DiscordChannel {
+                id: 300,
+                channel_type: ChannelType::GuildText,
+                guild_id: Some(200),
+                name: Some("renamed".to_string()),
+            },
+        }
     }
 
     fn make_channel_delete_event(session_id: &str) -> discord_types::events::ChannelDeleteEvent {
         use discord_types::events::{EventMetadata, ChannelDeleteEvent};
-        ChannelDeleteEvent { metadata: EventMetadata::new(session_id, 1), channel_id: 300, guild_id: 200 }
+        ChannelDeleteEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            channel_id: 300,
+            guild_id: 200,
+        }
     }
 
     fn make_role_create_event(session_id: &str) -> discord_types::events::RoleCreateEvent {
         use discord_types::events::{EventMetadata, RoleCreateEvent};
         use discord_types::types::DiscordRole;
-        RoleCreateEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role: DiscordRole { id: 111, name: "Mod".to_string(), color: 0, hoist: false, position: 1, permissions: "0".to_string(), mentionable: false } }
+        RoleCreateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id: 200,
+            role: DiscordRole {
+                id: 111,
+                name: "Mod".to_string(),
+                color: 0,
+                hoist: false,
+                position: 1,
+                permissions: "0".to_string(),
+                mentionable: false,
+            },
+        }
     }
 
     fn make_role_update_event(session_id: &str) -> discord_types::events::RoleUpdateEvent {
         use discord_types::events::{EventMetadata, RoleUpdateEvent};
         use discord_types::types::DiscordRole;
-        RoleUpdateEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role: DiscordRole { id: 111, name: "Admin".to_string(), color: 0xFF0000, hoist: true, position: 1, permissions: "8".to_string(), mentionable: true } }
+        RoleUpdateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id: 200,
+            role: DiscordRole {
+                id: 111,
+                name: "Admin".to_string(),
+                color: 0xFF0000,
+                hoist: true,
+                position: 1,
+                permissions: "8".to_string(),
+                mentionable: true,
+            },
+        }
     }
 
     fn make_role_delete_event(session_id: &str) -> discord_types::events::RoleDeleteEvent {
         use discord_types::events::{EventMetadata, RoleDeleteEvent};
-        RoleDeleteEvent { metadata: EventMetadata::new(session_id, 1), guild_id: 200, role_id: 111 }
+        RoleDeleteEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id: 200,
+            role_id: 111,
+        }
     }
 
     fn make_presence_event(session_id: &str) -> discord_types::events::PresenceUpdateEvent {
         use discord_types::events::{EventMetadata, PresenceUpdateEvent};
-        PresenceUpdateEvent { metadata: EventMetadata::new(session_id, 1), user_id: 42, guild_id: 200, status: "online".to_string() }
+        PresenceUpdateEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            user_id: 42,
+            guild_id: 200,
+            status: "online".to_string(),
+        }
     }
 
     fn make_bot_ready_event(session_id: &str) -> discord_types::events::BotReadyEvent {
         use discord_types::events::{EventMetadata, BotReadyEvent};
         use discord_types::types::DiscordUser;
-        BotReadyEvent { metadata: EventMetadata::new(session_id, 1), bot_user: DiscordUser { id: 999, username: "bot".to_string(), global_name: None, bot: true }, guild_count: 3 }
+        BotReadyEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            bot_user: DiscordUser {
+                id: 999,
+                username: "bot".to_string(),
+                global_name: None,
+                bot: true,
+            },
+            guild_count: 3,
+        }
     }
 
-    fn make_autocomplete_event(session_id: &str, interaction_id: u64) -> discord_types::events::AutocompleteEvent {
+    fn make_autocomplete_event(
+        session_id: &str,
+        interaction_id: u64,
+    ) -> discord_types::events::AutocompleteEvent {
         use discord_types::events::{AutocompleteEvent, EventMetadata};
         use discord_types::types::DiscordUser;
         AutocompleteEvent {
@@ -573,14 +588,22 @@ mod tests {
             interaction_token: "ac-tok".to_string(),
             guild_id: None,
             channel_id: 100,
-            user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+            user: DiscordUser {
+                id: 42,
+                username: "tester".to_string(),
+                global_name: None,
+                bot: false,
+            },
             command_name: "ask".to_string(),
             focused_option: "question".to_string(),
             current_value: "how".to_string(),
         }
     }
 
-    fn make_modal_submit_event(session_id: &str, interaction_id: u64) -> discord_types::events::ModalSubmitEvent {
+    fn make_modal_submit_event(
+        session_id: &str,
+        interaction_id: u64,
+    ) -> discord_types::events::ModalSubmitEvent {
         use discord_types::events::{EventMetadata, ModalSubmitEvent};
         use discord_types::types::DiscordUser;
         ModalSubmitEvent {
@@ -589,7 +612,12 @@ mod tests {
             interaction_token: "modal-tok".to_string(),
             guild_id: None,
             channel_id: 100,
-            user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+            user: DiscordUser {
+                id: 42,
+                username: "tester".to_string(),
+                global_name: None,
+                bot: false,
+            },
             custom_id: "my_modal".to_string(),
             inputs: vec![],
         }
@@ -598,145 +626,149 @@ mod tests {
     #[tokio::test]
     async fn test_typing_start_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_typing_start(&make_typing_event("dc-dm-100", 42, 100)).await;
+        let result = processor
+            .process_typing_start(&make_typing_event("dc-dm-100", 42, 100))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_voice_state_update_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_voice_state_update(&make_voice_event("dc-guild-200-500", 42)).await;
+        let result = processor
+            .process_voice_state_update(&make_voice_event("dc-guild-200-500", 42))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_guild_create_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_guild_create(&make_guild_create_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_guild_create(&make_guild_create_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_guild_update_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_guild_update(&make_guild_update_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_guild_update(&make_guild_update_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_guild_delete_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_guild_delete(&make_guild_delete_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_guild_delete(&make_guild_delete_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_channel_create_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_channel_create(&make_channel_create_event("dc-guild-200-300")).await;
+        let result = processor
+            .process_channel_create(&make_channel_create_event("dc-guild-200-300"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_channel_update_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_channel_update(&make_channel_update_event("dc-guild-200-300")).await;
+        let result = processor
+            .process_channel_update(&make_channel_update_event("dc-guild-200-300"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_channel_delete_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_channel_delete(&make_channel_delete_event("dc-guild-200-300")).await;
+        let result = processor
+            .process_channel_delete(&make_channel_delete_event("dc-guild-200-300"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_role_create_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_role_create(&make_role_create_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_role_create(&make_role_create_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_role_update_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_role_update(&make_role_update_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_role_update(&make_role_update_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_role_delete_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_role_delete(&make_role_delete_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_role_delete(&make_role_delete_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_presence_update_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_presence_update(&make_presence_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_presence_update(&make_presence_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_bot_ready_is_noop() {
         let processor = MessageProcessor::default();
-        let result = processor.process_bot_ready(&make_bot_ready_event("dc-guild-200-100")).await;
+        let result = processor
+            .process_bot_ready(&make_bot_ready_event("dc-guild-200-100"))
+            .await;
         assert!(result.is_ok());
     }
 
-    // ── autocomplete & modal (publish to NATS) ─────────────────────────────
+    // ── autocomplete & modal ───────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_autocomplete_responds_with_typed_value() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-ac-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_autocomplete_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::AutocompleteRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
-        // make_autocomplete_event uses current_value: "how" (non-empty)
         let event = make_autocomplete_event("dc-dm-100", 6666);
-        processor.process_autocomplete(&event, &publisher).await.unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        processor.process_autocomplete(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        let cmd: discord_types::AutocompleteRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert_eq!(cmd.interaction_id, 6666);
         assert_eq!(cmd.interaction_token, "ac-tok");
-        assert_eq!(cmd.choices.len(), 1, "non-empty current_value must return one pass-through choice");
+        assert_eq!(
+            cmd.choices.len(),
+            1,
+            "non-empty current_value must return one pass-through choice"
+        );
         assert_eq!(cmd.choices[0].name, "how");
         assert_eq!(cmd.choices[0].value, "how");
     }
 
     #[tokio::test]
     async fn test_autocomplete_empty_value_returns_no_choices() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-ac-empty-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_autocomplete_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::AutocompleteRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
-        // Build an event with empty current_value
         let event = {
             use discord_types::events::{AutocompleteEvent, EventMetadata};
             use discord_types::types::DiscordUser;
@@ -746,41 +778,43 @@ mod tests {
                 interaction_token: "ac-tok-empty".to_string(),
                 guild_id: None,
                 channel_id: 100,
-                user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+                user: DiscordUser {
+                    id: 42,
+                    username: "tester".to_string(),
+                    global_name: None,
+                    bot: false,
+                },
                 command_name: "ask".to_string(),
                 focused_option: "question".to_string(),
                 current_value: String::new(),
             }
         };
-        processor.process_autocomplete(&event, &publisher).await.unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        processor.process_autocomplete(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        let cmd: discord_types::AutocompleteRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert_eq!(cmd.interaction_id, 6667);
-        assert!(cmd.choices.is_empty(), "empty current_value must return no choices");
+        assert!(
+            cmd.choices.is_empty(),
+            "empty current_value must return no choices"
+        );
     }
 
     #[tokio::test]
     async fn test_modal_submit_responds_ephemeral() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-modal-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let event = make_modal_submit_event("dc-dm-100", 7777);
-        processor.process_modal_submit(&event, &publisher).await.unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        processor.process_modal_submit(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         assert_eq!(cmd.interaction_id, 7777);
         assert_eq!(cmd.interaction_token, "modal-tok");
         assert!(cmd.ephemeral, "modal ack must be ephemeral");
@@ -794,30 +828,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_unknown_slash_command_responds_with_help_hint() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available at {}", NATS_URL);
-            return;
-        };
-
-        let prefix = format!("test-proc-unknown-{}", uuid::Uuid::new_v4().simple());
-        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
-        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
-
-        let subject = discord_nats::subjects::agent::interaction_respond(&prefix);
-        let mut stream = subscriber
-            .subscribe::<discord_types::InteractionRespondCommand>(&subject)
-            .await
-            .unwrap();
-
+        let mock = MockPublisher::new("test");
         let processor = MessageProcessor::default();
         let event = make_slash_command_event("dc-dm-123", "nonexistent", 100);
 
         processor
-            .process_slash_command(&event, &publisher)
+            .process_slash_command(&event, &mock)
             .await
             .unwrap();
 
-        let cmd = stream.next().await.unwrap().unwrap();
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
         let content = cmd.content.unwrap_or_default();
         assert!(
             content.contains("/help"),

@@ -9,6 +9,26 @@ use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+/// Abstraction over environment variable reading.
+/// `SystemEnv` delegates to `std::env::var`; `InMemoryEnv` is used in tests.
+pub trait ReadEnv {
+    fn var(&self, key: &str) -> Option<String>;
+
+    /// Return the value of `key`, or `default` if unset.
+    fn var_or(&self, key: &str, default: &str) -> String {
+        self.var(key).unwrap_or_else(|| default.to_string())
+    }
+}
+
+/// Live implementation: delegates to `std::env::var`.
+pub struct SystemEnv;
+
+impl ReadEnv for SystemEnv {
+    fn var(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
 /// Complete bot configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -46,16 +66,21 @@ impl Config {
         Ok(config)
     }
 
-    /// Load configuration from environment variables
+    /// Load from real environment variables.
     pub fn from_env() -> Result<Self> {
-        let bot_token = std::env::var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
+        Self::from_env_impl(&SystemEnv)
+    }
 
-        let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
+    /// Load from any `ReadEnv` implementation (useful for testing with `InMemoryEnv`).
+    pub fn from_env_impl<E: ReadEnv>(env: &E) -> Result<Self> {
+        let bot_token = env.var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
 
-        let prefix = std::env::var("DISCORD_PREFIX").unwrap_or_else(|_| "prod".to_string());
+        let nats_url = env.var_or("NATS_URL", "localhost:4222");
 
-        let guild_policy = match std::env::var("DISCORD_GUILD_POLICY")
-            .unwrap_or_else(|_| "allowlist".to_string())
+        let prefix = env.var_or("DISCORD_PREFIX", "prod");
+
+        let guild_policy = match env
+            .var_or("DISCORD_GUILD_POLICY", "allowlist")
             .to_lowercase()
             .as_str()
         {
@@ -64,11 +89,10 @@ impl Config {
             _ => GuildPolicy::Allowlist,
         };
 
-        let guild_allowlist =
-            parse_id_list(&std::env::var("DISCORD_GUILD_ALLOWLIST").unwrap_or_default());
+        let guild_allowlist = parse_id_list(&env.var("DISCORD_GUILD_ALLOWLIST").unwrap_or_default());
 
-        let dm_policy = match std::env::var("DISCORD_DM_POLICY")
-            .unwrap_or_else(|_| "allowlist".to_string())
+        let dm_policy = match env
+            .var_or("DISCORD_DM_POLICY", "allowlist")
             .to_lowercase()
             .as_str()
         {
@@ -77,26 +101,25 @@ impl Config {
             _ => DmPolicy::Allowlist,
         };
 
-        let user_allowlist =
-            parse_id_list(&std::env::var("DISCORD_USER_ALLOWLIST").unwrap_or_default());
+        let user_allowlist = parse_id_list(&env.var("DISCORD_USER_ALLOWLIST").unwrap_or_default());
 
-        let admin_users = parse_id_list(&std::env::var("DISCORD_ADMIN_USERS").unwrap_or_default());
+        let admin_users = parse_id_list(&env.var("DISCORD_ADMIN_USERS").unwrap_or_default());
 
         let channel_allowlist =
-            parse_id_list(&std::env::var("DISCORD_CHANNEL_ALLOWLIST").unwrap_or_default());
+            parse_id_list(&env.var("DISCORD_CHANNEL_ALLOWLIST").unwrap_or_default());
 
-        let require_mention = std::env::var("DISCORD_REQUIRE_MENTION")
-            .unwrap_or_else(|_| "false".to_string())
+        let require_mention = env
+            .var_or("DISCORD_REQUIRE_MENTION", "false")
             .to_lowercase()
             == "true";
 
-        let presence_enabled = std::env::var("DISCORD_BRIDGE_PRESENCE")
-            .unwrap_or_else(|_| "false".to_string())
+        let presence_enabled = env
+            .var_or("DISCORD_BRIDGE_PRESENCE", "false")
             .to_lowercase()
             == "true";
 
-        let guild_commands_guild_id = std::env::var("DISCORD_GUILD_COMMANDS_GUILD_ID")
-            .ok()
+        let guild_commands_guild_id = env
+            .var("DISCORD_GUILD_COMMANDS_GUILD_ID")
             .and_then(|s| s.parse::<u64>().ok());
 
         Ok(Config {
