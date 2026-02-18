@@ -28,7 +28,10 @@ use serenity::model::application::{
     ModalInteraction, ResolvedValue,
 };
 use serenity::model::channel::GuildChannel;
+use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
 use serenity::model::event::TypingStartEvent as SerenityTypingStartEvent;
+use serenity::model::guild::ScheduledEvent;
+use std::collections::HashMap;
 use serenity::model::gateway::{Presence, Ready};
 use serenity::model::guild::{PartialGuild, Role, UnavailableGuild};
 use serenity::model::voice::VoiceState as SerenityVoiceState;
@@ -1197,6 +1200,170 @@ impl DiscordBridge {
         let subject = subjects::bot::stage_instance_delete(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published stage_instance_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_ban_add(
+        &self,
+        guild_id: GuildId,
+        user: &serenity::model::user::User,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildBanAddEvent {
+            metadata: meta,
+            guild_id: gid,
+            user: Self::convert_user(user),
+        };
+        let subject = subjects::bot::guild_ban_add(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_ban_add to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_ban_remove(
+        &self,
+        guild_id: GuildId,
+        user: &serenity::model::user::User,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildBanRemoveEvent {
+            metadata: meta,
+            guild_id: gid,
+            user: Self::convert_user(user),
+        };
+        let subject = subjects::bot::guild_ban_remove(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_ban_remove to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_emojis_update(
+        &self,
+        guild_id: GuildId,
+        current_state: &HashMap<serenity::model::id::EmojiId, serenity::model::guild::Emoji>,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let emojis: Vec<_> = current_state
+            .values()
+            .map(|e| Emoji { id: Some(e.id.get()), name: e.name.clone(), animated: e.animated })
+            .collect();
+        let ev = GuildEmojisUpdateEvent { metadata: meta, guild_id: gid, emojis };
+        let subject = subjects::bot::guild_emojis_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_emojis_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_scheduled_event_create(&self, event: &ScheduledEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildScheduledEventCreateEvent {
+            metadata: meta,
+            event_id: event.id.get(),
+            guild_id: gid,
+            name: event.name.clone(),
+            description: event.description.clone(),
+            start_time: event.start_time.to_rfc3339().unwrap_or_default(),
+            channel_id: event.channel_id.map(|c| c.get()),
+        };
+        let subject = subjects::bot::guild_scheduled_event_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_scheduled_event_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_scheduled_event_update(&self, event: &ScheduledEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildScheduledEventUpdateEvent {
+            metadata: meta,
+            event_id: event.id.get(),
+            guild_id: gid,
+            name: event.name.clone(),
+            description: event.description.clone(),
+            start_time: event.start_time.to_rfc3339().unwrap_or_default(),
+            channel_id: event.channel_id.map(|c| c.get()),
+        };
+        let subject = subjects::bot::guild_scheduled_event_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_scheduled_event_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_scheduled_event_delete(&self, event: &ScheduledEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = GuildScheduledEventDeleteEvent {
+            metadata: meta,
+            event_id: event.id.get(),
+            guild_id: gid,
+            name: event.name.clone(),
+        };
+        let subject = subjects::bot::guild_scheduled_event_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_scheduled_event_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_channel_pins_update(
+        &self,
+        pin: &SerenityChannelPinsUpdateEvent,
+    ) -> Result<()> {
+        let guild_id = pin.guild_id.map(|g| g.get());
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id.unwrap_or(0)),
+            self.next_sequence(),
+        );
+        let ev = ChannelPinsUpdateEvent {
+            metadata: meta,
+            channel_id: pin.channel_id.get(),
+            guild_id,
+            last_pin_timestamp: pin.last_pin_timestamp.and_then(|t| t.to_rfc3339()),
+        };
+        let subject = subjects::bot::channel_pins_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published channel_pins_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_reaction_remove_all(
+        &self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-channel-{}", channel_id.get()),
+            self.next_sequence(),
+        );
+        let ev = ReactionRemoveAllEvent {
+            metadata: meta,
+            channel_id: channel_id.get(),
+            message_id: message_id.get(),
+        };
+        let subject = subjects::bot::reaction_remove_all_notification(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published reaction_remove_all to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_webhooks_update(
+        &self,
+        guild_id: GuildId,
+        channel_id: ChannelId,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = WebhooksUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            channel_id: channel_id.get(),
+        };
+        let subject = subjects::bot::webhooks_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published webhooks_update to {}", subject);
         Ok(())
     }
 }

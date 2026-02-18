@@ -14,31 +14,35 @@ use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
     AddReactionCommand, AddThreadMemberCommand, ArchiveThreadCommand, AssignRoleCommand,
     AutocompleteRespondCommand, BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand,
-    CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand, CreateRoleCommand,
-    CreateScheduledEventCommand, CreateThreadCommand, CreateWebhookCommand, CrosspostMessageCommand,
-    DeleteChannelCommand, DeleteEmojiCommand, DeleteMessageCommand, DeleteRoleCommand,
-    DeleteScheduledEventCommand, DeleteWebhookCommand, EditChannelCommand, EditMessageCommand,
-    ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand, GuildMemberNickCommand,
-    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand,
-    ModalRespondCommand, PinMessageCommand, RemoveAllReactionsCommand, RemoveReactionCommand,
-    RemoveRoleCommand, RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand,
-    SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnbanUserCommand,
-    UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
+    CreateDmChannelCommand, CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand,
+    CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand, CreateThreadCommand,
+    CreateWebhookCommand, CrosspostMessageCommand, DeleteChannelCommand, DeleteEmojiCommand,
+    DeleteMessageCommand, DeleteRoleCommand, DeleteScheduledEventCommand, DeleteStageInstanceCommand,
+    DeleteWebhookCommand, EditChannelCommand, EditMessageCommand, EditRoleCommand, EditWebhookCommand,
+    ExecuteWebhookCommand, FetchChannelCommand, FetchGuildCommand, FetchInvitesCommand,
+    FetchMemberCommand, FetchMessagesCommand, GuildMemberNickCommand, InteractionDeferCommand,
+    InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand, ModalRespondCommand,
+    PinMessageCommand, RemoveAllReactionsCommand, RemoveReactionCommand, RemoveRoleCommand,
+    RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand, SetBotPresenceCommand,
+    TimeoutUserCommand, TypingCommand, UnbanUserCommand, UnpinMessageCommand,
+    VoiceDisconnectCommand, VoiceMoveCommand,
 };
 use discord_types::types::{
-    ActionRowComponent, AttachedFile, ButtonStyle as DcButtonStyle, DiscordUser,
-    Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, FetchedMember, FetchedMessage,
+    ActionRowComponent, AttachedFile, ButtonStyle as DcButtonStyle, ChannelType, DiscordUser,
+    Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, FetchedChannel, FetchedGuild,
+    FetchedInvite, FetchedMember, FetchedMessage,
 };
 use serenity::builder::{
     CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
     CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, CreateInteractionResponse,
     CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
-    CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, CreateThread, EditChannel,
-    EditMember, EditMessage, EditRole, EditThread, GetMessages,
+    CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, CreateStageInstance,
+    CreateThread, EditChannel, EditMember, EditMessage, EditRole, EditThread, EditWebhook,
+    GetMessages,
 };
 use serenity::model::application::ButtonStyle as SerenityButtonStyle;
 use serenity::http::Http;
-use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, UserId};
+use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, UserId, WebhookId};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -343,6 +347,7 @@ impl OutboundProcessor {
             r31, r32, r33, r34, r35, r36, r37,
             r38, r39, r40, r41, r42, r43,
             r44, r45, r46, r47, r48,
+            r49, r50, r51, r52, r53, r54, r55, r56,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -427,6 +432,14 @@ impl OutboundProcessor {
             Self::handle_forum_post_create(http.clone(), client.clone(), prefix.clone()),
             Self::handle_thread_member_add(http.clone(), client.clone(), prefix.clone()),
             Self::handle_thread_member_remove(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_edit_role(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_stage_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_stage_delete(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_webhook_edit(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_dm_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_guild(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_channel(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_invites(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -479,6 +492,14 @@ impl OutboundProcessor {
             ("forum_post_create", r46),
             ("thread_member_add", r47),
             ("thread_member_remove", r48),
+            ("edit_role", r49),
+            ("stage_create", r50),
+            ("stage_delete", r51),
+            ("webhook_edit", r52),
+            ("dm_create", r53),
+            ("fetch_guild", r54),
+            ("fetch_channel", r55),
+            ("fetch_invites", r56),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -2604,6 +2625,321 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => warn!("Failed to deserialize thread_member_remove command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_edit_role(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::role_edit(&prefix);
+        let mut stream = subscriber.subscribe::<EditRoleCommand>(&subject).await?;
+        info!("Listening for edit_role commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let role = RoleId::new(cmd.role_id);
+                    let mut builder = EditRole::new();
+                    if let Some(ref name) = cmd.name { builder = builder.name(name); }
+                    if let Some(color) = cmd.color { builder = builder.colour(color); }
+                    if let Some(hoist) = cmd.hoist { builder = builder.hoist(hoist); }
+                    if let Some(mentionable) = cmd.mentionable { builder = builder.mentionable(mentionable); }
+                    if let Err(e) = http.edit_role(guild, role, &builder, None).await {
+                        warn!("Failed to edit role {} in guild {}: {}", cmd.role_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize edit_role command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_stage_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::builder::Builder;
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::stage_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateStageInstanceCommand>(&subject).await?;
+        info!("Listening for stage_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let builder = CreateStageInstance::new(&cmd.topic);
+                    if let Err(e) = builder.execute(&*http, channel).await {
+                        warn!("Failed to create stage instance in {}: {}", cmd.channel_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize stage_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_stage_delete(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::stage_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteStageInstanceCommand>(&subject).await?;
+        info!("Listening for stage_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    if let Err(e) = http.delete_stage_instance(channel, None).await {
+                        warn!("Failed to delete stage instance in {}: {}", cmd.channel_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize stage_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_webhook_edit(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::webhook_edit(&prefix);
+        let mut stream = subscriber.subscribe::<EditWebhookCommand>(&subject).await?;
+        info!("Listening for webhook_edit commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let webhook_id = WebhookId::new(cmd.webhook_id);
+                    let mut builder = EditWebhook::new();
+                    if let Some(ref name) = cmd.name { builder = builder.name(name); }
+                    if let Some(channel_id) = cmd.channel_id {
+                        builder = builder.channel_id(ChannelId::new(channel_id));
+                    }
+                    if let Err(e) = http.edit_webhook_with_token(webhook_id, &cmd.webhook_token, &builder, None).await {
+                        warn!("Failed to edit webhook {}: {}", cmd.webhook_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize webhook_edit command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_dm_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::dm_create(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for dm_create requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("dm_create: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: CreateDmChannelCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("dm_create: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let user = UserId::new(cmd.user_id);
+            let response_bytes = match user.create_dm_channel(&*http).await {
+                Ok(channel) => serde_json::to_vec(&Some(channel.id.get())).unwrap_or_default(),
+                Err(e) => {
+                    error!("dm_create: Discord API error for user {}: {}", cmd.user_id, e);
+                    serde_json::to_vec::<Option<u64>>(&None).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("dm_create: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_guild(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_guild(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_guild requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_guild: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchGuildCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_guild: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let response_bytes = match http.get_guild(GuildId::new(cmd.guild_id)).await {
+                Ok(g) => {
+                    let fetched = FetchedGuild {
+                        id: g.id.get(),
+                        name: g.name.clone(),
+                        member_count: g.approximate_member_count.unwrap_or(0),
+                    };
+                    serde_json::to_vec(&Some(fetched)).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_guild: Discord API error for {}: {}", cmd.guild_id, e);
+                    serde_json::to_vec::<Option<FetchedGuild>>(&None).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_guild: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_channel(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        use serenity::model::channel::Channel;
+        use serenity::model::channel::ChannelType as SerenityChannelType;
+        let subject = subjects::agent::fetch_channel(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_channel requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_channel: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchChannelCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_channel: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let response_bytes = match http.get_channel(ChannelId::new(cmd.channel_id)).await {
+                Ok(ch) => {
+                    let fetched = match ch {
+                        Channel::Guild(g) => FetchedChannel {
+                            id: g.id.get(),
+                            channel_type: match g.kind {
+                                SerenityChannelType::Text => ChannelType::GuildText,
+                                SerenityChannelType::Voice => ChannelType::GuildVoice,
+                                SerenityChannelType::Category => ChannelType::GuildCategory,
+                                SerenityChannelType::News => ChannelType::GuildNews,
+                                SerenityChannelType::Stage => ChannelType::GuildStageVoice,
+                                SerenityChannelType::Forum => ChannelType::GuildForum,
+                                _ => ChannelType::Unknown,
+                            },
+                            guild_id: Some(g.guild_id.get()),
+                            name: Some(g.name.clone()),
+                            topic: g.topic.clone(),
+                        },
+                        Channel::Private(p) => FetchedChannel {
+                            id: p.id.get(),
+                            channel_type: ChannelType::Dm,
+                            guild_id: None,
+                            name: Some(p.name()),
+                            topic: None,
+                        },
+                        _ => FetchedChannel {
+                            id: ch.id().get(),
+                            channel_type: ChannelType::Unknown,
+                            guild_id: None,
+                            name: None,
+                            topic: None,
+                        },
+                    };
+                    serde_json::to_vec(&Some(fetched)).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_channel: Discord API error for {}: {}", cmd.channel_id, e);
+                    serde_json::to_vec::<Option<FetchedChannel>>(&None).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_channel: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_invites(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_invites(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_invites requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_invites: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchInvitesCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_invites: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let channel = ChannelId::new(cmd.channel_id);
+            let response_bytes = match channel.invites(&*http).await {
+                Ok(invites) => {
+                    let fetched: Vec<FetchedInvite> = invites
+                        .iter()
+                        .map(|inv| FetchedInvite {
+                            code: inv.code.clone(),
+                            channel_id: inv.channel.id.get(),
+                            inviter_id: inv.inviter.as_ref().map(|u| u.id.get()),
+                            uses: inv.uses,
+                            max_uses: inv.max_uses as u64,
+                            max_age_secs: inv.max_age as u64,
+                            temporary: inv.temporary,
+                        })
+                        .collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_invites: Discord API error for {}: {}", cmd.channel_id, e);
+                    serde_json::to_vec::<Vec<FetchedInvite>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_invites: failed to send reply: {}", e);
             }
         }
         Ok(())
