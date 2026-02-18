@@ -93,6 +93,9 @@ pub struct ComponentInteractionEvent {
     pub message_id: u64,
     pub custom_id: String,
     pub component_type: ComponentType,
+    /// Selected values for select-menu components. Empty for button interactions.
+    #[serde(default)]
+    pub values: Vec<String>,
 }
 
 /// A reaction was added to a message
@@ -416,6 +419,7 @@ mod tests {
             message_id: 5,
             custom_id: "button:ok".to_string(),
             component_type: ComponentType::Button,
+            values: vec![],
         };
         roundtrip(&event);
     }

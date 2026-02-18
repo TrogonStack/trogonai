@@ -689,7 +689,7 @@ mod tests {
     // ── autocomplete & modal (publish to NATS) ─────────────────────────────
 
     #[tokio::test]
-    async fn test_autocomplete_responds_with_empty_choices() {
+    async fn test_autocomplete_responds_with_typed_value() {
         let Some(client) = try_connect().await else {
             eprintln!("SKIP: NATS not available at {}", NATS_URL);
             return;
@@ -706,13 +706,57 @@ mod tests {
             .unwrap();
 
         let processor = MessageProcessor::default();
+        // make_autocomplete_event uses current_value: "how" (non-empty)
         let event = make_autocomplete_event("dc-dm-100", 6666);
         processor.process_autocomplete(&event, &publisher).await.unwrap();
 
         let cmd = stream.next().await.unwrap().unwrap();
         assert_eq!(cmd.interaction_id, 6666);
         assert_eq!(cmd.interaction_token, "ac-tok");
-        assert!(cmd.choices.is_empty(), "default autocomplete must return empty choices");
+        assert_eq!(cmd.choices.len(), 1, "non-empty current_value must return one pass-through choice");
+        assert_eq!(cmd.choices[0].name, "how");
+        assert_eq!(cmd.choices[0].value, "how");
+    }
+
+    #[tokio::test]
+    async fn test_autocomplete_empty_value_returns_no_choices() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available at {}", NATS_URL);
+            return;
+        };
+
+        let prefix = format!("test-proc-ac-empty-{}", uuid::Uuid::new_v4().simple());
+        let publisher = discord_nats::MessagePublisher::new(client.clone(), prefix.clone());
+        let subscriber = discord_nats::MessageSubscriber::new(client.clone(), prefix.clone());
+
+        let subject = discord_nats::subjects::agent::interaction_autocomplete_respond(&prefix);
+        let mut stream = subscriber
+            .subscribe::<discord_types::AutocompleteRespondCommand>(&subject)
+            .await
+            .unwrap();
+
+        let processor = MessageProcessor::default();
+        // Build an event with empty current_value
+        let event = {
+            use discord_types::events::{AutocompleteEvent, EventMetadata};
+            use discord_types::types::DiscordUser;
+            AutocompleteEvent {
+                metadata: EventMetadata::new("dc-dm-100", 1),
+                interaction_id: 6667,
+                interaction_token: "ac-tok-empty".to_string(),
+                guild_id: None,
+                channel_id: 100,
+                user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+                command_name: "ask".to_string(),
+                focused_option: "question".to_string(),
+                current_value: String::new(),
+            }
+        };
+        processor.process_autocomplete(&event, &publisher).await.unwrap();
+
+        let cmd = stream.next().await.unwrap().unwrap();
+        assert_eq!(cmd.interaction_id, 6667);
+        assert!(cmd.choices.is_empty(), "empty current_value must return no choices");
     }
 
     #[tokio::test]

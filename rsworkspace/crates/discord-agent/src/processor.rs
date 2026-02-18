@@ -12,8 +12,9 @@ use discord_types::{
         RoleDeleteEvent, RoleUpdateEvent, SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
     },
     types::{Attachment, ChannelType},
-    AutocompleteRespondCommand, InteractionDeferCommand, InteractionFollowupCommand,
-    InteractionRespondCommand, SendMessageCommand, StreamMessageCommand, TypingCommand,
+    AutocompleteChoice, AutocompleteRespondCommand, InteractionDeferCommand,
+    InteractionFollowupCommand, InteractionRespondCommand, SendMessageCommand, StreamMessageCommand,
+    TypingCommand,
 };
 use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -1218,26 +1219,197 @@ impl MessageProcessor {
         )
     }
 
-    /// Process a button / select menu interaction
+    /// Process a button / select menu interaction: run LLM on the interaction (or echo in no-LLM mode).
     pub async fn process_component_interaction(
         &self,
         event: &ComponentInteractionEvent,
         publisher: &MessagePublisher,
     ) -> Result<()> {
-        // Acknowledge the interaction and echo the custom_id
-        let text = format!("You interacted with: `{}`", event.custom_id);
-        self.interaction_respond(
-            event.interaction_id,
-            &event.interaction_token,
-            &text,
-            true,
-            publisher,
-        )
-        .await?;
+        let session_id = &event.metadata.session_id;
+        let channel_id = event.channel_id;
+
+        // Format the interaction as human-readable user input for the LLM
+        let user_text = if event.values.is_empty() {
+            // Button click
+            format!("[Button clicked: {}]", event.custom_id)
+        } else {
+            // Select menu selection
+            format!(
+                "[Selected from {}: {}]",
+                event.custom_id,
+                event.values.join(", ")
+            )
+        };
+
+        if let Some(ref llm_client) = self.llm_client {
+            // Defer — interaction must be acknowledged within 3 seconds
+            self.interaction_defer(
+                event.interaction_id,
+                &event.interaction_token,
+                false,
+                publisher,
+            )
+            .await?;
+
+            // Add to conversation history
+            self.conversation_manager
+                .add_user_message(session_id, &user_text, event.interaction_id)
+                .await;
+
+            // Placeholder followup
+            let followup_subject = subjects::agent::interaction_followup(publisher.prefix());
+            let component_session = format!("component_{}", session_id);
+            publisher
+                .publish(
+                    &followup_subject,
+                    &InteractionFollowupCommand {
+                        interaction_token: event.interaction_token.clone(),
+                        content: Some(STREAM_CURSOR.to_string()),
+                        embeds: vec![],
+                        ephemeral: false,
+                        session_id: Some(component_session.clone()),
+                        files: vec![],
+                        components: vec![],
+                    },
+                )
+                .await?;
+
+            // Spawn LLM
+            let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+            let llm_client = llm_client.clone();
+            let history = self.conversation_manager.get_history(session_id).await;
+            let system_prompt = self.system_prompt.clone();
+            let user_text_owned = user_text.clone();
+            let llm_handle = tokio::spawn(async move {
+                llm_client
+                    .generate_response_streaming(
+                        &system_prompt,
+                        &user_text_owned,
+                        &history,
+                        chunk_tx,
+                    )
+                    .await
+            });
+
+            let stream_subject = subjects::agent::message_stream(publisher.prefix());
+            let mut accumulated = String::new();
+            let mut last_publish = Instant::now();
+            let stream_deadline = tokio::time::sleep(self.stream_timeout);
+            tokio::pin!(stream_deadline);
+            let mut timed_out = false;
+
+            loop {
+                tokio::select! {
+                    chunk = chunk_rx.recv() => {
+                        match chunk {
+                            Some(c) => {
+                                accumulated.push_str(&c);
+                                if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                    publisher
+                                        .publish(
+                                            &stream_subject,
+                                            &StreamMessageCommand {
+                                                channel_id,
+                                                content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                                is_final: false,
+                                                session_id: component_session.clone(),
+                                                reply_to_message_id: None,
+                                            },
+                                        )
+                                        .await?;
+                                    last_publish = Instant::now();
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = &mut stream_deadline => {
+                        timed_out = true;
+                        llm_handle.abort();
+                        break;
+                    }
+                }
+            }
+
+            if timed_out {
+                warn!(
+                    "LLM component response timed out for session {}",
+                    session_id
+                );
+                if let Some(ref m) = self.metrics {
+                    m.inc_llm_errors();
+                }
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id,
+                            content: "Sorry, the response timed out.".to_string(),
+                            is_final: true,
+                            session_id: component_session,
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+                return Ok(());
+            }
+
+            match llm_handle.await? {
+                Ok(full_response) => {
+                    self.conversation_manager
+                        .add_message(session_id, "assistant", &full_response)
+                        .await;
+                    if let Some(ref m) = self.metrics {
+                        m.inc_messages_processed();
+                    }
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: full_response,
+                                is_final: true,
+                                session_id: component_session,
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+                }
+                Err(e) => {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_llm_errors();
+                    }
+                    warn!("LLM component failed for session {}: {}", session_id, e);
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: "Sorry, I encountered an error. Please try again."
+                                    .to_string(),
+                                is_final: true,
+                                session_id: component_session,
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+                }
+            }
+        } else {
+            // Echo mode
+            self.interaction_respond(
+                event.interaction_id,
+                &event.interaction_token,
+                &format!("Received: {}", user_text),
+                true,
+                publisher,
+            )
+            .await?;
+        }
 
         debug!(
             "Processed component interaction '{}' for channel {}",
-            event.custom_id, event.channel_id
+            event.custom_id, channel_id
         );
         Ok(())
     }
@@ -1431,50 +1603,229 @@ impl MessageProcessor {
         );
     }
 
-    /// Respond to autocomplete with empty choices.
+    /// Respond to autocomplete with a pass-through suggestion.
     /// Autocomplete MUST be responded to within 3 seconds.
     pub async fn process_autocomplete(
         &self,
         event: &AutocompleteEvent,
         publisher: &MessagePublisher,
     ) -> Result<()> {
+        let choices = if event.current_value.is_empty() {
+            vec![]
+        } else {
+            vec![AutocompleteChoice {
+                name: event.current_value.clone(),
+                value: event.current_value.clone(),
+            }]
+        };
+
         debug!(
-            "Autocomplete for command '{}' option '{}' value '{}'",
-            event.command_name, event.focused_option, event.current_value
+            "Autocomplete for '{}' option '{}': responding with {} choices",
+            event.command_name,
+            event.focused_option,
+            choices.len()
         );
 
         let cmd = AutocompleteRespondCommand {
             interaction_id: event.interaction_id,
             interaction_token: event.interaction_token.clone(),
-            choices: vec![],
+            choices,
         };
         let subject = subjects::agent::interaction_autocomplete_respond(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
         Ok(())
     }
 
-    /// Acknowledge a modal submission with an ephemeral message.
+    /// Process a modal submission: run LLM on the submitted inputs (or echo in no-LLM mode).
     /// Modals MUST be responded to within 3 seconds.
     pub async fn process_modal_submit(
         &self,
         event: &ModalSubmitEvent,
         publisher: &MessagePublisher,
     ) -> Result<()> {
+        let session_id = &event.metadata.session_id;
+        let channel_id = event.channel_id;
+
+        // Format modal inputs into readable text for the LLM
+        let user_text = if event.inputs.is_empty() {
+            format!("[Modal submitted: {}]", event.custom_id)
+        } else {
+            let fields: String = event
+                .inputs
+                .iter()
+                .map(|i| format!("**{}**: {}", i.custom_id, i.value))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("[Modal: {}]\n{}", event.custom_id, fields)
+        };
+
+        if let Some(ref llm_client) = self.llm_client {
+            // Defer first — modal must be acknowledged within 3 seconds
+            self.interaction_defer(
+                event.interaction_id,
+                &event.interaction_token,
+                false,
+                publisher,
+            )
+            .await?;
+
+            // Add to conversation history
+            self.conversation_manager
+                .add_user_message(session_id, &user_text, event.interaction_id)
+                .await;
+
+            // Send placeholder followup
+            let followup_subject = subjects::agent::interaction_followup(publisher.prefix());
+            let modal_session = format!("modal_{}", session_id);
+            publisher
+                .publish(
+                    &followup_subject,
+                    &InteractionFollowupCommand {
+                        interaction_token: event.interaction_token.clone(),
+                        content: Some(STREAM_CURSOR.to_string()),
+                        embeds: vec![],
+                        ephemeral: false,
+                        session_id: Some(modal_session.clone()),
+                        files: vec![],
+                        components: vec![],
+                    },
+                )
+                .await?;
+
+            // Spawn LLM task
+            let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+            let llm_client = llm_client.clone();
+            let history = self.conversation_manager.get_history(session_id).await;
+            let system_prompt = self.system_prompt.clone();
+            let user_text_owned = user_text.clone();
+            let llm_handle = tokio::spawn(async move {
+                llm_client
+                    .generate_response_streaming(
+                        &system_prompt,
+                        &user_text_owned,
+                        &history,
+                        chunk_tx,
+                    )
+                    .await
+            });
+
+            let stream_subject = subjects::agent::message_stream(publisher.prefix());
+            let mut accumulated = String::new();
+            let mut last_publish = Instant::now();
+            let stream_deadline = tokio::time::sleep(self.stream_timeout);
+            tokio::pin!(stream_deadline);
+            let mut timed_out = false;
+
+            loop {
+                tokio::select! {
+                    chunk = chunk_rx.recv() => {
+                        match chunk {
+                            Some(c) => {
+                                accumulated.push_str(&c);
+                                if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                                    publisher
+                                        .publish(
+                                            &stream_subject,
+                                            &StreamMessageCommand {
+                                                channel_id,
+                                                content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                                is_final: false,
+                                                session_id: modal_session.clone(),
+                                                reply_to_message_id: None,
+                                            },
+                                        )
+                                        .await?;
+                                    last_publish = Instant::now();
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = &mut stream_deadline => {
+                        timed_out = true;
+                        llm_handle.abort();
+                        break;
+                    }
+                }
+            }
+
+            if timed_out {
+                warn!("LLM modal response timed out for session {}", session_id);
+                if let Some(ref m) = self.metrics {
+                    m.inc_llm_errors();
+                }
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id,
+                            content: "Sorry, the response timed out.".to_string(),
+                            is_final: true,
+                            session_id: modal_session,
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+                return Ok(());
+            }
+
+            match llm_handle.await? {
+                Ok(full_response) => {
+                    self.conversation_manager
+                        .add_message(session_id, "assistant", &full_response)
+                        .await;
+                    if let Some(ref m) = self.metrics {
+                        m.inc_messages_processed();
+                    }
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: full_response,
+                                is_final: true,
+                                session_id: modal_session,
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+                }
+                Err(e) => {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_llm_errors();
+                    }
+                    warn!("LLM modal failed for session {}: {}", session_id, e);
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: "Sorry, I encountered an error. Please try again."
+                                    .to_string(),
+                                is_final: true,
+                                session_id: modal_session,
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+                }
+            }
+        } else {
+            // Echo mode: acknowledge with formatted inputs
+            self.interaction_respond(
+                event.interaction_id,
+                &event.interaction_token,
+                &format!("Received modal: {}", user_text),
+                true,
+                publisher,
+            )
+            .await?;
+        }
+
         debug!(
-            "Modal submitted: custom_id='{}' user={}",
+            "Processed modal submit '{}' for user {}",
             event.custom_id, event.user.id
         );
-
-        let cmd = InteractionRespondCommand {
-            interaction_id: event.interaction_id,
-            interaction_token: event.interaction_token.clone(),
-            content: Some("Received.".to_string()),
-            embeds: vec![],
-            ephemeral: true,
-            components: vec![],
-        };
-        let subject = subjects::agent::interaction_respond(publisher.prefix());
-        publisher.publish(&subject, &cmd).await?;
         Ok(())
     }
 }
