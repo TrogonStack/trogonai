@@ -3,7 +3,11 @@
 use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher};
 use discord_types::{
-    events::{ComponentInteractionEvent, MessageCreatedEvent, SlashCommandEvent},
+    events::{
+        ComponentInteractionEvent, GuildMemberAddEvent, GuildMemberRemoveEvent,
+        MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ReactionAddEvent,
+        ReactionRemoveEvent, SlashCommandEvent,
+    },
     InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand,
     SendMessageCommand, StreamMessageCommand, TypingCommand,
 };
@@ -24,11 +28,27 @@ const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant in a Discord
     Be concise, friendly, and helpful. Keep responses under 500 words unless \
     the user specifically asks for more detail.";
 
+/// Default welcome message template.
+pub const DEFAULT_WELCOME_TEMPLATE: &str = "Welcome to the server, {user}! 👋";
+
+/// Default farewell message template.
+pub const DEFAULT_FAREWELL_TEMPLATE: &str = "**{username}** has left the server.";
+
+/// Configuration for welcome or farewell messages sent when members join/leave.
+pub struct WelcomeConfig {
+    /// Channel to send the message in.
+    pub channel_id: u64,
+    /// Message template. Supports `{user}` (mention) and `{username}` (display name).
+    pub template: String,
+}
+
 /// Message processor
 pub struct MessageProcessor {
     llm_client: Option<ClaudeClient>,
     pub(crate) conversation_manager: ConversationManager,
     system_prompt: String,
+    welcome: Option<WelcomeConfig>,
+    farewell: Option<WelcomeConfig>,
 }
 
 impl MessageProcessor {
@@ -37,6 +57,8 @@ impl MessageProcessor {
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
         system_prompt: Option<String>,
+        welcome: Option<WelcomeConfig>,
+        farewell: Option<WelcomeConfig>,
     ) -> Self {
         let conversation_manager = match conversation_kv {
             Some(kv) => ConversationManager::with_kv(kv),
@@ -46,6 +68,8 @@ impl MessageProcessor {
             llm_client: llm_config.map(ClaudeClient::new),
             conversation_manager,
             system_prompt: system_prompt.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
+            welcome,
+            farewell,
         }
     }
 
@@ -441,6 +465,157 @@ impl MessageProcessor {
         Ok(())
     }
 
+    /// Process a guild member join event
+    pub async fn process_member_add(
+        &self,
+        event: &GuildMemberAddEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        let Some(ref cfg) = self.welcome else {
+            return Ok(());
+        };
+
+        let user = &event.member.user;
+        let display_name = event
+            .member
+            .nick
+            .as_deref()
+            .or(user.global_name.as_deref())
+            .unwrap_or(&user.username);
+
+        let content = cfg
+            .template
+            .replace("{user}", &format!("<@{}>", user.id))
+            .replace("{username}", display_name);
+
+        let cmd = SendMessageCommand {
+            channel_id: cfg.channel_id,
+            content,
+            embeds: vec![],
+            reply_to_message_id: None,
+        };
+        let subject = subjects::agent::message_send(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+
+        info!(
+            "Sent welcome message for user {} in guild {}",
+            user.username, event.guild_id
+        );
+        Ok(())
+    }
+
+    /// Process a guild member leave event
+    pub async fn process_member_remove(
+        &self,
+        event: &GuildMemberRemoveEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        let Some(ref cfg) = self.farewell else {
+            return Ok(());
+        };
+
+        let user = &event.user;
+        let display_name = user.global_name.as_deref().unwrap_or(&user.username);
+
+        let content = cfg
+            .template
+            .replace("{user}", &format!("<@{}>", user.id))
+            .replace("{username}", display_name);
+
+        let cmd = SendMessageCommand {
+            channel_id: cfg.channel_id,
+            content,
+            embeds: vec![],
+            reply_to_message_id: None,
+        };
+        let subject = subjects::agent::message_send(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+
+        info!(
+            "Sent farewell message for user {} in guild {}",
+            user.username, event.guild_id
+        );
+        Ok(())
+    }
+
+    /// Process a message edit event
+    ///
+    /// Updates the most recent matching user message in conversation history so the
+    /// LLM sees the corrected content in future turns.
+    pub async fn process_message_updated(&self, event: &MessageUpdatedEvent) -> Result<()> {
+        let Some(ref new_content) = event.new_content else {
+            return Ok(());
+        };
+
+        let session_id = &event.metadata.session_id;
+        let mut history = self.conversation_manager.get_history(session_id).await;
+
+        // Walk backwards to find the most recent user message and update it
+        if let Some(entry) = history.iter_mut().rev().find(|m| m.role == "user") {
+            debug!(
+                "Updating edited message in session {} (msg {})",
+                session_id, event.message_id
+            );
+            entry.content = new_content.clone();
+            // Persist the updated history
+            self.conversation_manager
+                .save_history(session_id, history)
+                .await;
+        }
+
+        Ok(())
+    }
+
+    /// Process a message deletion event
+    ///
+    /// Removes the most recent user message from conversation history when the
+    /// original message is deleted, keeping the context clean.
+    pub async fn process_message_deleted(&self, event: &MessageDeletedEvent) -> Result<()> {
+        let session_id = &event.metadata.session_id;
+        let mut history = self.conversation_manager.get_history(session_id).await;
+
+        if history.is_empty() {
+            return Ok(());
+        }
+
+        // Remove the last user message (we can't match by message ID since history
+        // doesn't store Discord message IDs, so we remove the most recent user turn)
+        if let Some(pos) = history.iter().rposition(|m| m.role == "user") {
+            debug!(
+                "Removing deleted message from session {} history (msg {})",
+                session_id, event.message_id
+            );
+            history.remove(pos);
+            // Also remove the assistant reply that followed it, if any
+            if pos < history.len() && history[pos].role == "assistant" {
+                history.remove(pos);
+            }
+            self.conversation_manager
+                .save_history(session_id, history)
+                .await;
+        }
+
+        Ok(())
+    }
+
+    /// Process a reaction-add event (no-op unless overridden by a subclass)
+    pub async fn process_reaction_add(&self, event: &ReactionAddEvent) -> Result<()> {
+        debug!(
+            "Reaction {} added by user {} on message {} in channel {}",
+            event.emoji.name, event.user_id, event.message_id, event.channel_id
+        );
+        Ok(())
+    }
+
+    /// Process a reaction-remove event
+    pub async fn process_reaction_remove(&self, event: &ReactionRemoveEvent) -> Result<()> {
+        debug!(
+            "Reaction {} removed by user {} on message {} in channel {}",
+            event.emoji.name, event.user_id, event.message_id, event.channel_id
+        );
+        Ok(())
+    }
+
     /// Process a button / select menu interaction
     pub async fn process_component_interaction(
         &self,
@@ -514,6 +689,6 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None, None, None)
+        Self::new(None, None, None, None, None)
     }
 }

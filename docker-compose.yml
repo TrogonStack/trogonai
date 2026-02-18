@@ -99,6 +99,11 @@ services:
       # - CLAUDE_TEMPERATURE=${CLAUDE_TEMPERATURE:-1.0}
       - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+      # Welcome/farewell messages (set channel ID to enable)
+      # - WELCOME_CHANNEL_ID=${WELCOME_CHANNEL_ID:-0}
+      # - WELCOME_MESSAGE=${WELCOME_MESSAGE:-Welcome to the server, {user}! 👋}
+      # - FAREWELL_CHANNEL_ID=${FAREWELL_CHANNEL_ID:-0}
+      # - FAREWELL_MESSAGE=${FAREWELL_MESSAGE:-**{username}** has left the server.}
     ports:
       - "3003:3002"
     depends_on:

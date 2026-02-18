@@ -17,6 +17,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::agent::DiscordAgent;
 use crate::health::AgentHealthState;
+use crate::processor::WelcomeConfig;
 
 /// Discord Agent CLI
 #[derive(Parser, Debug)]
@@ -61,6 +62,22 @@ struct Args {
     /// Health check server port (0 to disable)
     #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3002")]
     health_port: u16,
+
+    /// Channel ID for welcome messages (0 to disable)
+    #[arg(long, env = "WELCOME_CHANNEL_ID", default_value = "0")]
+    welcome_channel_id: u64,
+
+    /// Welcome message template ({user} = mention, {username} = display name)
+    #[arg(long, env = "WELCOME_MESSAGE")]
+    welcome_message: Option<String>,
+
+    /// Channel ID for farewell messages (0 to disable)
+    #[arg(long, env = "FAREWELL_CHANNEL_ID", default_value = "0")]
+    farewell_channel_id: u64,
+
+    /// Farewell message template ({user} = mention, {username} = display name)
+    #[arg(long, env = "FAREWELL_MESSAGE")]
+    farewell_message: Option<String>,
 }
 
 #[tokio::main]
@@ -144,6 +161,38 @@ async fn main() -> Result<()> {
 
     let mode = if llm_config.is_some() { "llm" } else { "echo" }.to_string();
 
+    let welcome = if args.welcome_channel_id != 0 {
+        let template = args
+            .welcome_message
+            .unwrap_or_else(|| processor::DEFAULT_WELCOME_TEMPLATE.to_string());
+        info!(
+            "Welcome messages enabled: channel={}, template={:?}",
+            args.welcome_channel_id, template
+        );
+        Some(WelcomeConfig {
+            channel_id: args.welcome_channel_id,
+            template,
+        })
+    } else {
+        None
+    };
+
+    let farewell = if args.farewell_channel_id != 0 {
+        let template = args
+            .farewell_message
+            .unwrap_or_else(|| processor::DEFAULT_FAREWELL_TEMPLATE.to_string());
+        info!(
+            "Farewell messages enabled: channel={}, template={:?}",
+            args.farewell_channel_id, template
+        );
+        Some(WelcomeConfig {
+            channel_id: args.farewell_channel_id,
+            template,
+        })
+    } else {
+        None
+    };
+
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
@@ -151,6 +200,8 @@ async fn main() -> Result<()> {
         llm_config,
         conversation_kv,
         args.system_prompt,
+        welcome,
+        farewell,
     );
 
     info!("Agent initialized, starting message processing...");
