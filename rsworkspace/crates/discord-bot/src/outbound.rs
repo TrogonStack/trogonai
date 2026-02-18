@@ -6,6 +6,7 @@
 #[path = "outbound_tests.rs"]
 mod outbound_tests;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -21,13 +22,17 @@ use serenity::builder::{
 };
 use serenity::http::Http;
 use serenity::model::id::{ChannelId, MessageId};
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
+
+use crate::outbound_streaming::StreamingMessages;
 
 /// Processes NATS agent commands and forwards them to Discord
 pub struct OutboundProcessor {
-    http: Arc<Http>,
-    client: async_nats::Client,
-    prefix: String,
+    pub(crate) http: Arc<Http>,
+    pub(crate) client: async_nats::Client,
+    pub(crate) prefix: String,
+    pub(crate) streaming_messages: StreamingMessages,
 }
 
 impl OutboundProcessor {
@@ -36,6 +41,7 @@ impl OutboundProcessor {
             http,
             client,
             prefix,
+            streaming_messages: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -44,10 +50,11 @@ impl OutboundProcessor {
         let http = self.http;
         let client = self.client;
         let prefix = self.prefix;
+        let streaming_messages = self.streaming_messages;
 
         info!("Starting outbound processor for prefix: {}", prefix);
 
-        let (r1, r2, r3, r4, r5, r6, r7, r8, r9) = tokio::join!(
+        let (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10) = tokio::join!(
             Self::handle_send_messages(http.clone(), client.clone(), prefix.clone()),
             Self::handle_edit_messages(http.clone(), client.clone(), prefix.clone()),
             Self::handle_delete_messages(http.clone(), client.clone(), prefix.clone()),
@@ -57,6 +64,12 @@ impl OutboundProcessor {
             Self::handle_reaction_add(http.clone(), client.clone(), prefix.clone()),
             Self::handle_reaction_remove(http.clone(), client.clone(), prefix.clone()),
             Self::handle_typing(http.clone(), client.clone(), prefix.clone()),
+            crate::outbound_streaming::handle_stream_messages(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                streaming_messages,
+            ),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -70,6 +83,7 @@ impl OutboundProcessor {
             ("reaction_add", r7),
             ("reaction_remove", r8),
             ("typing", r9),
+            ("stream_messages", r10),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);

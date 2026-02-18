@@ -8,6 +8,7 @@ mod config;
 mod handlers;
 mod health;
 mod outbound;
+mod outbound_streaming;
 
 use std::sync::Arc;
 

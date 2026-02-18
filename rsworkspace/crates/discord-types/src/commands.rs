@@ -88,6 +88,28 @@ pub struct TypingCommand {
     pub channel_id: u64,
 }
 
+/// Stream a message progressively (for LLM streaming responses).
+///
+/// The bot tracks `session_id` → Discord message ID internally.
+/// - First command with a given `session_id`: sends a new message (using
+///   `reply_to_message_id` if set), then tracks the resulting message ID.
+/// - Subsequent commands: edits the tracked message with the updated content.
+/// - When `is_final` is true: performs the last edit and cleans up state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StreamMessageCommand {
+    /// Target channel
+    pub channel_id: u64,
+    /// Accumulated content so far (full text, not just the delta)
+    pub content: String,
+    /// True when this is the last chunk and no more edits are coming
+    pub is_final: bool,
+    /// Session identifier used to correlate chunks with a tracked message
+    pub session_id: String,
+    /// Message to reply to on the *first* send (ignored on edits)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +214,43 @@ mod tests {
     #[test]
     fn test_typing_command_roundtrip() {
         roundtrip(&TypingCommand { channel_id: 100 });
+    }
+
+    #[test]
+    fn test_stream_message_command_roundtrip() {
+        roundtrip(&StreamMessageCommand {
+            channel_id: 100,
+            content: "Hello ▌".to_string(),
+            is_final: false,
+            session_id: "guild_100_200".to_string(),
+            reply_to_message_id: Some(42),
+        });
+    }
+
+    #[test]
+    fn test_stream_message_command_final() {
+        roundtrip(&StreamMessageCommand {
+            channel_id: 100,
+            content: "Hello, world!".to_string(),
+            is_final: true,
+            session_id: "guild_100_200".to_string(),
+            reply_to_message_id: None,
+        });
+    }
+
+    #[test]
+    fn test_stream_message_command_no_reply() {
+        let cmd = StreamMessageCommand {
+            channel_id: 1,
+            content: "chunk".to_string(),
+            is_final: false,
+            session_id: "s1".to_string(),
+            reply_to_message_id: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(
+            !json.contains("reply_to_message_id"),
+            "optional field must be omitted"
+        );
     }
 }
