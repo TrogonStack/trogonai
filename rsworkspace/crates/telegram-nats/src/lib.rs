@@ -5,6 +5,7 @@
 //! and observability integration.
 
 pub mod config;
+pub mod dedup;
 pub mod error;
 pub mod messaging;
 pub mod nats;
@@ -12,6 +13,7 @@ pub mod subjects;
 
 // Re-export commonly used types
 pub use config::{NatsConfig, TelegramConfig};
+pub use dedup::DedupStore;
 pub use error::{Error, Result};
 pub use messaging::{MessagePublisher, MessageSubscriber};
 pub use nats::connect;
