@@ -8,7 +8,7 @@ use discord_types::{
         MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ReactionAddEvent,
         ReactionRemoveEvent, SlashCommandEvent,
     },
-    types::Attachment,
+    types::{Attachment, ChannelType},
     InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand,
     SendMessageCommand, StreamMessageCommand, TypingCommand,
 };
@@ -16,6 +16,7 @@ use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::conversation::ConversationManager;
+use crate::health::AgentMetrics;
 use crate::llm::{ClaudeClient, ClaudeConfig};
 
 /// Minimum interval between stream-update publishes to avoid flooding NATS.
@@ -50,6 +51,7 @@ pub struct MessageProcessor {
     system_prompt: String,
     welcome: Option<WelcomeConfig>,
     farewell: Option<WelcomeConfig>,
+    metrics: Option<AgentMetrics>,
 }
 
 impl MessageProcessor {
@@ -61,6 +63,7 @@ impl MessageProcessor {
         welcome: Option<WelcomeConfig>,
         farewell: Option<WelcomeConfig>,
         conversation_ttl: Option<Duration>,
+        metrics: Option<AgentMetrics>,
     ) -> Self {
         let conversation_manager = match conversation_kv {
             Some(kv) => ConversationManager::with_kv(kv),
@@ -75,6 +78,7 @@ impl MessageProcessor {
             system_prompt: system_prompt.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
             welcome,
             farewell,
+            metrics,
         }
     }
 
@@ -102,8 +106,10 @@ impl MessageProcessor {
 
             let system_prompt = self.system_prompt.clone();
 
+            // Record the Discord message ID so edit/delete events can find this
+            // exact turn by ID rather than falling back to positional heuristics.
             self.conversation_manager
-                .add_message(session_id, "user", content)
+                .add_user_message(session_id, content, message_id)
                 .await;
 
             // Stream the response progressively
@@ -180,9 +186,15 @@ impl MessageProcessor {
                         )
                         .await?;
 
+                    if let Some(ref m) = self.metrics {
+                        m.inc_messages_processed();
+                    }
                     debug!("Streamed LLM response to channel {}", channel_id);
                 }
                 Err(e) => {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_llm_errors();
+                    }
                     warn!("LLM streaming failed for session {}: {}", session_id, e);
                     // Replace the placeholder with an error message
                     publisher
@@ -244,6 +256,7 @@ impl MessageProcessor {
                     `/help` — Show this message\n\
                     `/status` — Show agent status\n\
                     `/clear` — Clear your conversation history\n\
+                    `/summarize` — Summarize your conversation so far\n\
                     `/ask <question>` — Ask the AI a question\n\n\
                     You can also just send a message in any allowed channel!"
                 } else {
@@ -272,10 +285,21 @@ impl MessageProcessor {
                 } else {
                     "Echo mode"
                 };
-                let text = format!(
-                    "**Agent Status**\nMode: {}\nActive sessions: {}\nReady ✅",
-                    mode, active
-                );
+                let text = if let Some(ref m) = self.metrics {
+                    format!(
+                        "**Agent Status**\nMode: {}\nActive sessions: {}\n\
+                        Messages processed: {}\nLLM errors: {}\nReady ✅",
+                        mode,
+                        active,
+                        m.messages_processed(),
+                        m.llm_errors(),
+                    )
+                } else {
+                    format!(
+                        "**Agent Status**\nMode: {}\nActive sessions: {}\nReady ✅",
+                        mode, active
+                    )
+                };
                 self.interaction_respond(
                     event.interaction_id,
                     &event.interaction_token,
@@ -284,6 +308,142 @@ impl MessageProcessor {
                     publisher,
                 )
                 .await?;
+            }
+
+            "summarize" => {
+                let history = self.conversation_manager.get_history(session_id).await;
+
+                if history.is_empty() {
+                    self.interaction_respond(
+                        event.interaction_id,
+                        &event.interaction_token,
+                        "No conversation history to summarize.",
+                        true,
+                        publisher,
+                    )
+                    .await?;
+                } else if let Some(ref llm_client) = self.llm_client {
+                    self.interaction_defer(
+                        event.interaction_id,
+                        &event.interaction_token,
+                        false,
+                        publisher,
+                    )
+                    .await?;
+
+                    // Build a plain-text transcript for the LLM to summarize
+                    let transcript: String = history
+                        .iter()
+                        .map(|m| format!("{}: {}", m.role, m.content))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let summarize_prompt = format!(
+                        "Please provide a concise summary of this conversation:\n\n{}",
+                        transcript
+                    );
+
+                    let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+                    let llm_client = llm_client.clone();
+                    let system_prompt = self.system_prompt.clone();
+
+                    let llm_handle = tokio::spawn(async move {
+                        llm_client
+                            .generate_response_streaming(
+                                &system_prompt,
+                                &summarize_prompt,
+                                &[],
+                                chunk_tx,
+                            )
+                            .await
+                    });
+
+                    let ask_session = format!("summarize_{}", session_id);
+                    let followup_subject =
+                        subjects::agent::interaction_followup(publisher.prefix());
+                    publisher
+                        .publish(
+                            &followup_subject,
+                            &InteractionFollowupCommand {
+                                interaction_token: event.interaction_token.clone(),
+                                content: Some(STREAM_CURSOR.to_string()),
+                                embeds: vec![],
+                                ephemeral: false,
+                                session_id: Some(ask_session.clone()),
+                            },
+                        )
+                        .await?;
+
+                    let stream_subject = subjects::agent::message_stream(publisher.prefix());
+                    let mut accumulated = String::new();
+                    let mut last_publish = Instant::now();
+
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        accumulated.push_str(&chunk);
+                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                        is_final: false,
+                                        session_id: ask_session.clone(),
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
+                            last_publish = Instant::now();
+                        }
+                    }
+
+                    match llm_handle.await? {
+                        Ok(summary) => {
+                            if let Some(ref m) = self.metrics {
+                                m.inc_messages_processed();
+                            }
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: summary,
+                                        is_final: true,
+                                        session_id: ask_session,
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
+                        }
+                        Err(e) => {
+                            if let Some(ref m) = self.metrics {
+                                m.inc_llm_errors();
+                            }
+                            warn!("LLM summarize failed for session {}: {}", session_id, e);
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: "Sorry, I couldn't generate a summary. Please try again.".to_string(),
+                                        is_final: true,
+                                        session_id: ask_session,
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                } else {
+                    self.interaction_respond(
+                        event.interaction_id,
+                        &event.interaction_token,
+                        "Summarization requires LLM mode.",
+                        true,
+                        publisher,
+                    )
+                    .await?;
+                }
             }
 
             "clear" => {
@@ -410,6 +570,10 @@ impl MessageProcessor {
                                 .add_message(session_id, "assistant", &full_response)
                                 .await;
 
+                            if let Some(ref m) = self.metrics {
+                                m.inc_messages_processed();
+                            }
+
                             publisher
                                 .publish(
                                     &stream_subject,
@@ -424,6 +588,9 @@ impl MessageProcessor {
                                 .await?;
                         }
                         Err(e) => {
+                            if let Some(ref m) = self.metrics {
+                                m.inc_llm_errors();
+                            }
                             warn!(
                                 "LLM streaming failed for /ask in session {}: {}",
                                 session_id, e
@@ -547,8 +714,8 @@ impl MessageProcessor {
 
     /// Process a message edit event
     ///
-    /// Updates the most recent matching user message in conversation history so the
-    /// LLM sees the corrected content in future turns.
+    /// Finds the turn by Discord message ID when available; falls back to
+    /// updating the most recent user turn for history that pre-dates ID tracking.
     pub async fn process_message_updated(&self, event: &MessageUpdatedEvent) -> Result<()> {
         let Some(ref new_content) = event.new_content else {
             return Ok(());
@@ -557,14 +724,19 @@ impl MessageProcessor {
         let session_id = &event.metadata.session_id;
         let mut history = self.conversation_manager.get_history(session_id).await;
 
-        // Walk backwards to find the most recent user message and update it
-        if let Some(entry) = history.iter_mut().rev().find(|m| m.role == "user") {
+        // Prefer exact ID match; fall back to last user message for old history.
+        // Find the index first (immutable borrow), then mutate by index.
+        let pos = history
+            .iter()
+            .position(|m| m.role == "user" && m.message_id == Some(event.message_id))
+            .or_else(|| history.iter().rposition(|m| m.role == "user"));
+
+        if let Some(pos) = pos {
             debug!(
-                "Updating edited message in session {} (msg {})",
-                session_id, event.message_id
+                "Updating edited message {} in session {}",
+                event.message_id, session_id
             );
-            entry.content = new_content.clone();
-            // Persist the updated history
+            history[pos].content = new_content.clone();
             self.conversation_manager
                 .save_history(session_id, history)
                 .await;
@@ -575,8 +747,9 @@ impl MessageProcessor {
 
     /// Process a message deletion event
     ///
-    /// Removes the most recent user message from conversation history when the
-    /// original message is deleted, keeping the context clean.
+    /// Finds the deleted turn by Discord message ID when available; falls back
+    /// to removing the most recent user turn for history without IDs.
+    /// The assistant reply that immediately follows the deleted turn is also removed.
     pub async fn process_message_deleted(&self, event: &MessageDeletedEvent) -> Result<()> {
         let session_id = &event.metadata.session_id;
         let mut history = self.conversation_manager.get_history(session_id).await;
@@ -585,15 +758,19 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        // Remove the last user message (we can't match by message ID since history
-        // doesn't store Discord message IDs, so we remove the most recent user turn)
-        if let Some(pos) = history.iter().rposition(|m| m.role == "user") {
+        // Prefer exact ID match; fall back to last user message for old history.
+        let pos = history
+            .iter()
+            .position(|m| m.role == "user" && m.message_id == Some(event.message_id))
+            .or_else(|| history.iter().rposition(|m| m.role == "user"));
+
+        if let Some(pos) = pos {
             debug!(
-                "Removing deleted message from session {} history (msg {})",
-                session_id, event.message_id
+                "Removing deleted message {} from session {} history",
+                event.message_id, session_id
             );
             history.remove(pos);
-            // Also remove the assistant reply that followed it, if any
+            // Also remove the assistant reply that immediately followed it, if any
             if pos < history.len() && history[pos].role == "assistant" {
                 history.remove(pos);
             }
@@ -605,22 +782,214 @@ impl MessageProcessor {
         Ok(())
     }
 
-    /// Process a reaction-add event (no-op unless overridden by a subclass)
-    pub async fn process_reaction_add(&self, event: &ReactionAddEvent) -> Result<()> {
+    /// Process a reaction-add event.
+    ///
+    /// Supported emoji actions:
+    /// - 🔁 / 🔄 — regenerate the last AI response for this user's session
+    /// - ❌     — clear the user's conversation history
+    pub async fn process_reaction_add(
+        &self,
+        event: &ReactionAddEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        match event.emoji.name.as_str() {
+            "🔁" | "🔄" => self.handle_reaction_regenerate(event, publisher).await,
+            "❌" => self.handle_reaction_clear(event, publisher).await,
+            other => {
+                debug!(
+                    "Unhandled reaction '{}' by user {} on message {} in channel {}",
+                    other, event.user_id, event.message_id, event.channel_id
+                );
+                Ok(())
+            }
+        }
+    }
+
+    /// Process a reaction-remove event (no action needed).
+    pub async fn process_reaction_remove(
+        &self,
+        event: &ReactionRemoveEvent,
+        _publisher: &MessagePublisher,
+    ) -> Result<()> {
         debug!(
-            "Reaction {} added by user {} on message {} in channel {}",
+            "Reaction '{}' removed by user {} on message {} in channel {}",
             event.emoji.name, event.user_id, event.message_id, event.channel_id
         );
         Ok(())
     }
 
-    /// Process a reaction-remove event
-    pub async fn process_reaction_remove(&self, event: &ReactionRemoveEvent) -> Result<()> {
-        debug!(
-            "Reaction {} removed by user {} on message {} in channel {}",
-            event.emoji.name, event.user_id, event.message_id, event.channel_id
+    /// Regenerate the last AI response for the session that triggered the 🔁 reaction.
+    async fn handle_reaction_regenerate(
+        &self,
+        event: &ReactionAddEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        let Some(ref llm_client) = self.llm_client else {
+            // Echo mode — nothing to regenerate
+            return Ok(());
+        };
+
+        let session_id = Self::session_id_for_reaction(event);
+        let mut history = self.conversation_manager.get_history(&session_id).await;
+
+        // Need at least one user message to regenerate from
+        let Some(last_user_idx) = history.iter().rposition(|m| m.role == "user") else {
+            return Ok(());
+        };
+
+        // Prior context = everything before the last user turn
+        let prior_history = history[..last_user_idx].to_vec();
+        let last_user_content = history[last_user_idx].content.clone();
+
+        // Drop the stale assistant reply (if any) so we can append the new one
+        history.truncate(last_user_idx + 1);
+        self.conversation_manager
+            .save_history(&session_id, history)
+            .await;
+
+        self.send_typing(event.channel_id, publisher).await?;
+
+        let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+        let stream_subject = subjects::agent::message_stream(publisher.prefix());
+        // Use a unique sub-session so the streaming bot creates a fresh message
+        let regen_session = format!("regen_{}_{}", session_id, event.message_id);
+
+        publisher
+            .publish(
+                &stream_subject,
+                &StreamMessageCommand {
+                    channel_id: event.channel_id,
+                    content: STREAM_CURSOR.to_string(),
+                    is_final: false,
+                    session_id: regen_session.clone(),
+                    reply_to_message_id: None,
+                },
+            )
+            .await?;
+
+        let llm_client = llm_client.clone();
+        let system_prompt = self.system_prompt.clone();
+
+        let llm_handle = tokio::spawn(async move {
+            llm_client
+                .generate_response_streaming(
+                    &system_prompt,
+                    &last_user_content,
+                    &prior_history,
+                    chunk_tx,
+                )
+                .await
+        });
+
+        let mut accumulated = String::new();
+        let mut last_publish = Instant::now();
+
+        while let Some(chunk) = chunk_rx.recv().await {
+            accumulated.push_str(&chunk);
+            if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id: event.channel_id,
+                            content: format!("{}{}", accumulated, STREAM_CURSOR),
+                            is_final: false,
+                            session_id: regen_session.clone(),
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+                last_publish = Instant::now();
+            }
+        }
+
+        match llm_handle.await? {
+            Ok(full_response) => {
+                self.conversation_manager
+                    .add_message(&session_id, "assistant", &full_response)
+                    .await;
+                if let Some(ref m) = self.metrics {
+                    m.inc_messages_processed();
+                }
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id: event.channel_id,
+                            content: full_response,
+                            is_final: true,
+                            session_id: regen_session,
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+                info!(
+                    "Regenerated response for session {} via 🔁 reaction",
+                    session_id
+                );
+            }
+            Err(e) => {
+                if let Some(ref m) = self.metrics {
+                    m.inc_llm_errors();
+                }
+                warn!("LLM regenerate failed for session {}: {}", session_id, e);
+                publisher
+                    .publish(
+                        &stream_subject,
+                        &StreamMessageCommand {
+                            channel_id: event.channel_id,
+                            content: "Sorry, I couldn't regenerate the response. Please try again."
+                                .to_string(),
+                            is_final: true,
+                            session_id: regen_session,
+                            reply_to_message_id: None,
+                        },
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Clear the user's conversation history when they react with ❌.
+    async fn handle_reaction_clear(
+        &self,
+        event: &ReactionAddEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        let session_id = Self::session_id_for_reaction(event);
+        self.conversation_manager.clear_session(&session_id).await;
+
+        let cmd = SendMessageCommand {
+            channel_id: event.channel_id,
+            content: format!("<@{}> Conversation history cleared! 🗑️", event.user_id),
+            embeds: vec![],
+            reply_to_message_id: None,
+        };
+        let subject = subjects::agent::message_send(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+
+        info!(
+            "Cleared session {} via ❌ reaction from user {}",
+            session_id, event.user_id
         );
         Ok(())
+    }
+
+    /// Build the session ID that corresponds to a reaction event.
+    fn session_id_for_reaction(event: &ReactionAddEvent) -> String {
+        let chan_type = if event.guild_id.is_some() {
+            ChannelType::GuildText
+        } else {
+            ChannelType::Dm
+        };
+        discord_types::session::session_id(
+            &chan_type,
+            event.channel_id,
+            event.guild_id,
+            Some(event.user_id),
+        )
     }
 
     /// Process a button / select menu interaction
@@ -714,6 +1083,6 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None, None, None, None, None, None)
+        Self::new(None, None, None, None, None, None, None)
     }
 }
