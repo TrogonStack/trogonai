@@ -15,5 +15,5 @@ pub mod subjects;
 pub use config::{NatsConfig, TelegramConfig};
 pub use dedup::DedupStore;
 pub use error::{Error, Result};
-pub use messaging::{MessagePublisher, MessageSubscriber};
+pub use messaging::{read_cmd_metadata, MessagePublisher, MessageSubscriber};
 pub use nats::connect;

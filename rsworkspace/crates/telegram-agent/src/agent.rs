@@ -24,6 +24,8 @@ pub struct TelegramAgent {
     js: async_nats::jetstream::Context,
     prefix: String,
     dedup: Option<DedupStore>,
+    /// Conversation KV — kept here so the error consumer can purge sessions
+    conversation_kv: Option<async_nats::jetstream::kv::Store>,
 }
 
 impl TelegramAgent {
@@ -38,7 +40,7 @@ impl TelegramAgent {
         dedup_kv: Option<async_nats::jetstream::kv::Store>,
     ) -> Self {
         let publisher = MessagePublisher::new(client, prefix.clone());
-        let processor = MessageProcessor::new(llm_config, conversation_kv);
+        let processor = MessageProcessor::new(llm_config, conversation_kv.clone());
         let dedup = dedup_kv.map(DedupStore::new);
 
         Self {
@@ -48,6 +50,7 @@ impl TelegramAgent {
             js,
             prefix,
             dedup,
+            conversation_kv,
         }
     }
 
@@ -143,34 +146,44 @@ impl TelegramAgent {
             };
 
             match serde_json::from_slice::<CommandErrorEvent>(&msg.payload) {
-                Ok(evt) => match evt.category {
-                    ErrorCategory::RateLimit => {
-                        warn!(
-                            "Rate limit on '{}': retry after {:?}s — JetStream will redeliver after backoff",
-                            evt.command_subject, evt.retry_after_secs
-                        );
+                Ok(evt) => {
+                    match evt.category {
+                        ErrorCategory::RateLimit => {
+                            warn!(
+                                "Rate limit on '{}': retry after {:?}s — JetStream will redeliver after backoff",
+                                evt.command_subject, evt.retry_after_secs
+                            );
+                        }
+                        ErrorCategory::ChatMigrated => {
+                            warn!(
+                                "Chat migrated on '{}': new_chat_id={:?} — purging old session and letting agent rebuild",
+                                evt.command_subject, evt.migrated_to_chat_id
+                            );
+                            // Purge the old session so the agent starts fresh with the
+                            // new chat_id on the next interaction.
+                            if let Some(ref session_id) = evt.session_id {
+                                self.purge_session(session_id).await;
+                            }
+                        }
+                        ErrorCategory::BotBlocked
+                        | ErrorCategory::NotFound
+                        | ErrorCategory::PermissionDenied => {
+                            error!(
+                                "Permanent failure on '{}' ({:?}): {} — purging session",
+                                evt.command_subject, evt.category, evt.message
+                            );
+                            if let Some(ref session_id) = evt.session_id {
+                                self.purge_session(session_id).await;
+                            }
+                        }
+                        _ => {
+                            warn!(
+                                "Command error on '{}' ({:?}): {}",
+                                evt.command_subject, evt.category, evt.message
+                            );
+                        }
                     }
-                    ErrorCategory::ChatMigrated => {
-                        warn!(
-                            "Chat migrated on '{}': new_chat_id={:?} — update routing",
-                            evt.command_subject, evt.migrated_to_chat_id
-                        );
-                    }
-                    ErrorCategory::BotBlocked
-                    | ErrorCategory::NotFound
-                    | ErrorCategory::PermissionDenied => {
-                        error!(
-                            "Permanent failure on '{}' ({:?}): {}",
-                            evt.command_subject, evt.category, evt.message
-                        );
-                    }
-                    _ => {
-                        warn!(
-                            "Command error on '{}' ({:?}): {}",
-                            evt.command_subject, evt.category, evt.message
-                        );
-                    }
-                },
+                }
                 Err(e) => {
                     warn!("Failed to deserialize CommandErrorEvent: {}", e);
                 }
@@ -182,6 +195,22 @@ impl TelegramAgent {
         }
 
         Ok(())
+    }
+
+    /// Delete a session's conversation history from the KV store.
+    ///
+    /// Called by the error consumer when a permanent Telegram error (bot blocked,
+    /// chat not found, permission denied) or a chat migration is detected so the
+    /// agent does not keep sending commands to a dead session.
+    async fn purge_session(&self, session_id: &str) {
+        if let Some(ref kv) = self.conversation_kv {
+            match kv.delete(session_id).await {
+                Ok(_) => info!("Purged conversation for session '{}'", session_id),
+                Err(e) => warn!("Failed to purge session '{}': {}", session_id, e),
+            }
+        } else {
+            debug!("No conversation KV — cannot purge session '{}'", session_id);
+        }
     }
 
     /// Dispatch a message to the appropriate processor based on its subject.

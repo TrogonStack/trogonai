@@ -1,11 +1,70 @@
 //! Commands sent from agents to Telegram bot via NATS
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::chat::{
     BotCommand, BotCommandScope, ChatAdministratorRights, ChatPermissions, InlineKeyboardMarkup,
     InputSticker, LabeledPrice, MaskPosition, ShippingOption, StickerSet,
 };
+
+fn default_cmd_attempt() -> u32 {
+    1
+}
+
+/// Tracing metadata carried on every command published to NATS.
+///
+/// Transported as NATS message headers so command structs do not need to be
+/// modified.  The outbound processor reads these headers before dispatching,
+/// forwards them in any error event it publishes, and uses `command_id` as an
+/// idempotency key to prevent duplicate Telegram API calls on JetStream
+/// redelivery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandMetadata {
+    /// Unique ID for this command (stable across JetStream redeliveries)
+    pub command_id: Uuid,
+    /// Session that originated the command (e.g. `tg-private-123456`)
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Wall-clock time when the command was first published
+    pub produced_at: DateTime<Utc>,
+    /// `event_id` of the inbound event that triggered this command
+    #[serde(default)]
+    pub causation_id: Option<String>,
+    /// Ties request/response pairs together across the system
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    /// 1 on first publish; incremented by the publisher on logical retries
+    #[serde(default = "default_cmd_attempt")]
+    pub attempt: u32,
+}
+
+impl Default for CommandMetadata {
+    fn default() -> Self {
+        Self {
+            command_id: Uuid::new_v4(),
+            session_id: None,
+            produced_at: Utc::now(),
+            causation_id: None,
+            correlation_id: None,
+            attempt: 1,
+        }
+    }
+}
+
+impl CommandMetadata {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Attach the triggering event's session and event_id for tracing.
+    pub fn with_causation(mut self, session_id: impl Into<String>, event_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self.causation_id = Some(event_id.into());
+        self
+    }
+}
 
 /// Parse mode for message formatting
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

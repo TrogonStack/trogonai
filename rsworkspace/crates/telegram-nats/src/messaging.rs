@@ -68,6 +68,67 @@ impl MessagePublisher {
         debug!("Published message with headers to {}", subject);
         Ok(())
     }
+
+    /// Publish a command with tracing metadata carried as NATS headers.
+    ///
+    /// The `CommandMetadata` is serialised into well-known headers (`X-Command-Id`,
+    /// `X-Session-Id`, `X-Produced-At`, `X-Causation-Id`, `X-Correlation-Id`,
+    /// `X-Attempt`) so every consumer can extract it without touching the
+    /// command payload struct.
+    pub async fn publish_command<T: Serialize>(
+        &self,
+        subject: impl AsRef<str>,
+        command: &T,
+        metadata: telegram_types::commands::CommandMetadata,
+    ) -> Result<()> {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Command-Id", metadata.command_id.to_string().as_str());
+        headers.insert("X-Produced-At", metadata.produced_at.to_rfc3339().as_str());
+        headers.insert("X-Attempt", metadata.attempt.to_string().as_str());
+        if let Some(ref sid) = metadata.session_id {
+            headers.insert("X-Session-Id", sid.as_str());
+        }
+        if let Some(ref cid) = metadata.causation_id {
+            headers.insert("X-Causation-Id", cid.as_str());
+        }
+        if let Some(ref rid) = metadata.correlation_id {
+            headers.insert("X-Correlation-Id", rid.as_str());
+        }
+        self.publish_with_headers(subject, command, headers).await
+    }
+}
+
+/// Read `CommandMetadata` fields from NATS message headers.
+///
+/// Returns `None` if `X-Command-Id` is absent or unparseable.
+pub fn read_cmd_metadata(
+    headers: &async_nats::HeaderMap,
+) -> Option<telegram_types::commands::CommandMetadata> {
+    use std::str::FromStr;
+    let command_id = uuid::Uuid::from_str(
+        headers.get("X-Command-Id")?.as_str(),
+    )
+    .ok()?;
+
+    let produced_at = headers
+        .get("X-Produced-At")
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v.as_str()).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(chrono::Utc::now);
+
+    let attempt = headers
+        .get("X-Attempt")
+        .and_then(|v| v.as_str().parse::<u32>().ok())
+        .unwrap_or(1);
+
+    Some(telegram_types::commands::CommandMetadata {
+        command_id,
+        session_id: headers.get("X-Session-Id").map(|v| v.as_str().to_string()),
+        produced_at,
+        causation_id: headers.get("X-Causation-Id").map(|v| v.as_str().to_string()),
+        correlation_id: headers.get("X-Correlation-Id").map(|v| v.as_str().to_string()),
+        attempt,
+    })
 }
 
 /// Message subscriber for receiving events and commands
