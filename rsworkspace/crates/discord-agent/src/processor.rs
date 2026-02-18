@@ -19,10 +19,16 @@ const STREAM_PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
 /// Cursor appended to in-progress streaming messages.
 const STREAM_CURSOR: &str = "▌";
 
+/// Default system prompt used when none is configured.
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant in a Discord server. \
+    Be concise, friendly, and helpful. Keep responses under 500 words unless \
+    the user specifically asks for more detail.";
+
 /// Message processor
 pub struct MessageProcessor {
     llm_client: Option<ClaudeClient>,
     pub(crate) conversation_manager: ConversationManager,
+    system_prompt: String,
 }
 
 impl MessageProcessor {
@@ -30,6 +36,7 @@ impl MessageProcessor {
     pub fn new(
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
+        system_prompt: Option<String>,
     ) -> Self {
         let conversation_manager = match conversation_kv {
             Some(kv) => ConversationManager::with_kv(kv),
@@ -38,6 +45,7 @@ impl MessageProcessor {
         Self {
             llm_client: llm_config.map(ClaudeClient::new),
             conversation_manager,
+            system_prompt: system_prompt.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
         }
     }
 
@@ -63,9 +71,7 @@ impl MessageProcessor {
         if let Some(ref llm_client) = self.llm_client {
             let history = self.conversation_manager.get_history(session_id).await;
 
-            let system_prompt = "You are a helpful AI assistant in a Discord server. \
-                Be concise, friendly, and helpful. Keep responses under 500 words unless \
-                the user specifically asks for more detail.";
+            let system_prompt = self.system_prompt.clone();
 
             self.conversation_manager
                 .add_message(session_id, "user", content)
@@ -96,7 +102,7 @@ impl MessageProcessor {
 
             let llm_handle = tokio::spawn(async move {
                 llm_client
-                    .generate_response_streaming(system_prompt, &content_owned, &history, chunk_tx)
+                    .generate_response_streaming(&system_prompt, &content_owned, &history, chunk_tx)
                     .await
             });
 
@@ -299,8 +305,7 @@ impl MessageProcessor {
                     .await?;
 
                     let history = self.conversation_manager.get_history(session_id).await;
-                    let system_prompt = "You are a helpful AI assistant in a Discord server. \
-                        Be concise, friendly, and helpful.";
+                    let system_prompt = self.system_prompt.clone();
 
                     self.conversation_manager
                         .add_message(session_id, "user", &question)
@@ -336,7 +341,7 @@ impl MessageProcessor {
                     let llm_handle = tokio::spawn(async move {
                         llm_client
                             .generate_response_streaming(
-                                system_prompt,
+                                &system_prompt,
                                 &question_owned,
                                 &history,
                                 chunk_tx,
@@ -509,6 +514,6 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None, None)
+        Self::new(None, None, None)
     }
 }

@@ -46,6 +46,18 @@ struct Args {
     #[arg(long, env = "ENABLE_LLM", default_value = "false")]
     enable_llm: bool,
 
+    /// System prompt for the LLM (uses built-in default if not set)
+    #[arg(long, env = "SYSTEM_PROMPT")]
+    system_prompt: Option<String>,
+
+    /// Maximum tokens per LLM response
+    #[arg(long, env = "CLAUDE_MAX_TOKENS", default_value = "1024")]
+    max_tokens: u32,
+
+    /// LLM sampling temperature (0.0–1.0)
+    #[arg(long, env = "CLAUDE_TEMPERATURE", default_value = "1.0")]
+    temperature: f32,
+
     /// Health check server port (0 to disable)
     #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3002")]
     health_port: u16,
@@ -116,8 +128,8 @@ async fn main() -> Result<()> {
             Some(llm::ClaudeConfig {
                 api_key,
                 model: args.claude_model,
-                max_tokens: 1024,
-                temperature: 1.0,
+                max_tokens: args.max_tokens,
+                temperature: args.temperature,
             })
         } else {
             error!("LLM mode enabled but ANTHROPIC_API_KEY not provided");
@@ -138,6 +150,7 @@ async fn main() -> Result<()> {
         args.agent_name.clone(),
         llm_config,
         conversation_kv,
+        args.system_prompt,
     );
 
     info!("Agent initialized, starting message processing...");

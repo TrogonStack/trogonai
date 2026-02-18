@@ -13,24 +13,23 @@ pub fn member_session_id(guild_id: u64) -> String {
 /// Generate a session ID for a Discord conversation.
 ///
 /// - DM channels: `dc-dm-{channel_id}`
-/// - Guild channels: `dc-guild-{guild_id}-{channel_id}`
+/// - Guild channels (with user): `dc-guild-{guild_id}-{channel_id}-{user_id}`
+/// - Guild channels (no user): `dc-guild-{guild_id}-{channel_id}`
 pub fn session_id(
     channel_type: &ChannelType,
     channel_id: u64,
     guild_id: Option<u64>,
-    _user_id: Option<u64>,
+    user_id: Option<u64>,
 ) -> String {
     match channel_type {
         ChannelType::Dm | ChannelType::GroupDm => {
             format!("dc-dm-{}", channel_id)
         }
-        _ => {
-            if let Some(gid) = guild_id {
-                format!("dc-guild-{}-{}", gid, channel_id)
-            } else {
-                format!("dc-channel-{}", channel_id)
-            }
-        }
+        _ => match (guild_id, user_id) {
+            (Some(gid), Some(uid)) => format!("dc-guild-{}-{}-{}", gid, channel_id, uid),
+            (Some(gid), None) => format!("dc-guild-{}-{}", gid, channel_id),
+            _ => format!("dc-channel-{}", channel_id),
+        },
     }
 }
 
@@ -66,6 +65,12 @@ mod tests {
     fn test_guild_voice_session_id() {
         let sid = session_id(&ChannelType::GuildVoice, 300, Some(200), None);
         assert_eq!(sid, "dc-guild-200-300");
+    }
+
+    #[test]
+    fn test_guild_session_id_with_user() {
+        let sid = session_id(&ChannelType::GuildText, 100, Some(200), Some(999));
+        assert_eq!(sid, "dc-guild-200-100-999");
     }
 
     #[test]

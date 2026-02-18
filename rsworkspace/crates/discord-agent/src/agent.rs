@@ -24,10 +24,11 @@ impl DiscordAgent {
         agent_name: String,
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
+        system_prompt: Option<String>,
     ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
-        let processor = MessageProcessor::new(llm_config, conversation_kv);
+        let processor = MessageProcessor::new(llm_config, conversation_kv, system_prompt);
 
         Self {
             subscriber,

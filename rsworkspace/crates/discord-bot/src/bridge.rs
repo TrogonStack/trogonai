@@ -166,7 +166,7 @@ impl DiscordBridge {
                 &ChannelType::GuildText,
                 msg.channel_id.get(),
                 msg.guild_id.map(|g| g.get()),
-                None,
+                Some(msg.author.id.get()),
             )
         } else {
             session_id(
