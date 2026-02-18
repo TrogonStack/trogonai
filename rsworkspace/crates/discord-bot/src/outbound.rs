@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use discord_nats::{subjects, MessageSubscriber};
+use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
     AddReactionCommand, DeleteMessageCommand, EditMessageCommand, InteractionDeferCommand,
     InteractionFollowupCommand, InteractionRespondCommand, RemoveReactionCommand,
@@ -72,13 +72,29 @@ impl OutboundProcessor {
         let client = self.client;
         let prefix = self.prefix;
         let streaming_messages = self.streaming_messages;
+        let publisher = MessagePublisher::new(client.clone(), prefix.clone());
 
         info!("Starting outbound processor for prefix: {}", prefix);
 
         let (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10) = tokio::join!(
-            Self::handle_send_messages(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_edit_messages(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_delete_messages(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_send_messages(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_edit_messages(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_delete_messages(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_interaction_respond(http.clone(), client.clone(), prefix.clone()),
             Self::handle_interaction_defer(http.clone(), client.clone(), prefix.clone()),
             Self::handle_interaction_followup(
@@ -87,8 +103,18 @@ impl OutboundProcessor {
                 prefix.clone(),
                 streaming_messages.clone(),
             ),
-            Self::handle_reaction_add(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_reaction_remove(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_reaction_add(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_reaction_remove(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_typing(http.clone(), client.clone(), prefix.clone()),
             crate::outbound_streaming::handle_stream_messages(
                 http.clone(),
@@ -123,9 +149,11 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        publisher: MessagePublisher,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_send(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
         let mut stream = subscriber.subscribe::<SendMessageCommand>(&subject).await?;
 
         info!("Listening for send_message commands on {}", subject);
@@ -147,6 +175,8 @@ impl OutboundProcessor {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -167,9 +197,11 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        publisher: MessagePublisher,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_edit(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
         let mut stream = subscriber.subscribe::<EditMessageCommand>(&subject).await?;
 
         info!("Listening for edit_message commands on {}", subject);
@@ -195,6 +227,8 @@ impl OutboundProcessor {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -215,9 +249,11 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        publisher: MessagePublisher,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_delete(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
         let mut stream = subscriber
             .subscribe::<DeleteMessageCommand>(&subject)
             .await?;
@@ -241,6 +277,8 @@ impl OutboundProcessor {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -430,9 +468,11 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        publisher: MessagePublisher,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::reaction_add(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
         let mut stream = subscriber.subscribe::<AddReactionCommand>(&subject).await?;
 
         info!("Listening for reaction_add commands on {}", subject);
@@ -455,6 +495,8 @@ impl OutboundProcessor {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -475,9 +517,11 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        publisher: MessagePublisher,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::reaction_remove(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
         let mut stream = subscriber
             .subscribe::<RemoveReactionCommand>(&subject)
             .await?;
@@ -505,6 +549,8 @@ impl OutboundProcessor {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -550,6 +596,22 @@ impl OutboundProcessor {
         }
 
         Ok(())
+    }
+}
+
+/// Publish a `CommandErrorEvent` to NATS if the outcome is `Permanent`.
+///
+/// Failures to publish are only logged as warnings so they never block the
+/// main error-handling path.
+async fn publish_if_permanent(
+    publisher: &MessagePublisher,
+    error_subject: &str,
+    outcome: &ErrorOutcome,
+) {
+    if let ErrorOutcome::Permanent(evt) = outcome {
+        if let Err(e) = publisher.publish(error_subject, evt).await {
+            warn!("Failed to publish command_error to NATS: {}", e);
+        }
     }
 }
 

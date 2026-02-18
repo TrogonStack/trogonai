@@ -5,6 +5,7 @@
 mod agent;
 mod conversation;
 mod conversation_tests;
+mod health;
 mod llm;
 mod processor;
 mod processor_tests;
@@ -15,6 +16,7 @@ use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::agent::DiscordAgent;
+use crate::health::AgentHealthState;
 
 /// Discord Agent CLI
 #[derive(Parser, Debug)]
@@ -43,6 +45,10 @@ struct Args {
     /// Enable LLM mode (requires API key)
     #[arg(long, env = "ENABLE_LLM", default_value = "false")]
     enable_llm: bool,
+
+    /// Health check server port (0 to disable)
+    #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3002")]
+    health_port: u16,
 }
 
 #[tokio::main]
@@ -124,15 +130,28 @@ async fn main() -> Result<()> {
         None
     };
 
+    let mode = if llm_config.is_some() { "llm" } else { "echo" }.to_string();
+
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
-        args.agent_name,
+        args.agent_name.clone(),
         llm_config,
         conversation_kv,
     );
 
     info!("Agent initialized, starting message processing...");
+
+    // Start health server (unless disabled with port 0)
+    if args.health_port != 0 {
+        let health_state = AgentHealthState::new(args.agent_name, mode);
+        let port = args.health_port;
+        tokio::spawn(async move {
+            if let Err(e) = health::start_health_server(health_state, port).await {
+                error!("Health server error: {}", e);
+            }
+        });
+    }
 
     tokio::select! {
         result = agent.run() => {
