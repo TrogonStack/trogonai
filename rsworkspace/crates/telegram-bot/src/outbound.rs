@@ -2349,6 +2349,7 @@ impl OutboundProcessor {
     /// - `Retry`    → logs a warning (actual re-execution is the caller's responsibility)
     /// - `Migrated` → logs the new chat ID
     /// - `Permanent` / `Transient` → publishes the event to `telegram.{prefix}.bot.error.command`
+    ///
     /// Classify a Telegram API error, publish a `CommandErrorEvent` to NATS, and
     /// return the appropriate NAK signal to the dispatch loop:
     ///
