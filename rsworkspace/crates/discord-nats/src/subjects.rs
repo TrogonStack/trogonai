@@ -196,6 +196,21 @@ pub mod bot {
         format!("discord.{}.bot.invite.delete", prefix)
     }
 
+    /// Stage instance created event subject
+    pub fn stage_instance_create(prefix: &str) -> String {
+        format!("discord.{}.bot.stage.instance_create", prefix)
+    }
+
+    /// Stage instance updated event subject
+    pub fn stage_instance_update(prefix: &str) -> String {
+        format!("discord.{}.bot.stage.instance_update", prefix)
+    }
+
+    /// Stage instance deleted event subject
+    pub fn stage_instance_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.stage.instance_delete", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -417,6 +432,31 @@ pub mod agent {
     /// Delete scheduled event command subject
     pub fn scheduled_event_delete(prefix: &str) -> String {
         format!("discord.{}.agent.scheduled_event.delete", prefix)
+    }
+
+    /// Remove all reactions command subject
+    pub fn reaction_remove_all(prefix: &str) -> String {
+        format!("discord.{}.agent.reaction.remove_all", prefix)
+    }
+
+    /// Crosspost message command subject
+    pub fn message_crosspost(prefix: &str) -> String {
+        format!("discord.{}.agent.message.crosspost", prefix)
+    }
+
+    /// Create forum post command subject
+    pub fn forum_post_create(prefix: &str) -> String {
+        format!("discord.{}.agent.forum.post_create", prefix)
+    }
+
+    /// Add member to thread command subject
+    pub fn thread_member_add(prefix: &str) -> String {
+        format!("discord.{}.agent.thread.member_add", prefix)
+    }
+
+    /// Remove member from thread command subject
+    pub fn thread_member_remove(prefix: &str) -> String {
+        format!("discord.{}.agent.thread.member_remove", prefix)
     }
 
     /// Wildcard for all agent commands

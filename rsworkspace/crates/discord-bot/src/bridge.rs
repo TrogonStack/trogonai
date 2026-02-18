@@ -1134,6 +1134,71 @@ impl DiscordBridge {
         debug!("Published thread_member_remove to {}", subject);
         Ok(())
     }
+
+    pub async fn publish_stage_instance_create(
+        &self,
+        stage: &serenity::model::channel::StageInstance,
+    ) -> Result<()> {
+        let guild_id = stage.guild_id.get();
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = StageInstanceCreateEvent {
+            metadata: meta,
+            stage_id: stage.id.get(),
+            guild_id,
+            channel_id: stage.channel_id.get(),
+            topic: stage.topic.clone(),
+        };
+        let subject = subjects::bot::stage_instance_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published stage_instance_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_stage_instance_update(
+        &self,
+        stage: &serenity::model::channel::StageInstance,
+    ) -> Result<()> {
+        let guild_id = stage.guild_id.get();
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = StageInstanceUpdateEvent {
+            metadata: meta,
+            stage_id: stage.id.get(),
+            guild_id,
+            channel_id: stage.channel_id.get(),
+            topic: stage.topic.clone(),
+        };
+        let subject = subjects::bot::stage_instance_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published stage_instance_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_stage_instance_delete(
+        &self,
+        stage: &serenity::model::channel::StageInstance,
+    ) -> Result<()> {
+        let guild_id = stage.guild_id.get();
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = StageInstanceDeleteEvent {
+            metadata: meta,
+            stage_id: stage.id.get(),
+            guild_id,
+            channel_id: stage.channel_id.get(),
+        };
+        let subject = subjects::bot::stage_instance_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published stage_instance_delete to {}", subject);
+        Ok(())
+    }
 }
 
 fn convert_reaction_type(reaction: &ReactionType) -> Emoji {
