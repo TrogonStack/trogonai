@@ -194,6 +194,7 @@ mod tests {
                 attachments: vec![],
                 embeds: vec![],
                 referenced_message_id: None,
+                referenced_message_content: None,
             },
         };
         roundtrip(&event);

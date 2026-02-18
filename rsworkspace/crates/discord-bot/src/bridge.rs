@@ -162,6 +162,11 @@ impl DiscordBridge {
             attachments,
             embeds,
             referenced_message_id: msg.referenced_message.as_ref().map(|r| r.id.get()),
+            referenced_message_content: msg
+                .referenced_message
+                .as_ref()
+                .map(|r| r.content.clone())
+                .filter(|c| !c.is_empty()),
         }
     }
 

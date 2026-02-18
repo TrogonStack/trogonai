@@ -151,6 +151,9 @@ pub struct DiscordMessage {
     pub embeds: Vec<Embed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub referenced_message_id: Option<u64>,
+    /// Content of the message being replied to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_message_content: Option<String>,
 }
 
 #[cfg(test)]
@@ -210,8 +213,17 @@ mod tests {
             attachments: vec![],
             embeds: vec![],
             referenced_message_id: None,
+            referenced_message_content: None,
         };
         roundtrip(&msg);
+
+        // With reply context
+        let reply_msg = DiscordMessage {
+            referenced_message_id: Some(999),
+            referenced_message_content: Some("the original message".to_string()),
+            ..msg.clone()
+        };
+        roundtrip(&reply_msg);
     }
 
     #[test]
