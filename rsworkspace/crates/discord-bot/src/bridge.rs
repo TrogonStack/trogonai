@@ -17,10 +17,10 @@ use discord_types::{
     events::*,
     session::{member_session_id, session_id},
     types::{
-        Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordChannel,
-        DiscordGuild, DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, EmbedAuthor,
-        EmbedField, EmbedFooter, EmbedMedia, Emoji, ModalInput, StickerInfo,
-        VoiceState as BridgeVoiceState,
+        Attachment, AuditLogEntryInfo, ChannelType, CommandOption, CommandOptionValue,
+        ComponentType, DiscordChannel, DiscordGuild, DiscordMember, DiscordMessage, DiscordRole,
+        DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji, FetchedMember,
+        ModalInput, StickerInfo, VoiceState as BridgeVoiceState,
     },
     AccessConfig,
 };
@@ -30,9 +30,20 @@ use serenity::model::application::{
 };
 use serenity::model::channel::GuildChannel;
 use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
+use serenity::model::application::CommandPermissions as SerenityCommandPermissions;
+use serenity::model::event::GuildMembersChunkEvent as SerenityGuildMembersChunkEvent;
 use serenity::model::event::GuildScheduledEventUserAddEvent as SerenityScheduledEventUserAddEvent;
 use serenity::model::event::GuildScheduledEventUserRemoveEvent as SerenityScheduledEventUserRemoveEvent;
+use serenity::model::event::MessagePollVoteAddEvent as SerenityPollVoteAddEvent;
+use serenity::model::event::MessagePollVoteRemoveEvent as SerenityPollVoteRemoveEvent;
+use serenity::model::event::ThreadListSyncEvent as SerenityThreadListSyncEvent;
 use serenity::model::event::TypingStartEvent as SerenityTypingStartEvent;
+use serenity::model::event::VoiceServerUpdateEvent as SerenityVoiceServerUpdateEvent;
+use serenity::model::guild::automod::{ActionExecution as SerenityActionExecution, Rule as SerenityAutoModRule};
+use serenity::model::guild::Integration as SerenityIntegration;
+use serenity::model::id::{ApplicationId, IntegrationId};
+use serenity::model::monetization::Entitlement as SerenityEntitlement;
+use serenity::model::user::CurrentUser;
 use serenity::model::guild::ScheduledEvent;
 use std::collections::HashMap;
 use serenity::model::gateway::{Presence, Ready};
@@ -1431,6 +1442,447 @@ impl DiscordBridge {
         let subject = subjects::bot::scheduled_event_user_remove(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published scheduled_event_user_remove to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_category_create(&self, channel: &GuildChannel) -> Result<()> {
+        let meta = EventMetadata::new(format!("dc-ch-{}", channel.id.get()), self.next_sequence());
+        let ev = CategoryCreateEvent {
+            metadata: meta,
+            channel: Self::convert_channel(channel),
+        };
+        let subject = subjects::bot::category_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published category_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_category_delete(&self, channel: &GuildChannel) -> Result<()> {
+        let meta = EventMetadata::new(format!("dc-ch-{}", channel.id.get()), self.next_sequence());
+        let ev = CategoryDeleteEvent {
+            metadata: meta,
+            channel: Self::convert_channel(channel),
+        };
+        let subject = subjects::bot::category_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published category_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_bot_resume(&self) -> Result<()> {
+        let meta = EventMetadata::new("dc-bot-resume".to_string(), self.next_sequence());
+        let ev = BotResumeEvent { metadata: meta };
+        let subject = subjects::bot::bot_resume(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published bot_resume to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_user_update(&self, new: &CurrentUser) -> Result<()> {
+        let uid = new.id.get();
+        let meta = EventMetadata::new(format!("dc-user-{}", uid), self.next_sequence());
+        let ev = UserUpdateEvent {
+            metadata: meta,
+            user_id: uid,
+            username: new.name.clone(),
+            global_name: new.global_name.as_deref().map(String::from),
+        };
+        let subject = subjects::bot::user_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published user_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_members_chunk(
+        &self,
+        chunk: &SerenityGuildMembersChunkEvent,
+    ) -> Result<()> {
+        let gid = chunk.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let members: Vec<FetchedMember> = chunk.members.values().map(|m| FetchedMember {
+            user: DiscordUser {
+                id: m.user.id.get(),
+                username: m.user.name.clone(),
+                global_name: m.user.global_name.as_deref().map(String::from),
+                bot: m.user.bot,
+            },
+            guild_id: gid,
+            nick: m.nick.clone(),
+            roles: m.roles.iter().map(|r| r.get()).collect(),
+            joined_at: m.joined_at.and_then(|t| t.to_rfc3339()),
+        }).collect();
+        let ev = GuildMembersChunkEvent {
+            metadata: meta,
+            guild_id: gid,
+            chunk_index: chunk.chunk_index,
+            chunk_count: chunk.chunk_count,
+            members,
+        };
+        let subject = subjects::bot::guild_members_chunk(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_members_chunk to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_voice_server_update(
+        &self,
+        event: &SerenityVoiceServerUpdateEvent,
+    ) -> Result<()> {
+        let meta = EventMetadata::new("dc-voice-server".to_string(), self.next_sequence());
+        let ev = VoiceServerUpdateEvent {
+            metadata: meta,
+            guild_id: event.guild_id.map(|g| g.get()),
+            token: event.token.clone(),
+            endpoint: event.endpoint.clone(),
+        };
+        let subject = subjects::bot::voice_server_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published voice_server_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_audit_log_entry(
+        &self,
+        guild_id: GuildId,
+        entry: &serenity::model::guild::audit_log::AuditLogEntry,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let info = AuditLogEntryInfo {
+            id: entry.id.get(),
+            user_id: entry.user_id.get(),
+            target_id: entry.target_id.map(|t| t.get()),
+            action_type: entry.action.num() as u32,
+            reason: entry.reason.clone(),
+        };
+        let ev = GuildAuditLogEntryEvent { metadata: meta, guild_id: gid, entry: info };
+        let subject = subjects::bot::guild_audit_log_entry(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_audit_log_entry to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_list_sync(
+        &self,
+        event: &SerenityThreadListSyncEvent,
+    ) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = ThreadListSyncEvent {
+            metadata: meta,
+            guild_id: gid,
+            channel_ids: event.channel_ids.as_ref().map(|ids| ids.iter().map(|c| c.get()).collect()),
+            thread_count: event.threads.len() as u32,
+        };
+        let subject = subjects::bot::thread_list_sync(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_list_sync to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_member_update(
+        &self,
+        member: &serenity::model::guild::ThreadMember,
+    ) -> Result<()> {
+        let tid = member.id.get();
+        let meta = EventMetadata::new(format!("dc-thread-{}", tid), self.next_sequence());
+        let ev = ThreadMemberUpdateEvent {
+            metadata: meta,
+            thread_id: tid,
+            guild_id: member.guild_id.map(|g| g.get()),
+            user_id: member.user_id.get(),
+        };
+        let subject = subjects::bot::thread_member_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_member_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_integration_create(
+        &self,
+        integration: &SerenityIntegration,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-integration-{}", integration.id.get()),
+            self.next_sequence(),
+        );
+        let ev = IntegrationCreateEvent {
+            metadata: meta,
+            guild_id: integration.guild_id.map(|g: GuildId| g.get()),
+            integration_id: integration.id.get(),
+            name: integration.name.clone(),
+            kind: integration.kind.clone(),
+            enabled: integration.enabled,
+        };
+        let subject = subjects::bot::integration_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published integration_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_integration_update(
+        &self,
+        integration: &SerenityIntegration,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-integration-{}", integration.id.get()),
+            self.next_sequence(),
+        );
+        let ev = IntegrationUpdateEvent {
+            metadata: meta,
+            guild_id: integration.guild_id.map(|g: GuildId| g.get()),
+            integration_id: integration.id.get(),
+            name: integration.name.clone(),
+            kind: integration.kind.clone(),
+            enabled: integration.enabled,
+        };
+        let subject = subjects::bot::integration_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published integration_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_integration_delete(
+        &self,
+        integration_id: IntegrationId,
+        guild_id: GuildId,
+        application_id: Option<ApplicationId>,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = IntegrationDeleteEvent {
+            metadata: meta,
+            guild_id: gid,
+            integration_id: integration_id.get(),
+            application_id: application_id.map(|a| a.get()),
+        };
+        let subject = subjects::bot::integration_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published integration_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_voice_channel_status_update(
+        &self,
+        old: Option<String>,
+        status: Option<String>,
+        id: ChannelId,
+        guild_id: GuildId,
+    ) -> Result<()> {
+        let gid = guild_id.get();
+        let meta = EventMetadata::new(format!("dc-vc-{}", id.get()), self.next_sequence());
+        let ev = VoiceChannelStatusUpdateEvent {
+            metadata: meta,
+            channel_id: id.get(),
+            guild_id: gid,
+            old_status: old,
+            new_status: status,
+        };
+        let subject = subjects::bot::voice_channel_status_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published voice_channel_status_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_automod_rule_create(&self, rule: &SerenityAutoModRule) -> Result<()> {
+        let gid = rule.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = AutoModRuleCreateEvent {
+            metadata: meta,
+            guild_id: gid,
+            rule_id: rule.id.get(),
+            name: rule.name.clone(),
+            enabled: rule.enabled,
+        };
+        let subject = subjects::bot::automod_rule_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published automod_rule_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_automod_rule_update(&self, rule: &SerenityAutoModRule) -> Result<()> {
+        let gid = rule.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = AutoModRuleUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            rule_id: rule.id.get(),
+            name: rule.name.clone(),
+            enabled: rule.enabled,
+        };
+        let subject = subjects::bot::automod_rule_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published automod_rule_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_automod_rule_delete(&self, rule: &SerenityAutoModRule) -> Result<()> {
+        let gid = rule.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = AutoModRuleDeleteEvent {
+            metadata: meta,
+            guild_id: gid,
+            rule_id: rule.id.get(),
+            name: rule.name.clone(),
+        };
+        let subject = subjects::bot::automod_rule_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published automod_rule_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_automod_action_execution(
+        &self,
+        execution: &SerenityActionExecution,
+    ) -> Result<()> {
+        let gid = execution.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = AutoModActionExecutionEvent {
+            metadata: meta,
+            guild_id: gid,
+            rule_id: execution.rule_id.get(),
+            user_id: execution.user_id.get(),
+            channel_id: execution.channel_id.map(|c| c.get()),
+            message_id: execution.message_id.map(|m| m.get()),
+            matched_keyword: execution.matched_keyword.clone(),
+        };
+        let subject = subjects::bot::automod_action_execution(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published automod_action_execution to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_command_permissions_update(
+        &self,
+        permissions: &SerenityCommandPermissions,
+    ) -> Result<()> {
+        let gid = permissions.guild_id.get();
+        let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
+        let ev = CommandPermissionsUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            command_id: permissions.id.get(),
+            application_id: permissions.application_id.get(),
+        };
+        let subject = subjects::bot::command_permissions_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published command_permissions_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_entitlement_create(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-entitlement-{}", entitlement.id.get()),
+            self.next_sequence(),
+        );
+        let ev = EntitlementCreateEvent {
+            metadata: meta,
+            entitlement_id: entitlement.id.get(),
+            sku_id: entitlement.sku_id.get(),
+            application_id: entitlement.application_id.get(),
+            user_id: entitlement.user_id.map(|u| u.get()),
+            guild_id: entitlement.guild_id.map(|g| g.get()),
+        };
+        let subject = subjects::bot::entitlement_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published entitlement_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_entitlement_update(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-entitlement-{}", entitlement.id.get()),
+            self.next_sequence(),
+        );
+        let ev = EntitlementUpdateEvent {
+            metadata: meta,
+            entitlement_id: entitlement.id.get(),
+            sku_id: entitlement.sku_id.get(),
+            application_id: entitlement.application_id.get(),
+            user_id: entitlement.user_id.map(|u| u.get()),
+            guild_id: entitlement.guild_id.map(|g| g.get()),
+        };
+        let subject = subjects::bot::entitlement_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published entitlement_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_entitlement_delete(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-entitlement-{}", entitlement.id.get()),
+            self.next_sequence(),
+        );
+        let ev = EntitlementDeleteEvent {
+            metadata: meta,
+            entitlement_id: entitlement.id.get(),
+            sku_id: entitlement.sku_id.get(),
+            application_id: entitlement.application_id.get(),
+            user_id: entitlement.user_id.map(|u| u.get()),
+            guild_id: entitlement.guild_id.map(|g| g.get()),
+        };
+        let subject = subjects::bot::entitlement_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published entitlement_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_poll_vote_add(&self, event: &SerenityPollVoteAddEvent) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-msg-{}", event.message_id.get()),
+            self.next_sequence(),
+        );
+        let ev = PollVoteAddEvent {
+            metadata: meta,
+            user_id: event.user_id.get(),
+            channel_id: event.channel_id.get(),
+            message_id: event.message_id.get(),
+            guild_id: event.guild_id.map(|g| g.get()),
+            answer_id: event.answer_id.get(),
+        };
+        let subject = subjects::bot::poll_vote_add(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published poll_vote_add to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_poll_vote_remove(&self, event: &SerenityPollVoteRemoveEvent) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-msg-{}", event.message_id.get()),
+            self.next_sequence(),
+        );
+        let ev = PollVoteRemoveEvent {
+            metadata: meta,
+            user_id: event.user_id.get(),
+            channel_id: event.channel_id.get(),
+            message_id: event.message_id.get(),
+            guild_id: event.guild_id.map(|g| g.get()),
+            answer_id: event.answer_id.get(),
+        };
+        let subject = subjects::bot::poll_vote_remove(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published poll_vote_remove to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_reaction_remove_emoji(
+        &self,
+        reaction: &serenity::model::channel::Reaction,
+    ) -> Result<()> {
+        let cid = reaction.channel_id.get();
+        let meta = EventMetadata::new(format!("dc-ch-{}", cid), self.next_sequence());
+        let emoji = convert_reaction_type(&reaction.emoji);
+        let ev = ReactionRemoveEmojiEvent {
+            metadata: meta,
+            channel_id: cid,
+            message_id: reaction.message_id.get(),
+            guild_id: reaction.guild_id.map(|g| g.get()),
+            emoji_name: if emoji.name.is_empty() { None } else { Some(emoji.name) },
+            emoji_id: emoji.id,
+        };
+        let subject = subjects::bot::reaction_remove_emoji(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published reaction_remove_emoji to {}", subject);
         Ok(())
     }
 }

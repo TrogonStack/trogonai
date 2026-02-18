@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    CommandOption, ComponentType, DiscordChannel, DiscordGuild, DiscordMember, DiscordMessage,
-    DiscordRole, DiscordUser, Embed, Emoji, ModalInput, StickerInfo, VoiceState,
+    AuditLogEntryInfo, CommandOption, ComponentType, DiscordChannel, DiscordGuild, DiscordMember,
+    DiscordMessage, DiscordRole, DiscordUser, Embed, Emoji, FetchedMember, ModalInput,
+    ScheduledEventUserInfo, StickerInfo, VoiceRegionInfo, AppInfo, VoiceState,
 };
 
 /// Base event metadata shared across all Discord events
@@ -529,6 +530,285 @@ pub struct GuildScheduledEventUserRemoveEvent {
     pub event_id: u64,
     pub user_id: u64,
     pub guild_id: u64,
+}
+
+/// A category channel was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryCreateEvent {
+    pub metadata: EventMetadata,
+    pub channel: DiscordChannel,
+}
+
+/// A category channel was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryDeleteEvent {
+    pub metadata: EventMetadata,
+    pub channel: DiscordChannel,
+}
+
+/// Bot reconnected to the gateway
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BotResumeEvent {
+    pub metadata: EventMetadata,
+}
+
+/// The current user (bot) profile was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UserUpdateEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_name: Option<String>,
+}
+
+/// Bulk guild members chunk received
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildMembersChunkEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub chunk_index: u32,
+    pub chunk_count: u32,
+    pub members: Vec<FetchedMember>,
+}
+
+/// Voice server update (used for voice connections)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceServerUpdateEvent {
+    pub metadata: EventMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
+/// An audit log entry was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildAuditLogEntryEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub entry: AuditLogEntryInfo,
+}
+
+/// Thread list was synced
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadListSyncEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_ids: Option<Vec<u64>>,
+    pub thread_count: u32,
+}
+
+/// A thread member was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadMemberUpdateEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub user_id: u64,
+}
+
+/// An integration was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IntegrationCreateEvent {
+    pub metadata: EventMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub integration_id: u64,
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+}
+
+/// An integration was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IntegrationUpdateEvent {
+    pub metadata: EventMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub integration_id: u64,
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+}
+
+/// An integration was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IntegrationDeleteEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub integration_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<u64>,
+}
+
+/// Voice channel status was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceChannelStatusUpdateEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    pub guild_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_status: Option<String>,
+}
+
+/// An auto-moderation rule was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoModRuleCreateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub rule_id: u64,
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// An auto-moderation rule was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoModRuleUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub rule_id: u64,
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// An auto-moderation rule was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoModRuleDeleteEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub rule_id: u64,
+    pub name: String,
+}
+
+/// An auto-moderation action was executed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoModActionExecutionEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub rule_id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_keyword: Option<String>,
+}
+
+/// Application command permissions were updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CommandPermissionsUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub command_id: u64,
+    pub application_id: u64,
+}
+
+/// An entitlement was created (monetization)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EntitlementCreateEvent {
+    pub metadata: EventMetadata,
+    pub entitlement_id: u64,
+    pub sku_id: u64,
+    pub application_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+}
+
+/// An entitlement was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EntitlementUpdateEvent {
+    pub metadata: EventMetadata,
+    pub entitlement_id: u64,
+    pub sku_id: u64,
+    pub application_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+}
+
+/// An entitlement was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EntitlementDeleteEvent {
+    pub metadata: EventMetadata,
+    pub entitlement_id: u64,
+    pub sku_id: u64,
+    pub application_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+}
+
+/// A user voted on a message poll
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PollVoteAddEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub channel_id: u64,
+    pub message_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub answer_id: u64,
+}
+
+/// A user removed their vote from a message poll
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PollVoteRemoveEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub channel_id: u64,
+    pub message_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub answer_id: u64,
+}
+
+/// A specific emoji's reactions were removed from a message
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReactionRemoveEmojiEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    pub message_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji_id: Option<u64>,
+}
+
+/// Fetch audit log result (response to FetchAuditLogCommand)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchAuditLogResult {
+    pub entries: Vec<AuditLogEntryInfo>,
+}
+
+/// Fetch scheduled event users result (response to FetchScheduledEventUsersCommand)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchScheduledEventUsersResult {
+    pub users: Vec<ScheduledEventUserInfo>,
+}
+
+/// Fetch voice regions result (response to FetchVoiceRegionsCommand)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchVoiceRegionsResult {
+    pub regions: Vec<VoiceRegionInfo>,
+}
+
+/// Fetch application info result (response to FetchApplicationInfoCommand)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchApplicationInfoResult {
+    pub app: Option<AppInfo>,
 }
 
 #[cfg(test)]

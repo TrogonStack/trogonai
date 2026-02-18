@@ -656,6 +656,77 @@ pub struct DeleteChannelPermissionsCommand {
     pub target_id: u64,
 }
 
+/// Kick inactive members from a guild (prune)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneMembersCommand {
+    pub guild_id: u64,
+    /// Members inactive for this many days are pruned (1–30)
+    pub days: u8,
+}
+
+/// Fetch audit log entries for a guild (request-reply: returns `Vec<AuditLogEntryInfo>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchAuditLogCommand {
+    pub guild_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u8>,
+    /// Return entries before this entry ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_id: Option<u64>,
+    /// Filter by this user ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<u64>,
+}
+
+/// Fetch users subscribed to a scheduled event (request-reply: returns `Vec<ScheduledEventUserInfo>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchScheduledEventUsersCommand {
+    pub guild_id: u64,
+    pub event_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
+
+/// Edit a guild sticker's metadata
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditStickerCommand {
+    pub guild_id: u64,
+    pub sticker_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Delete a guild sticker
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteStickerCommand {
+    pub guild_id: u64,
+    pub sticker_id: u64,
+}
+
+/// Delete a guild integration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteIntegrationCommand {
+    pub guild_id: u64,
+    pub integration_id: u64,
+}
+
+/// Sync a guild integration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SyncIntegrationCommand {
+    pub guild_id: u64,
+    pub integration_id: u64,
+}
+
+/// Fetch available voice regions (request-reply: returns `Vec<VoiceRegionInfo>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchVoiceRegionsCommand {}
+
+/// Fetch the bot's application info (request-reply: returns `Option<AppInfo>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchApplicationInfoCommand {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,14 +4,21 @@ use serenity::async_trait;
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::application::{Command, CommandOptionType, Interaction};
 use serenity::model::channel::{GuildChannel, Message};
+use serenity::model::application::CommandPermissions;
 use serenity::model::event::{
-    ChannelPinsUpdateEvent, GuildScheduledEventUserAddEvent, GuildScheduledEventUserRemoveEvent,
-    MessageUpdateEvent, TypingStartEvent,
+    ChannelPinsUpdateEvent, GuildMembersChunkEvent, GuildScheduledEventUserAddEvent,
+    GuildScheduledEventUserRemoveEvent, MessagePollVoteAddEvent, MessagePollVoteRemoveEvent,
+    MessageUpdateEvent, ThreadListSyncEvent, TypingStartEvent, VoiceServerUpdateEvent,
 };
 use serenity::model::gateway::{Presence, Ready};
-use serenity::model::guild::{Guild, Member, PartialGuild, Role, ScheduledEvent, UnavailableGuild};
-use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId};
-use serenity::model::user::User;
+use serenity::model::guild::{
+    Guild, Member, PartialGuild, Role, ScheduledEvent, ThreadMember, UnavailableGuild,
+};
+use serenity::model::guild::automod::{ActionExecution, Rule as AutoModRule};
+use serenity::model::guild::Integration;
+use serenity::model::id::{ApplicationId, ChannelId, GuildId, IntegrationId, MessageId, RoleId};
+use serenity::model::monetization::Entitlement;
+use serenity::model::user::{CurrentUser, User};
 use serenity::model::voice::VoiceState;
 use serenity::prelude::*;
 use std::collections::HashMap;
@@ -1066,6 +1073,376 @@ impl EventHandler for Handler {
         }
         if let Err(e) = bridge.publish_guild_scheduled_event_user_remove(&unsubscribed).await {
             error!("Failed to publish scheduled_event_user_remove: {}", e);
+        }
+    }
+
+    async fn category_create(&self, ctx: Context, category: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(category.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_category_create(&category).await {
+            error!("Failed to publish category_create: {}", e);
+        }
+    }
+
+    async fn category_delete(&self, ctx: Context, category: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(category.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_category_delete(&category).await {
+            error!("Failed to publish category_delete: {}", e);
+        }
+    }
+
+    async fn resume(&self, ctx: Context, _event: serenity::model::event::ResumedEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_bot_resume().await {
+            error!("Failed to publish bot_resume: {}", e);
+        }
+    }
+
+    async fn user_update(&self, ctx: Context, _old: Option<CurrentUser>, new: CurrentUser) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_user_update(&new).await {
+            error!("Failed to publish user_update: {}", e);
+        }
+    }
+
+    async fn guild_members_chunk(&self, ctx: Context, chunk: GuildMembersChunkEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(chunk.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_members_chunk(&chunk).await {
+            error!("Failed to publish guild_members_chunk: {}", e);
+        }
+    }
+
+    async fn voice_server_update(&self, ctx: Context, event: VoiceServerUpdateEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_voice_server_update(&event).await {
+            error!("Failed to publish voice_server_update: {}", e);
+        }
+    }
+
+    async fn guild_audit_log_entry_create(
+        &self,
+        ctx: Context,
+        entry: serenity::model::guild::audit_log::AuditLogEntry,
+        guild_id: GuildId,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_audit_log_entry(guild_id, &entry).await {
+            error!("Failed to publish guild_audit_log_entry: {}", e);
+        }
+    }
+
+    async fn thread_list_sync(&self, ctx: Context, thread_list_sync: ThreadListSyncEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(thread_list_sync.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_thread_list_sync(&thread_list_sync).await {
+            error!("Failed to publish thread_list_sync: {}", e);
+        }
+    }
+
+    async fn thread_member_update(&self, ctx: Context, thread_member: ThreadMember) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_thread_member_update(&thread_member).await {
+            error!("Failed to publish thread_member_update: {}", e);
+        }
+    }
+
+    async fn integration_create(&self, ctx: Context, integration: Integration) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_integration_create(&integration).await {
+            error!("Failed to publish integration_create: {}", e);
+        }
+    }
+
+    async fn integration_update(&self, ctx: Context, integration: Integration) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_integration_update(&integration).await {
+            error!("Failed to publish integration_update: {}", e);
+        }
+    }
+
+    async fn integration_delete(
+        &self,
+        ctx: Context,
+        integration_id: IntegrationId,
+        guild_id: GuildId,
+        application_id: Option<ApplicationId>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_integration_delete(integration_id, guild_id, application_id).await {
+            error!("Failed to publish integration_delete: {}", e);
+        }
+    }
+
+    async fn voice_channel_status_update(
+        &self,
+        ctx: Context,
+        old: Option<String>,
+        status: Option<String>,
+        id: ChannelId,
+        guild_id: GuildId,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_voice_channel_status_update(old, status, id, guild_id).await {
+            error!("Failed to publish voice_channel_status_update: {}", e);
+        }
+    }
+
+    async fn auto_moderation_rule_create(&self, ctx: Context, rule: AutoModRule) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(rule.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_automod_rule_create(&rule).await {
+            error!("Failed to publish automod_rule_create: {}", e);
+        }
+    }
+
+    async fn auto_moderation_rule_update(&self, ctx: Context, rule: AutoModRule) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(rule.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_automod_rule_update(&rule).await {
+            error!("Failed to publish automod_rule_update: {}", e);
+        }
+    }
+
+    async fn auto_moderation_rule_delete(&self, ctx: Context, rule: AutoModRule) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(rule.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_automod_rule_delete(&rule).await {
+            error!("Failed to publish automod_rule_delete: {}", e);
+        }
+    }
+
+    async fn auto_moderation_action_execution(&self, ctx: Context, execution: ActionExecution) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(execution.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_automod_action_execution(&execution).await {
+            error!("Failed to publish automod_action_execution: {}", e);
+        }
+    }
+
+    async fn command_permissions_update(&self, ctx: Context, permission: CommandPermissions) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(permission.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_command_permissions_update(&permission).await {
+            error!("Failed to publish command_permissions_update: {}", e);
+        }
+    }
+
+    async fn entitlement_create(&self, ctx: Context, entitlement: Entitlement) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_entitlement_create(&entitlement).await {
+            error!("Failed to publish entitlement_create: {}", e);
+        }
+    }
+
+    async fn entitlement_update(&self, ctx: Context, entitlement: Entitlement) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_entitlement_update(&entitlement).await {
+            error!("Failed to publish entitlement_update: {}", e);
+        }
+    }
+
+    async fn entitlement_delete(&self, ctx: Context, entitlement: Entitlement) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_entitlement_delete(&entitlement).await {
+            error!("Failed to publish entitlement_delete: {}", e);
+        }
+    }
+
+    async fn poll_vote_add(&self, ctx: Context, event: MessagePollVoteAddEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_poll_vote_add(&event).await {
+            error!("Failed to publish poll_vote_add: {}", e);
+        }
+    }
+
+    async fn poll_vote_remove(&self, ctx: Context, event: MessagePollVoteRemoveEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_poll_vote_remove(&event).await {
+            error!("Failed to publish poll_vote_remove: {}", e);
+        }
+    }
+
+    async fn reaction_remove_emoji(
+        &self,
+        ctx: Context,
+        removed_reactions: serenity::model::channel::Reaction,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_reaction_remove_emoji(&removed_reactions).await {
+            error!("Failed to publish reaction_remove_emoji: {}", e);
         }
     }
 }
