@@ -2,6 +2,14 @@
 
 use crate::types::ChannelType;
 
+/// Generate a session ID for a guild membership event.
+///
+/// Membership events are guild-scoped and have no associated channel:
+/// `dc-guild-{guild_id}`
+pub fn member_session_id(guild_id: u64) -> String {
+    format!("dc-guild-{}", guild_id)
+}
+
 /// Generate a session ID for a Discord conversation.
 ///
 /// - DM channels: `dc-dm-{channel_id}`
@@ -58,5 +66,11 @@ mod tests {
     fn test_guild_voice_session_id() {
         let sid = session_id(&ChannelType::GuildVoice, 300, Some(200), None);
         assert_eq!(sid, "dc-guild-200-300");
+    }
+
+    #[test]
+    fn test_member_session_id() {
+        let sid = member_session_id(12345);
+        assert_eq!(sid, "dc-guild-12345");
     }
 }

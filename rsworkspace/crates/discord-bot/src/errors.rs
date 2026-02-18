@@ -46,7 +46,12 @@ pub fn classify(command_subject: &str, err: &serenity::Error) -> ErrorOutcome {
 /// - Rate-limited → `warn!`
 /// - Transient errors → `warn!`
 pub fn log_error(command_subject: &str, context: &str, err: &serenity::Error) {
-    match classify(command_subject, err) {
+    log_outcome(command_subject, context, classify(command_subject, err));
+}
+
+/// Log a pre-classified `ErrorOutcome` at the appropriate level.
+pub fn log_outcome(command_subject: &str, context: &str, outcome: ErrorOutcome) {
+    match outcome {
         ErrorOutcome::Permanent(evt) => {
             error!("{} [{:?}]: {}", context, evt.error_code, evt.message);
         }
@@ -54,7 +59,8 @@ pub fn log_error(command_subject: &str, context: &str, err: &serenity::Error) {
             warn!("{} [{:?}]: {}", context, evt.error_code, evt.message);
         }
         ErrorOutcome::Retry(dur) => {
-            warn!("{}: rate limited, retry after {:?}", context, dur);
+            warn!("{}: rate limited, retry after {:?}", command_subject, dur);
+            let _ = context;
         }
     }
 }

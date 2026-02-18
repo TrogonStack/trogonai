@@ -18,6 +18,8 @@ pub enum DmPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GuildPolicy {
+    /// Any guild can use the bot
+    Open,
     /// Only specific guilds can use the bot
     Allowlist,
     /// Guilds disabled
@@ -37,6 +39,9 @@ pub struct AccessConfig {
     pub user_allowlist: Vec<u64>,
     /// Allowed guild IDs
     pub guild_allowlist: Vec<u64>,
+    /// If true, bot only responds in guilds when @mentioned
+    #[serde(default)]
+    pub require_mention: bool,
 }
 
 impl Default for AccessConfig {
@@ -47,6 +52,7 @@ impl Default for AccessConfig {
             admin_users: Vec::new(),
             user_allowlist: Vec::new(),
             guild_allowlist: Vec::new(),
+            require_mention: false,
         }
     }
 }
@@ -67,6 +73,7 @@ impl AccessConfig {
     /// Check if a guild has access
     pub fn can_access_guild(&self, guild_id: u64) -> bool {
         match self.guild_policy {
+            GuildPolicy::Open => true,
             GuildPolicy::Allowlist => self.guild_allowlist.contains(&guild_id),
             GuildPolicy::Disabled => false,
         }
@@ -89,6 +96,7 @@ mod tests {
             guild_allowlist: vec![100, 200],
             user_allowlist: vec![],
             admin_users: vec![],
+            require_mention: false,
         }
     }
 
@@ -99,6 +107,7 @@ mod tests {
             user_allowlist: vec![10, 20, 30],
             guild_allowlist: vec![100, 200],
             admin_users: vec![999],
+            require_mention: false,
         }
     }
 
@@ -109,6 +118,7 @@ mod tests {
             user_allowlist: vec![10],
             guild_allowlist: vec![100],
             admin_users: vec![],
+            require_mention: false,
         }
     }
 
@@ -120,6 +130,7 @@ mod tests {
         assert!(cfg.user_allowlist.is_empty());
         assert!(cfg.guild_allowlist.is_empty());
         assert!(cfg.admin_users.is_empty());
+        assert!(!cfg.require_mention);
     }
 
     #[test]
@@ -175,6 +186,17 @@ mod tests {
     }
 
     #[test]
+    fn test_guild_open_allows_any() {
+        let cfg = AccessConfig {
+            guild_policy: GuildPolicy::Open,
+            guild_allowlist: vec![],
+            ..AccessConfig::default()
+        };
+        assert!(cfg.can_access_guild(1));
+        assert!(cfg.can_access_guild(999999));
+    }
+
+    #[test]
     fn test_dm_policy_serde() {
         for (v, expected) in [
             (DmPolicy::Open, "\"open\""),
@@ -191,6 +213,7 @@ mod tests {
     #[test]
     fn test_guild_policy_serde() {
         for (v, expected) in [
+            (GuildPolicy::Open, "\"open\""),
             (GuildPolicy::Allowlist, "\"allowlist\""),
             (GuildPolicy::Disabled, "\"disabled\""),
         ] {

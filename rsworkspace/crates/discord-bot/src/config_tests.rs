@@ -156,4 +156,107 @@ prefix = "prod"
 
         std::env::remove_var("DISCORD_BOT_TOKEN");
     }
+
+    #[test]
+    fn test_from_env_guild_policy_open() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_GUILD_POLICY", "open");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Open);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_GUILD_POLICY");
+    }
+
+    #[test]
+    fn test_from_env_guild_allowlist_parsed() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_GUILD_POLICY", "allowlist");
+        std::env::set_var("DISCORD_GUILD_ALLOWLIST", "111, 222, 333");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Allowlist);
+        assert_eq!(cfg.discord.access.guild_allowlist, vec![111, 222, 333]);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_GUILD_POLICY");
+        std::env::remove_var("DISCORD_GUILD_ALLOWLIST");
+    }
+
+    #[test]
+    fn test_from_env_dm_policy_disabled() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_DM_POLICY", "disabled");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.dm_policy, DmPolicy::Disabled);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_DM_POLICY");
+    }
+
+    #[test]
+    fn test_from_env_user_and_admin_lists() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_USER_ALLOWLIST", "10,20,30");
+        std::env::set_var("DISCORD_ADMIN_USERS", "999");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.user_allowlist, vec![10, 20, 30]);
+        assert_eq!(cfg.discord.access.admin_users, vec![999]);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_USER_ALLOWLIST");
+        std::env::remove_var("DISCORD_ADMIN_USERS");
+    }
+
+    #[test]
+    fn test_from_env_require_mention_true() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::set_var("DISCORD_REQUIRE_MENTION", "true");
+
+        let cfg = Config::from_env().unwrap();
+        assert!(cfg.discord.access.require_mention);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+        std::env::remove_var("DISCORD_REQUIRE_MENTION");
+    }
+
+    #[test]
+    fn test_from_env_require_mention_default_false() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::remove_var("DISCORD_REQUIRE_MENTION");
+
+        let cfg = Config::from_env().unwrap();
+        assert!(!cfg.discord.access.require_mention);
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+    }
+
+    #[test]
+    fn test_from_env_defaults_all_policies() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DISCORD_BOT_TOKEN", "tok");
+        std::env::remove_var("DISCORD_GUILD_POLICY");
+        std::env::remove_var("DISCORD_DM_POLICY");
+        std::env::remove_var("DISCORD_GUILD_ALLOWLIST");
+        std::env::remove_var("DISCORD_USER_ALLOWLIST");
+        std::env::remove_var("DISCORD_ADMIN_USERS");
+
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Allowlist);
+        assert_eq!(cfg.discord.access.dm_policy, DmPolicy::Allowlist);
+        assert!(cfg.discord.access.guild_allowlist.is_empty());
+        assert!(cfg.discord.access.user_allowlist.is_empty());
+        assert!(cfg.discord.access.admin_users.is_empty());
+
+        std::env::remove_var("DISCORD_BOT_TOKEN");
+    }
 }

@@ -59,7 +59,7 @@ impl DiscordAgent {
 
         let mut stream = self
             .subscriber
-            .subscribe::<MessageCreatedEvent>(&subject)
+            .queue_subscribe::<MessageCreatedEvent>(&subject, "discord-agents")
             .await?;
 
         while let Some(result) = stream.next().await {
@@ -93,7 +93,7 @@ impl DiscordAgent {
 
         let mut stream = self
             .subscriber
-            .subscribe::<SlashCommandEvent>(&subject)
+            .queue_subscribe::<SlashCommandEvent>(&subject, "discord-agents")
             .await?;
 
         while let Some(result) = stream.next().await {
@@ -127,7 +127,7 @@ impl DiscordAgent {
 
         let mut stream = self
             .subscriber
-            .subscribe::<ComponentInteractionEvent>(&subject)
+            .queue_subscribe::<ComponentInteractionEvent>(&subject, "discord-agents")
             .await?;
 
         while let Some(result) = stream.next().await {

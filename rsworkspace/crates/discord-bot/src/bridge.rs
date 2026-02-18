@@ -15,7 +15,7 @@ use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher};
 use discord_types::{
     events::*,
-    session::session_id,
+    session::{member_session_id, session_id},
     types::{
         Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordMember,
         DiscordMessage, DiscordUser, Embed, EmbedField, Emoji,
@@ -39,6 +39,7 @@ pub struct DiscordBridge {
     publisher: MessagePublisher,
     pub access_config: AccessConfig,
     sequence: Arc<AtomicU64>,
+    bot_user_id: Arc<AtomicU64>,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -52,7 +53,30 @@ impl DiscordBridge {
             publisher: MessagePublisher::new(client, prefix),
             access_config,
             sequence: Arc::new(AtomicU64::new(0)),
+            bot_user_id: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Store the bot's own user ID (called from the ready handler)
+    pub fn set_bot_user_id(&self, id: u64) {
+        self.bot_user_id.store(id, Ordering::Relaxed);
+    }
+
+    /// Returns true if the message should be processed.
+    ///
+    /// When `require_mention` is false every message passes.
+    /// When `require_mention` is true the bot's own user ID must appear in
+    /// the mentions list.  If the bot ID is not set yet (0) the check is
+    /// skipped to avoid silently dropping messages on startup.
+    pub fn check_require_mention(&self, mentions: &[serenity::model::user::User]) -> bool {
+        if !self.access_config.require_mention {
+            return true;
+        }
+        let bot_id = self.bot_user_id.load(Ordering::Relaxed);
+        if bot_id == 0 {
+            return true;
+        }
+        mentions.iter().any(|u| u.id.get() == bot_id)
     }
 
     fn next_sequence(&self) -> u64 {
@@ -420,12 +444,7 @@ impl DiscordBridge {
     }
 
     pub async fn publish_guild_member_add(&self, guild_id: u64, member: &Member) -> Result<()> {
-        let sid = session_id(
-            &ChannelType::GuildText,
-            0,
-            Some(guild_id),
-            Some(member.user.id.get()),
-        );
+        let sid = member_session_id(guild_id);
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let discord_member = DiscordMember {
@@ -452,12 +471,7 @@ impl DiscordBridge {
         guild_id: u64,
         user: &SerenityUser,
     ) -> Result<()> {
-        let sid = session_id(
-            &ChannelType::GuildText,
-            0,
-            Some(guild_id),
-            Some(user.id.get()),
-        );
+        let sid = member_session_id(guild_id);
         let meta = EventMetadata::new(sid, self.next_sequence());
 
         let event = GuildMemberRemoveEvent {

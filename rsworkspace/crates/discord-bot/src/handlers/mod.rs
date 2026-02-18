@@ -31,6 +31,9 @@ impl EventHandler for Handler {
             if let Some(health_state) = data.get::<AppState>() {
                 health_state.set_bot_username(ready.user.name.clone()).await;
             }
+            if let Some(bridge) = data.get::<DiscordBridge>() {
+                bridge.set_bot_user_id(ready.user.id.get());
+            }
         }
 
         // Register slash commands globally (takes ~1 hour to propagate after first deploy)
@@ -77,6 +80,10 @@ impl EventHandler for Handler {
         // Access control: check guild or DM; admins bypass guild restrictions
         if let Some(guild_id) = msg.guild_id {
             if !bridge.check_guild_access(guild_id.get()) && !bridge.is_admin(msg.author.id.get()) {
+                return;
+            }
+            if !bridge.check_require_mention(&msg.mentions) && !bridge.is_admin(msg.author.id.get())
+            {
                 return;
             }
         } else {
