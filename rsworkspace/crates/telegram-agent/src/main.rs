@@ -88,37 +88,57 @@ async fn main() -> Result<()> {
     // Ensure the inbound event stream exists (bot may not have started first)
     telegram_nats::nats::setup_event_stream(&js, &args.prefix).await?;
 
-    // Setup JetStream KV for persistent conversation history
-    let conversation_kv = {
-        let js = async_nats::jetstream::new(nats_client.clone());
-        let bucket = format!("telegram_conversations_{}", args.prefix);
-        match js.get_key_value(&bucket).await {
+    // Helper: get-or-create a JetStream KV bucket
+    async fn get_or_create_kv(
+        js: &async_nats::jetstream::Context,
+        bucket: &str,
+        ttl_secs: Option<u64>,
+    ) -> Option<async_nats::jetstream::kv::Store> {
+        if let Ok(kv) = js.get_key_value(bucket).await {
+            info!("Using existing KV bucket: {}", bucket);
+            return Some(kv);
+        }
+        let max_age = ttl_secs
+            .map(std::time::Duration::from_secs)
+            .unwrap_or_default();
+        match js
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: bucket.to_string(),
+                history: 1,
+                max_age,
+                storage: async_nats::jetstream::stream::StorageType::File,
+                ..Default::default()
+            })
+            .await
+        {
             Ok(kv) => {
-                info!("Using existing conversation KV bucket: {}", bucket);
+                info!("Created KV bucket: {}", bucket);
                 Some(kv)
             }
-            Err(_) => {
-                match js
-                    .create_key_value(async_nats::jetstream::kv::Config {
-                        bucket: bucket.clone(),
-                        history: 1,
-                        storage: async_nats::jetstream::stream::StorageType::File,
-                        ..Default::default()
-                    })
-                    .await
-                {
-                    Ok(kv) => {
-                        info!("Created conversation KV bucket: {}", bucket);
-                        Some(kv)
-                    }
-                    Err(e) => {
-                        tracing::warn!("Could not create conversation KV bucket (running without persistence): {}", e);
-                        None
-                    }
-                }
+            Err(e) => {
+                tracing::warn!("Could not create KV bucket '{}': {}", bucket, e);
+                None
             }
         }
-    };
+    }
+
+    let js_kv = async_nats::jetstream::new(nats_client.clone());
+
+    // Persistent conversation history (no TTL — conversations are long-lived)
+    let conversation_kv = get_or_create_kv(
+        &js_kv,
+        &format!("telegram_conversations_{}", args.prefix),
+        None,
+    )
+    .await;
+
+    // Dedup bucket — 24h TTL matches the JetStream message retention window
+    let dedup_kv = get_or_create_kv(
+        &js_kv,
+        &format!("telegram_dedup_{}", args.prefix),
+        Some(86_400),
+    )
+    .await;
 
     // Configure LLM if enabled
     let llm_config = if args.enable_llm {
@@ -149,6 +169,7 @@ async fn main() -> Result<()> {
         args.agent_name,
         llm_config,
         conversation_kv,
+        dedup_kv,
     );
 
     info!("Agent initialized, starting message processing...");
