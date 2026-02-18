@@ -2,7 +2,6 @@
 
 use crate::outbound::{convert_parse_mode, OutboundProcessor, StreamingMessage};
 use anyhow::Result;
-use telegram_nats::subjects;
 use telegram_types::commands::StreamMessageCommand;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, MessageId};
@@ -16,28 +15,9 @@ const MIN_EDIT_INTERVAL: Duration = Duration::from_millis(1000);
 const MAX_RETRIES: u32 = 3;
 
 impl OutboundProcessor {
-    /// Handle stream message commands with rate limiting and tracking
-    pub async fn handle_stream_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_stream(&prefix);
-        info!("Subscribing to streaming messages: {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<StreamMessageCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    if let Err(e) = self.process_stream_message(cmd).await {
-                        error!("Failed to process stream message: {}", e);
-                    }
-                }
-                Err(e) => error!("Failed to deserialize stream message command: {}", e),
-            }
-        }
-
-        Ok(())
+    /// Handle a single stream message command with rate limiting and tracking
+    pub async fn handle_stream_message(&self, cmd: StreamMessageCommand) -> Result<()> {
+        self.process_stream_message(cmd).await
     }
 
     /// Process a single stream message with proper tracking

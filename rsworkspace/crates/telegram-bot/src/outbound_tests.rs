@@ -32,12 +32,15 @@ mod tests {
 
     /// Starts an OutboundProcessor in the background and waits for it to subscribe.
     async fn start_processor(client: async_nats::Client, prefix: &str) {
-        let processor = OutboundProcessor::new(fake_bot(), client, prefix.to_string());
+        let js = async_nats::jetstream::new(client.clone());
+        // Set up the agent stream for the test
+        telegram_nats::nats::setup_agent_stream(&js, prefix).await.unwrap();
+        let processor = OutboundProcessor::new(fake_bot(), client, prefix.to_string(), js);
         tokio::spawn(async move {
             let _ = processor.run().await;
         });
-        // Allow processor time to establish all NATS subscriptions
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        // Allow processor time to establish JetStream pull consumer
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
     /// Waits for a message on a subscription with a 5-second timeout.
