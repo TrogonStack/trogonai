@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    CommandOption, ComponentType, DiscordMember, DiscordMessage, DiscordUser, Embed, Emoji,
+    CommandOption, ComponentType, DiscordChannel, DiscordGuild, DiscordMember, DiscordMessage,
+    DiscordRole, DiscordUser, Embed, Emoji, ModalInput, VoiceState,
 };
 
 /// Base event metadata shared across all Discord events
@@ -132,6 +133,143 @@ pub struct GuildMemberRemoveEvent {
     pub metadata: EventMetadata,
     pub guild_id: u64,
     pub user: DiscordUser,
+}
+
+/// User started typing in a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TypingStartEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+}
+
+/// A user's voice state changed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceStateUpdateEvent {
+    pub metadata: EventMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_channel_id: Option<u64>,
+    pub new_state: VoiceState,
+}
+
+/// Bot joined or a guild became available
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildCreateEvent {
+    pub metadata: EventMetadata,
+    pub guild: DiscordGuild,
+    pub member_count: u64,
+}
+
+/// A guild was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild: DiscordGuild,
+}
+
+/// Bot left or a guild became unavailable
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildDeleteEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub unavailable: bool,
+}
+
+/// A channel was created in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChannelCreateEvent {
+    pub metadata: EventMetadata,
+    pub channel: DiscordChannel,
+}
+
+/// A channel was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChannelUpdateEvent {
+    pub metadata: EventMetadata,
+    pub channel: DiscordChannel,
+}
+
+/// A channel was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChannelDeleteEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    pub guild_id: u64,
+}
+
+/// A role was created in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoleCreateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub role: DiscordRole,
+}
+
+/// A role was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoleUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub role: DiscordRole,
+}
+
+/// A role was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoleDeleteEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub role_id: u64,
+}
+
+/// A user's presence (online status) changed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PresenceUpdateEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub guild_id: u64,
+    pub status: String,
+}
+
+/// A modal was submitted by a user
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModalSubmitEvent {
+    pub metadata: EventMetadata,
+    pub interaction_id: u64,
+    pub interaction_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub channel_id: u64,
+    pub user: DiscordUser,
+    pub custom_id: String,
+    #[serde(default)]
+    pub inputs: Vec<ModalInput>,
+}
+
+/// An autocomplete interaction was triggered
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutocompleteEvent {
+    pub metadata: EventMetadata,
+    pub interaction_id: u64,
+    pub interaction_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub channel_id: u64,
+    pub user: DiscordUser,
+    pub command_name: String,
+    pub focused_option: String,
+    pub current_value: String,
+}
+
+/// The bot connected and is ready
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BotReadyEvent {
+    pub metadata: EventMetadata,
+    pub bot_user: DiscordUser,
+    pub guild_count: u64,
 }
 
 #[cfg(test)]

@@ -156,6 +156,38 @@ pub struct DiscordMessage {
     pub referenced_message_content: Option<String>,
 }
 
+/// Discord role
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiscordRole {
+    pub id: u64,
+    pub name: String,
+    pub color: u32,
+    pub hoist: bool,
+    pub position: i64,
+    /// Permission bitmask as decimal string
+    pub permissions: String,
+    pub mentionable: bool,
+}
+
+/// Voice state snapshot
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceState {
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    pub self_mute: bool,
+    pub self_deaf: bool,
+}
+
+/// Modal text input value
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModalInput {
+    pub custom_id: String,
+    pub value: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

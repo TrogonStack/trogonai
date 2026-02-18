@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::Embed;
+use crate::types::{ChannelType, Embed, ModalInput};
 
 /// Send a new message to a channel
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -116,6 +116,166 @@ pub struct StreamMessageCommand {
     /// Message to reply to on the *first* send (ignored on edits)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to_message_id: Option<u64>,
+}
+
+/// An autocomplete choice returned to Discord
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutocompleteChoice {
+    pub name: String,
+    pub value: String,
+}
+
+/// Respond to a modal interaction by opening a modal form
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModalRespondCommand {
+    pub interaction_id: u64,
+    pub interaction_token: String,
+    pub custom_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub inputs: Vec<ModalInput>,
+}
+
+/// Respond to an autocomplete interaction with choices
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutocompleteRespondCommand {
+    pub interaction_id: u64,
+    pub interaction_token: String,
+    #[serde(default)]
+    pub choices: Vec<AutocompleteChoice>,
+}
+
+/// Ban a user from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BanUserCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// How many seconds of messages to delete (0 = none, max 604800 = 7 days)
+    pub delete_message_seconds: u64,
+}
+
+/// Kick a user from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KickUserCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Time out a user (0 duration_secs removes the timeout)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimeoutUserCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    /// Duration in seconds. 0 removes the timeout.
+    pub duration_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Create a new channel in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateChannelCommand {
+    pub guild_id: u64,
+    pub name: String,
+    pub channel_type: ChannelType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+}
+
+/// Edit an existing channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditChannelCommand {
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+}
+
+/// Delete a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteChannelCommand {
+    pub channel_id: u64,
+}
+
+/// Create a new role in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateRoleCommand {
+    pub guild_id: u64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<u32>,
+    pub hoist: bool,
+    pub mentionable: bool,
+}
+
+/// Assign a role to a guild member
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AssignRoleCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub role_id: u64,
+}
+
+/// Remove a role from a guild member
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemoveRoleCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub role_id: u64,
+}
+
+/// Delete a role from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteRoleCommand {
+    pub guild_id: u64,
+    pub role_id: u64,
+}
+
+/// Pin a message in a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PinMessageCommand {
+    pub channel_id: u64,
+    pub message_id: u64,
+}
+
+/// Unpin a message from a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnpinMessageCommand {
+    pub channel_id: u64,
+    pub message_id: u64,
+}
+
+/// Bulk delete messages from a channel (max 100, must be < 14 days old)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BulkDeleteMessagesCommand {
+    pub channel_id: u64,
+    pub message_ids: Vec<u64>,
+}
+
+/// Create a thread in a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateThreadCommand {
+    pub channel_id: u64,
+    pub name: String,
+    /// If set, creates the thread from an existing message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<u64>,
+    /// Auto-archive duration in minutes (60, 1440, 4320, or 10080)
+    pub auto_archive_mins: u16,
+}
+
+/// Archive (and optionally lock) a thread
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArchiveThreadCommand {
+    pub channel_id: u64,
+    pub locked: bool,
 }
 
 #[cfg(test)]

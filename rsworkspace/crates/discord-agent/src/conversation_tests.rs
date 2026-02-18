@@ -127,4 +127,36 @@ mod tests {
         assert_eq!(mgr.active_sessions().await, 0);
         assert!(mgr.get_history("any").await.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_add_user_message_stores_discord_id() {
+        let mgr = ConversationManager::new();
+        mgr.add_user_message("s1", "hello", 999_000_111).await;
+        let history = mgr.get_history("s1").await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].content, "hello");
+        assert_eq!(history[0].message_id, Some(999_000_111u64));
+    }
+
+    #[tokio::test]
+    async fn test_add_message_without_id_stores_none() {
+        let mgr = ConversationManager::new();
+        mgr.add_message("s1", "assistant", "a response").await;
+        let history = mgr.get_history("s1").await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].message_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_with_max_history_custom_limit() {
+        let mgr = ConversationManager::with_max_history(5);
+        for i in 0..8u32 {
+            mgr.add_message("s1", "user", &format!("msg {}", i)).await;
+        }
+        let history = mgr.get_history("s1").await;
+        assert_eq!(history.len(), 5);
+        assert_eq!(history[0].content, "msg 3");
+        assert_eq!(history[4].content, "msg 7");
+    }
 }

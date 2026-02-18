@@ -76,6 +76,81 @@ pub mod bot {
         format!("discord.{}.bot.errors.command", prefix)
     }
 
+    /// Typing start event subject
+    pub fn typing_start(prefix: &str) -> String {
+        format!("discord.{}.bot.typing.start", prefix)
+    }
+
+    /// Voice state update event subject
+    pub fn voice_state_update(prefix: &str) -> String {
+        format!("discord.{}.bot.voice.state_update", prefix)
+    }
+
+    /// Guild create event subject
+    pub fn guild_create(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.create", prefix)
+    }
+
+    /// Guild update event subject
+    pub fn guild_update(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.update", prefix)
+    }
+
+    /// Guild delete event subject
+    pub fn guild_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.delete", prefix)
+    }
+
+    /// Channel create event subject
+    pub fn channel_create(prefix: &str) -> String {
+        format!("discord.{}.bot.channel.create", prefix)
+    }
+
+    /// Channel update event subject
+    pub fn channel_update(prefix: &str) -> String {
+        format!("discord.{}.bot.channel.update", prefix)
+    }
+
+    /// Channel delete event subject
+    pub fn channel_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.channel.delete", prefix)
+    }
+
+    /// Role create event subject
+    pub fn role_create(prefix: &str) -> String {
+        format!("discord.{}.bot.role.create", prefix)
+    }
+
+    /// Role update event subject
+    pub fn role_update(prefix: &str) -> String {
+        format!("discord.{}.bot.role.update", prefix)
+    }
+
+    /// Role delete event subject
+    pub fn role_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.role.delete", prefix)
+    }
+
+    /// Presence update event subject
+    pub fn presence_update(prefix: &str) -> String {
+        format!("discord.{}.bot.presence.update", prefix)
+    }
+
+    /// Modal submit interaction event subject
+    pub fn interaction_modal(prefix: &str) -> String {
+        format!("discord.{}.bot.interaction.modal", prefix)
+    }
+
+    /// Autocomplete interaction event subject
+    pub fn interaction_autocomplete(prefix: &str) -> String {
+        format!("discord.{}.bot.interaction.autocomplete", prefix)
+    }
+
+    /// Bot ready event subject
+    pub fn bot_ready(prefix: &str) -> String {
+        format!("discord.{}.bot.ready", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -132,6 +207,91 @@ pub mod agent {
     /// Stream message command subject (progressive LLM responses)
     pub fn message_stream(prefix: &str) -> String {
         format!("discord.{}.agent.message.stream", prefix)
+    }
+
+    /// Respond to a modal interaction subject
+    pub fn interaction_modal_respond(prefix: &str) -> String {
+        format!("discord.{}.agent.interaction.modal_respond", prefix)
+    }
+
+    /// Respond to an autocomplete interaction subject
+    pub fn interaction_autocomplete_respond(prefix: &str) -> String {
+        format!("discord.{}.agent.interaction.autocomplete_respond", prefix)
+    }
+
+    /// Ban user command subject
+    pub fn guild_ban(prefix: &str) -> String {
+        format!("discord.{}.agent.guild.ban", prefix)
+    }
+
+    /// Kick user command subject
+    pub fn guild_kick(prefix: &str) -> String {
+        format!("discord.{}.agent.guild.kick", prefix)
+    }
+
+    /// Timeout user command subject
+    pub fn guild_timeout(prefix: &str) -> String {
+        format!("discord.{}.agent.guild.timeout", prefix)
+    }
+
+    /// Create channel command subject
+    pub fn channel_create(prefix: &str) -> String {
+        format!("discord.{}.agent.channel.create", prefix)
+    }
+
+    /// Edit channel command subject
+    pub fn channel_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.channel.edit", prefix)
+    }
+
+    /// Delete channel command subject
+    pub fn channel_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.channel.delete", prefix)
+    }
+
+    /// Create role command subject
+    pub fn role_create(prefix: &str) -> String {
+        format!("discord.{}.agent.role.create", prefix)
+    }
+
+    /// Assign role command subject
+    pub fn role_assign(prefix: &str) -> String {
+        format!("discord.{}.agent.role.assign", prefix)
+    }
+
+    /// Remove role command subject
+    pub fn role_remove(prefix: &str) -> String {
+        format!("discord.{}.agent.role.remove", prefix)
+    }
+
+    /// Delete role command subject
+    pub fn role_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.role.delete", prefix)
+    }
+
+    /// Pin message command subject
+    pub fn message_pin(prefix: &str) -> String {
+        format!("discord.{}.agent.message.pin", prefix)
+    }
+
+    /// Unpin message command subject
+    pub fn message_unpin(prefix: &str) -> String {
+        format!("discord.{}.agent.message.unpin", prefix)
+    }
+
+    /// Bulk delete messages command subject
+    pub fn message_bulk_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.message.bulk_delete", prefix)
+    }
+
+    /// Create thread command subject
+    pub fn thread_create(prefix: &str) -> String {
+        format!("discord.{}.agent.thread.create", prefix)
+    }
+
+    /// Archive thread command subject
+    pub fn thread_archive(prefix: &str) -> String {
+        format!("discord.{}.agent.thread.archive", prefix)
     }
 
     /// Wildcard for all agent commands
