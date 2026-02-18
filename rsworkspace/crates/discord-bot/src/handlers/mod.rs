@@ -618,4 +618,107 @@ impl EventHandler for Handler {
             error!("failed to publish guild_member_update: {e}");
         }
     }
+
+    async fn thread_create(&self, ctx: Context, thread: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(thread.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_thread_created(&thread).await {
+            error!("Failed to publish thread_created: {}", e);
+        }
+    }
+
+    async fn thread_update(&self, ctx: Context, _old: Option<GuildChannel>, new: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(new.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_thread_updated(&new).await {
+            error!("Failed to publish thread_updated: {}", e);
+        }
+    }
+
+    async fn thread_delete(
+        &self,
+        ctx: Context,
+        thread: serenity::model::channel::PartialGuildChannel,
+        _full: Option<GuildChannel>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let guild_id = thread.guild_id.get();
+        if !bridge.check_guild_access(guild_id) {
+            return;
+        }
+        let parent_id = Some(thread.parent_id.get());
+        if let Err(e) = bridge
+            .publish_thread_deleted(thread.id.get(), guild_id, parent_id)
+            .await
+        {
+            error!("Failed to publish thread_deleted: {}", e);
+        }
+    }
+
+    async fn thread_members_update(
+        &self,
+        ctx: Context,
+        event: serenity::model::event::ThreadMembersUpdateEvent,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let guild_id = event.guild_id.get();
+        if !bridge.check_guild_access(guild_id) {
+            return;
+        }
+        let thread_id = event.id.get();
+
+        // Publish member additions
+        let added: Vec<u64> = event
+            .added_members
+            .iter()
+            .map(|m| m.user_id.get())
+            .collect();
+        if !added.is_empty() {
+            if let Err(e) = bridge
+                .publish_thread_member_add(thread_id, guild_id, added)
+                .await
+            {
+                error!("Failed to publish thread_member_add: {}", e);
+            }
+        }
+
+        // Publish member removals
+        let removed: Vec<u64> = event.removed_member_ids.iter().map(|id| id.get()).collect();
+        if !removed.is_empty() {
+            if let Err(e) = bridge
+                .publish_thread_member_remove(thread_id, guild_id, removed)
+                .await
+            {
+                error!("Failed to publish thread_member_remove: {}", e);
+            }
+        }
+    }
 }

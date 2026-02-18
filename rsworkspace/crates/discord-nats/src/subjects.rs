@@ -161,6 +161,31 @@ pub mod bot {
         format!("discord.{}.bot.ready", prefix)
     }
 
+    /// Thread created event subject
+    pub fn thread_created(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.created", prefix)
+    }
+
+    /// Thread updated event subject
+    pub fn thread_updated(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.updated", prefix)
+    }
+
+    /// Thread deleted event subject
+    pub fn thread_deleted(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.deleted", prefix)
+    }
+
+    /// Thread member(s) joined subject
+    pub fn thread_member_add(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.member_add", prefix)
+    }
+
+    /// Thread member(s) left subject
+    pub fn thread_member_remove(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.member_remove", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -329,6 +354,31 @@ pub mod agent {
         format!("discord.{}.agent.member.nick", prefix)
     }
 
+    /// Create webhook command subject
+    pub fn webhook_create(prefix: &str) -> String {
+        format!("discord.{}.agent.webhook.create", prefix)
+    }
+
+    /// Execute webhook command subject
+    pub fn webhook_execute(prefix: &str) -> String {
+        format!("discord.{}.agent.webhook.execute", prefix)
+    }
+
+    /// Delete webhook command subject
+    pub fn webhook_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.webhook.delete", prefix)
+    }
+
+    /// Move user to voice channel command subject
+    pub fn voice_move(prefix: &str) -> String {
+        format!("discord.{}.agent.voice.move", prefix)
+    }
+
+    /// Disconnect user from voice channel command subject
+    pub fn voice_disconnect(prefix: &str) -> String {
+        format!("discord.{}.agent.voice.disconnect", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)
@@ -467,6 +517,23 @@ mod tests {
         assert_eq!(agent::bot_presence("prod"),                    "discord.prod.agent.bot.presence");
         assert_eq!(agent::fetch_messages("prod"),                  "discord.prod.agent.fetch.messages");
         assert_eq!(agent::fetch_member("prod"),                    "discord.prod.agent.fetch.member");
+    }
+
+    #[test]
+    fn test_thread_and_voice_subjects() {
+        // Thread events (bot)
+        assert_eq!(bot::thread_created("prod"),       "discord.prod.bot.thread.created");
+        assert_eq!(bot::thread_updated("prod"),       "discord.prod.bot.thread.updated");
+        assert_eq!(bot::thread_deleted("prod"),       "discord.prod.bot.thread.deleted");
+        assert_eq!(bot::thread_member_add("prod"),    "discord.prod.bot.thread.member_add");
+        assert_eq!(bot::thread_member_remove("prod"), "discord.prod.bot.thread.member_remove");
+        // Webhook commands (agent)
+        assert_eq!(agent::webhook_create("prod"),     "discord.prod.agent.webhook.create");
+        assert_eq!(agent::webhook_execute("prod"),    "discord.prod.agent.webhook.execute");
+        assert_eq!(agent::webhook_delete("prod"),     "discord.prod.agent.webhook.delete");
+        // Voice commands (agent)
+        assert_eq!(agent::voice_move("prod"),         "discord.prod.agent.voice.move");
+        assert_eq!(agent::voice_disconnect("prod"),   "discord.prod.agent.voice.disconnect");
     }
 
     #[test]

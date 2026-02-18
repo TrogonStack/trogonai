@@ -14,12 +14,13 @@ use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
     AddReactionCommand, ArchiveThreadCommand, AssignRoleCommand, AutocompleteRespondCommand,
     BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateRoleCommand,
-    CreateThreadCommand, DeleteChannelCommand, DeleteMessageCommand, DeleteRoleCommand,
-    EditChannelCommand, EditMessageCommand, FetchMemberCommand, FetchMessagesCommand,
-    GuildMemberNickCommand, InteractionDeferCommand, InteractionFollowupCommand,
-    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
-    RemoveReactionCommand, RemoveRoleCommand, SendMessageCommand, SetBotPresenceCommand,
-    TimeoutUserCommand, TypingCommand, UnbanUserCommand, UnpinMessageCommand,
+    CreateThreadCommand, CreateWebhookCommand, DeleteChannelCommand, DeleteMessageCommand,
+    DeleteRoleCommand, DeleteWebhookCommand, EditChannelCommand, EditMessageCommand,
+    ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand, GuildMemberNickCommand,
+    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand,
+    ModalRespondCommand, PinMessageCommand, RemoveReactionCommand, RemoveRoleCommand,
+    SendMessageCommand, SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnbanUserCommand,
+    UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
 };
 use discord_types::types::{
     ActionRowComponent, AttachedFile, ButtonStyle as DcButtonStyle, DiscordUser,
@@ -121,7 +122,13 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
             let has_select = row
                 .components
                 .iter()
-                .any(|c| matches!(c, ActionRowComponent::StringSelect(_)));
+                .any(|c| matches!(
+                    c,
+                    ActionRowComponent::StringSelect(_)
+                        | ActionRowComponent::UserSelect(_)
+                        | ActionRowComponent::RoleSelect(_)
+                        | ActionRowComponent::ChannelSelect(_)
+                ));
 
             if has_buttons && !has_select {
                 let buttons: Vec<CreateButton> = row
@@ -164,31 +171,41 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                     .collect();
                 Some(CreateActionRow::Buttons(buttons))
             } else if has_select {
-                let menu = row.components.iter().find_map(|c| {
-                    if let ActionRowComponent::StringSelect(m) = c {
-                        Some(m)
-                    } else {
-                        None
+                let (menu, kind) = row.components.iter().find_map(|c| match c {
+                    ActionRowComponent::StringSelect(m) => {
+                        let opts: Vec<CreateSelectMenuOption> = m
+                            .options
+                            .iter()
+                            .map(|opt| {
+                                let mut o =
+                                    CreateSelectMenuOption::new(&opt.label, &opt.value);
+                                if let Some(ref desc) = opt.description {
+                                    o = o.description(desc);
+                                }
+                                if opt.default {
+                                    o = o.default_selection(true);
+                                }
+                                o
+                            })
+                            .collect();
+                        Some((m, CreateSelectMenuKind::String { options: opts }))
                     }
+                    ActionRowComponent::UserSelect(m) => {
+                        Some((m, CreateSelectMenuKind::User { default_users: None }))
+                    }
+                    ActionRowComponent::RoleSelect(m) => {
+                        Some((m, CreateSelectMenuKind::Role { default_roles: None }))
+                    }
+                    ActionRowComponent::ChannelSelect(m) => Some((
+                        m,
+                        CreateSelectMenuKind::Channel {
+                            channel_types: None,
+                            default_channels: None,
+                        },
+                    )),
+                    _ => None,
                 })?;
-                let options: Vec<CreateSelectMenuOption> = menu
-                    .options
-                    .iter()
-                    .map(|opt| {
-                        let mut o = CreateSelectMenuOption::new(&opt.label, &opt.value);
-                        if let Some(ref desc) = opt.description {
-                            o = o.description(desc);
-                        }
-                        if opt.default {
-                            o = o.default_selection(true);
-                        }
-                        o
-                    })
-                    .collect();
-                let mut select = CreateSelectMenu::new(
-                    &menu.custom_id,
-                    CreateSelectMenuKind::String { options },
-                )
+                let mut select = CreateSelectMenu::new(&menu.custom_id, kind)
                 .min_values(menu.min_values)
                 .max_values(menu.max_values)
                 .disabled(menu.disabled);
@@ -320,7 +337,7 @@ impl OutboundProcessor {
             r1, r2, r3, r4, r5, r6, r7, r8, r9, r10,
             r11, r12, r13, r14, r15, r16, r17, r18, r19, r20,
             r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
-            r31, r32,
+            r31, r32, r33, r34, r35, r36, r37,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -389,6 +406,11 @@ impl OutboundProcessor {
             Self::handle_fetch_member(http.clone(), client.clone(), prefix.clone()),
             Self::handle_unban(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
             Self::handle_guild_member_nick(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_webhook_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_webhook_execute(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_webhook_delete(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_voice_move(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_voice_disconnect(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -425,6 +447,11 @@ impl OutboundProcessor {
             ("fetch_member", r30),
             ("unban", r31),
             ("guild_member_nick", r32),
+            ("webhook_create", r33),
+            ("webhook_execute", r34),
+            ("webhook_delete", r35),
+            ("voice_move", r36),
+            ("voice_disconnect", r37),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -2064,6 +2091,176 @@ impl OutboundProcessor {
             }
         }
 
+        Ok(())
+    }
+
+    async fn handle_webhook_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::webhook_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateWebhookCommand>(&subject).await?;
+        info!("Listening for webhook_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let builder = serenity::builder::CreateWebhook::new(&cmd.name);
+                    if let Err(e) = channel.create_webhook(&*http, builder).await {
+                        warn!("Failed to create webhook in {}: {}", cmd.channel_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize webhook_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_webhook_execute(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::webhook_execute(&prefix);
+        let mut stream = subscriber.subscribe::<ExecuteWebhookCommand>(&subject).await?;
+        info!("Listening for webhook_execute commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let mut builder = serenity::builder::ExecuteWebhook::new()
+                        .content(cmd.content);
+                    if let Some(ref name) = cmd.username {
+                        builder = builder.username(name);
+                    }
+                    if let Some(ref url) = cmd.avatar_url {
+                        builder = builder.avatar_url(url);
+                    }
+                    if let Err(e) = http
+                        .execute_webhook(cmd.webhook_id.into(), None, &cmd.webhook_token, false, Vec::new(), &builder)
+                        .await
+                    {
+                        warn!("Failed to execute webhook {}: {}", cmd.webhook_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize webhook_execute command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_webhook_delete(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::webhook_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteWebhookCommand>(&subject).await?;
+        info!("Listening for webhook_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    if let Err(e) = http
+                        .delete_webhook_with_token(cmd.webhook_id.into(), &cmd.webhook_token, None)
+                        .await
+                    {
+                        warn!("Failed to delete webhook {}: {}", cmd.webhook_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize webhook_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_voice_move(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::voice_move(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<VoiceMoveCommand>(&subject).await?;
+        info!("Listening for voice_move commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let user = UserId::new(cmd.user_id);
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!(
+                        "Failed to move user {} to channel {} in guild {}",
+                        cmd.user_id, cmd.channel_id, cmd.guild_id
+                    );
+                    let edit = EditMember::new().voice_channel(channel);
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.edit_member(http.as_ref(), user, edit.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize voice_move command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_voice_disconnect(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::voice_disconnect(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<VoiceDisconnectCommand>(&subject).await?;
+        info!("Listening for voice_disconnect commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let user = UserId::new(cmd.user_id);
+                    let context = format!(
+                        "Failed to disconnect user {} from voice in guild {}",
+                        cmd.user_id, cmd.guild_id
+                    );
+                    // Disconnect by editing member with no voice channel
+                    let edit = EditMember::new().disconnect_member();
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.edit_member(http.as_ref(), user, edit.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize voice_disconnect command: {}", e),
+            }
+        }
         Ok(())
     }
 }

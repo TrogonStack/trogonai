@@ -298,6 +298,62 @@ pub struct GuildMemberUpdateEvent {
     pub roles: Vec<u64>,
 }
 
+/// A thread channel was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadCreatedEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    pub guild_id: u64,
+    /// Parent channel ID
+    pub parent_id: u64,
+    pub name: String,
+    pub archived: bool,
+    pub locked: bool,
+    pub auto_archive_duration: u64,
+}
+
+/// A thread channel was updated (name, archived, locked, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadUpdatedEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    pub guild_id: u64,
+    pub parent_id: u64,
+    pub name: String,
+    pub archived: bool,
+    pub locked: bool,
+}
+
+/// A thread channel was deleted
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadDeletedEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    pub guild_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<u64>,
+}
+
+/// One or more users joined a thread
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadMemberAddEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    pub guild_id: u64,
+    /// User IDs that joined the thread
+    pub user_ids: Vec<u64>,
+}
+
+/// One or more users left (or were removed from) a thread
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreadMemberRemoveEvent {
+    pub metadata: EventMetadata,
+    pub thread_id: u64,
+    pub guild_id: u64,
+    /// User IDs that left the thread
+    pub user_ids: Vec<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

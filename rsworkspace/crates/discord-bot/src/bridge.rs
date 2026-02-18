@@ -977,6 +977,117 @@ impl DiscordBridge {
         debug!("Published bot_ready to {}", subject);
         Ok(())
     }
+
+    pub async fn publish_thread_created(&self, thread: &GuildChannel) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", thread.guild_id.get()),
+            self.next_sequence(),
+        );
+        let tm = thread.thread_metadata.as_ref();
+        let ev = ThreadCreatedEvent {
+            metadata: meta,
+            thread_id: thread.id.get(),
+            guild_id: thread.guild_id.get(),
+            parent_id: thread.parent_id.map(|id| id.get()).unwrap_or(0),
+            name: thread.name.clone(),
+            archived: tm.map(|m| m.archived).unwrap_or(false),
+            locked: tm.map(|m| m.locked).unwrap_or(false),
+            auto_archive_duration: tm
+                .map(|m| u16::from(m.auto_archive_duration) as u64)
+                .unwrap_or(0),
+        };
+        let subject = subjects::bot::thread_created(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_created to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_updated(&self, thread: &GuildChannel) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", thread.guild_id.get()),
+            self.next_sequence(),
+        );
+        let tm = thread.thread_metadata.as_ref();
+        let ev = ThreadUpdatedEvent {
+            metadata: meta,
+            thread_id: thread.id.get(),
+            guild_id: thread.guild_id.get(),
+            parent_id: thread.parent_id.map(|id| id.get()).unwrap_or(0),
+            name: thread.name.clone(),
+            archived: tm.map(|m| m.archived).unwrap_or(false),
+            locked: tm.map(|m| m.locked).unwrap_or(false),
+        };
+        let subject = subjects::bot::thread_updated(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_updated to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_deleted(
+        &self,
+        thread_id: u64,
+        guild_id: u64,
+        parent_id: Option<u64>,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = ThreadDeletedEvent {
+            metadata: meta,
+            thread_id,
+            guild_id,
+            parent_id,
+        };
+        let subject = subjects::bot::thread_deleted(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_deleted to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_member_add(
+        &self,
+        thread_id: u64,
+        guild_id: u64,
+        user_ids: Vec<u64>,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = ThreadMemberAddEvent {
+            metadata: meta,
+            thread_id,
+            guild_id,
+            user_ids,
+        };
+        let subject = subjects::bot::thread_member_add(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_member_add to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_thread_member_remove(
+        &self,
+        thread_id: u64,
+        guild_id: u64,
+        user_ids: Vec<u64>,
+    ) -> Result<()> {
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id),
+            self.next_sequence(),
+        );
+        let ev = ThreadMemberRemoveEvent {
+            metadata: meta,
+            thread_id,
+            guild_id,
+            user_ids,
+        };
+        let subject = subjects::bot::thread_member_remove(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published thread_member_remove to {}", subject);
+        Ok(())
+    }
 }
 
 fn convert_reaction_type(reaction: &ReactionType) -> Emoji {
