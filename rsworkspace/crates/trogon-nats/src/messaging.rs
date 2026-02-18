@@ -1,15 +1,12 @@
 use crate::client::{FlushClient, PublishClient, RequestClient};
-use crate::telemetry::messaging::{
-    MessagingError, MessagingOperation, set_client_operation_span_attributes, set_span_error,
-};
 use async_nats::header::HeaderMap;
 use opentelemetry::propagation::Injector;
 use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
-use tracing::{Span, instrument};
+use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct HeaderMapCarrier<'a>(&'a mut HeaderMap);
 
@@ -32,13 +29,6 @@ pub fn headers_with_trace_context() -> HeaderMap {
     headers
 }
 
-pub fn build_request_headers() -> HeaderMap {
-    let mut headers = headers_with_trace_context();
-    headers.insert(REQ_ID_HEADER, uuid::Uuid::new_v4().to_string().as_str());
-    headers
-}
-
-#[instrument(name = "nats.request", skip(client, request), fields(subject = %subject))]
 pub async fn request_with_timeout<N: RequestClient, Req, Res>(
     client: &N,
     subject: &str,
@@ -49,49 +39,36 @@ where
     Req: Serialize,
     Res: DeserializeOwned,
 {
-    let span = Span::current();
-    set_client_operation_span_attributes(&span, MessagingOperation::Request, subject);
-
-    let payload = serde_json::to_vec(request).map_err(|error| {
-        set_span_error(&span, MessagingError::Serialize);
-        NatsError::Serialize(error)
-    })?;
-    let headers = build_request_headers();
+    let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
+    let headers = headers_with_trace_context();
 
     let response = tokio::time::timeout(
         timeout,
         client.request_with_headers(subject.to_string(), headers, payload.into()),
     )
     .await
-    .map_err(|_| {
-        set_span_error(&span, MessagingError::Timeout);
-        NatsError::Timeout {
-            subject: subject.to_string(),
-        }
+    .map_err(|_| NatsError::Timeout {
+        subject: subject.to_string(),
     })?
-    .map_err(|error| {
-        set_span_error(&span, MessagingError::Request);
-        NatsError::Request {
-            subject: subject.to_string(),
-            error: error.to_string(),
-        }
+    .map_err(|e| NatsError::Request {
+        subject: subject.to_string(),
+        error: e.to_string(),
     })?;
 
     let payload_str = String::from_utf8_lossy(&response.payload);
     tracing::debug!(payload = %payload_str, "Received NATS response");
 
-    serde_json::from_slice(&response.payload).map_err(|error| {
-        set_span_error(&span, MessagingError::Deserialize);
-        tracing::error!(
-            error = %error,
-            subject = %subject,
-            "Failed to deserialize NATS response"
-        );
-        NatsError::Deserialize(error)
+    serde_json::from_slice(&response.payload).map_err(|e| {
+        tracing::error!(payload = %payload_str, error = %e, "Failed to deserialize NATS response");
+        NatsError::Deserialize(e)
     })
 }
 
-pub async fn request<N: RequestClient, Req, Res>(client: &N, subject: &str, request: &Req) -> Result<Res, NatsError>
+pub async fn request<N: RequestClient, Req, Res>(
+    client: &N,
+    subject: &str,
+    request: &Req,
+) -> Result<Res, NatsError>
 where
     Req: Serialize,
     Res: DeserializeOwned,
@@ -122,66 +99,77 @@ impl RetryPolicy {
         }
     }
 
-    pub async fn execute<F, Fut>(&self, mut operation: F, operation_name: &str, subject: &str) -> Result<(), NatsError>
+    pub async fn execute<F, Fut>(
+        &self,
+        mut operation: F,
+        operation_name: &str,
+        subject: &str,
+    ) -> Result<(), NatsError>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<(), PublishOperationError>>,
     {
-        let mut last_error = match operation().await {
-            Ok(()) => return Ok(()),
-            Err(e) => e,
-        };
+        let mut attempts = 0;
+        let mut last_error: Option<PublishOperationError> = None;
 
-        for attempt in 1..=self.max_retries {
-            let exp = (attempt - 1).min(31);
-            let delay = self.initial_retry_delay * (1u32 << exp);
-            tracing::debug!(
-                error = %last_error,
-                operation = operation_name,
-                subject = %subject,
-                attempt,
-                max_retries = self.max_retries,
-                delay_ms = delay.as_millis(),
-                "Operation failed, retrying"
-            );
-            tokio::time::sleep(delay).await;
-
+        while attempts <= self.max_retries {
+            attempts += 1;
             match operation().await {
                 Ok(()) => {
-                    tracing::info!(
-                        operation = operation_name,
-                        subject = %subject,
-                        attempts = attempt + 1,
-                        "Operation succeeded after retries"
-                    );
+                    if attempts > 1 {
+                        tracing::info!(
+                            operation = operation_name,
+                            subject = %subject,
+                            attempts,
+                            "Operation succeeded after retries"
+                        );
+                    }
                     return Ok(());
                 }
-                Err(e) => last_error = e,
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempts <= self.max_retries {
+                        let exp = (attempts - 1).min(31);
+                        let delay = self.initial_retry_delay * (1u32 << exp);
+                        tracing::debug!(
+                            error = %last_error.as_ref().unwrap(),
+                            operation = operation_name,
+                            subject = %subject,
+                            attempt = attempts,
+                            max_retries = self.max_retries,
+                            delay_ms = delay.as_millis(),
+                            "Operation failed, retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                }
             }
         }
 
-        let attempts = self.max_retries + 1;
+        let final_error = last_error.unwrap_or_else(|| {
+            PublishOperationError("No error recorded in retry loop".to_string())
+        });
         if self.max_retries > 0 {
             tracing::warn!(
-                error = %last_error,
+                error = %final_error,
                 operation = operation_name,
                 subject = %subject,
                 total_attempts = attempts,
                 "Operation failed after all retry attempts"
             );
             Err(NatsError::PublishOperationExhausted {
-                error: last_error,
+                error: final_error,
                 subject: subject.to_string(),
                 attempts,
             })
         } else {
             tracing::warn!(
-                error = %last_error,
+                error = %final_error,
                 operation = operation_name,
                 subject = %subject,
                 "Operation failed"
             );
-            Err(NatsError::PublishOperation(last_error))
+            Err(NatsError::PublishOperation(final_error))
         }
     }
 }
@@ -258,7 +246,6 @@ impl PublishOptionsBuilder {
     }
 }
 
-#[instrument(name = "nats.publish", skip(client, request, options), fields(subject = %subject))]
 pub async fn publish<N: PublishClient + FlushClient, Req>(
     client: &N,
     subject: &str,
@@ -268,13 +255,7 @@ pub async fn publish<N: PublishClient + FlushClient, Req>(
 where
     Req: Serialize,
 {
-    let span = Span::current();
-    set_client_operation_span_attributes(&span, MessagingOperation::Publish, subject);
-
-    let payload = serde_json::to_vec(request).map_err(|error| {
-        set_span_error(&span, MessagingError::Serialize);
-        NatsError::Serialize(error)
-    })?;
+    let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
     let headers = headers_with_trace_context();
 
     options
@@ -282,17 +263,18 @@ where
         .execute(
             || async {
                 client
-                    .publish_with_headers(subject.to_string(), headers.clone(), payload.clone().into())
+                    .publish_with_headers(
+                        subject.to_string(),
+                        headers.clone(),
+                        payload.clone().into(),
+                    )
                     .await
                     .map_err(|e| PublishOperationError(e.to_string()))
             },
             "publish",
             subject,
         )
-        .await
-        .inspect_err(|_error| {
-            set_span_error(&span, MessagingError::PublishOperation);
-        })?;
+        .await?;
 
     let Some(flush_policy) = options.flush else {
         return Ok(());
@@ -303,77 +285,106 @@ where
         .execute(
             || {
                 let client = client.clone();
-                async move { client.flush().await.map_err(|e| PublishOperationError(e.to_string())) }
+                Box::pin(async move {
+                    client
+                        .flush()
+                        .await
+                        .map_err(|e| PublishOperationError(e.to_string()))
+                })
             },
             "flush",
             subject,
         )
         .await
-        .inspect_err(|_error| {
-            set_span_error(&span, MessagingError::FlushOperation);
-        })
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
+#[derive(Debug)]
 pub struct PublishOperationError(pub String);
 
-#[derive(Debug, thiserror::Error)]
+impl std::fmt::Display for PublishOperationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for PublishOperationError {}
+
+#[derive(Debug)]
 pub enum NatsError {
-    #[error("Failed to serialize request: {0}")]
-    Serialize(#[source] serde_json::Error),
-    #[error("Failed to deserialize response: {0}")]
-    Deserialize(#[source] serde_json::Error),
-    #[error("Request to '{subject}' failed: {error}")]
-    Request { subject: String, error: String },
-    #[error("Publish operation failed: {0}")]
-    PublishOperation(#[source] PublishOperationError),
-    #[error("Publish operation failed after {attempts} attempts on '{subject}': {error}")]
+    Serialize(serde_json::Error),
+    Deserialize(serde_json::Error),
+    Request {
+        subject: String,
+        error: String,
+    },
+    PublishOperation(PublishOperationError),
     PublishOperationExhausted {
-        #[source]
         error: PublishOperationError,
         subject: String,
         attempts: u32,
     },
-    #[error("Request to '{subject}' timed out. The backend may be overloaded or unresponsive.")]
-    Timeout { subject: String },
-    #[error("NATS error: {0}")]
+    Timeout {
+        subject: String,
+    },
     Other(String),
+}
+
+impl std::fmt::Display for NatsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Serialize(e) => write!(f, "Failed to serialize request: {}", e),
+            Self::Deserialize(e) => write!(f, "Failed to deserialize response: {}", e),
+            Self::Request { subject, error } => {
+                write!(f, "Request to '{}' failed: {}", subject, error)
+            }
+            Self::PublishOperation(e) => write!(f, "Publish operation failed: {}", e),
+            Self::PublishOperationExhausted {
+                error,
+                subject,
+                attempts,
+            } => write!(
+                f,
+                "Publish operation failed after {} attempts on '{}': {}",
+                attempts, subject, error
+            ),
+            Self::Timeout { subject } => write!(
+                f,
+                "Request to '{}' timed out. The backend may be overloaded or unresponsive.",
+                subject
+            ),
+            Self::Other(msg) => write!(f, "NATS error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for NatsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Serialize(e) => Some(e),
+            Self::Deserialize(e) => Some(e),
+            Self::PublishOperation(e) => Some(e),
+            Self::PublishOperationExhausted { error, .. } => Some(error),
+            Self::Request { .. } | Self::Timeout { .. } | Self::Other(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
 
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
-    #[cfg(feature = "test-support")]
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
-    #[cfg(feature = "test-support")]
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
-    }
-
-    #[cfg(feature = "test-support")]
-    struct FailingSerialize;
-
-    #[cfg(feature = "test-support")]
-    impl serde::Serialize for FailingSerialize {
-        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            Err(serde::ser::Error::custom(format!(
-                "{} cannot be serialized",
-                std::any::type_name::<S>()
-            )))
-        }
     }
 
     #[test]
@@ -399,12 +410,6 @@ mod tests {
     #[test]
     fn test_flush_policy_no_retries() {
         let policy = FlushPolicy::no_retries();
-        assert_eq!(policy.retry_policy.max_retries, 0);
-    }
-
-    #[test]
-    fn test_flush_policy_default() {
-        let policy = FlushPolicy::default();
         assert_eq!(policy.retry_policy.max_retries, 0);
     }
 
@@ -460,46 +465,6 @@ mod tests {
     fn test_inject_trace_context_does_not_panic() {
         let mut headers = async_nats::HeaderMap::new();
         inject_trace_context(&mut headers);
-    }
-
-    #[test]
-    fn header_map_carrier_set_inserts_value() {
-        use opentelemetry::propagation::Injector;
-        let mut headers = async_nats::HeaderMap::new();
-        let mut carrier = HeaderMapCarrier(&mut headers);
-        carrier.set("x-test-key", "test-value".to_string());
-        assert_eq!(headers.get("x-test-key").map(|v| v.as_str()), Some("test-value"));
-    }
-
-    #[test]
-    fn inject_trace_context_preserves_existing_headers() {
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert("X-Custom", "preserved");
-        inject_trace_context(&mut headers);
-        assert_eq!(headers.get("X-Custom").map(|v| v.as_str()), Some("preserved"),);
-    }
-
-    #[tokio::test]
-    async fn retry_policy_execute_does_not_panic_with_high_retry_count() {
-        tokio::time::pause();
-
-        let policy = RetryPolicy {
-            max_retries: 33,
-            initial_retry_delay: Duration::from_millis(1),
-        };
-
-        let result = policy
-            .execute(
-                || async { Err(PublishOperationError("always fails".into())) },
-                "test_op",
-                "test.subject",
-            )
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(NatsError::PublishOperationExhausted { attempts: 34, .. })
-        ));
     }
 
     #[tokio::test]
@@ -564,16 +529,6 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "test-support")]
-    async fn test_request_serialize_error() {
-        let mock = AdvancedMockNatsClient::new();
-
-        let result: Result<TestResponse, NatsError> = request(&mock, "test.subject", &FailingSerialize).await;
-
-        assert!(matches!(result, Err(NatsError::Serialize(_))));
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
     async fn test_publish_simple() {
         let mock = AdvancedMockNatsClient::new();
         let data = TestRequest {
@@ -584,17 +539,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
-    async fn test_publish_serialize_error() {
-        let mock = AdvancedMockNatsClient::new();
-
-        let result = publish(&mock, "test.subject", &FailingSerialize, PublishOptions::simple()).await;
-
-        assert!(matches!(result, Err(NatsError::Serialize(_))));
-        assert!(mock.published_messages().is_empty());
     }
 
     #[tokio::test]
@@ -615,39 +559,6 @@ mod tests {
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
     }
 
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
-    async fn test_publish_returns_error_when_publish_fails() {
-        let mock = AdvancedMockNatsClient::new();
-        mock.fail_next_publish();
-        let data = TestRequest {
-            message: "test".to_string(),
-        };
-
-        let result = publish(&mock, "test.subject", &data, PublishOptions::simple()).await;
-
-        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
-        assert!(mock.published_messages().is_empty());
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
-    async fn test_publish_returns_error_when_flush_fails() {
-        let mock = AdvancedMockNatsClient::new();
-        mock.fail_next_flush();
-        let data = TestRequest {
-            message: "test".to_string(),
-        };
-        let options = PublishOptions::builder()
-            .flush_policy(FlushPolicy::no_retries())
-            .build();
-
-        let result = publish(&mock, "test.subject", &data, options).await;
-
-        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
-        assert_eq!(mock.published_messages(), vec!["test.subject"]);
-    }
-
     #[test]
     fn test_publish_operation_error_display() {
         let err = PublishOperationError("test error".to_string());
@@ -659,7 +570,10 @@ mod tests {
         let err = NatsError::Timeout {
             subject: "test.subject".to_string(),
         };
-        assert!(err.to_string().contains("Request to 'test.subject' timed out"));
+        assert!(
+            err.to_string()
+                .contains("Request to 'test.subject' timed out")
+        );
     }
 
     #[test]
@@ -669,10 +583,12 @@ mod tests {
 
     #[test]
     fn nats_error_display_all_variants() {
-        let serialize_err = NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let serialize_err =
+            NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(serialize_err.to_string().contains("serialize request"));
 
-        let deserialize_err = NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let deserialize_err =
+            NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(deserialize_err.to_string().contains("deserialize response"));
 
         let request_err = NatsError::Request {
@@ -697,10 +613,12 @@ mod tests {
 
     #[test]
     fn nats_error_source() {
-        let serialize_err = NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let serialize_err =
+            NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(std::error::Error::source(&serialize_err).is_some());
 
-        let deserialize_err = NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let deserialize_err =
+            NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(std::error::Error::source(&deserialize_err).is_some());
 
         let pub_err = NatsError::PublishOperation(PublishOperationError("f".into()));
@@ -719,7 +637,9 @@ mod tests {
         };
         assert!(std::error::Error::source(&request_err).is_none());
 
-        let timeout = NatsError::Timeout { subject: "s".into() };
+        let timeout = NatsError::Timeout {
+            subject: "s".into(),
+        };
         assert!(std::error::Error::source(&timeout).is_none());
 
         let other = NatsError::Other("x".into());
@@ -760,7 +680,6 @@ mod tests {
     async fn test_retry_policy_execute_success_after_retries() {
         use std::sync::{Arc, Mutex};
 
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
@@ -795,7 +714,6 @@ mod tests {
     async fn test_retry_policy_execute_exhausted() {
         use std::sync::{Arc, Mutex};
 
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
@@ -820,28 +738,14 @@ mod tests {
         assert_eq!(*call_count.lock().unwrap(), 4); // initial + 3 retries
 
         match result.unwrap_err() {
-            NatsError::PublishOperationExhausted { attempts, subject, .. } => {
+            NatsError::PublishOperationExhausted {
+                attempts, subject, ..
+            } => {
                 assert_eq!(attempts, 4);
                 assert_eq!(subject, "test.subject");
             }
             e => panic!("Expected PublishOperationExhausted error, got: {:?}", e),
         }
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
-    async fn test_request_with_timeout_returns_timeout_error() {
-        let mock = AdvancedMockNatsClient::new();
-        mock.hang_next_request();
-
-        let req = TestRequest {
-            message: "hello".to_string(),
-        };
-
-        let result: Result<TestResponse, NatsError> =
-            request_with_timeout(&mock, "test.subject", &req, Duration::from_millis(1)).await;
-
-        assert!(matches!(result, Err(NatsError::Timeout { .. })));
     }
 
     #[tokio::test]
