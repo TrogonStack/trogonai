@@ -43,6 +43,7 @@ pub mod messaging;
 #[cfg(feature = "test-support")]
 pub mod mocks;
 
+pub use async_nats::subject::ToSubject;
 pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
