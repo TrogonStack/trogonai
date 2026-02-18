@@ -1,7 +1,7 @@
 //! Message handlers for Telegram updates
 
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, Message};
+use teloxide::types::{CallbackQuery, Message, Update};
 use tracing::{debug, error, info, warn};
 
 use crate::bridge::TelegramBridge;
@@ -10,12 +10,13 @@ use crate::health::AppState;
 /// Handle text messages
 pub async fn handle_text_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received text message: {}", text);
 
@@ -49,11 +50,12 @@ pub async fn handle_text_message(
 /// Handle photo messages
 pub async fn handle_photo_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received photo message");
     health.increment_messages_received().await;
@@ -74,11 +76,12 @@ pub async fn handle_photo_message(
 /// Handle video messages
 pub async fn handle_video_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received video message");
     health.increment_messages_received().await;
@@ -99,11 +102,12 @@ pub async fn handle_video_message(
 /// Handle audio messages
 pub async fn handle_audio_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received audio message");
     health.increment_messages_received().await;
@@ -124,11 +128,12 @@ pub async fn handle_audio_message(
 /// Handle document messages
 pub async fn handle_document_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received document message");
     health.increment_messages_received().await;
@@ -149,11 +154,12 @@ pub async fn handle_document_message(
 /// Handle voice messages
 pub async fn handle_voice_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received voice message");
     health.increment_messages_received().await;
@@ -174,11 +180,12 @@ pub async fn handle_voice_message(
 /// Handle location messages
 pub async fn handle_location_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received location message");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -194,11 +201,12 @@ pub async fn handle_location_message(
 /// Handle venue messages
 pub async fn handle_venue_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received venue message");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -214,11 +222,12 @@ pub async fn handle_venue_message(
 /// Handle contact messages
 pub async fn handle_contact_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received contact message");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -234,11 +243,12 @@ pub async fn handle_contact_message(
 /// Handle sticker messages
 pub async fn handle_sticker_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received sticker message");
     health.increment_messages_received().await;
@@ -259,11 +269,12 @@ pub async fn handle_sticker_message(
 /// Handle animation (GIF) messages
 pub async fn handle_animation_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received animation message");
     health.increment_messages_received().await;
@@ -284,11 +295,12 @@ pub async fn handle_animation_message(
 /// Handle video note messages (short round videos)
 pub async fn handle_video_note_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received video note message");
     health.increment_messages_received().await;
@@ -309,11 +321,12 @@ pub async fn handle_video_note_message(
 /// Handle callback queries (button clicks)
 pub async fn handle_callback_query(
     _bot: Bot,
+    update: Update,
     query: CallbackQuery,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = query.id.parse::<i64>().unwrap_or(0);
+    let update_id = update.id.0 as i64;
 
     debug!("Received callback query: {:?}", query.data);
     health.increment_messages_received().await;
@@ -379,13 +392,14 @@ async fn handle_command(
 /// Handle inline queries (@bot query)
 pub async fn handle_inline_query(
     _bot: Bot,
+    update: Update,
     query: teloxide::types::InlineQuery,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
     use telegram_types::events::{InlineQueryEvent, Location};
 
-    let update_id = 0; // Inline queries don't have update_id
+    let update_id = update.id.0 as i64;
 
     debug!("Received inline query: {}", query.query);
     health.increment_messages_received().await;
@@ -436,13 +450,14 @@ pub async fn handle_inline_query(
 /// Handle chosen inline results
 pub async fn handle_chosen_inline_result(
     _bot: Bot,
+    update: Update,
     result: teloxide::types::ChosenInlineResult,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
     use telegram_types::events::ChosenInlineResultEvent;
 
-    let update_id = 0;
+    let update_id = update.id.0 as i64;
 
     debug!("Inline result chosen: {}", result.result_id);
     health.increment_messages_received().await;
@@ -477,20 +492,24 @@ pub async fn handle_chosen_inline_result(
 /// Handle chat member updates (when other users join/leave/get banned)
 pub async fn handle_chat_member_updated(
     _bot: Bot,
-    update: teloxide::types::ChatMemberUpdated,
+    update: Update,
+    chat_member_update: teloxide::types::ChatMemberUpdated,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = 0; // Chat member updates don't have a standard update_id
+    let update_id = update.id.0 as i64;
 
     debug!(
         "Chat member updated: {:?} -> {:?}",
-        update.old_chat_member.kind, update.new_chat_member.kind
+        chat_member_update.old_chat_member.kind, chat_member_update.new_chat_member.kind
     );
     health.increment_messages_received().await;
 
     // Publish to NATS
-    if let Err(e) = bridge.publish_chat_member_updated(&update, update_id).await {
+    if let Err(e) = bridge
+        .publish_chat_member_updated(&chat_member_update, update_id)
+        .await
+    {
         error!("Failed to publish chat member updated: {}", e);
         health.increment_errors().await;
     }
@@ -501,21 +520,24 @@ pub async fn handle_chat_member_updated(
 /// Handle my chat member updates (when bot's status changes in a chat)
 pub async fn handle_my_chat_member_updated(
     _bot: Bot,
-    update: teloxide::types::ChatMemberUpdated,
+    update: Update,
+    chat_member_update: teloxide::types::ChatMemberUpdated,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = 0;
+    let update_id = update.id.0 as i64;
 
     info!(
         "Bot chat member status changed: {:?} -> {:?} in chat {}",
-        update.old_chat_member.kind, update.new_chat_member.kind, update.chat.id
+        chat_member_update.old_chat_member.kind,
+        chat_member_update.new_chat_member.kind,
+        chat_member_update.chat.id
     );
     health.increment_messages_received().await;
 
     // Publish to NATS
     if let Err(e) = bridge
-        .publish_my_chat_member_updated(&update, update_id)
+        .publish_my_chat_member_updated(&chat_member_update, update_id)
         .await
     {
         error!("Failed to publish my chat member updated: {}", e);
@@ -528,6 +550,7 @@ pub async fn handle_my_chat_member_updated(
 /// Handle pre-checkout query (before payment is confirmed)
 pub async fn handle_pre_checkout_query(
     _bot: Bot,
+    update: Update,
     query: teloxide::types::PreCheckoutQuery,
     bridge: TelegramBridge,
     health: AppState,
@@ -537,7 +560,7 @@ pub async fn handle_pre_checkout_query(
         query.from.id, query.total_amount, query.currency
     );
 
-    let update_id = 0; // Update ID is not available directly on PreCheckoutQuery
+    let update_id = update.id.0 as i64;
     health.increment_messages_received().await;
 
     if let Err(e) = bridge.publish_pre_checkout_query(&query, update_id).await {
@@ -551,6 +574,7 @@ pub async fn handle_pre_checkout_query(
 /// Handle successful payment
 pub async fn handle_successful_payment(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
@@ -561,7 +585,7 @@ pub async fn handle_successful_payment(
             payment.total_amount, payment.currency, msg.chat.id
         );
 
-        let update_id = msg.id.0 as i64;
+        let update_id = update.id.0 as i64;
         health.increment_messages_received().await;
 
         if let Err(e) = bridge
@@ -579,13 +603,14 @@ pub async fn handle_successful_payment(
 /// Handle shipping query (for physical goods)
 pub async fn handle_shipping_query(
     _bot: Bot,
+    update: Update,
     query: teloxide::types::ShippingQuery,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
     debug!("Shipping query from user {}", query.from.id);
 
-    let update_id = 0;
+    let update_id = update.id.0 as i64;
     health.increment_messages_received().await;
 
     if let Err(e) = bridge.publish_shipping_query(&query, update_id).await {
@@ -599,11 +624,12 @@ pub async fn handle_shipping_query(
 /// Handle poll messages (poll sent inside a chat)
 pub async fn handle_poll_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
 
     debug!("Received poll message");
     health.increment_messages_received().await;
@@ -624,14 +650,16 @@ pub async fn handle_poll_message(
 /// Handle standalone poll updates (poll state changed)
 pub async fn handle_poll_update(
     _bot: Bot,
+    update: Update,
     poll: teloxide::types::Poll,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
+    let update_id = update.id.0 as i64;
     debug!("Poll update: {}", poll.id);
     health.increment_messages_received().await;
 
-    if let Err(e) = bridge.publish_poll_update(&poll, 0).await {
+    if let Err(e) = bridge.publish_poll_update(&poll, update_id).await {
         error!("Failed to publish poll update: {}", e);
         health.increment_errors().await;
     }
@@ -642,17 +670,19 @@ pub async fn handle_poll_update(
 /// Handle poll answers (user voted in a non-anonymous poll)
 pub async fn handle_poll_answer(
     _bot: Bot,
+    update: Update,
     answer: teloxide::types::PollAnswer,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
+    let update_id = update.id.0 as i64;
     debug!(
         "Poll answer for poll {}: {:?}",
         answer.poll_id, answer.option_ids
     );
     health.increment_messages_received().await;
 
-    if let Err(e) = bridge.publish_poll_answer(&answer, 0).await {
+    if let Err(e) = bridge.publish_poll_answer(&answer, update_id).await {
         error!("Failed to publish poll answer: {}", e);
         health.increment_errors().await;
     }
@@ -663,11 +693,12 @@ pub async fn handle_poll_answer(
 /// Handle edited messages (user edited a previously sent message)
 pub async fn handle_edited_message(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received edited message");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -683,11 +714,12 @@ pub async fn handle_edited_message(
 /// Handle channel posts (messages sent to a channel the bot is in)
 pub async fn handle_channel_post(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received channel post");
     health.increment_messages_received().await;
 
@@ -726,11 +758,12 @@ pub async fn handle_channel_post(
 /// Handle edited channel posts
 pub async fn handle_edited_channel_post(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Received edited channel post");
     health.increment_messages_received().await;
 
@@ -749,17 +782,19 @@ pub async fn handle_edited_channel_post(
 /// Handle chat join requests (user requested to join a group with approval required)
 pub async fn handle_chat_join_request(
     _bot: Bot,
+    update: Update,
     request: teloxide::types::ChatJoinRequest,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
+    let update_id = update.id.0 as i64;
     debug!(
         "Chat join request from user {} in chat {}",
         request.from.id, request.chat.id
     );
     health.increment_messages_received().await;
 
-    if let Err(e) = bridge.publish_chat_join_request(&request, 0).await {
+    if let Err(e) = bridge.publish_chat_join_request(&request, update_id).await {
         error!("Failed to publish chat join request: {}", e);
         health.increment_errors().await;
     }
@@ -769,11 +804,12 @@ pub async fn handle_chat_join_request(
 /// Handle forum topic created service messages
 pub async fn handle_forum_topic_created(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Forum topic created");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -789,11 +825,12 @@ pub async fn handle_forum_topic_created(
 /// Handle forum topic edited service messages
 pub async fn handle_forum_topic_edited(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Forum topic edited");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -809,11 +846,12 @@ pub async fn handle_forum_topic_edited(
 /// Handle forum topic closed service messages
 pub async fn handle_forum_topic_closed(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Forum topic closed");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -829,11 +867,12 @@ pub async fn handle_forum_topic_closed(
 /// Handle forum topic reopened service messages
 pub async fn handle_forum_topic_reopened(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("Forum topic reopened");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -849,11 +888,12 @@ pub async fn handle_forum_topic_reopened(
 /// Handle general forum topic hidden service messages
 pub async fn handle_general_forum_topic_hidden(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("General forum topic hidden");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {
@@ -872,11 +912,12 @@ pub async fn handle_general_forum_topic_hidden(
 /// Handle general forum topic unhidden service messages
 pub async fn handle_general_forum_topic_unhidden(
     _bot: Bot,
+    update: Update,
     msg: Message,
     bridge: TelegramBridge,
     health: AppState,
 ) -> ResponseResult<()> {
-    let update_id = msg.id.0 as i64;
+    let update_id = update.id.0 as i64;
     debug!("General forum topic unhidden");
     health.increment_messages_received().await;
     if !check_access(&msg, &bridge) {

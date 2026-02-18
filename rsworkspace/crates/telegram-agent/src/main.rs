@@ -82,6 +82,12 @@ async fn main() -> Result<()> {
     let nats_client = telegram_nats::connect(&nats_config).await?;
     info!("Connected to NATS successfully");
 
+    // Setup JetStream (needed for durable pull consumer)
+    let js = async_nats::jetstream::new(nats_client.clone());
+
+    // Ensure the inbound event stream exists (bot may not have started first)
+    telegram_nats::nats::setup_event_stream(&js, &args.prefix).await?;
+
     // Setup JetStream KV for persistent conversation history
     let conversation_kv = {
         let js = async_nats::jetstream::new(nats_client.clone());
@@ -138,6 +144,7 @@ async fn main() -> Result<()> {
     // Create and run agent
     let agent = TelegramAgent::new(
         nats_client,
+        js,
         args.prefix,
         args.agent_name,
         llm_config,
