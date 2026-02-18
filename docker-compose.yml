@@ -66,6 +66,7 @@ services:
       - ENABLE_LLM=false
       - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+      # - DISCORD_MAX_HISTORY=${DISCORD_MAX_HISTORY:-20}             # messages retained per session
     ports:
       - "3002:3002"
     depends_on:
@@ -100,6 +101,8 @@ services:
       # - CLAUDE_TEMPERATURE=${CLAUDE_TEMPERATURE:-1.0}
       - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+      # - DISCORD_MAX_HISTORY=${DISCORD_MAX_HISTORY:-20}             # messages retained per session
+      # - CLAUDE_STREAM_TIMEOUT_SECS=${CLAUDE_STREAM_TIMEOUT_SECS:-120}  # 0 = no timeout
       # Conversation history TTL (0 = never expire)
       # - CONVERSATION_TTL_HOURS=${CONVERSATION_TTL_HOURS:-168}
       # Welcome/farewell messages (set channel ID to enable)

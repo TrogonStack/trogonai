@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
-/// Maximum messages to keep in history per session
-const MAX_HISTORY_SIZE: usize = 20;
+/// Default maximum messages to keep in history per session.
+const DEFAULT_MAX_HISTORY_SIZE: usize = 20;
 
 /// How often the in-memory cleanup task runs.
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600); // 1 hour
@@ -26,24 +26,41 @@ pub struct ConversationManager {
     last_access: Arc<RwLock<HashMap<String, Instant>>>,
     /// Optional NATS KV for persistence
     kv: Option<async_nats::jetstream::kv::Store>,
+    /// Maximum number of messages to retain per session.
+    max_history_size: usize,
 }
 
 impl ConversationManager {
-    /// Create a new in-memory conversation manager
+    /// Create a new in-memory conversation manager (default 20-message history).
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             last_access: Arc::new(RwLock::new(HashMap::new())),
             kv: None,
+            max_history_size: DEFAULT_MAX_HISTORY_SIZE,
         }
     }
 
-    /// Create a conversation manager backed by NATS KV for persistence
-    pub fn with_kv(kv: async_nats::jetstream::kv::Store) -> Self {
+    /// Create an in-memory manager with a custom history limit.
+    pub fn with_max_history(max_history_size: usize) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            last_access: Arc::new(RwLock::new(HashMap::new())),
+            kv: None,
+            max_history_size,
+        }
+    }
+
+    /// Create a KV-backed manager with a custom history limit.
+    pub fn with_kv_and_max_history(
+        kv: async_nats::jetstream::kv::Store,
+        max_history_size: usize,
+    ) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             last_access: Arc::new(RwLock::new(HashMap::new())),
             kv: Some(kv),
+            max_history_size,
         }
     }
 
@@ -115,8 +132,8 @@ impl ConversationManager {
         });
 
         // Trim history if too long
-        if history.len() > MAX_HISTORY_SIZE {
-            let start = history.len() - MAX_HISTORY_SIZE;
+        if history.len() > self.max_history_size {
+            let start = history.len() - self.max_history_size;
             history = history[start..].to_vec();
         }
 
