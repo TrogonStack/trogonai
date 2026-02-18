@@ -90,8 +90,7 @@ impl TelegramAgent {
             self.agent_name
         );
 
-        let consumer =
-            create_inbound_consumer(&self.js, &self.prefix, &self.agent_name).await?;
+        let consumer = create_inbound_consumer(&self.js, &self.prefix, &self.agent_name).await?;
         let mut messages = consumer.messages().await?;
 
         info!("Agent '{}' ready, waiting for events", self.agent_name);
@@ -139,8 +138,7 @@ impl TelegramAgent {
             self.agent_name, consumer_name
         );
 
-        let consumer =
-            create_error_consumer(&self.js, &self.prefix, &consumer_name).await?;
+        let consumer = create_error_consumer(&self.js, &self.prefix, &consumer_name).await?;
         let mut messages = consumer.messages().await?;
 
         while let Some(msg) = messages.next().await {
@@ -267,8 +265,7 @@ impl TelegramAgent {
         // ── End dedup guard ────────────────────────────────────────────────────
 
         if subject == bot::message_text(prefix) {
-            let event: telegram_types::events::MessageTextEvent =
-                serde_json::from_slice(payload)?;
+            let event: telegram_types::events::MessageTextEvent = serde_json::from_slice(payload)?;
             info!(
                 "Processing text message from session {}",
                 event.metadata.session_id
@@ -277,8 +274,7 @@ impl TelegramAgent {
                 .process_text_message(&event, &self.publisher)
                 .await
         } else if subject == bot::message_photo(prefix) {
-            let event: telegram_types::events::MessagePhotoEvent =
-                serde_json::from_slice(payload)?;
+            let event: telegram_types::events::MessagePhotoEvent = serde_json::from_slice(payload)?;
             info!(
                 "Processing photo message from session {}",
                 event.metadata.session_id
@@ -306,8 +302,7 @@ impl TelegramAgent {
                 .process_callback(&event, &self.publisher)
                 .await
         } else if subject == bot::inline_query(prefix) {
-            let event: telegram_types::events::InlineQueryEvent =
-                serde_json::from_slice(payload)?;
+            let event: telegram_types::events::InlineQueryEvent = serde_json::from_slice(payload)?;
             info!("Processing inline query: {}", event.query);
             self.processor
                 .process_inline_query(&event, &self.publisher)

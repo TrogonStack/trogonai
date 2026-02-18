@@ -21,9 +21,7 @@ async fn try_connect() -> Option<(async_nats::Client, async_nats::jetstream::Con
 }
 
 /// Create a unique KV bucket with a random name (avoids cross-test pollution).
-async fn make_kv(
-    js: &async_nats::jetstream::Context,
-) -> async_nats::jetstream::kv::Store {
+async fn make_kv(js: &async_nats::jetstream::Context) -> async_nats::jetstream::kv::Store {
     let bucket = format!("test-{}", uuid::Uuid::new_v4().simple());
     js.create_key_value(async_nats::jetstream::kv::Config {
         bucket,
@@ -46,14 +44,19 @@ async fn test_error_consumer_purges_session_on_bot_blocked() {
     let prefix = format!("agent-blk-{}", uuid::Uuid::new_v4().simple());
 
     // Set up the inbound event stream (error events land here)
-    telegram_nats::nats::setup_event_stream(&js, &prefix).await.unwrap();
+    telegram_nats::nats::setup_event_stream(&js, &prefix)
+        .await
+        .unwrap();
 
     // Create conversation KV and seed a session
     let conv_kv = make_kv(&js).await;
     let session_id = "private:99999";
     let kv_session_id = session_id.replace(':', ".");
     conv_kv
-        .put(&kv_session_id, b"[{\"role\":\"user\",\"content\":\"hi\"}]".to_vec().into())
+        .put(
+            &kv_session_id,
+            b"[{\"role\":\"user\",\"content\":\"hi\"}]".to_vec().into(),
+        )
         .await
         .unwrap();
     assert!(
@@ -129,7 +132,9 @@ async fn test_error_consumer_purges_session_on_chat_migrated() {
     };
     let prefix = format!("agent-mig-{}", uuid::Uuid::new_v4().simple());
 
-    telegram_nats::nats::setup_event_stream(&js, &prefix).await.unwrap();
+    telegram_nats::nats::setup_event_stream(&js, &prefix)
+        .await
+        .unwrap();
 
     let conv_kv = make_kv(&js).await;
     let session_id = "group:-100111222";
@@ -198,10 +203,7 @@ async fn test_error_consumer_purges_session_on_chat_migrated() {
 #[test]
 fn test_event_metadata_stores_correct_update_id() {
     let update_id: i64 = 987654321;
-    let meta = telegram_types::events::EventMetadata::new(
-        "private:42".to_string(),
-        update_id,
-    );
+    let meta = telegram_types::events::EventMetadata::new("private:42".to_string(), update_id);
     assert_eq!(
         meta.update_id, update_id,
         "EventMetadata must store the exact update_id, not 0 or msg.id"
@@ -221,7 +223,10 @@ fn test_event_metadata_different_update_ids_are_independent() {
     let meta1 = telegram_types::events::EventMetadata::new("private:1".to_string(), 100);
     let meta2 = telegram_types::events::EventMetadata::new("private:1".to_string(), 200);
 
-    assert_ne!(meta1.event_id, meta2.event_id, "each event must get a unique UUID");
+    assert_ne!(
+        meta1.event_id, meta2.event_id,
+        "each event must get a unique UUID"
+    );
     assert_eq!(meta1.update_id, 100);
     assert_eq!(meta2.update_id, 200);
 }
@@ -243,8 +248,12 @@ async fn test_agent_dispatch_publishes_command_to_jetstream_stream() {
     let prefix = format!("agent-e2e-{}", uuid::Uuid::new_v4().simple());
 
     // Both streams must exist (agent startup responsibility)
-    telegram_nats::nats::setup_event_stream(&js, &prefix).await.unwrap();
-    telegram_nats::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+    telegram_nats::nats::setup_event_stream(&js, &prefix)
+        .await
+        .unwrap();
+    telegram_nats::nats::setup_agent_stream(&js, &prefix)
+        .await
+        .unwrap();
 
     // Agent with JetStream-backed publisher (echo mode, no LLM)
     let agent = TelegramAgent::new(
@@ -259,10 +268,7 @@ async fn test_agent_dispatch_publishes_command_to_jetstream_stream() {
 
     // Build a minimal inbound text event with a realistic update_id (not 0)
     let event = telegram_types::events::MessageTextEvent {
-        metadata: telegram_types::events::EventMetadata::new(
-            "private:100".to_string(),
-            55555,
-        ),
+        metadata: telegram_types::events::EventMetadata::new("private:100".to_string(), 55555),
         message: serde_json::from_value(serde_json::json!({
             "message_id": 7,
             "date": 0,
@@ -347,8 +353,12 @@ async fn test_agent_dispatch_dedup_skips_duplicate_event_id() {
     };
     let prefix = format!("agent-dedup-{}", uuid::Uuid::new_v4().simple());
 
-    telegram_nats::nats::setup_event_stream(&js, &prefix).await.unwrap();
-    telegram_nats::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+    telegram_nats::nats::setup_event_stream(&js, &prefix)
+        .await
+        .unwrap();
+    telegram_nats::nats::setup_agent_stream(&js, &prefix)
+        .await
+        .unwrap();
 
     let dedup_kv = make_kv(&js).await;
 
@@ -365,10 +375,7 @@ async fn test_agent_dispatch_dedup_skips_duplicate_event_id() {
     // Build a minimal MessageTextEvent with a known event_id
     let event_id = uuid::Uuid::new_v4();
     let event = telegram_types::events::MessageTextEvent {
-        metadata: telegram_types::events::EventMetadata::new(
-            "private:42".to_string(),
-            1,
-        ),
+        metadata: telegram_types::events::EventMetadata::new("private:42".to_string(), 1),
         message: {
             let m: telegram_types::chat::Message = serde_json::from_value(serde_json::json!({
                 "message_id": 1,

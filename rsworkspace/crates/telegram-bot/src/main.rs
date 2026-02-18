@@ -178,17 +178,29 @@ async fn main() -> Result<()> {
     let cmd_dedup_kv = {
         let bucket = format!("telegram_cmd_dedup_{}", config.nats.prefix);
         match js.get_key_value(&bucket).await {
-            Ok(kv) => { info!("Using existing cmd dedup bucket: {}", bucket); Some(kv) }
-            Err(_) => match js.create_key_value(async_nats::jetstream::kv::Config {
-                bucket: bucket.clone(),
-                history: 1,
-                max_age: std::time::Duration::from_secs(3_600),
-                storage: async_nats::jetstream::stream::StorageType::Memory,
-                ..Default::default()
-            }).await {
-                Ok(kv) => { info!("Created cmd dedup bucket: {}", bucket); Some(kv) }
-                Err(e) => { warn!("Could not create cmd dedup bucket '{}': {}", bucket, e); None }
+            Ok(kv) => {
+                info!("Using existing cmd dedup bucket: {}", bucket);
+                Some(kv)
             }
+            Err(_) => match js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: bucket.clone(),
+                    history: 1,
+                    max_age: std::time::Duration::from_secs(3_600),
+                    storage: async_nats::jetstream::stream::StorageType::Memory,
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(kv) => {
+                    info!("Created cmd dedup bucket: {}", bucket);
+                    Some(kv)
+                }
+                Err(e) => {
+                    warn!("Could not create cmd dedup bucket '{}': {}", bucket, e);
+                    None
+                }
+            },
         }
     };
 
