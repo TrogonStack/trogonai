@@ -398,16 +398,29 @@ impl DiscordBridge {
         );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
-        let component_type = match interaction.data.kind {
-            ComponentInteractionDataKind::Button => ComponentType::Button,
-            ComponentInteractionDataKind::StringSelect { .. } => ComponentType::StringSelect,
-            ComponentInteractionDataKind::UserSelect { .. } => ComponentType::UserSelect,
-            ComponentInteractionDataKind::RoleSelect { .. } => ComponentType::RoleSelect,
-            ComponentInteractionDataKind::MentionableSelect { .. } => {
-                ComponentType::MentionableSelect
-            }
-            ComponentInteractionDataKind::ChannelSelect { .. } => ComponentType::ChannelSelect,
-            _ => ComponentType::Unknown,
+        let (component_type, values) = match interaction.data.kind {
+            ComponentInteractionDataKind::Button => (ComponentType::Button, vec![]),
+            ComponentInteractionDataKind::StringSelect { ref values } => (
+                ComponentType::StringSelect,
+                values.clone(),
+            ),
+            ComponentInteractionDataKind::UserSelect { ref values } => (
+                ComponentType::UserSelect,
+                values.iter().map(|id| id.get().to_string()).collect(),
+            ),
+            ComponentInteractionDataKind::RoleSelect { ref values } => (
+                ComponentType::RoleSelect,
+                values.iter().map(|id| id.get().to_string()).collect(),
+            ),
+            ComponentInteractionDataKind::MentionableSelect { ref values } => (
+                ComponentType::MentionableSelect,
+                values.iter().map(|id| id.get().to_string()).collect(),
+            ),
+            ComponentInteractionDataKind::ChannelSelect { ref values } => (
+                ComponentType::ChannelSelect,
+                values.iter().map(|id| id.get().to_string()).collect(),
+            ),
+            _ => (ComponentType::Unknown, vec![]),
         };
 
         let event = ComponentInteractionEvent {
@@ -420,6 +433,7 @@ impl DiscordBridge {
             message_id: interaction.message.id.get(),
             custom_id: interaction.data.custom_id.clone(),
             component_type,
+            values,
         };
 
         let subject = subjects::bot::interaction_component(self.prefix());
