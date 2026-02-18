@@ -190,6 +190,150 @@ async fn test_error_consumer_purges_session_on_chat_migrated() {
     );
 }
 
+// ── Issue: update_id propagated correctly ─────────────────────────────────────
+
+/// EventMetadata::new must store the exact update_id passed in — not 0 or
+/// the message_id.  This guards against the old bug where handlers were
+/// using `msg.id` or hard-coded `0` instead of `Telegram Update.id`.
+#[test]
+fn test_event_metadata_stores_correct_update_id() {
+    let update_id: i64 = 987654321;
+    let meta = telegram_types::events::EventMetadata::new(
+        "private:42".to_string(),
+        update_id,
+    );
+    assert_eq!(
+        meta.update_id, update_id,
+        "EventMetadata must store the exact update_id, not 0 or msg.id"
+    );
+    assert_ne!(meta.update_id, 0, "update_id must not be 0");
+    assert!(
+        !meta.event_id.is_nil(),
+        "event_id UUID must be set (non-nil)"
+    );
+    assert_eq!(meta.attempt, 1, "attempt must default to 1");
+}
+
+/// Two events for the same session but different update_ids must produce
+/// different event_ids (UUIDs) and correctly store their respective update_ids.
+#[test]
+fn test_event_metadata_different_update_ids_are_independent() {
+    let meta1 = telegram_types::events::EventMetadata::new("private:1".to_string(), 100);
+    let meta2 = telegram_types::events::EventMetadata::new("private:1".to_string(), 200);
+
+    assert_ne!(meta1.event_id, meta2.event_id, "each event must get a unique UUID");
+    assert_eq!(meta1.update_id, 100);
+    assert_eq!(meta2.update_id, 200);
+}
+
+// ── Issue: outbound pipeline (agent → JetStream stream → bot) ─────────────
+
+/// When the agent dispatches an event in echo mode, the resulting command
+/// must be durably stored in the `telegram_commands_{prefix}` JetStream stream
+/// and retrievable by a future bot pull consumer — even if the bot was not
+/// running when the agent published.
+///
+/// This is the end-to-end test for the outbound at-least-once delivery path.
+#[tokio::test]
+async fn test_agent_dispatch_publishes_command_to_jetstream_stream() {
+    let Some((client, js)) = try_connect().await else {
+        eprintln!("SKIP: NATS not available");
+        return;
+    };
+    let prefix = format!("agent-e2e-{}", uuid::Uuid::new_v4().simple());
+
+    // Both streams must exist (agent startup responsibility)
+    telegram_nats::nats::setup_event_stream(&js, &prefix).await.unwrap();
+    telegram_nats::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+
+    // Agent with JetStream-backed publisher (echo mode, no LLM)
+    let agent = TelegramAgent::new(
+        client.clone(),
+        js.clone(),
+        prefix.clone(),
+        "test-e2e".to_string(),
+        None, // echo mode
+        None,
+        None, // no dedup for this test
+    );
+
+    // Build a minimal inbound text event with a realistic update_id (not 0)
+    let event = telegram_types::events::MessageTextEvent {
+        metadata: telegram_types::events::EventMetadata::new(
+            "private:100".to_string(),
+            55555,
+        ),
+        message: serde_json::from_value(serde_json::json!({
+            "message_id": 7,
+            "date": 0,
+            "chat": {"id": 100, "type": "private"},
+            "from": {"id": 100, "is_bot": false, "first_name": "E2E"}
+        }))
+        .unwrap(),
+        text: "hello e2e".to_string(),
+        entities: None,
+    };
+    let subject = telegram_nats::subjects::bot::message_text(&prefix);
+    let payload = serde_json::to_vec(&event).unwrap();
+
+    // Dispatch — no bot consumer is active yet
+    agent.dispatch_for_test(&subject, &payload).await.unwrap();
+
+    // Bot starts later and creates its durable pull consumer
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let consumer = telegram_nats::nats::create_outbound_consumer(&js, &prefix)
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    // The agent publishes a typing indicator (chat_action) first, then the
+    // send_message.  Consume messages until we find the send_message command.
+    let send_msg_subject = telegram_nats::subjects::agent::message_send(&prefix);
+    let send_msg = loop {
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — send_message command was not found in JetStream stream")
+        .unwrap()
+        .unwrap();
+
+        if msg.subject.as_str() == send_msg_subject.as_str() {
+            break msg;
+        }
+        // Skip other commands (e.g. chat_action typing indicator)
+        msg.ack().await.unwrap();
+    };
+
+    // Must be a send_message command (echo mode)
+    let cmd: telegram_types::commands::SendMessageCommand =
+        serde_json::from_slice(&send_msg.payload)
+            .expect("outbound payload must deserialize as SendMessageCommand");
+
+    assert_eq!(cmd.chat_id, 100, "command must target the originating chat");
+    assert!(
+        cmd.text.contains("hello e2e"),
+        "echo command must contain the original message text"
+    );
+
+    // CommandMetadata headers must carry the causation chain
+    let headers = send_msg.headers.as_ref().expect("headers must be present");
+    let cmd_meta = telegram_nats::read_cmd_metadata(headers)
+        .expect("X-Command-Id header must be set by publish_command");
+    assert!(
+        cmd_meta.causation_id.is_some(),
+        "causation_id must link the command back to the triggering event"
+    );
+    assert_eq!(
+        cmd_meta.session_id.as_deref(),
+        Some("private:100"),
+        "session_id must match the originating session"
+    );
+
+    send_msg.ack().await.unwrap();
+}
+
 // ── Issue 2: Agent dedup — same event_id must not be processed twice ──────────
 
 /// Publishing the same event_id twice to the dispatcher must result in the

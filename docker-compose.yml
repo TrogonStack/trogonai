@@ -7,6 +7,8 @@ services:
     container_name: trogonai-nats
     command:
       - "-js"
+      - "-sd"
+      - "/data"      # Persist JetStream streams/consumers/KV to the named volume
       - "-m"
       - "8222"
     ports:
@@ -27,8 +29,8 @@ services:
   # Telegram Bot
   telegram-bot:
     build:
-      context: .
-      dockerfile: Dockerfile.bot
+      context: ./rsworkspace
+      dockerfile: ../Dockerfile.bot
     container_name: trogonai-telegram-bot
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -45,8 +47,8 @@ services:
   # Telegram Agent (Echo mode)
   telegram-agent-echo:
     build:
-      context: .
-      dockerfile: Dockerfile.agent
+      context: ./rsworkspace
+      dockerfile: ../Dockerfile.agent
     container_name: trogonai-agent-echo
     environment:
       - NATS_URL=nats://nats:4222
@@ -66,8 +68,8 @@ services:
   # Telegram Agent (LLM mode)
   telegram-agent-llm:
     build:
-      context: .
-      dockerfile: Dockerfile.agent
+      context: ./rsworkspace
+      dockerfile: ../Dockerfile.agent
     container_name: trogonai-agent-llm
     environment:
       - NATS_URL=nats://nats:4222
