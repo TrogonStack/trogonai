@@ -118,7 +118,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -156,7 +156,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -197,7 +197,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -233,7 +233,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -269,7 +269,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -304,7 +304,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -341,7 +341,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -401,7 +401,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -448,7 +448,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -493,7 +493,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -529,7 +529,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -564,7 +564,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -616,7 +616,7 @@ impl TelegramBridge {
 
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -647,7 +647,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -703,7 +703,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -738,7 +738,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -773,7 +773,7 @@ impl TelegramBridge {
         // Payments are always in private chats
         let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -804,7 +804,7 @@ impl TelegramBridge {
         // Payments are always in private chats
         let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -833,7 +833,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -975,7 +975,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1082,7 +1082,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1120,7 +1120,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1148,7 +1148,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1174,7 +1174,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1204,7 +1204,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1230,7 +1230,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1269,7 +1269,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&request.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
@@ -1301,7 +1301,7 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
-        if self.is_dedup(&session_id.to_string(), update_id).await {
+        if self.is_dedup(session_id.as_ref(), update_id).await {
             return Ok(());
         }
 
