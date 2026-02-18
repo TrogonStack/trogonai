@@ -18,7 +18,7 @@ use clap::Parser;
 use discord_nats::connect;
 use serenity::model::gateway::GatewayIntents;
 use serenity::prelude::*;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::bridge::DiscordBridge;
@@ -102,6 +102,11 @@ async fn main() -> Result<()> {
     };
 
     info!("NATS prefix: {}", config.nats.prefix);
+
+    // Warn about suspicious access-control configuration
+    for w in config.discord.access.warnings() {
+        warn!("Access config: {}", w);
+    }
 
     // Connect to NATS
     let nats_client = connect(&config.nats).await?;

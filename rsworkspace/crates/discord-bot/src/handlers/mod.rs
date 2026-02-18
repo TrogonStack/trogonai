@@ -10,7 +10,7 @@ use serenity::model::guild::Member;
 use serenity::model::id::{ChannelId, GuildId, MessageId};
 use serenity::model::user::User;
 use serenity::prelude::*;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::bridge::DiscordBridge;
 use crate::health::AppState;
@@ -42,6 +42,8 @@ impl EventHandler for Handler {
             CreateCommand::new("help").description("Show available commands"),
             CreateCommand::new("status").description("Show agent status"),
             CreateCommand::new("clear").description("Clear your conversation history"),
+            CreateCommand::new("forget")
+                .description("Remove the last message exchange from memory"),
             CreateCommand::new("summarize").description("Summarize your conversation so far"),
             CreateCommand::new("ask")
                 .description("Ask the AI a question")
@@ -81,20 +83,39 @@ impl EventHandler for Handler {
         // Access control: check guild or DM; admins bypass guild restrictions
         if let Some(guild_id) = msg.guild_id {
             if !bridge.check_guild_access(guild_id.get()) && !bridge.is_admin(msg.author.id.get()) {
+                debug!(
+                    user = msg.author.id.get(),
+                    guild = guild_id.get(),
+                    "Message dropped: guild not in allowlist"
+                );
                 return;
             }
             if !bridge.check_require_mention(&msg.mentions) && !bridge.is_admin(msg.author.id.get())
             {
+                debug!(
+                    user = msg.author.id.get(),
+                    channel = msg.channel_id.get(),
+                    "Message dropped: require_mention is set and bot was not mentioned"
+                );
                 return;
             }
             if !bridge.check_channel_access(msg.channel_id.get())
                 && !bridge.is_admin(msg.author.id.get())
             {
+                debug!(
+                    user = msg.author.id.get(),
+                    channel = msg.channel_id.get(),
+                    "Message dropped: channel not in allowlist"
+                );
                 return;
             }
         } else {
             // DM
             if !bridge.check_dm_access(msg.author.id.get()) {
+                debug!(
+                    user = msg.author.id.get(),
+                    "Message dropped: DM not allowed for this user"
+                );
                 return;
             }
         }

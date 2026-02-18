@@ -133,9 +133,12 @@ impl MessageProcessor {
             // Clone owned data for the spawned task (tokio::spawn requires 'static)
             let llm_client = llm_client.clone();
             let history = history.clone();
+            // Prepend reply context so the LLM knows what the user is responding to
+            let reply_ctx =
+                Self::format_reply_context(event.message.referenced_message_content.as_deref());
             // Append attachment metadata so the LLM is aware of any uploaded files
             let attachment_ctx = Self::format_attachments(&event.message.attachments);
-            let content_owned = format!("{}{}", content, attachment_ctx);
+            let content_owned = format!("{}{}{}", reply_ctx, content, attachment_ctx);
 
             let llm_handle = tokio::spawn(async move {
                 llm_client
@@ -256,16 +259,19 @@ impl MessageProcessor {
                     `/help` — Show this message\n\
                     `/status` — Show agent status\n\
                     `/clear` — Clear your conversation history\n\
+                    `/forget` — Remove the last message exchange from memory\n\
                     `/summarize` — Summarize your conversation so far\n\
                     `/ask <question>` — Ask the AI a question\n\n\
-                    You can also just send a message in any allowed channel!"
+                    You can also just send a message in any allowed channel!\n\
+                    React with 🔁 to regenerate a response or ❌ to clear history."
                 } else {
                     "**Discord AI Agent** *(echo mode)*\n\n\
                     Available commands:\n\
                     `/ping` — Check if the bot is alive\n\
                     `/help` — Show this message\n\
                     `/status` — Show agent status\n\
-                    `/clear` — Clear your conversation history\n\n\
+                    `/clear` — Clear your conversation history\n\
+                    `/forget` — Remove the last message exchange from memory\n\n\
                     You can also just send a message in any allowed channel!"
                 };
                 self.interaction_respond(
@@ -456,6 +462,40 @@ impl MessageProcessor {
                     publisher,
                 )
                 .await?;
+            }
+
+            "forget" => {
+                let mut history = self.conversation_manager.get_history(session_id).await;
+
+                if history.is_empty() {
+                    self.interaction_respond(
+                        event.interaction_id,
+                        &event.interaction_token,
+                        "No conversation history to forget.",
+                        true,
+                        publisher,
+                    )
+                    .await?;
+                } else {
+                    // Remove the last assistant response (if any), then the last user message
+                    if history.last().map(|m| m.role.as_str()) == Some("assistant") {
+                        history.pop();
+                    }
+                    if history.last().map(|m| m.role.as_str()) == Some("user") {
+                        history.pop();
+                    }
+                    self.conversation_manager
+                        .save_history(session_id, history)
+                        .await;
+                    self.interaction_respond(
+                        event.interaction_id,
+                        &event.interaction_token,
+                        "Last exchange removed from memory.",
+                        true,
+                        publisher,
+                    )
+                    .await?;
+                }
             }
 
             "ask" => {
@@ -1017,6 +1057,14 @@ impl MessageProcessor {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
+
+    /// Build a reply-context prefix so the LLM knows what the user is responding to.
+    fn format_reply_context(referenced_content: Option<&str>) -> String {
+        match referenced_content {
+            Some(c) if !c.is_empty() => format!("[Replying to: \"{}\"]\n\n", c),
+            _ => String::new(),
+        }
+    }
 
     /// Build an attachment context block to append to the user message so the
     /// LLM is aware of any files the user included.

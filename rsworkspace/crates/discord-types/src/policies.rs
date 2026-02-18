@@ -92,6 +92,28 @@ impl AccessConfig {
     pub fn is_admin(&self, user_id: u64) -> bool {
         self.admin_users.contains(&user_id)
     }
+
+    /// Return human-readable warnings for suspicious configuration.
+    ///
+    /// A non-empty vec means the bot will likely block more traffic than intended.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut ws = Vec::new();
+        if self.guild_policy == GuildPolicy::Allowlist && self.guild_allowlist.is_empty() {
+            ws.push(
+                "guild_policy=allowlist but guild_allowlist is empty — \
+                 all guild messages will be blocked"
+                    .to_string(),
+            );
+        }
+        if self.dm_policy == DmPolicy::Allowlist && self.user_allowlist.is_empty() {
+            ws.push(
+                "dm_policy=allowlist but user_allowlist is empty — \
+                 all DMs will be blocked"
+                    .to_string(),
+            );
+        }
+        ws
+    }
 }
 
 #[cfg(test)]

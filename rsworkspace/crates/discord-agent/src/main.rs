@@ -159,12 +159,26 @@ async fn main() -> Result<()> {
     // Configure LLM if enabled
     let llm_config = if args.enable_llm {
         if let Some(api_key) = args.anthropic_api_key {
-            info!("LLM mode enabled with model: {}", args.claude_model);
+            let temperature = if args.temperature < 0.0 || args.temperature > 1.0 {
+                let clamped = args.temperature.clamp(0.0, 1.0);
+                tracing::warn!(
+                    "CLAUDE_TEMPERATURE={:.2} is outside valid range 0.0–1.0; clamping to {:.2}",
+                    args.temperature,
+                    clamped
+                );
+                clamped
+            } else {
+                args.temperature
+            };
+            info!(
+                "LLM mode enabled with model: {}, temperature: {:.2}",
+                args.claude_model, temperature
+            );
             Some(llm::ClaudeConfig {
                 api_key,
                 model: args.claude_model,
                 max_tokens: args.max_tokens,
-                temperature: args.temperature,
+                temperature,
             })
         } else {
             error!("LLM mode enabled but ANTHROPIC_API_KEY not provided");
