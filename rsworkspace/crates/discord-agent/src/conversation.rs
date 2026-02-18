@@ -109,6 +109,25 @@ impl ConversationManager {
         vec![]
     }
 
+    /// Overwrite conversation history for a session (used for edits/deletions)
+    pub async fn save_history(&self, session_id: &str, history: Vec<Message>) {
+        if let Some(ref kv) = self.kv {
+            match serde_json::to_vec(&history) {
+                Ok(bytes) => {
+                    if let Err(e) = kv.put(session_id, bytes.into()).await {
+                        tracing::warn!("Failed to persist conversation for {}: {}", session_id, e);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize conversation for {}: {}", session_id, e);
+                }
+            }
+        }
+
+        let mut sessions = self.sessions.write().await;
+        sessions.insert(session_id.to_string(), history);
+    }
+
     /// Clear conversation history for a session
     pub async fn clear_session(&self, session_id: &str) {
         let mut sessions = self.sessions.write().await;
