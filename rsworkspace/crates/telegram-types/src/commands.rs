@@ -59,7 +59,11 @@ impl CommandMetadata {
     }
 
     /// Attach the triggering event's session and event_id for tracing.
-    pub fn with_causation(mut self, session_id: impl Into<String>, event_id: impl Into<String>) -> Self {
+    pub fn with_causation(
+        mut self,
+        session_id: impl Into<String>,
+        event_id: impl Into<String>,
+    ) -> Self {
         self.session_id = Some(session_id.into());
         self.causation_id = Some(event_id.into());
         self

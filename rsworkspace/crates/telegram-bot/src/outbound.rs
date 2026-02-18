@@ -164,8 +164,9 @@ impl OutboundProcessor {
                     if let Some(nak) = e.downcast_ref::<NakError>() {
                         // Telegram error: NAK with optional delay (respects rate-limit retry_after)
                         let delay = nak.delay;
-                        if let Err(e) =
-                            msg.ack_with(async_nats::jetstream::AckKind::Nak(delay)).await
+                        if let Err(e) = msg
+                            .ack_with(async_nats::jetstream::AckKind::Nak(delay))
+                            .await
                         {
                             warn!("Failed to nak message on '{}': {}", subject, e);
                         }
@@ -184,141 +185,213 @@ impl OutboundProcessor {
     }
 
     /// Dispatch a message to the appropriate handler based on subject
-    async fn dispatch(&self, subject: &str, payload: &[u8], prefix: &str, _attempt: u32) -> Result<()> {
+    async fn dispatch(
+        &self,
+        subject: &str,
+        payload: &[u8],
+        prefix: &str,
+        _attempt: u32,
+    ) -> Result<()> {
         use telegram_nats::subjects::agent;
 
         if subject == agent::message_send(prefix) {
-            self.handle_send_message(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_message(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_edit(prefix) {
-            self.handle_edit_message(serde_json::from_slice(payload)?, prefix).await
+            self.handle_edit_message(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_delete(prefix) {
-            self.handle_delete_message(serde_json::from_slice(payload)?, prefix).await
+            self.handle_delete_message(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_forward(prefix) {
-            self.handle_forward_message(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forward_message(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_copy(prefix) {
-            self.handle_copy_message(serde_json::from_slice(payload)?, prefix).await
+            self.handle_copy_message(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_photo(prefix) {
-            self.handle_send_photo(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_photo(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_video(prefix) {
-            self.handle_send_video(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_video(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_audio(prefix) {
-            self.handle_send_audio(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_audio(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_document(prefix) {
-            self.handle_send_document(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_document(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_voice(prefix) {
-            self.handle_send_voice(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_voice(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_media_group(prefix) {
-            self.handle_send_media_group(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_media_group(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_sticker(prefix) {
-            self.handle_send_sticker(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_sticker(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_animation(prefix) {
-            self.handle_send_animation(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_animation(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_video_note(prefix) {
-            self.handle_send_video_note(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_video_note(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_location(prefix) {
-            self.handle_send_location(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_location(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_venue(prefix) {
-            self.handle_send_venue(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_venue(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_send_contact(prefix) {
-            self.handle_send_contact(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_contact(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::message_stream(prefix) {
-            self.handle_stream_message(serde_json::from_slice(payload)?).await
+            self.handle_stream_message(serde_json::from_slice(payload)?)
+                .await
         } else if subject == agent::poll_send(prefix) {
-            self.handle_send_poll(serde_json::from_slice(payload)?, prefix).await
+            self.handle_send_poll(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::poll_stop(prefix) {
-            self.handle_stop_poll(serde_json::from_slice(payload)?, prefix).await
+            self.handle_stop_poll(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::callback_answer(prefix) {
-            self.handle_answer_callback(serde_json::from_slice(payload)?, prefix).await
+            self.handle_answer_callback(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::chat_action(prefix) {
-            self.handle_chat_action(serde_json::from_slice(payload)?, prefix).await
+            self.handle_chat_action(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::inline_answer(prefix) {
-            self.handle_answer_inline_query(serde_json::from_slice(payload)?, prefix).await
+            self.handle_answer_inline_query(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_create(prefix) {
-            self.handle_forum_create(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_create(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_edit(prefix) {
-            self.handle_forum_edit(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_edit(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_close(prefix) {
-            self.handle_forum_close(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_close(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_reopen(prefix) {
-            self.handle_forum_reopen(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_reopen(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_delete(prefix) {
-            self.handle_forum_delete(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_delete(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_unpin(prefix) {
-            self.handle_forum_unpin(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_unpin(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_edit_general(prefix) {
-            self.handle_forum_edit_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_edit_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_close_general(prefix) {
-            self.handle_forum_close_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_close_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_reopen_general(prefix) {
-            self.handle_forum_reopen_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_reopen_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_hide_general(prefix) {
-            self.handle_forum_hide_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_hide_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_unhide_general(prefix) {
-            self.handle_forum_unhide_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_unhide_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::forum_unpin_general(prefix) {
-            self.handle_forum_unpin_general(serde_json::from_slice(payload)?, prefix).await
+            self.handle_forum_unpin_general(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::file_get(prefix) {
-            self.handle_file_get(serde_json::from_slice(payload)?, prefix).await
+            self.handle_file_get(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::file_download(prefix) {
-            self.handle_file_download(serde_json::from_slice(payload)?, prefix).await
+            self.handle_file_download(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_promote(prefix) {
-            self.handle_admin_promote(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_promote(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_restrict(prefix) {
-            self.handle_admin_restrict(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_restrict(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_ban(prefix) {
-            self.handle_admin_ban(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_ban(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_unban(prefix) {
-            self.handle_admin_unban(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_unban(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_set_permissions(prefix) {
-            self.handle_admin_set_permissions(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_set_permissions(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_set_title(prefix) {
-            self.handle_admin_set_title(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_set_title(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_pin(prefix) {
-            self.handle_admin_pin(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_pin(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_unpin(prefix) {
-            self.handle_admin_unpin(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_unpin(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_unpin_all(prefix) {
-            self.handle_admin_unpin_all(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_unpin_all(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_set_chat_title(prefix) {
-            self.handle_admin_set_chat_title(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_set_chat_title(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::admin_set_chat_description(prefix) {
-            self.handle_admin_set_chat_description(serde_json::from_slice(payload)?, prefix).await
+            self.handle_admin_set_chat_description(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::payment_send_invoice(prefix) {
-            self.handle_payment_send_invoice(serde_json::from_slice(payload)?, prefix).await
+            self.handle_payment_send_invoice(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::payment_answer_pre_checkout(prefix) {
-            self.handle_payment_answer_pre_checkout(serde_json::from_slice(payload)?, prefix).await
+            self.handle_payment_answer_pre_checkout(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::payment_answer_shipping(prefix) {
-            self.handle_payment_answer_shipping(serde_json::from_slice(payload)?, prefix).await
+            self.handle_payment_answer_shipping(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::bot_commands_set(prefix) {
-            self.handle_bot_commands_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_bot_commands_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::bot_commands_delete(prefix) {
-            self.handle_bot_commands_delete(serde_json::from_slice(payload)?, prefix).await
+            self.handle_bot_commands_delete(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::bot_commands_get(prefix) {
-            self.handle_bot_commands_get(serde_json::from_slice(payload)?, prefix).await
+            self.handle_bot_commands_get(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_get_set(prefix) {
-            self.handle_sticker_get_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_get_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_upload_file(prefix) {
-            self.handle_sticker_upload_file(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_upload_file(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_create_set(prefix) {
-            self.handle_sticker_create_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_create_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_add_to_set(prefix) {
-            self.handle_sticker_add_to_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_add_to_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_position(prefix) {
-            self.handle_sticker_set_position(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_position(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_delete_from_set(prefix) {
-            self.handle_sticker_delete_from_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_delete_from_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_title(prefix) {
-            self.handle_sticker_set_title(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_title(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_thumbnail(prefix) {
-            self.handle_sticker_set_thumbnail(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_thumbnail(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_delete_set(prefix) {
-            self.handle_sticker_delete_set(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_delete_set(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_emoji_list(prefix) {
-            self.handle_sticker_set_emoji_list(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_emoji_list(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_keywords(prefix) {
-            self.handle_sticker_set_keywords(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_keywords(serde_json::from_slice(payload)?, prefix)
+                .await
         } else if subject == agent::sticker_set_mask_position(prefix) {
-            self.handle_sticker_set_mask_position(serde_json::from_slice(payload)?, prefix).await
+            self.handle_sticker_set_mask_position(serde_json::from_slice(payload)?, prefix)
+                .await
         } else {
             warn!("Unknown command subject: {}", subject);
             Ok(())
@@ -338,8 +411,7 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(markup) = cmd.reply_markup {
@@ -349,8 +421,7 @@ impl OutboundProcessor {
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -367,11 +438,9 @@ impl OutboundProcessor {
             cmd.chat_id, cmd.message_id
         );
 
-        let mut req = self.bot.edit_message_text(
-            ChatId(cmd.chat_id),
-            MessageId(cmd.message_id),
-            cmd.text,
-        );
+        let mut req =
+            self.bot
+                .edit_message_text(ChatId(cmd.chat_id), MessageId(cmd.message_id), cmd.text);
 
         if let Some(parse_mode) = cmd.parse_mode {
             req.parse_mode = Some(convert_parse_mode(parse_mode));
@@ -420,8 +489,7 @@ impl OutboundProcessor {
         );
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
         req.disable_notification = cmd.disable_notification;
         req.protect_content = cmd.protect_content;
@@ -447,8 +515,7 @@ impl OutboundProcessor {
         );
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
         if let Some(caption) = cmd.caption {
             req.caption = Some(caption);
@@ -461,8 +528,7 @@ impl OutboundProcessor {
             });
         }
         if let Some(reply_id) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
         }
         req.disable_notification = cmd.disable_notification;
         req.protect_content = cmd.protect_content;
@@ -492,13 +558,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -540,13 +604,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -584,13 +646,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -616,13 +676,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -652,13 +710,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -668,7 +724,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_send_media_group(&self, cmd: SendMediaGroupCommand, prefix: &str) -> Result<()> {
+    async fn handle_send_media_group(
+        &self,
+        cmd: SendMediaGroupCommand,
+        prefix: &str,
+    ) -> Result<()> {
         use telegram_types::commands::InputMediaItem;
         use teloxide::types::{
             InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
@@ -690,9 +750,7 @@ impl OutboundProcessor {
                     caption,
                     parse_mode,
                 } => {
-                    let mut m = InputMediaPhoto::new(
-                        teloxide::types::InputFile::file_id(media),
-                    );
+                    let mut m = InputMediaPhoto::new(teloxide::types::InputFile::file_id(media));
                     m.caption = caption;
                     m.parse_mode = parse_mode.map(convert_parse_mode);
                     InputMedia::Photo(m)
@@ -706,9 +764,7 @@ impl OutboundProcessor {
                     height,
                     supports_streaming,
                 } => {
-                    let mut m = InputMediaVideo::new(
-                        teloxide::types::InputFile::file_id(media),
-                    );
+                    let mut m = InputMediaVideo::new(teloxide::types::InputFile::file_id(media));
                     m.caption = caption;
                     m.parse_mode = parse_mode.map(convert_parse_mode);
                     m.duration = duration.map(|d| d as u16);
@@ -725,9 +781,7 @@ impl OutboundProcessor {
                     performer,
                     title,
                 } => {
-                    let mut m = InputMediaAudio::new(
-                        teloxide::types::InputFile::file_id(media),
-                    );
+                    let mut m = InputMediaAudio::new(teloxide::types::InputFile::file_id(media));
                     m.caption = caption;
                     m.parse_mode = parse_mode.map(convert_parse_mode);
                     m.duration = duration.map(|d| d as u16);
@@ -740,9 +794,7 @@ impl OutboundProcessor {
                     caption,
                     parse_mode,
                 } => {
-                    let mut m = InputMediaDocument::new(
-                        teloxide::types::InputFile::file_id(media),
-                    );
+                    let mut m = InputMediaDocument::new(teloxide::types::InputFile::file_id(media));
                     m.caption = caption;
                     m.parse_mode = parse_mode.map(convert_parse_mode);
                     InputMedia::Document(m)
@@ -753,13 +805,11 @@ impl OutboundProcessor {
         let mut req = self.bot.send_media_group(ChatId(cmd.chat_id), media);
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -777,8 +827,7 @@ impl OutboundProcessor {
         let mut req = self.bot.send_sticker(ChatId(cmd.chat_id), sticker);
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(markup) = cmd.reply_markup {
@@ -788,8 +837,7 @@ impl OutboundProcessor {
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -827,8 +875,7 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(markup) = cmd.reply_markup {
@@ -838,8 +885,7 @@ impl OutboundProcessor {
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -865,13 +911,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -885,9 +929,9 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_location(prefix);
         debug!("Received send location command for chat {}", cmd.chat_id);
 
-        let mut req =
-            self.bot
-                .send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
+        let mut req = self
+            .bot
+            .send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
 
         if let Some(live_period) = cmd.live_period {
             req.live_period = Some(live_period.into());
@@ -906,13 +950,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -951,13 +993,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -971,11 +1011,9 @@ impl OutboundProcessor {
         let subject = subjects::agent::message_send_contact(prefix);
         debug!("Received send contact command for chat {}", cmd.chat_id);
 
-        let mut req = self.bot.send_contact(
-            ChatId(cmd.chat_id),
-            cmd.phone_number,
-            cmd.first_name,
-        );
+        let mut req = self
+            .bot
+            .send_contact(ChatId(cmd.chat_id), cmd.phone_number, cmd.first_name);
 
         if let Some(last_name) = cmd.last_name {
             req.last_name = Some(last_name);
@@ -986,13 +1024,11 @@ impl OutboundProcessor {
         }
 
         if let Some(reply_to) = cmd.reply_to_message_id {
-            req.reply_parameters =
-                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
         }
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -1011,7 +1047,8 @@ impl OutboundProcessor {
         let subject = subjects::agent::poll_send(prefix);
         debug!("Received send poll command for chat {}", cmd.chat_id);
 
-        let options: Vec<teloxide::types::InputPollOption> = cmd.options
+        let options: Vec<teloxide::types::InputPollOption> = cmd
+            .options
             .into_iter()
             .map(teloxide::types::InputPollOption::new)
             .collect();
@@ -1021,11 +1058,9 @@ impl OutboundProcessor {
             _ => TgPollType::Regular,
         };
 
-        let mut req = self.bot.send_poll(
-            ChatId(cmd.chat_id),
-            cmd.question,
-            options,
-        );
+        let mut req = self
+            .bot
+            .send_poll(ChatId(cmd.chat_id), cmd.question, options);
 
         req.is_anonymous = cmd.is_anonymous;
         req.type_ = Some(poll_type);
@@ -1065,7 +1100,9 @@ impl OutboundProcessor {
         let subject = subjects::agent::poll_stop(prefix);
         debug!("Received stop poll command for chat {}", cmd.chat_id);
 
-        let mut req = self.bot.stop_poll(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+        let mut req = self
+            .bot
+            .stop_poll(ChatId(cmd.chat_id), MessageId(cmd.message_id));
 
         if let Some(markup) = cmd.reply_markup {
             req.reply_markup = Some(convert_inline_keyboard(markup));
@@ -1109,8 +1146,7 @@ impl OutboundProcessor {
         let mut req = self.bot.send_chat_action(ChatId(cmd.chat_id), action);
 
         if let Some(thread_id) = cmd.message_thread_id {
-            req.message_thread_id =
-                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
         }
 
         if let Err(e) = req.await {
@@ -1120,7 +1156,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_answer_inline_query(&self, cmd: AnswerInlineQueryCommand, prefix: &str) -> Result<()> {
+    async fn handle_answer_inline_query(
+        &self,
+        cmd: AnswerInlineQueryCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::inline_answer(prefix);
         debug!(
             "Received answer inline query command for query {}",
@@ -1160,7 +1200,8 @@ impl OutboundProcessor {
         let subject = subjects::agent::forum_create(prefix);
         debug!("Creating forum topic in chat {}", cmd.chat_id);
 
-        let icon_color = cmd.icon_color
+        let icon_color = cmd
+            .icon_color
             .map(|c| teloxide::types::Rgb::from_u32(c as u32))
             .unwrap_or_else(|| teloxide::types::Rgb::from_u32(0x6FB9F0));
         let icon_custom_emoji_id = cmd.icon_custom_emoji_id.unwrap_or_default();
@@ -1179,9 +1220,15 @@ impl OutboundProcessor {
 
     async fn handle_forum_edit(&self, cmd: EditForumTopicCommand, prefix: &str) -> Result<()> {
         let subject = subjects::agent::forum_edit(prefix);
-        debug!("Editing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+        debug!(
+            "Editing forum topic {} in chat {}",
+            cmd.message_thread_id, cmd.chat_id
+        );
 
-        let mut req = self.bot.edit_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id)));
+        let mut req = self.bot.edit_forum_topic(
+            ChatId(cmd.chat_id),
+            teloxide::types::ThreadId(MessageId(cmd.message_thread_id)),
+        );
         if let Some(name) = cmd.name {
             req.name = Some(name);
         }
@@ -1197,9 +1244,19 @@ impl OutboundProcessor {
 
     async fn handle_forum_close(&self, cmd: CloseForumTopicCommand, prefix: &str) -> Result<()> {
         let subject = subjects::agent::forum_close(prefix);
-        debug!("Closing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+        debug!(
+            "Closing forum topic {} in chat {}",
+            cmd.message_thread_id, cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.close_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+        if let Err(e) = self
+            .bot
+            .close_forum_topic(
+                ChatId(cmd.chat_id),
+                teloxide::types::ThreadId(MessageId(cmd.message_thread_id)),
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
@@ -1208,9 +1265,19 @@ impl OutboundProcessor {
 
     async fn handle_forum_reopen(&self, cmd: ReopenForumTopicCommand, prefix: &str) -> Result<()> {
         let subject = subjects::agent::forum_reopen(prefix);
-        debug!("Reopening forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+        debug!(
+            "Reopening forum topic {} in chat {}",
+            cmd.message_thread_id, cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.reopen_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+        if let Err(e) = self
+            .bot
+            .reopen_forum_topic(
+                ChatId(cmd.chat_id),
+                teloxide::types::ThreadId(MessageId(cmd.message_thread_id)),
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
@@ -1219,60 +1286,112 @@ impl OutboundProcessor {
 
     async fn handle_forum_delete(&self, cmd: DeleteForumTopicCommand, prefix: &str) -> Result<()> {
         let subject = subjects::agent::forum_delete(prefix);
-        debug!("Deleting forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+        debug!(
+            "Deleting forum topic {} in chat {}",
+            cmd.message_thread_id, cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.delete_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+        if let Err(e) = self
+            .bot
+            .delete_forum_topic(
+                ChatId(cmd.chat_id),
+                teloxide::types::ThreadId(MessageId(cmd.message_thread_id)),
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_unpin(&self, cmd: UnpinAllForumTopicMessagesCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_unpin(
+        &self,
+        cmd: UnpinAllForumTopicMessagesCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_unpin(prefix);
-        debug!("Unpinning all messages in topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+        debug!(
+            "Unpinning all messages in topic {} in chat {}",
+            cmd.message_thread_id, cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.unpin_all_forum_topic_messages(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+        if let Err(e) = self
+            .bot
+            .unpin_all_forum_topic_messages(
+                ChatId(cmd.chat_id),
+                teloxide::types::ThreadId(MessageId(cmd.message_thread_id)),
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_edit_general(&self, cmd: EditGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_edit_general(
+        &self,
+        cmd: EditGeneralForumTopicCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_edit_general(prefix);
         debug!("Editing general forum topic in chat {}", cmd.chat_id);
 
-        if let Err(e) = self.bot.edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name).await {
+        if let Err(e) = self
+            .bot
+            .edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name)
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_close_general(&self, cmd: CloseGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_close_general(
+        &self,
+        cmd: CloseGeneralForumTopicCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_close_general(prefix);
         debug!("Closing general forum topic in chat {}", cmd.chat_id);
 
-        if let Err(e) = self.bot.close_general_forum_topic(ChatId(cmd.chat_id)).await {
+        if let Err(e) = self
+            .bot
+            .close_general_forum_topic(ChatId(cmd.chat_id))
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_reopen_general(&self, cmd: ReopenGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_reopen_general(
+        &self,
+        cmd: ReopenGeneralForumTopicCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_reopen_general(prefix);
         debug!("Reopening general forum topic in chat {}", cmd.chat_id);
 
-        if let Err(e) = self.bot.reopen_general_forum_topic(ChatId(cmd.chat_id)).await {
+        if let Err(e) = self
+            .bot
+            .reopen_general_forum_topic(ChatId(cmd.chat_id))
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_hide_general(&self, cmd: HideGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_hide_general(
+        &self,
+        cmd: HideGeneralForumTopicCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_hide_general(prefix);
         debug!("Hiding general forum topic in chat {}", cmd.chat_id);
 
@@ -1283,22 +1402,41 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_forum_unhide_general(&self, cmd: UnhideGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_unhide_general(
+        &self,
+        cmd: UnhideGeneralForumTopicCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_unhide_general(prefix);
         debug!("Unhiding general forum topic in chat {}", cmd.chat_id);
 
-        if let Err(e) = self.bot.unhide_general_forum_topic(ChatId(cmd.chat_id)).await {
+        if let Err(e) = self
+            .bot
+            .unhide_general_forum_topic(ChatId(cmd.chat_id))
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_forum_unpin_general(&self, cmd: UnpinAllGeneralForumTopicMessagesCommand, prefix: &str) -> Result<()> {
+    async fn handle_forum_unpin_general(
+        &self,
+        cmd: UnpinAllGeneralForumTopicMessagesCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::forum_unpin_general(prefix);
-        debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
+        debug!(
+            "Unpinning all general forum topic messages in chat {}",
+            cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
+        if let Err(e) = self
+            .bot
+            .unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id))
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
@@ -1316,8 +1454,7 @@ impl OutboundProcessor {
                 let bot_token = self.bot.token();
                 let download_url = format!(
                     "https://api.telegram.org/file/bot{}/{}",
-                    bot_token,
-                    file.path
+                    bot_token, file.path
                 );
 
                 let response = FileInfoResponse {
@@ -1330,8 +1467,13 @@ impl OutboundProcessor {
                 };
 
                 let response_subject = subjects::bot::file_info(prefix);
-                if let Err(e) = self.subscriber.client()
-                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                if let Err(e) = self
+                    .subscriber
+                    .client()
+                    .publish(
+                        response_subject.clone(),
+                        serde_json::to_vec(&response).unwrap().into(),
+                    )
                     .await
                 {
                     error!("Failed to publish file info response: {}", e);
@@ -1349,15 +1491,17 @@ impl OutboundProcessor {
 
     async fn handle_file_download(&self, cmd: DownloadFileCommand, prefix: &str) -> Result<()> {
         let subject = subjects::agent::file_download(prefix);
-        debug!("Downloading file {} to {}", cmd.file_id, cmd.destination_path);
+        debug!(
+            "Downloading file {} to {}",
+            cmd.file_id, cmd.destination_path
+        );
 
         match self.bot.get_file(&cmd.file_id).await {
             Ok(file) => {
                 let bot_token = self.bot.token();
                 let download_url = format!(
                     "https://api.telegram.org/file/bot{}/{}",
-                    bot_token,
-                    file.path
+                    bot_token, file.path
                 );
 
                 match download_file_from_url(&download_url, &cmd.destination_path).await {
@@ -1372,8 +1516,13 @@ impl OutboundProcessor {
                         };
 
                         let response_subject = subjects::bot::file_downloaded(prefix);
-                        if let Err(e) = self.subscriber.client()
-                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                        if let Err(e) = self
+                            .subscriber
+                            .client()
+                            .publish(
+                                response_subject.clone(),
+                                serde_json::to_vec(&response).unwrap().into(),
+                            )
                             .await
                         {
                             error!("Failed to publish file download response: {}", e);
@@ -1393,8 +1542,13 @@ impl OutboundProcessor {
                         };
 
                         let response_subject = subjects::bot::file_downloaded(prefix);
-                        if let Err(e) = self.subscriber.client()
-                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                        if let Err(e) = self
+                            .subscriber
+                            .client()
+                            .publish(
+                                response_subject.clone(),
+                                serde_json::to_vec(&response).unwrap().into(),
+                            )
                             .await
                         {
                             error!("Failed to publish file download error response: {}", e);
@@ -1415,8 +1569,13 @@ impl OutboundProcessor {
                 };
 
                 let response_subject = subjects::bot::file_downloaded(prefix);
-                if let Err(e) = self.subscriber.client()
-                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                if let Err(e) = self
+                    .subscriber
+                    .client()
+                    .publish(
+                        response_subject.clone(),
+                        serde_json::to_vec(&response).unwrap().into(),
+                    )
                     .await
                 {
                     error!("Failed to publish file download error response: {}", e);
@@ -1429,11 +1588,18 @@ impl OutboundProcessor {
 
     // ── Admin handlers ────────────────────────────────────────────────────────
 
-    async fn handle_admin_promote(&self, cmd: PromoteChatMemberCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_promote(
+        &self,
+        cmd: PromoteChatMemberCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_promote(prefix);
         debug!("Promoting user {} in chat {}", cmd.user_id, cmd.chat_id);
 
-        let mut req = self.bot.promote_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+        let mut req = self.bot.promote_chat_member(
+            ChatId(cmd.chat_id),
+            teloxide::types::UserId(cmd.user_id as u64),
+        );
 
         if let Some(rights) = cmd.rights {
             req.is_anonymous = rights.is_anonymous;
@@ -1460,12 +1626,20 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_admin_restrict(&self, cmd: RestrictChatMemberCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_restrict(
+        &self,
+        cmd: RestrictChatMemberCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_restrict(prefix);
         debug!("Restricting user {} in chat {}", cmd.user_id, cmd.chat_id);
 
         let perms = convert_chat_permissions(&cmd.permissions);
-        let mut req = self.bot.restrict_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64), perms);
+        let mut req = self.bot.restrict_chat_member(
+            ChatId(cmd.chat_id),
+            teloxide::types::UserId(cmd.user_id as u64),
+            perms,
+        );
 
         if let Some(until) = cmd.until_date {
             use chrono::{DateTime, Utc};
@@ -1485,7 +1659,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::admin_ban(prefix);
         debug!("Banning user {} in chat {}", cmd.user_id, cmd.chat_id);
 
-        let mut req = self.bot.ban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+        let mut req = self.bot.ban_chat_member(
+            ChatId(cmd.chat_id),
+            teloxide::types::UserId(cmd.user_id as u64),
+        );
 
         if let Some(until) = cmd.until_date {
             use chrono::{DateTime, Utc};
@@ -1509,7 +1686,10 @@ impl OutboundProcessor {
         let subject = subjects::agent::admin_unban(prefix);
         debug!("Unbanning user {} in chat {}", cmd.user_id, cmd.chat_id);
 
-        let mut req = self.bot.unban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+        let mut req = self.bot.unban_chat_member(
+            ChatId(cmd.chat_id),
+            teloxide::types::UserId(cmd.user_id as u64),
+        );
 
         if let Some(only_if_banned) = cmd.only_if_banned {
             req.only_if_banned = Some(only_if_banned);
@@ -1522,28 +1702,47 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_admin_set_permissions(&self, cmd: SetChatPermissionsCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_set_permissions(
+        &self,
+        cmd: SetChatPermissionsCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_set_permissions(prefix);
         debug!("Setting permissions in chat {}", cmd.chat_id);
 
         let perms = convert_chat_permissions(&cmd.permissions);
 
-        if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
+        if let Err(e) = self
+            .bot
+            .set_chat_permissions(ChatId(cmd.chat_id), perms)
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_admin_set_title(&self, cmd: SetChatAdministratorCustomTitleCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_set_title(
+        &self,
+        cmd: SetChatAdministratorCustomTitleCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_set_title(prefix);
-        debug!("Setting custom title for user {} in chat {}", cmd.user_id, cmd.chat_id);
+        debug!(
+            "Setting custom title for user {} in chat {}",
+            cmd.user_id, cmd.chat_id
+        );
 
-        if let Err(e) = self.bot.set_chat_administrator_custom_title(
-            ChatId(cmd.chat_id),
-            teloxide::types::UserId(cmd.user_id as u64),
-            cmd.custom_title,
-        ).await {
+        if let Err(e) = self
+            .bot
+            .set_chat_administrator_custom_title(
+                ChatId(cmd.chat_id),
+                teloxide::types::UserId(cmd.user_id as u64),
+                cmd.custom_title,
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
@@ -1554,7 +1753,9 @@ impl OutboundProcessor {
         let subject = subjects::agent::admin_pin(prefix);
         debug!("Pinning message {} in chat {}", cmd.message_id, cmd.chat_id);
 
-        let mut req = self.bot.pin_chat_message(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+        let mut req = self
+            .bot
+            .pin_chat_message(ChatId(cmd.chat_id), MessageId(cmd.message_id));
 
         if let Some(disable_notification) = cmd.disable_notification {
             req.disable_notification = Some(disable_notification);
@@ -1584,7 +1785,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_admin_unpin_all(&self, cmd: UnpinAllChatMessagesCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_unpin_all(
+        &self,
+        cmd: UnpinAllChatMessagesCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_unpin_all(prefix);
         debug!("Unpinning all messages in chat {}", cmd.chat_id);
 
@@ -1595,18 +1800,30 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_admin_set_chat_title(&self, cmd: SetChatTitleCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_set_chat_title(
+        &self,
+        cmd: SetChatTitleCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_set_chat_title(prefix);
         debug!("Setting chat title in chat {}", cmd.chat_id);
 
-        if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
+        if let Err(e) = self
+            .bot
+            .set_chat_title(ChatId(cmd.chat_id), cmd.title)
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_admin_set_chat_description(&self, cmd: SetChatDescriptionCommand, prefix: &str) -> Result<()> {
+    async fn handle_admin_set_chat_description(
+        &self,
+        cmd: SetChatDescriptionCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::admin_set_chat_description(prefix);
         debug!("Setting chat description in chat {}", cmd.chat_id);
 
@@ -1622,11 +1839,17 @@ impl OutboundProcessor {
 
     // ── Payment handlers ──────────────────────────────────────────────────────
 
-    async fn handle_payment_send_invoice(&self, cmd: SendInvoiceCommand, prefix: &str) -> Result<()> {
+    async fn handle_payment_send_invoice(
+        &self,
+        cmd: SendInvoiceCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::payment_send_invoice(prefix);
         debug!("Sending invoice to chat {}", cmd.chat_id);
 
-        let prices: Vec<teloxide::types::LabeledPrice> = cmd.prices.iter()
+        let prices: Vec<teloxide::types::LabeledPrice> = cmd
+            .prices
+            .iter()
             .map(|p| teloxide::types::LabeledPrice {
                 label: p.label.clone(),
                 amount: p.amount as u32,
@@ -1646,9 +1869,9 @@ impl OutboundProcessor {
             req.provider_token = Some(cmd.provider_token);
         }
         req.max_tip_amount = cmd.max_tip_amount.map(|a| a as u32);
-        req.suggested_tip_amounts = cmd.suggested_tip_amounts.map(|amounts|
-            amounts.iter().map(|&a| a as u32).collect()
-        );
+        req.suggested_tip_amounts = cmd
+            .suggested_tip_amounts
+            .map(|amounts| amounts.iter().map(|&a| a as u32).collect());
         req.start_parameter = cmd.start_parameter;
         req.provider_data = cmd.provider_data;
         req.photo_url = cmd.photo_url.and_then(|u| u.parse().ok());
@@ -1680,14 +1903,24 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_payment_answer_pre_checkout(&self, cmd: AnswerPreCheckoutQueryCommand, prefix: &str) -> Result<()> {
+    async fn handle_payment_answer_pre_checkout(
+        &self,
+        cmd: AnswerPreCheckoutQueryCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::payment_answer_pre_checkout(prefix);
-        debug!("Answering pre-checkout query {}: ok={}", cmd.pre_checkout_query_id, cmd.ok);
+        debug!(
+            "Answering pre-checkout query {}: ok={}",
+            cmd.pre_checkout_query_id, cmd.ok
+        );
 
         let req = if cmd.ok {
-            self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, true)
+            self.bot
+                .answer_pre_checkout_query(&cmd.pre_checkout_query_id, true)
         } else {
-            let mut req = self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, false);
+            let mut req = self
+                .bot
+                .answer_pre_checkout_query(&cmd.pre_checkout_query_id, false);
             req.error_message = cmd.error_message;
             req
         };
@@ -1699,22 +1932,37 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_payment_answer_shipping(&self, cmd: AnswerShippingQueryCommand, prefix: &str) -> Result<()> {
+    async fn handle_payment_answer_shipping(
+        &self,
+        cmd: AnswerShippingQueryCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::payment_answer_shipping(prefix);
-        debug!("Answering shipping query {}: ok={}", cmd.shipping_query_id, cmd.ok);
+        debug!(
+            "Answering shipping query {}: ok={}",
+            cmd.shipping_query_id, cmd.ok
+        );
 
-        let mut req = self.bot.answer_shipping_query(&cmd.shipping_query_id, cmd.ok);
+        let mut req = self
+            .bot
+            .answer_shipping_query(&cmd.shipping_query_id, cmd.ok);
 
         if cmd.ok {
-            let options: Vec<teloxide::types::ShippingOption> = cmd.shipping_options.unwrap_or_default()
+            let options: Vec<teloxide::types::ShippingOption> = cmd
+                .shipping_options
+                .unwrap_or_default()
                 .into_iter()
                 .map(|opt| teloxide::types::ShippingOption {
                     id: opt.id,
                     title: opt.title,
-                    prices: opt.prices.iter().map(|p| teloxide::types::LabeledPrice {
-                        label: p.label.clone(),
-                        amount: p.amount as u32,
-                    }).collect(),
+                    prices: opt
+                        .prices
+                        .iter()
+                        .map(|p| teloxide::types::LabeledPrice {
+                            label: p.label.clone(),
+                            amount: p.amount as u32,
+                        })
+                        .collect(),
                 })
                 .collect();
             req.shipping_options = Some(options);
@@ -1735,7 +1983,9 @@ impl OutboundProcessor {
         let subject = subjects::agent::bot_commands_set(prefix);
         debug!("Setting bot commands ({} commands)", cmd.commands.len());
 
-        let commands: Vec<teloxide::types::BotCommand> = cmd.commands.iter()
+        let commands: Vec<teloxide::types::BotCommand> = cmd
+            .commands
+            .iter()
             .map(|c| teloxide::types::BotCommand::new(c.command.clone(), c.description.clone()))
             .collect();
 
@@ -1754,7 +2004,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_bot_commands_delete(&self, cmd: DeleteMyCommandsCommand, prefix: &str) -> Result<()> {
+    async fn handle_bot_commands_delete(
+        &self,
+        cmd: DeleteMyCommandsCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::bot_commands_delete(prefix);
         debug!("Deleting bot commands");
 
@@ -1788,16 +2042,24 @@ impl OutboundProcessor {
         match req.await {
             Ok(commands) => {
                 let response = BotCommandsResponse {
-                    commands: commands.iter().map(|c| telegram_types::chat::BotCommand {
-                        command: c.command.clone(),
-                        description: c.description.clone(),
-                    }).collect(),
+                    commands: commands
+                        .iter()
+                        .map(|c| telegram_types::chat::BotCommand {
+                            command: c.command.clone(),
+                            description: c.description.clone(),
+                        })
+                        .collect(),
                     request_id: cmd.request_id,
                 };
 
                 let response_subject = subjects::bot::bot_commands_response(prefix);
-                if let Err(e) = self.subscriber.client()
-                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                if let Err(e) = self
+                    .subscriber
+                    .client()
+                    .publish(
+                        response_subject.clone(),
+                        serde_json::to_vec(&response).unwrap().into(),
+                    )
                     .await
                 {
                     error!("Failed to publish bot commands response: {}", e);
@@ -1842,13 +2104,25 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_upload_file(&self, cmd: UploadStickerFileCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_upload_file(
+        &self,
+        cmd: UploadStickerFileCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_upload_file(prefix);
         debug!("Uploading sticker file for user {}", cmd.user_id);
 
         let sticker_file = teloxide::types::InputFile::file_id(&cmd.sticker);
         let format = convert_sticker_format(&cmd.format);
-        match self.bot.upload_sticker_file(teloxide::types::UserId(cmd.user_id as u64), sticker_file, format).await {
+        match self
+            .bot
+            .upload_sticker_file(
+                teloxide::types::UserId(cmd.user_id as u64),
+                sticker_file,
+                format,
+            )
+            .await
+        {
             Ok(file) => {
                 let response = UploadStickerFileResponse {
                     file_id: file.id.clone(),
@@ -1865,13 +2139,19 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_create_set(&self, cmd: CreateNewStickerSetCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_create_set(
+        &self,
+        cmd: CreateNewStickerSetCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_create_set(prefix);
-        debug!("Creating sticker set '{}' for user {}", cmd.name, cmd.user_id);
+        debug!(
+            "Creating sticker set '{}' for user {}",
+            cmd.name, cmd.user_id
+        );
 
-        let stickers: Vec<teloxide::types::InputSticker> = cmd.stickers.iter()
-            .map(convert_input_sticker)
-            .collect();
+        let stickers: Vec<teloxide::types::InputSticker> =
+            cmd.stickers.iter().map(convert_input_sticker).collect();
         let mut req = self.bot.create_new_sticker_set(
             teloxide::types::UserId(cmd.user_id as u64),
             &cmd.name,
@@ -1889,34 +2169,57 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_add_to_set(&self, cmd: AddStickerToSetCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_add_to_set(
+        &self,
+        cmd: AddStickerToSetCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_add_to_set(prefix);
-        debug!("Adding sticker to set '{}' for user {}", cmd.name, cmd.user_id);
+        debug!(
+            "Adding sticker to set '{}' for user {}",
+            cmd.name, cmd.user_id
+        );
 
         let sticker = convert_input_sticker(&cmd.sticker);
-        if let Err(e) = self.bot.add_sticker_to_set(
-            teloxide::types::UserId(cmd.user_id as u64),
-            &cmd.name,
-            sticker,
-        ).await {
+        if let Err(e) = self
+            .bot
+            .add_sticker_to_set(
+                teloxide::types::UserId(cmd.user_id as u64),
+                &cmd.name,
+                sticker,
+            )
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_sticker_set_position(&self, cmd: SetStickerPositionInSetCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_position(
+        &self,
+        cmd: SetStickerPositionInSetCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_position(prefix);
         debug!("Setting sticker position to {}", cmd.position);
 
-        if let Err(e) = self.bot.set_sticker_position_in_set(&cmd.sticker, cmd.position).await {
+        if let Err(e) = self
+            .bot
+            .set_sticker_position_in_set(&cmd.sticker, cmd.position)
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_sticker_delete_from_set(&self, cmd: DeleteStickerFromSetCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_delete_from_set(
+        &self,
+        cmd: DeleteStickerFromSetCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_delete_from_set(prefix);
         debug!("Deleting sticker from set: {}", cmd.sticker);
 
@@ -1927,9 +2230,16 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_set_title(&self, cmd: SetStickerSetTitleCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_title(
+        &self,
+        cmd: SetStickerSetTitleCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_title(prefix);
-        debug!("Setting title of sticker set '{}' to '{}'", cmd.name, cmd.title);
+        debug!(
+            "Setting title of sticker set '{}' to '{}'",
+            cmd.name, cmd.title
+        );
 
         if let Err(e) = self.bot.set_sticker_set_title(&cmd.name, &cmd.title).await {
             self.handle_telegram_error(&subject, e, prefix).await?;
@@ -1938,7 +2248,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_set_thumbnail(&self, cmd: SetStickerSetThumbnailCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_thumbnail(
+        &self,
+        cmd: SetStickerSetThumbnailCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_thumbnail(prefix);
         debug!("Setting thumbnail of sticker set '{}'", cmd.name);
 
@@ -1958,7 +2272,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_delete_set(&self, cmd: DeleteStickerSetCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_delete_set(
+        &self,
+        cmd: DeleteStickerSetCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_delete_set(prefix);
         debug!("Deleting sticker set '{}'", cmd.name);
 
@@ -1969,18 +2287,30 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_set_emoji_list(&self, cmd: SetStickerEmojiListCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_emoji_list(
+        &self,
+        cmd: SetStickerEmojiListCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_emoji_list(prefix);
         debug!("Setting emoji list for sticker {}", cmd.sticker);
 
-        if let Err(e) = self.bot.set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list).await {
+        if let Err(e) = self
+            .bot
+            .set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list)
+            .await
+        {
             self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_sticker_set_keywords(&self, cmd: SetStickerKeywordsCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_keywords(
+        &self,
+        cmd: SetStickerKeywordsCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_keywords(prefix);
         debug!("Setting keywords for sticker {}", cmd.sticker);
 
@@ -1993,7 +2323,11 @@ impl OutboundProcessor {
         Ok(())
     }
 
-    async fn handle_sticker_set_mask_position(&self, cmd: SetStickerMaskPositionCommand, prefix: &str) -> Result<()> {
+    async fn handle_sticker_set_mask_position(
+        &self,
+        cmd: SetStickerMaskPositionCommand,
+        prefix: &str,
+    ) -> Result<()> {
         let subject = subjects::agent::sticker_set_mask_position(prefix);
         debug!("Setting mask position for sticker {}", cmd.sticker);
 
@@ -2102,7 +2436,6 @@ impl OutboundProcessor {
 
     // Stream message handling in outbound_streaming.rs module
 }
-
 
 /// Convert our ParseMode to Teloxide's ParseMode
 #[allow(deprecated)]

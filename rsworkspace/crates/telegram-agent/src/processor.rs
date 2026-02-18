@@ -48,10 +48,8 @@ impl MessageProcessor {
 
         // Metadata factory: captures session_id and causation (triggering event_id)
         let causation_id = event.metadata.event_id.to_string();
-        let meta = || {
-            CommandMetadata::new()
-                .with_causation(session_id.as_str(), causation_id.as_str())
-        };
+        let meta =
+            || CommandMetadata::new().with_causation(session_id.as_str(), causation_id.as_str());
 
         // Send typing indicator
         self.send_typing_indicator(chat_id, publisher).await?;
@@ -90,7 +88,9 @@ impl MessageProcessor {
                                     session_id: Some(session_id.clone()),
                                     message_thread_id,
                                 };
-                                publisher.publish_command(&stream_subject, &cmd, meta()).await?;
+                                publisher
+                                    .publish_command(&stream_subject, &cmd, meta())
+                                    .await?;
                             }
                             Err(e) => {
                                 warn!("Streaming chunk error for session {}: {}", session_id, e);
@@ -109,7 +109,9 @@ impl MessageProcessor {
                             session_id: Some(session_id.clone()),
                             message_thread_id,
                         };
-                        publisher.publish_command(&stream_subject, &cmd, meta()).await?;
+                        publisher
+                            .publish_command(&stream_subject, &cmd, meta())
+                            .await?;
 
                         self.conversation_manager
                             .add_message(session_id, "assistant", &accumulated)
@@ -211,8 +213,10 @@ impl MessageProcessor {
             }
         };
 
-        let meta = CommandMetadata::new()
-            .with_causation(session_id.as_str(), event.metadata.event_id.to_string().as_str());
+        let meta = CommandMetadata::new().with_causation(
+            session_id.as_str(),
+            event.metadata.event_id.to_string().as_str(),
+        );
 
         let cmd = SendMessageCommand {
             chat_id,
@@ -282,8 +286,10 @@ impl MessageProcessor {
             _ => "Unknown command. Use /help to see available commands.",
         };
 
-        let meta = CommandMetadata::new()
-            .with_causation(session_id.as_str(), event.metadata.event_id.to_string().as_str());
+        let meta = CommandMetadata::new().with_causation(
+            session_id.as_str(),
+            event.metadata.event_id.to_string().as_str(),
+        );
 
         let cmd = SendMessageCommand {
             chat_id,
@@ -322,7 +328,9 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::callback_answer(publisher.prefix());
-        publisher.publish_command(&subject, &answer_command, meta()).await?;
+        publisher
+            .publish_command(&subject, &answer_command, meta())
+            .await?;
 
         // Send a message with the callback data
         let message_command = SendMessageCommand {
@@ -335,7 +343,9 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish_command(&subject, &message_command, meta()).await?;
+        publisher
+            .publish_command(&subject, &message_command, meta())
+            .await?;
 
         debug!("Processed callback for chat {}", event.chat.id);
         Ok(())
@@ -426,7 +436,9 @@ impl MessageProcessor {
             event.metadata.event_id.to_string().as_str(),
         );
         let subject = subjects::agent::inline_answer(publisher.prefix());
-        publisher.publish_command(&subject, &answer_command, meta).await?;
+        publisher
+            .publish_command(&subject, &answer_command, meta)
+            .await?;
 
         debug!("Answered inline query {}", event.inline_query_id);
         Ok(())
