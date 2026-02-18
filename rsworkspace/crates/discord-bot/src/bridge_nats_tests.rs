@@ -34,6 +34,7 @@ mod nats_tests {
                 guild_allowlist: vec![200],
                 ..Default::default()
             },
+            false,
         )
     }
 

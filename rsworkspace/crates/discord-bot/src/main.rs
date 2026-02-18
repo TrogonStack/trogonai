@@ -117,6 +117,7 @@ async fn main() -> Result<()> {
         nats_client.clone(),
         config.nats.prefix.clone(),
         config.discord.access.clone(),
+        config.discord.presence_enabled,
     ));
 
     // Build the outbound processor (NATS → Discord)
@@ -126,11 +127,18 @@ async fn main() -> Result<()> {
     let health_port = args.health_port;
 
     // Build serenity client
-    let intents = GatewayIntents::GUILD_MESSAGES
+    let mut intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::GUILD_MEMBERS
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
-        | GatewayIntents::MESSAGE_CONTENT;
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_VOICE_STATES
+        | GatewayIntents::GUILD_MESSAGE_TYPING
+        | GatewayIntents::DIRECT_MESSAGE_TYPING;
+    if config.discord.presence_enabled {
+        intents |= GatewayIntents::GUILD_PRESENCES;
+    }
 
     let mut client = Client::builder(&bot_token, intents)
         .event_handler(Handler)

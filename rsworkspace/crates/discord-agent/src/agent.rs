@@ -68,6 +68,15 @@ impl DiscordAgent {
             self.handle_member_events(),
             self.handle_message_lifecycle(),
             self.handle_reactions(),
+            self.handle_typing(),
+            self.handle_voice(),
+            self.handle_guild_lifecycle(),
+            self.handle_channel_lifecycle(),
+            self.handle_role_lifecycle(),
+            self.handle_presence(),
+            self.handle_bot_ready(),
+            self.handle_autocomplete(),
+            self.handle_modal_submit(),
         )?;
 
         Ok(())
@@ -290,6 +299,356 @@ impl DiscordAgent {
                     }
                 }
                 else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle typing start events
+    async fn handle_typing(&self) -> Result<()> {
+        use discord_types::events::TypingStartEvent;
+
+        let subject = discord_nats::subjects::bot::typing_start(self.subscriber.prefix());
+        info!("Subscribing to typing events: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<TypingStartEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self.processor.process_typing_start(&event).await {
+                        error!("Failed to process typing_start: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize typing_start event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle voice state update events
+    async fn handle_voice(&self) -> Result<()> {
+        use discord_types::events::VoiceStateUpdateEvent;
+
+        let subject = discord_nats::subjects::bot::voice_state_update(self.subscriber.prefix());
+        info!("Subscribing to voice state events: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<VoiceStateUpdateEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self.processor.process_voice_state_update(&event).await {
+                        error!("Failed to process voice_state_update: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize voice_state_update event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle guild create, update, and delete events
+    async fn handle_guild_lifecycle(&self) -> Result<()> {
+        use discord_types::events::{GuildCreateEvent, GuildDeleteEvent, GuildUpdateEvent};
+
+        let create_subject = discord_nats::subjects::bot::guild_create(self.subscriber.prefix());
+        let update_subject = discord_nats::subjects::bot::guild_update(self.subscriber.prefix());
+        let delete_subject = discord_nats::subjects::bot::guild_delete(self.subscriber.prefix());
+
+        info!("Subscribing to guild lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+
+        let mut create_stream = self
+            .subscriber
+            .queue_subscribe::<GuildCreateEvent>(&create_subject, "discord-agents")
+            .await?;
+        let mut update_stream = self
+            .subscriber
+            .queue_subscribe::<GuildUpdateEvent>(&update_subject, "discord-agents")
+            .await?;
+        let mut delete_stream = self
+            .subscriber
+            .queue_subscribe::<GuildDeleteEvent>(&delete_subject, "discord-agents")
+            .await?;
+
+        loop {
+            tokio::select! {
+                Some(result) = create_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_guild_create(&event).await {
+                                error!("Failed to process guild_create: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize guild_create event: {}", e),
+                    }
+                }
+                Some(result) = update_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_guild_update(&event).await {
+                                error!("Failed to process guild_update: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize guild_update event: {}", e),
+                    }
+                }
+                Some(result) = delete_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_guild_delete(&event).await {
+                                error!("Failed to process guild_delete: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize guild_delete event: {}", e),
+                    }
+                }
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle channel create, update, and delete events
+    async fn handle_channel_lifecycle(&self) -> Result<()> {
+        use discord_types::events::{ChannelCreateEvent, ChannelDeleteEvent, ChannelUpdateEvent};
+
+        let create_subject = discord_nats::subjects::bot::channel_create(self.subscriber.prefix());
+        let update_subject = discord_nats::subjects::bot::channel_update(self.subscriber.prefix());
+        let delete_subject = discord_nats::subjects::bot::channel_delete(self.subscriber.prefix());
+
+        info!("Subscribing to channel lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+
+        let mut create_stream = self
+            .subscriber
+            .queue_subscribe::<ChannelCreateEvent>(&create_subject, "discord-agents")
+            .await?;
+        let mut update_stream = self
+            .subscriber
+            .queue_subscribe::<ChannelUpdateEvent>(&update_subject, "discord-agents")
+            .await?;
+        let mut delete_stream = self
+            .subscriber
+            .queue_subscribe::<ChannelDeleteEvent>(&delete_subject, "discord-agents")
+            .await?;
+
+        loop {
+            tokio::select! {
+                Some(result) = create_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_channel_create(&event).await {
+                                error!("Failed to process channel_create: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize channel_create event: {}", e),
+                    }
+                }
+                Some(result) = update_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_channel_update(&event).await {
+                                error!("Failed to process channel_update: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize channel_update event: {}", e),
+                    }
+                }
+                Some(result) = delete_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_channel_delete(&event).await {
+                                error!("Failed to process channel_delete: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize channel_delete event: {}", e),
+                    }
+                }
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle role create, update, and delete events
+    async fn handle_role_lifecycle(&self) -> Result<()> {
+        use discord_types::events::{RoleCreateEvent, RoleDeleteEvent, RoleUpdateEvent};
+
+        let create_subject = discord_nats::subjects::bot::role_create(self.subscriber.prefix());
+        let update_subject = discord_nats::subjects::bot::role_update(self.subscriber.prefix());
+        let delete_subject = discord_nats::subjects::bot::role_delete(self.subscriber.prefix());
+
+        info!("Subscribing to role lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+
+        let mut create_stream = self
+            .subscriber
+            .queue_subscribe::<RoleCreateEvent>(&create_subject, "discord-agents")
+            .await?;
+        let mut update_stream = self
+            .subscriber
+            .queue_subscribe::<RoleUpdateEvent>(&update_subject, "discord-agents")
+            .await?;
+        let mut delete_stream = self
+            .subscriber
+            .queue_subscribe::<RoleDeleteEvent>(&delete_subject, "discord-agents")
+            .await?;
+
+        loop {
+            tokio::select! {
+                Some(result) = create_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_role_create(&event).await {
+                                error!("Failed to process role_create: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize role_create event: {}", e),
+                    }
+                }
+                Some(result) = update_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_role_update(&event).await {
+                                error!("Failed to process role_update: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize role_update event: {}", e),
+                    }
+                }
+                Some(result) = delete_stream.next() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.processor.process_role_delete(&event).await {
+                                error!("Failed to process role_delete: {}", e);
+                            }
+                        }
+                        Err(e) => error!("Failed to deserialize role_delete event: {}", e),
+                    }
+                }
+                else => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle presence update events
+    async fn handle_presence(&self) -> Result<()> {
+        use discord_types::events::PresenceUpdateEvent;
+
+        let subject = discord_nats::subjects::bot::presence_update(self.subscriber.prefix());
+        info!("Subscribing to presence events: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<PresenceUpdateEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self.processor.process_presence_update(&event).await {
+                        error!("Failed to process presence_update: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize presence_update event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle bot ready events
+    async fn handle_bot_ready(&self) -> Result<()> {
+        use discord_types::events::BotReadyEvent;
+
+        let subject = discord_nats::subjects::bot::bot_ready(self.subscriber.prefix());
+        info!("Subscribing to bot_ready: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<BotReadyEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self.processor.process_bot_ready(&event).await {
+                        error!("Failed to process bot_ready: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize bot_ready event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle autocomplete interaction events
+    async fn handle_autocomplete(&self) -> Result<()> {
+        use discord_types::events::AutocompleteEvent;
+
+        let subject = discord_nats::subjects::bot::interaction_autocomplete(self.subscriber.prefix());
+        info!("Subscribing to autocomplete: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<AutocompleteEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self
+                        .processor
+                        .process_autocomplete(&event, &self.publisher)
+                        .await
+                    {
+                        error!("Failed to process autocomplete: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize autocomplete event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle modal submit events
+    async fn handle_modal_submit(&self) -> Result<()> {
+        use discord_types::events::ModalSubmitEvent;
+
+        let subject = discord_nats::subjects::bot::interaction_modal(self.subscriber.prefix());
+        info!("Subscribing to modal_submit: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<ModalSubmitEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    if let Err(e) = self
+                        .processor
+                        .process_modal_submit(&event, &self.publisher)
+                        .await
+                    {
+                        error!("Failed to process modal_submit: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize modal_submit event: {}", e),
             }
         }
 

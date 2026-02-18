@@ -22,6 +22,9 @@ pub struct DiscordBotConfig {
     /// Bot token from the Discord developer portal
     #[serde(default = "default_bot_token")]
     pub bot_token: String,
+    /// Publish presence update events to NATS (requires GUILD_PRESENCES privileged intent)
+    #[serde(default)]
+    pub presence_enabled: bool,
     /// Access control configuration
     #[serde(default)]
     pub access: AccessConfig,
@@ -83,9 +86,15 @@ impl Config {
             .to_lowercase()
             == "true";
 
+        let presence_enabled = std::env::var("DISCORD_BRIDGE_PRESENCE")
+            .unwrap_or_else(|_| "false".to_string())
+            .to_lowercase()
+            == "true";
+
         Ok(Config {
             discord: DiscordBotConfig {
                 bot_token,
+                presence_enabled,
                 access: AccessConfig {
                     dm_policy,
                     guild_policy,

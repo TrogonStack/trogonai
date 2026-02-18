@@ -4,13 +4,16 @@ use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher};
 use discord_types::{
     events::{
-        ComponentInteractionEvent, GuildMemberAddEvent, GuildMemberRemoveEvent,
-        MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ReactionAddEvent,
-        ReactionRemoveEvent, SlashCommandEvent,
+        AutocompleteEvent, BotReadyEvent, ChannelCreateEvent, ChannelDeleteEvent,
+        ChannelUpdateEvent, ComponentInteractionEvent, GuildCreateEvent, GuildDeleteEvent,
+        GuildMemberAddEvent, GuildMemberRemoveEvent, GuildUpdateEvent, MessageCreatedEvent,
+        MessageDeletedEvent, MessageUpdatedEvent, ModalSubmitEvent, PresenceUpdateEvent,
+        ReactionAddEvent, ReactionRemoveEvent, RoleCreateEvent, RoleDeleteEvent, RoleUpdateEvent,
+        SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
     },
     types::{Attachment, ChannelType},
-    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand,
-    SendMessageCommand, StreamMessageCommand, TypingCommand,
+    AutocompleteRespondCommand, InteractionDeferCommand, InteractionFollowupCommand,
+    InteractionRespondCommand, SendMessageCommand, StreamMessageCommand, TypingCommand,
 };
 use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -1295,6 +1298,153 @@ impl MessageProcessor {
             ephemeral,
         };
         let subject = subjects::agent::interaction_defer(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+        Ok(())
+    }
+
+    pub async fn process_typing_start(&self, event: &TypingStartEvent) -> Result<()> {
+        debug!(
+            "User {} typing in channel {}",
+            event.user_id, event.channel_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_voice_state_update(&self, event: &VoiceStateUpdateEvent) -> Result<()> {
+        debug!(
+            "Voice state update for user {} (channel: {:?})",
+            event.new_state.user_id, event.new_state.channel_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_guild_create(&self, event: &GuildCreateEvent) -> Result<()> {
+        info!(
+            "Bot joined guild '{}' (id: {}, {} members)",
+            event.guild.name, event.guild.id, event.member_count
+        );
+        Ok(())
+    }
+
+    pub async fn process_guild_update(&self, event: &GuildUpdateEvent) -> Result<()> {
+        debug!("Guild '{}' updated (id: {})", event.guild.name, event.guild.id);
+        Ok(())
+    }
+
+    pub async fn process_guild_delete(&self, event: &GuildDeleteEvent) -> Result<()> {
+        info!(
+            "Bot left guild {} (unavailable: {})",
+            event.guild_id, event.unavailable
+        );
+        Ok(())
+    }
+
+    pub async fn process_channel_create(&self, event: &ChannelCreateEvent) -> Result<()> {
+        debug!(
+            "Channel created: {:?} (id: {})",
+            event.channel.name, event.channel.id
+        );
+        Ok(())
+    }
+
+    pub async fn process_channel_update(&self, event: &ChannelUpdateEvent) -> Result<()> {
+        debug!(
+            "Channel updated: {:?} (id: {})",
+            event.channel.name, event.channel.id
+        );
+        Ok(())
+    }
+
+    pub async fn process_channel_delete(&self, event: &ChannelDeleteEvent) -> Result<()> {
+        debug!(
+            "Channel {} deleted from guild {}",
+            event.channel_id, event.guild_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_role_create(&self, event: &RoleCreateEvent) -> Result<()> {
+        debug!(
+            "Role '{}' created in guild {}",
+            event.role.name, event.guild_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_role_update(&self, event: &RoleUpdateEvent) -> Result<()> {
+        debug!(
+            "Role '{}' updated in guild {}",
+            event.role.name, event.guild_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_role_delete(&self, event: &RoleDeleteEvent) -> Result<()> {
+        debug!(
+            "Role {} deleted from guild {}",
+            event.role_id, event.guild_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_presence_update(&self, event: &PresenceUpdateEvent) -> Result<()> {
+        debug!(
+            "Presence update: user {} is now '{}' in guild {}",
+            event.user_id, event.status, event.guild_id
+        );
+        Ok(())
+    }
+
+    pub async fn process_bot_ready(&self, event: &BotReadyEvent) -> Result<()> {
+        info!(
+            "Bot ready: {} (id: {}) in {} guilds",
+            event.bot_user.username, event.bot_user.id, event.guild_count
+        );
+        Ok(())
+    }
+
+    /// Respond to autocomplete with empty choices.
+    /// Autocomplete MUST be responded to within 3 seconds.
+    pub async fn process_autocomplete(
+        &self,
+        event: &AutocompleteEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        debug!(
+            "Autocomplete for command '{}' option '{}' value '{}'",
+            event.command_name, event.focused_option, event.current_value
+        );
+
+        let cmd = AutocompleteRespondCommand {
+            interaction_id: event.interaction_id,
+            interaction_token: event.interaction_token.clone(),
+            choices: vec![],
+        };
+        let subject = subjects::agent::interaction_autocomplete_respond(publisher.prefix());
+        publisher.publish(&subject, &cmd).await?;
+        Ok(())
+    }
+
+    /// Acknowledge a modal submission with an ephemeral message.
+    /// Modals MUST be responded to within 3 seconds.
+    pub async fn process_modal_submit(
+        &self,
+        event: &ModalSubmitEvent,
+        publisher: &MessagePublisher,
+    ) -> Result<()> {
+        debug!(
+            "Modal submitted: custom_id='{}' user={}",
+            event.custom_id, event.user.id
+        );
+
+        let cmd = InteractionRespondCommand {
+            interaction_id: event.interaction_id,
+            interaction_token: event.interaction_token.clone(),
+            content: Some("Received.".to_string()),
+            embeds: vec![],
+            ephemeral: true,
+        };
+        let subject = subjects::agent::interaction_respond(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
         Ok(())
     }

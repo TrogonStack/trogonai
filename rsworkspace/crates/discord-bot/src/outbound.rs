@@ -12,16 +12,21 @@ use std::sync::Arc;
 use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
-    AddReactionCommand, DeleteMessageCommand, EditMessageCommand, InteractionDeferCommand,
-    InteractionFollowupCommand, InteractionRespondCommand, RemoveReactionCommand,
-    SendMessageCommand, TypingCommand,
+    AddReactionCommand, ArchiveThreadCommand, AssignRoleCommand, AutocompleteRespondCommand,
+    BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateRoleCommand,
+    CreateThreadCommand, DeleteChannelCommand, DeleteMessageCommand, DeleteRoleCommand,
+    EditChannelCommand, EditMessageCommand, InteractionDeferCommand, InteractionFollowupCommand,
+    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
+    RemoveReactionCommand, RemoveRoleCommand, SendMessageCommand, TimeoutUserCommand,
+    TypingCommand, UnpinMessageCommand,
 };
 use serenity::builder::{
-    CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage,
-    CreateMessage, EditMessage,
+    CreateAutocompleteResponse, CreateChannel, CreateInteractionResponse,
+    CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
+    CreateThread, EditChannel, EditMember, EditMessage, EditRole, EditThread,
 };
 use serenity::http::Http;
-use serenity::model::id::{ChannelId, MessageId};
+use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, UserId};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -76,7 +81,11 @@ impl OutboundProcessor {
 
         info!("Starting outbound processor for prefix: {}", prefix);
 
-        let (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10) = tokio::join!(
+        let (
+            r1, r2, r3, r4, r5, r6, r7, r8, r9, r10,
+            r11, r12, r13, r14, r15, r16, r17, r18, r19, r20,
+            r21, r22, r23, r24, r25, r26, r27,
+        ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
                 client.clone(),
@@ -122,6 +131,23 @@ impl OutboundProcessor {
                 prefix.clone(),
                 streaming_messages,
             ),
+            Self::handle_modal_respond(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_autocomplete_respond(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_ban(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_kick(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_timeout(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_create_channel(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_edit_channel(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_delete_channel(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_create_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_assign_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_remove_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_delete_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_pin(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_unpin(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_bulk_delete(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_create_thread(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_archive_thread(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -136,6 +162,23 @@ impl OutboundProcessor {
             ("reaction_remove", r8),
             ("typing", r9),
             ("stream_messages", r10),
+            ("modal_respond", r11),
+            ("autocomplete_respond", r12),
+            ("ban", r13),
+            ("kick", r14),
+            ("timeout", r15),
+            ("create_channel", r16),
+            ("edit_channel", r17),
+            ("delete_channel", r18),
+            ("create_role", r19),
+            ("assign_role", r20),
+            ("remove_role", r21),
+            ("delete_role", r22),
+            ("pin", r23),
+            ("unpin", r24),
+            ("bulk_delete", r25),
+            ("create_thread", r26),
+            ("archive_thread", r27),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -592,6 +635,832 @@ impl OutboundProcessor {
                 Err(e) => {
                     warn!("Failed to deserialize typing command: {}", e);
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_modal_respond(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::builder::{CreateActionRow, CreateInputText};
+        use serenity::all::InputTextStyle;
+
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::interaction_modal_respond(&prefix);
+        let mut stream = subscriber
+            .subscribe::<ModalRespondCommand>(&subject)
+            .await?;
+
+        info!("Listening for modal_respond commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let components: Vec<CreateActionRow> = cmd
+                        .inputs
+                        .iter()
+                        .map(|inp| {
+                            CreateActionRow::InputText(
+                                CreateInputText::new(
+                                    InputTextStyle::Short,
+                                    &inp.custom_id,
+                                    &inp.custom_id,
+                                )
+                                .value(&inp.value),
+                            )
+                        })
+                        .collect();
+
+                    use serenity::builder::CreateModal;
+                    let modal = CreateModal::new(&cmd.custom_id, &cmd.title)
+                        .components(components);
+                    let response = CreateInteractionResponse::Modal(modal);
+
+                    if let Err(e) = http
+                        .create_interaction_response(
+                            cmd.interaction_id.into(),
+                            &cmd.interaction_token,
+                            &response,
+                            Vec::new(),
+                        )
+                        .await
+                    {
+                        log_error(
+                            &subject,
+                            &format!("Failed to respond with modal to {}", cmd.interaction_id),
+                            &e,
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to deserialize modal_respond command: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_autocomplete_respond(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::interaction_autocomplete_respond(&prefix);
+        let mut stream = subscriber
+            .subscribe::<AutocompleteRespondCommand>(&subject)
+            .await?;
+
+        info!("Listening for autocomplete_respond commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let mut response = CreateAutocompleteResponse::new();
+                    for choice in &cmd.choices {
+                        response = response.add_string_choice(&choice.name, &choice.value);
+                    }
+                    let ir = CreateInteractionResponse::Autocomplete(response);
+
+                    if let Err(e) = http
+                        .create_interaction_response(
+                            cmd.interaction_id.into(),
+                            &cmd.interaction_token,
+                            &ir,
+                            Vec::new(),
+                        )
+                        .await
+                    {
+                        log_error(
+                            &subject,
+                            &format!("Failed autocomplete_respond for {}", cmd.interaction_id),
+                            &e,
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to deserialize autocomplete_respond command: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_ban(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::guild_ban(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<BanUserCommand>(&subject).await?;
+
+        info!("Listening for ban commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let user = UserId::new(cmd.user_id);
+                    let context = format!("Failed to ban user {} in guild {}", cmd.user_id, cmd.guild_id);
+                    // dmd = delete message days (max 7), API expects u8
+                    let delete_days = (cmd.delete_message_seconds / 86400).min(7) as u8;
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.ban(http.as_ref(), user, delete_days).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize ban command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_kick(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::guild_kick(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<KickUserCommand>(&subject).await?;
+
+        info!("Listening for kick commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let user = UserId::new(cmd.user_id);
+                    let context = format!("Failed to kick user {} from guild {}", cmd.user_id, cmd.guild_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.kick(http.as_ref(), user).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize kick command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_timeout(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::guild_timeout(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<TimeoutUserCommand>(&subject).await?;
+
+        info!("Listening for timeout commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let user = UserId::new(cmd.user_id);
+                    let context = format!("Failed to timeout user {} in guild {}", cmd.user_id, cmd.guild_id);
+
+                    let edit = if cmd.duration_secs == 0 {
+                        EditMember::new().enable_communication()
+                    } else {
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let until_secs = (now_secs + cmd.duration_secs) as i64;
+                        let timestamp =
+                            serenity::model::Timestamp::from_unix_timestamp(until_secs)
+                                .unwrap_or_else(|_| serenity::model::Timestamp::now());
+                        EditMember::new().disable_communication_until_datetime(timestamp)
+                    };
+
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.edit_member(http.as_ref(), user, edit.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize timeout command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_channel(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        use discord_types::types::ChannelType as DcChannelType;
+        use serenity::model::channel::ChannelType as SerenityChannelType;
+
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::channel_create(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<CreateChannelCommand>(&subject).await?;
+
+        info!("Listening for create_channel commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let context = format!("Failed to create channel '{}' in guild {}", cmd.name, cmd.guild_id);
+                    let kind = match cmd.channel_type {
+                        DcChannelType::GuildVoice => SerenityChannelType::Voice,
+                        DcChannelType::GuildCategory => SerenityChannelType::Category,
+                        DcChannelType::GuildNews => SerenityChannelType::News,
+                        DcChannelType::GuildStageVoice => SerenityChannelType::Stage,
+                        DcChannelType::GuildForum => SerenityChannelType::Forum,
+                        _ => SerenityChannelType::Text,
+                    };
+                    let mut builder = CreateChannel::new(&cmd.name).kind(kind);
+                    if let Some(topic) = cmd.topic {
+                        builder = builder.topic(&topic);
+                    }
+                    if let Some(cat_id) = cmd.category_id {
+                        builder = builder.category(ChannelId::new(cat_id));
+                    }
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.create_channel(http.as_ref(), builder.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize create_channel command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_edit_channel(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::channel_edit(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<EditChannelCommand>(&subject).await?;
+
+        info!("Listening for edit_channel commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!("Failed to edit channel {}", cmd.channel_id);
+                    let mut builder = EditChannel::new();
+                    if let Some(ref name) = cmd.name {
+                        builder = builder.name(name);
+                    }
+                    if let Some(ref topic) = cmd.topic {
+                        builder = builder.topic(topic);
+                    }
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.edit(http.as_ref(), builder.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize edit_channel command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_delete_channel(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::channel_delete(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteChannelCommand>(&subject).await?;
+
+        info!("Listening for delete_channel commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!("Failed to delete channel {}", cmd.channel_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.delete(http.as_ref()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize delete_channel command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_role(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::role_create(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<CreateRoleCommand>(&subject).await?;
+
+        info!("Listening for create_role commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let context = format!("Failed to create role '{}' in guild {}", cmd.name, cmd.guild_id);
+                    let mut builder = EditRole::new()
+                        .name(&cmd.name)
+                        .hoist(cmd.hoist)
+                        .mentionable(cmd.mentionable);
+                    if let Some(color) = cmd.color {
+                        builder = builder.colour(color);
+                    }
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.create_role(http.as_ref(), builder.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize create_role command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_assign_role(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::role_assign(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<AssignRoleCommand>(&subject).await?;
+
+        info!("Listening for assign_role commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let context = format!("Failed to assign role {} to user {} in guild {}", cmd.role_id, cmd.user_id, cmd.guild_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match http
+                            .add_member_role(
+                                GuildId::new(cmd.guild_id),
+                                UserId::new(cmd.user_id),
+                                RoleId::new(cmd.role_id),
+                                None,
+                            )
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize assign_role command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_remove_role(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::role_remove(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<RemoveRoleCommand>(&subject).await?;
+
+        info!("Listening for remove_role commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let context = format!("Failed to remove role {} from user {} in guild {}", cmd.role_id, cmd.user_id, cmd.guild_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match http
+                            .remove_member_role(
+                                GuildId::new(cmd.guild_id),
+                                UserId::new(cmd.user_id),
+                                RoleId::new(cmd.role_id),
+                                None,
+                            )
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize remove_role command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_delete_role(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::role_delete(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteRoleCommand>(&subject).await?;
+
+        info!("Listening for delete_role commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let role = RoleId::new(cmd.role_id);
+                    let context = format!("Failed to delete role {} in guild {}", cmd.role_id, cmd.guild_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match guild.delete_role(http.as_ref(), role).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize delete_role command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_pin(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::message_pin(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<PinMessageCommand>(&subject).await?;
+
+        info!("Listening for pin commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let message = MessageId::new(cmd.message_id);
+                    let context = format!("Failed to pin message {} in channel {}", cmd.message_id, cmd.channel_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.pin(http.as_ref(), message).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize pin command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_unpin(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::message_unpin(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<UnpinMessageCommand>(&subject).await?;
+
+        info!("Listening for unpin commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let message = MessageId::new(cmd.message_id);
+                    let context = format!("Failed to unpin message {} in channel {}", cmd.message_id, cmd.channel_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.unpin(http.as_ref(), message).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize unpin command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_bulk_delete(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::message_bulk_delete(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber
+            .subscribe::<BulkDeleteMessagesCommand>(&subject)
+            .await?;
+
+        info!("Listening for bulk_delete commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let message_ids: Vec<MessageId> = cmd
+                        .message_ids
+                        .iter()
+                        .map(|&id| MessageId::new(id))
+                        .collect();
+                    let context = format!("Failed to bulk delete {} messages in channel {}", message_ids.len(), cmd.channel_id);
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.delete_messages(http.as_ref(), &message_ids).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize bulk_delete command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_thread(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        use serenity::model::channel::AutoArchiveDuration;
+
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::thread_create(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber.subscribe::<CreateThreadCommand>(&subject).await?;
+
+        info!("Listening for create_thread commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!("Failed to create thread '{}' in channel {}", cmd.name, cmd.channel_id);
+                    let archive_dur = match cmd.auto_archive_mins {
+                        60 => AutoArchiveDuration::OneHour,
+                        4320 => AutoArchiveDuration::ThreeDays,
+                        10080 => AutoArchiveDuration::OneWeek,
+                        _ => AutoArchiveDuration::OneDay,
+                    };
+                    let builder = CreateThread::new(&cmd.name)
+                        .auto_archive_duration(archive_dur);
+                    for attempt in 0..=MAX_RETRIES {
+                        let result = if let Some(msg_id) = cmd.message_id {
+                            channel
+                                .create_thread_from_message(
+                                    http.as_ref(),
+                                    MessageId::new(msg_id),
+                                    builder.clone(),
+                                )
+                                .await
+                        } else {
+                            channel.create_thread(http.as_ref(), builder.clone()).await
+                        };
+                        match result {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize create_thread command: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_archive_thread(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::thread_archive(&prefix);
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut stream = subscriber
+            .subscribe::<ArchiveThreadCommand>(&subject)
+            .await?;
+
+        info!("Listening for archive_thread commands on {}", subject);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!("Failed to archive thread {}", cmd.channel_id);
+                    let builder = EditThread::new().archived(true).locked(cmd.locked);
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.edit_thread(http.as_ref(), builder.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize archive_thread command: {}", e),
             }
         }
 

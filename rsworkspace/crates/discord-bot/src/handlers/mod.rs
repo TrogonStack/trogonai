@@ -3,12 +3,13 @@
 use serenity::async_trait;
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::application::{Command, CommandOptionType, Interaction};
-use serenity::model::channel::Message;
-use serenity::model::event::MessageUpdateEvent;
-use serenity::model::gateway::Ready;
-use serenity::model::guild::Member;
-use serenity::model::id::{ChannelId, GuildId, MessageId};
+use serenity::model::channel::{GuildChannel, Message};
+use serenity::model::event::{MessageUpdateEvent, TypingStartEvent};
+use serenity::model::gateway::{Presence, Ready};
+use serenity::model::guild::{Guild, Member, PartialGuild, Role, UnavailableGuild};
+use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId};
 use serenity::model::user::User;
+use serenity::model::voice::VoiceState;
 use serenity::prelude::*;
 use tracing::{debug, error, info, warn};
 
@@ -33,6 +34,9 @@ impl EventHandler for Handler {
             }
             if let Some(bridge) = data.get::<DiscordBridge>() {
                 bridge.set_bot_user_id(ready.user.id.get());
+                if let Err(e) = bridge.publish_bot_ready(&ready).await {
+                    error!("Failed to publish bot_ready: {}", e);
+                }
             }
         }
 
@@ -224,9 +228,17 @@ impl EventHandler for Handler {
                     error!("Failed to publish component_interaction: {}", e);
                 }
             }
-            _ => {
-                // Other interaction types (autocomplete, modal, ping) not handled
+            Interaction::Autocomplete(cmd) => {
+                if let Err(e) = bridge.publish_autocomplete(&cmd).await {
+                    error!("Failed to publish autocomplete: {}", e);
+                }
             }
+            Interaction::Modal(modal) => {
+                if let Err(e) = bridge.publish_modal_submit(&modal).await {
+                    error!("Failed to publish modal_submit: {}", e);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -326,6 +338,211 @@ impl EventHandler for Handler {
 
         if let Err(e) = bridge.publish_guild_member_remove(gid, &user).await {
             error!("Failed to publish guild_member_remove: {}", e);
+        }
+    }
+
+    async fn typing_start(&self, ctx: Context, event: TypingStartEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_typing_start(&event).await {
+            debug!("Failed to publish typing_start: {}", e);
+        }
+    }
+
+    async fn voice_state_update(
+        &self,
+        ctx: Context,
+        old: Option<VoiceState>,
+        new: VoiceState,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_voice_state_update(old.as_ref(), &new).await {
+            error!("Failed to publish voice_state_update: {}", e);
+        }
+    }
+
+    async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: Option<bool>) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let member_count = guild.member_count;
+        if let Err(e) = bridge.publish_guild_create(&guild, member_count).await {
+            error!("Failed to publish guild_create: {}", e);
+        }
+    }
+
+    async fn guild_update(&self, ctx: Context, _old: Option<Guild>, new: PartialGuild) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_guild_update(&new).await {
+            error!("Failed to publish guild_update: {}", e);
+        }
+    }
+
+    async fn guild_delete(
+        &self,
+        ctx: Context,
+        incomplete: UnavailableGuild,
+        _full: Option<Guild>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge.publish_guild_delete(&incomplete).await {
+            error!("Failed to publish guild_delete: {}", e);
+        }
+    }
+
+    async fn channel_create(&self, ctx: Context, channel: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(channel.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_channel_create(&channel).await {
+            error!("Failed to publish channel_create: {}", e);
+        }
+    }
+
+    async fn channel_update(&self, ctx: Context, _old: Option<GuildChannel>, new: GuildChannel) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(new.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_channel_update(&new).await {
+            error!("Failed to publish channel_update: {}", e);
+        }
+    }
+
+    async fn channel_delete(
+        &self,
+        ctx: Context,
+        channel: GuildChannel,
+        _messages: Option<Vec<Message>>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(channel.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge
+            .publish_channel_delete(channel.id.get(), channel.guild_id.get())
+            .await
+        {
+            error!("Failed to publish channel_delete: {}", e);
+        }
+    }
+
+    async fn guild_role_create(&self, ctx: Context, new: Role) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let guild_id = new.guild_id.get();
+        if !bridge.check_guild_access(guild_id) {
+            return;
+        }
+        if let Err(e) = bridge.publish_role_create(guild_id, &new).await {
+            error!("Failed to publish role_create: {}", e);
+        }
+    }
+
+    async fn guild_role_update(&self, ctx: Context, _old: Option<Role>, new: Role) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let guild_id = new.guild_id.get();
+        if !bridge.check_guild_access(guild_id) {
+            return;
+        }
+        if let Err(e) = bridge.publish_role_update(guild_id, &new).await {
+            error!("Failed to publish role_update: {}", e);
+        }
+    }
+
+    async fn guild_role_delete(
+        &self,
+        ctx: Context,
+        guild_id: GuildId,
+        role_id: RoleId,
+        _role: Option<Role>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        let gid = guild_id.get();
+        if !bridge.check_guild_access(gid) {
+            return;
+        }
+        if let Err(e) = bridge.publish_role_delete(gid, role_id.get()).await {
+            error!("Failed to publish role_delete: {}", e);
+        }
+    }
+
+    async fn presence_update(&self, ctx: Context, new_data: Presence) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.presence_enabled {
+            return;
+        }
+        if let Err(e) = bridge.publish_presence_update(&new_data).await {
+            debug!("Failed to publish presence_update: {}", e);
         }
     }
 }

@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
 /// Default maximum messages to keep in history per session.
-const DEFAULT_MAX_HISTORY_SIZE: usize = 20;
+pub const DEFAULT_MAX_HISTORY_SIZE: usize = 20;
 
 /// How often the in-memory cleanup task runs.
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600); // 1 hour

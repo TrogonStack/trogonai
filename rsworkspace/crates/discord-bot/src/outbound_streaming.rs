@@ -187,16 +187,17 @@ async fn process_stream_message(
 }
 
 /// Truncate content to Discord's 2000-character limit, appending "…" if cut.
-fn truncate(content: &str) -> &str {
+fn truncate(content: &str) -> std::borrow::Cow<'_, str> {
     if content.len() <= MAX_DISCORD_LEN {
-        content
+        std::borrow::Cow::Borrowed(content)
     } else {
+        const ELLIPSIS: &str = "…"; // 3 UTF-8 bytes
         // Walk back to a char boundary so we don't split a multi-byte char.
-        let mut end = MAX_DISCORD_LEN - 1; // leave room for the ellipsis
+        let mut end = MAX_DISCORD_LEN - ELLIPSIS.len();
         while !content.is_char_boundary(end) {
             end -= 1;
         }
-        &content[..end]
+        std::borrow::Cow::Owned(format!("{}{}", &content[..end], ELLIPSIS))
     }
 }
 

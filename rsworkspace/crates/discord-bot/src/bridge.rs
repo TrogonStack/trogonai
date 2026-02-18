@@ -17,14 +17,21 @@ use discord_types::{
     events::*,
     session::{member_session_id, session_id},
     types::{
-        Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordMember,
-        DiscordMessage, DiscordUser, Embed, EmbedField, Emoji,
+        Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordChannel,
+        DiscordGuild, DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, EmbedField,
+        Emoji, ModalInput, VoiceState as BridgeVoiceState,
     },
     AccessConfig,
 };
 use serenity::model::application::{
-    CommandInteraction, ComponentInteraction, ComponentInteractionDataKind, ResolvedValue,
+    CommandInteraction, ComponentInteraction, ComponentInteractionDataKind,
+    ModalInteraction, ResolvedValue,
 };
+use serenity::model::channel::GuildChannel;
+use serenity::model::event::TypingStartEvent as SerenityTypingStartEvent;
+use serenity::model::gateway::{Presence, Ready};
+use serenity::model::guild::{PartialGuild, Role, UnavailableGuild};
+use serenity::model::voice::VoiceState as SerenityVoiceState;
 use serenity::model::channel::Message as SerenityMessage;
 use serenity::model::channel::ReactionType;
 use serenity::model::event::MessageUpdateEvent;
@@ -40,6 +47,8 @@ pub struct DiscordBridge {
     pub access_config: AccessConfig,
     sequence: Arc<AtomicU64>,
     bot_user_id: Arc<AtomicU64>,
+    /// Whether to publish presence update events (requires GUILD_PRESENCES intent)
+    pub presence_enabled: bool,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -48,12 +57,18 @@ impl TypeMapKey for DiscordBridge {
 
 impl DiscordBridge {
     /// Create a new bridge
-    pub fn new(client: async_nats::Client, prefix: String, access_config: AccessConfig) -> Self {
+    pub fn new(
+        client: async_nats::Client,
+        prefix: String,
+        access_config: AccessConfig,
+        presence_enabled: bool,
+    ) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
             access_config,
             sequence: Arc::new(AtomicU64::new(0)),
             bot_user_id: Arc::new(AtomicU64::new(0)),
+            presence_enabled,
         }
     }
 
@@ -493,6 +508,408 @@ impl DiscordBridge {
         let subject = subjects::bot::guild_member_remove(self.prefix());
         self.publisher.publish(&subject, &event).await?;
         debug!("Published guild_member_remove to {}", subject);
+        Ok(())
+    }
+
+    // ── Conversion helpers (new event types) ───────────────────────────────
+
+    pub fn convert_channel(ch: &GuildChannel) -> DiscordChannel {
+        use serenity::model::channel::ChannelType as SerenityChannelType;
+        DiscordChannel {
+            id: ch.id.get(),
+            channel_type: match ch.kind {
+                SerenityChannelType::Text => ChannelType::GuildText,
+                SerenityChannelType::Voice => ChannelType::GuildVoice,
+                SerenityChannelType::Category => ChannelType::GuildCategory,
+                SerenityChannelType::News => ChannelType::GuildNews,
+                SerenityChannelType::Stage => ChannelType::GuildStageVoice,
+                SerenityChannelType::Forum => ChannelType::GuildForum,
+                _ => ChannelType::Unknown,
+            },
+            guild_id: Some(ch.guild_id.get()),
+            name: Some(ch.name.clone()),
+        }
+    }
+
+    pub fn convert_role(role: &Role) -> DiscordRole {
+        DiscordRole {
+            id: role.id.get(),
+            name: role.name.clone(),
+            color: role.colour.0,
+            hoist: role.hoist,
+            position: role.position as i64,
+            permissions: role.permissions.bits().to_string(),
+            mentionable: role.mentionable,
+        }
+    }
+
+    pub fn convert_voice_state(vs: &SerenityVoiceState) -> BridgeVoiceState {
+        BridgeVoiceState {
+            user_id: vs.user_id.get(),
+            channel_id: vs.channel_id.map(|c| c.get()),
+            guild_id: vs.guild_id.map(|g| g.get()),
+            self_mute: vs.self_mute,
+            self_deaf: vs.self_deaf,
+        }
+    }
+
+    // ── New publish methods ────────────────────────────────────────────────
+
+    pub async fn publish_typing_start(&self, event: &SerenityTypingStartEvent) -> Result<()> {
+        let guild_id = event.guild_id.map(|g| g.get());
+        let sid = if let Some(gid) = guild_id {
+            member_session_id(gid)
+        } else {
+            format!("dc-dm-{}", event.user_id.get())
+        };
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = TypingStartEvent {
+            metadata: meta,
+            user_id: event.user_id.get(),
+            channel_id: event.channel_id.get(),
+            guild_id,
+        };
+
+        let subject = subjects::bot::typing_start(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published typing_start to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_voice_state_update(
+        &self,
+        old: Option<&SerenityVoiceState>,
+        new: &SerenityVoiceState,
+    ) -> Result<()> {
+        let guild_id = new.guild_id.map(|g| g.get());
+        let sid = if let Some(gid) = guild_id {
+            member_session_id(gid)
+        } else {
+            format!("dc-dm-{}", new.user_id.get())
+        };
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = VoiceStateUpdateEvent {
+            metadata: meta,
+            guild_id,
+            old_channel_id: old.and_then(|vs| vs.channel_id).map(|c| c.get()),
+            new_state: Self::convert_voice_state(new),
+        };
+
+        let subject = subjects::bot::voice_state_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published voice_state_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_create(
+        &self,
+        guild: &serenity::model::guild::Guild,
+        member_count: u64,
+    ) -> Result<()> {
+        let sid = member_session_id(guild.id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = GuildCreateEvent {
+            metadata: meta,
+            guild: DiscordGuild {
+                id: guild.id.get(),
+                name: guild.name.clone(),
+            },
+            member_count,
+        };
+
+        let subject = subjects::bot::guild_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_update(&self, guild: &PartialGuild) -> Result<()> {
+        let sid = member_session_id(guild.id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = GuildUpdateEvent {
+            metadata: meta,
+            guild: DiscordGuild {
+                id: guild.id.get(),
+                name: guild.name.clone(),
+            },
+        };
+
+        let subject = subjects::bot::guild_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_delete(&self, incomplete: &UnavailableGuild) -> Result<()> {
+        let sid = member_session_id(incomplete.id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = GuildDeleteEvent {
+            metadata: meta,
+            guild_id: incomplete.id.get(),
+            unavailable: incomplete.unavailable,
+        };
+
+        let subject = subjects::bot::guild_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published guild_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_channel_create(&self, channel: &GuildChannel) -> Result<()> {
+        let sid = member_session_id(channel.guild_id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = ChannelCreateEvent {
+            metadata: meta,
+            channel: Self::convert_channel(channel),
+        };
+
+        let subject = subjects::bot::channel_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published channel_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_channel_update(&self, channel: &GuildChannel) -> Result<()> {
+        let sid = member_session_id(channel.guild_id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = ChannelUpdateEvent {
+            metadata: meta,
+            channel: Self::convert_channel(channel),
+        };
+
+        let subject = subjects::bot::channel_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published channel_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_channel_delete(
+        &self,
+        channel_id: u64,
+        guild_id: u64,
+    ) -> Result<()> {
+        let sid = member_session_id(guild_id);
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = ChannelDeleteEvent {
+            metadata: meta,
+            channel_id,
+            guild_id,
+        };
+
+        let subject = subjects::bot::channel_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published channel_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_role_create(&self, guild_id: u64, role: &Role) -> Result<()> {
+        let sid = member_session_id(guild_id);
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = RoleCreateEvent {
+            metadata: meta,
+            guild_id,
+            role: Self::convert_role(role),
+        };
+
+        let subject = subjects::bot::role_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published role_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_role_update(&self, guild_id: u64, role: &Role) -> Result<()> {
+        let sid = member_session_id(guild_id);
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = RoleUpdateEvent {
+            metadata: meta,
+            guild_id,
+            role: Self::convert_role(role),
+        };
+
+        let subject = subjects::bot::role_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published role_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_role_delete(
+        &self,
+        guild_id: u64,
+        role_id: u64,
+    ) -> Result<()> {
+        let sid = member_session_id(guild_id);
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = RoleDeleteEvent {
+            metadata: meta,
+            guild_id,
+            role_id,
+        };
+
+        let subject = subjects::bot::role_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published role_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_presence_update(&self, presence: &Presence) -> Result<()> {
+        let Some(guild_id) = presence.guild_id else {
+            return Ok(());
+        };
+        let sid = member_session_id(guild_id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        use serenity::model::user::OnlineStatus;
+        let status = match presence.status {
+            OnlineStatus::Online => "online",
+            OnlineStatus::Idle => "idle",
+            OnlineStatus::DoNotDisturb => "dnd",
+            OnlineStatus::Offline | OnlineStatus::Invisible => "offline",
+            _ => "unknown",
+        }
+        .to_string();
+
+        let ev = PresenceUpdateEvent {
+            metadata: meta,
+            user_id: presence.user.id.get(),
+            guild_id: guild_id.get(),
+            status,
+        };
+
+        let subject = subjects::bot::presence_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published presence_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_modal_submit(&self, interaction: &ModalInteraction) -> Result<()> {
+        let guild_id = interaction.guild_id.map(|g| g.get());
+        let channel_id = interaction.channel_id.get();
+        let sid = if let Some(gid) = guild_id {
+            session_id(
+                &ChannelType::GuildText,
+                channel_id,
+                Some(gid),
+                Some(interaction.user.id.get()),
+            )
+        } else {
+            session_id(
+                &ChannelType::Dm,
+                channel_id,
+                None,
+                Some(interaction.user.id.get()),
+            )
+        };
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        use serenity::model::application::ActionRowComponent;
+        let inputs: Vec<ModalInput> = interaction
+            .data
+            .components
+            .iter()
+            .flat_map(|row| row.components.iter())
+            .filter_map(|comp| {
+                if let ActionRowComponent::InputText(input) = comp {
+                    Some(ModalInput {
+                        custom_id: input.custom_id.clone(),
+                        value: input.value.clone().unwrap_or_default(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let ev = ModalSubmitEvent {
+            metadata: meta,
+            interaction_id: interaction.id.get(),
+            interaction_token: interaction.token.clone(),
+            guild_id,
+            channel_id,
+            user: Self::convert_user(&interaction.user),
+            custom_id: interaction.data.custom_id.clone(),
+            inputs,
+        };
+
+        let subject = subjects::bot::interaction_modal(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published interaction_modal to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_autocomplete(&self, interaction: &CommandInteraction) -> Result<()> {
+        let guild_id = interaction.guild_id.map(|g| g.get());
+        let channel_id = interaction.channel_id.get();
+        let sid = session_id(
+            if guild_id.is_some() {
+                &ChannelType::GuildText
+            } else {
+                &ChannelType::Dm
+            },
+            channel_id,
+            guild_id,
+            Some(interaction.user.id.get()),
+        );
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        // Find the focused option: in serenity 0.12, CommandDataOption has no `focused` field.
+        // For autocomplete, the partial string value is in the options; take the first string one.
+        use serenity::model::application::CommandDataOptionValue;
+        let (focused_option, current_value) = interaction
+            .data
+            .options
+            .iter()
+            .filter_map(|o| {
+                if let CommandDataOptionValue::String(s) = &o.value {
+                    Some((o.name.clone(), s.clone()))
+                } else {
+                    None
+                }
+            })
+            .next()
+            .unwrap_or_default();
+
+        let ev = AutocompleteEvent {
+            metadata: meta,
+            interaction_id: interaction.id.get(),
+            interaction_token: interaction.token.clone(),
+            guild_id,
+            channel_id,
+            user: Self::convert_user(&interaction.user),
+            command_name: interaction.data.name.clone(),
+            focused_option,
+            current_value,
+        };
+
+        let subject = subjects::bot::interaction_autocomplete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published interaction_autocomplete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_bot_ready(&self, ready: &Ready) -> Result<()> {
+        let sid = format!("dc-bot-{}", ready.user.id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let ev = BotReadyEvent {
+            metadata: meta,
+            bot_user: Self::convert_user(&ready.user),
+            guild_count: ready.guilds.len() as u64,
+        };
+
+        let subject = subjects::bot::bot_ready(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published bot_ready to {}", subject);
         Ok(())
     }
 }
