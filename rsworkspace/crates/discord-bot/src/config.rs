@@ -75,6 +75,9 @@ impl Config {
 
         let admin_users = parse_id_list(&std::env::var("DISCORD_ADMIN_USERS").unwrap_or_default());
 
+        let channel_allowlist =
+            parse_id_list(&std::env::var("DISCORD_CHANNEL_ALLOWLIST").unwrap_or_default());
+
         let require_mention = std::env::var("DISCORD_REQUIRE_MENTION")
             .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
@@ -89,6 +92,7 @@ impl Config {
                     admin_users,
                     user_allowlist,
                     guild_allowlist,
+                    channel_allowlist,
                     require_mention,
                 },
             },

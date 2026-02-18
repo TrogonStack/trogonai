@@ -219,6 +219,10 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Build health state first so we can share its metrics with the processor
+    let health_state = AgentHealthState::new(args.agent_name.clone(), mode.clone());
+    let metrics = Some(health_state.metrics.clone());
+
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
@@ -229,13 +233,13 @@ async fn main() -> Result<()> {
         welcome,
         farewell,
         conversation_ttl,
+        metrics,
     );
 
     info!("Agent initialized, starting message processing...");
 
     // Start health server (unless disabled with port 0)
     if args.health_port != 0 {
-        let health_state = AgentHealthState::new(args.agent_name, mode);
         let port = args.health_port;
         tokio::spawn(async move {
             if let Err(e) = health::start_health_server(health_state, port).await {
