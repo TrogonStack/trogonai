@@ -29,6 +29,22 @@ use crate::errors::log_error;
 
 use crate::outbound_streaming::{StreamingMessages, StreamingState};
 
+/// Discord's maximum message content length in characters.
+const MAX_DISCORD_LEN: usize = 2000;
+
+/// Truncate a string to Discord's 2000-character limit.
+fn truncate(s: &str) -> &str {
+    if s.len() <= MAX_DISCORD_LEN {
+        s
+    } else {
+        let mut end = MAX_DISCORD_LEN - 1;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
+    }
+}
+
 /// Processes NATS agent commands and forwards them to Discord
 pub struct OutboundProcessor {
     pub(crate) http: Arc<Http>,
@@ -115,7 +131,7 @@ impl OutboundProcessor {
             match result {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
-                    let mut builder = CreateMessage::new().content(&cmd.content);
+                    let mut builder = CreateMessage::new().content(truncate(&cmd.content));
 
                     if let Some(reply_id) = cmd.reply_to_message_id {
                         builder = builder.reference_message((channel, MessageId::new(reply_id)));
@@ -157,7 +173,7 @@ impl OutboundProcessor {
                     let mut builder = EditMessage::new();
 
                     if let Some(content) = &cmd.content {
-                        builder = builder.content(content);
+                        builder = builder.content(truncate(content));
                     }
 
                     if let Err(e) = channel.edit_message(&*http, message_id, builder).await {
@@ -237,7 +253,7 @@ impl OutboundProcessor {
                 Ok(cmd) => {
                     let mut msg = CreateInteractionResponseMessage::new();
                     if let Some(content) = &cmd.content {
-                        msg = msg.content(content);
+                        msg = msg.content(truncate(content));
                     }
                     if cmd.ephemeral {
                         msg = msg.ephemeral(true);
@@ -338,7 +354,7 @@ impl OutboundProcessor {
                 Ok(cmd) => {
                     let mut builder = CreateInteractionResponseFollowup::new();
                     if let Some(content) = &cmd.content {
-                        builder = builder.content(content);
+                        builder = builder.content(truncate(content));
                     }
                     if cmd.ephemeral {
                         builder = builder.ephemeral(true);
