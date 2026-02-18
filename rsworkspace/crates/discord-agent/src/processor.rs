@@ -8,6 +8,7 @@ use discord_types::{
         MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ReactionAddEvent,
         ReactionRemoveEvent, SlashCommandEvent,
     },
+    types::Attachment,
     InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand,
     SendMessageCommand, StreamMessageCommand, TypingCommand,
 };
@@ -59,11 +60,15 @@ impl MessageProcessor {
         system_prompt: Option<String>,
         welcome: Option<WelcomeConfig>,
         farewell: Option<WelcomeConfig>,
+        conversation_ttl: Option<Duration>,
     ) -> Self {
         let conversation_manager = match conversation_kv {
             Some(kv) => ConversationManager::with_kv(kv),
             None => ConversationManager::new(),
         };
+        if let Some(ttl) = conversation_ttl {
+            conversation_manager.start_cleanup(ttl);
+        }
         Self {
             llm_client: llm_config.map(ClaudeClient::new),
             conversation_manager,
@@ -122,7 +127,9 @@ impl MessageProcessor {
             // Clone owned data for the spawned task (tokio::spawn requires 'static)
             let llm_client = llm_client.clone();
             let history = history.clone();
-            let content_owned = content.to_string();
+            // Append attachment metadata so the LLM is aware of any uploaded files
+            let attachment_ctx = Self::format_attachments(&event.message.attachments);
+            let content_owned = format!("{}{}", content, attachment_ctx);
 
             let llm_handle = tokio::spawn(async move {
                 llm_client
@@ -642,6 +649,24 @@ impl MessageProcessor {
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
+    /// Build an attachment context block to append to the user message so the
+    /// LLM is aware of any files the user included.
+    fn format_attachments(attachments: &[Attachment]) -> String {
+        if attachments.is_empty() {
+            return String::new();
+        }
+        let mut lines = String::from("\n\n[Attachments]");
+        for a in attachments {
+            let size_kb = a.size / 1024;
+            let type_str = a.content_type.as_deref().unwrap_or("unknown type");
+            lines.push_str(&format!(
+                "\n- {} ({}, {} KB): {}",
+                a.filename, type_str, size_kb, a.url
+            ));
+        }
+        lines
+    }
+
     async fn send_typing(&self, channel_id: u64, publisher: &MessagePublisher) -> Result<()> {
         let cmd = TypingCommand { channel_id };
         let subject = subjects::agent::channel_typing(publisher.prefix());
@@ -689,6 +714,6 @@ impl MessageProcessor {
 
 impl Default for MessageProcessor {
     fn default() -> Self {
-        Self::new(None, None, None, None, None)
+        Self::new(None, None, None, None, None, None)
     }
 }

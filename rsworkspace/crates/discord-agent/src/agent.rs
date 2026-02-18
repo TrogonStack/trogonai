@@ -7,6 +7,7 @@ use tracing::{error, info};
 
 use crate::llm::ClaudeConfig;
 use crate::processor::{MessageProcessor, WelcomeConfig};
+use tokio::time::Duration;
 
 /// Discord agent that processes messages
 pub struct DiscordAgent {
@@ -28,6 +29,7 @@ impl DiscordAgent {
         system_prompt: Option<String>,
         welcome: Option<WelcomeConfig>,
         farewell: Option<WelcomeConfig>,
+        conversation_ttl: Option<Duration>,
     ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
@@ -37,6 +39,7 @@ impl DiscordAgent {
             system_prompt,
             welcome,
             farewell,
+            conversation_ttl,
         );
 
         Self {

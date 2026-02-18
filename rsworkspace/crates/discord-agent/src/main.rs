@@ -63,6 +63,10 @@ struct Args {
     #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3002")]
     health_port: u16,
 
+    /// Conversation history TTL in hours (0 = never expire, default 168 = 7 days)
+    #[arg(long, env = "CONVERSATION_TTL_HOURS", default_value = "168")]
+    conversation_ttl_hours: u64,
+
     /// Channel ID for welcome messages (0 to disable)
     #[arg(long, env = "WELCOME_CHANNEL_ID", default_value = "0")]
     welcome_channel_id: u64,
@@ -104,6 +108,19 @@ async fn main() -> Result<()> {
     info!("Connected to NATS successfully");
 
     // Setup JetStream KV for persistent conversation history
+    let ttl_duration = if args.conversation_ttl_hours > 0 {
+        let d = std::time::Duration::from_secs(args.conversation_ttl_hours * 3600);
+        info!(
+            "Conversation TTL: {} hours ({} days)",
+            args.conversation_ttl_hours,
+            args.conversation_ttl_hours / 24
+        );
+        d
+    } else {
+        info!("Conversation TTL: disabled (sessions never expire)");
+        std::time::Duration::ZERO
+    };
+
     let conversation_kv = {
         let js = async_nats::jetstream::new(nats_client.clone());
         let bucket = format!("discord_conversations_{}", args.prefix);
@@ -118,6 +135,7 @@ async fn main() -> Result<()> {
                         bucket: bucket.clone(),
                         history: 1,
                         storage: async_nats::jetstream::stream::StorageType::File,
+                        max_age: ttl_duration,
                         ..Default::default()
                     })
                     .await
@@ -193,6 +211,14 @@ async fn main() -> Result<()> {
         None
     };
 
+    let conversation_ttl = if args.conversation_ttl_hours > 0 {
+        Some(tokio::time::Duration::from_secs(
+            args.conversation_ttl_hours * 3600,
+        ))
+    } else {
+        None
+    };
+
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
@@ -202,6 +228,7 @@ async fn main() -> Result<()> {
         args.system_prompt,
         welcome,
         farewell,
+        conversation_ttl,
     );
 
     info!("Agent initialized, starting message processing...");
