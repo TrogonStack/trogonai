@@ -22,3 +22,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 reqwest = { version = "0.12", features = ["json", "stream"] }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
