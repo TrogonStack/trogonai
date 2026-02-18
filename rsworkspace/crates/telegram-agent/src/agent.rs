@@ -42,13 +42,32 @@ impl TelegramAgent {
         }
     }
 
-    /// Run the agent
+    /// Run the agent: spawns the main event consumer and the error event consumer concurrently.
     pub async fn run(self) -> Result<()> {
+        use std::sync::Arc;
+        let agent = Arc::new(self);
+        let event_task = {
+            let agent = Arc::clone(&agent);
+            tokio::spawn(async move { agent.run_event_consumer().await })
+        };
+        let error_task = {
+            let agent = Arc::clone(&agent);
+            tokio::spawn(async move { agent.run_error_consumer().await })
+        };
+        tokio::try_join!(
+            async { event_task.await.map_err(|e| anyhow::anyhow!(e))? },
+            async { error_task.await.map_err(|e| anyhow::anyhow!(e))? },
+        )?;
+        Ok(())
+    }
+
+    /// Consume inbound bot events from the JetStream stream with at-least-once delivery.
+    async fn run_event_consumer(&self) -> Result<()> {
         use futures::StreamExt;
         use telegram_nats::nats::create_inbound_consumer;
 
         info!(
-            "Agent '{}' starting (JetStream pull consumer)...",
+            "Agent '{}' starting event consumer (JetStream pull consumer)...",
             self.agent_name
         );
 
@@ -78,6 +97,78 @@ impl TelegramAgent {
 
             if let Err(e) = msg.ack().await {
                 warn!("Failed to ack message on '{}': {}", subject, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Consume `bot.error.command` events and take action by error category.
+    ///
+    /// - `RateLimit`    → logged; JetStream already respects the retry delay via `Nak(delay)`
+    /// - `ChatMigrated` → logged with old subject + new chat_id for operator action
+    /// - `BotBlocked` / `NotFound` / `PermissionDenied` → error log; session should be torn down
+    /// - Other transient → warning log; JetStream will retry the original command
+    async fn run_error_consumer(&self) -> Result<()> {
+        use futures::StreamExt;
+        use telegram_nats::nats::create_inbound_consumer;
+        use telegram_types::errors::{CommandErrorEvent, ErrorCategory};
+
+        let consumer_name = format!("{}-errors", self.agent_name);
+        info!(
+            "Agent '{}' starting error consumer ('{}')...",
+            self.agent_name, consumer_name
+        );
+
+        let consumer =
+            create_inbound_consumer(&self.js, &self.prefix, &consumer_name).await?;
+        let mut messages = consumer.messages().await?;
+
+        while let Some(msg) = messages.next().await {
+            let msg = match msg {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Error consumer stream error: {}", e);
+                    continue;
+                }
+            };
+
+            match serde_json::from_slice::<CommandErrorEvent>(&msg.payload) {
+                Ok(evt) => match evt.category {
+                    ErrorCategory::RateLimit => {
+                        warn!(
+                            "Rate limit on '{}': retry after {:?}s — JetStream will redeliver after backoff",
+                            evt.command_subject, evt.retry_after_secs
+                        );
+                    }
+                    ErrorCategory::ChatMigrated => {
+                        warn!(
+                            "Chat migrated on '{}': new_chat_id={:?} — update routing",
+                            evt.command_subject, evt.migrated_to_chat_id
+                        );
+                    }
+                    ErrorCategory::BotBlocked
+                    | ErrorCategory::NotFound
+                    | ErrorCategory::PermissionDenied => {
+                        error!(
+                            "Permanent failure on '{}' ({:?}): {}",
+                            evt.command_subject, evt.category, evt.message
+                        );
+                    }
+                    _ => {
+                        warn!(
+                            "Command error on '{}' ({:?}): {}",
+                            evt.command_subject, evt.category, evt.message
+                        );
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to deserialize CommandErrorEvent: {}", e);
+                }
+            }
+
+            if let Err(e) = msg.ack().await {
+                warn!("Failed to ack error event: {}", e);
             }
         }
 

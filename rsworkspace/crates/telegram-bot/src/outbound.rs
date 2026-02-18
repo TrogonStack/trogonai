@@ -17,6 +17,24 @@ use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
+/// Signals the dispatch loop how to NAK a JetStream message after a Telegram error.
+#[derive(Debug)]
+pub(crate) struct NakError {
+    /// Delay before redelivery; `None` means redeliver immediately.
+    pub delay: Option<std::time::Duration>,
+}
+
+impl std::fmt::Display for NakError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.delay {
+            Some(d) => write!(f, "nak with delay {:?}", d),
+            None => write!(f, "nak immediately"),
+        }
+    }
+}
+
+impl std::error::Error for NakError {}
+
 /// Tracking info for streaming messages
 #[derive(Debug, Clone)]
 pub(crate) struct StreamingMessage {
@@ -68,16 +86,21 @@ impl OutboundProcessor {
                         warn!("Failed to ack message on '{}': {}", subject, e);
                     }
                 }
-                Err(e) if is_permanent_error(&e) => {
-                    warn!("Permanent error on '{}' (attempt {}): {}", subject, attempt, e);
-                    if let Err(e) = msg.ack().await {
-                        warn!("Failed to ack permanent error message: {}", e);
-                    }
-                }
                 Err(e) => {
-                    warn!("Transient error on '{}' (attempt {}): {}", subject, attempt, e);
-                    if let Err(e) = msg.ack_with(async_nats::jetstream::AckKind::Nak(None)).await {
-                        warn!("Failed to nak message: {}", e);
+                    if let Some(nak) = e.downcast_ref::<NakError>() {
+                        // Telegram error: NAK with optional delay (respects rate-limit retry_after)
+                        let delay = nak.delay;
+                        if let Err(e) =
+                            msg.ack_with(async_nats::jetstream::AckKind::Nak(delay)).await
+                        {
+                            warn!("Failed to nak message on '{}': {}", subject, e);
+                        }
+                    } else {
+                        // Serde / parsing error: permanent, ack to avoid infinite redelivery
+                        warn!("Permanent dispatch error on '{}': {}", subject, e);
+                        if let Err(e) = msg.ack().await {
+                            warn!("Failed to ack permanent error message: {}", e);
+                        }
                     }
                 }
             }
@@ -257,7 +280,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -285,7 +308,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -303,7 +326,7 @@ impl OutboundProcessor {
             .delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id))
             .await
         {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -330,7 +353,7 @@ impl OutboundProcessor {
         req.protect_content = cmd.protect_content;
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -371,7 +394,7 @@ impl OutboundProcessor {
         req.protect_content = cmd.protect_content;
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -405,7 +428,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -453,7 +476,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -497,7 +520,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -529,7 +552,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -565,7 +588,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -666,7 +689,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -696,7 +719,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -746,7 +769,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -778,7 +801,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -819,7 +842,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -864,7 +887,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -899,7 +922,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -958,7 +981,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -975,7 +998,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -998,7 +1021,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1017,7 +1040,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1051,7 +1074,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1074,7 +1097,7 @@ impl OutboundProcessor {
             icon_custom_emoji_id,
         );
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1092,7 +1115,7 @@ impl OutboundProcessor {
             req.icon_custom_emoji_id = Some(emoji_id);
         }
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1103,7 +1126,7 @@ impl OutboundProcessor {
         debug!("Closing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
 
         if let Err(e) = self.bot.close_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1114,7 +1137,7 @@ impl OutboundProcessor {
         debug!("Reopening forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
 
         if let Err(e) = self.bot.reopen_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1125,7 +1148,7 @@ impl OutboundProcessor {
         debug!("Deleting forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
 
         if let Err(e) = self.bot.delete_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1136,7 +1159,7 @@ impl OutboundProcessor {
         debug!("Unpinning all messages in topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
 
         if let Err(e) = self.bot.unpin_all_forum_topic_messages(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1147,7 +1170,7 @@ impl OutboundProcessor {
         debug!("Editing general forum topic in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1158,7 +1181,7 @@ impl OutboundProcessor {
         debug!("Closing general forum topic in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.close_general_forum_topic(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1169,7 +1192,7 @@ impl OutboundProcessor {
         debug!("Reopening general forum topic in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.reopen_general_forum_topic(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1180,7 +1203,7 @@ impl OutboundProcessor {
         debug!("Hiding general forum topic in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.hide_general_forum_topic(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1191,7 +1214,7 @@ impl OutboundProcessor {
         debug!("Unhiding general forum topic in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.unhide_general_forum_topic(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1202,7 +1225,7 @@ impl OutboundProcessor {
         debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1243,7 +1266,7 @@ impl OutboundProcessor {
                 }
             }
             Err(e) => {
-                self.handle_telegram_error(&subject, e, prefix).await;
+                self.handle_telegram_error(&subject, e, prefix).await?;
             }
         }
 
@@ -1307,7 +1330,7 @@ impl OutboundProcessor {
             }
             Err(e) => {
                 let e_str = e.to_string();
-                self.handle_telegram_error(&subject, e, prefix).await;
+                self.handle_telegram_error(&subject, e, prefix).await?;
                 let response = FileDownloadResponse {
                     file_id: cmd.file_id.clone(),
                     local_path: cmd.destination_path.clone(),
@@ -1357,7 +1380,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1378,7 +1401,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1402,7 +1425,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1419,7 +1442,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1432,7 +1455,7 @@ impl OutboundProcessor {
         let perms = convert_chat_permissions(&cmd.permissions);
 
         if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1447,7 +1470,7 @@ impl OutboundProcessor {
             teloxide::types::UserId(cmd.user_id as u64),
             cmd.custom_title,
         ).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1464,7 +1487,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1481,7 +1504,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1492,7 +1515,7 @@ impl OutboundProcessor {
         debug!("Unpinning all messages in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.unpin_all_chat_messages(ChatId(cmd.chat_id)).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1503,7 +1526,7 @@ impl OutboundProcessor {
         debug!("Setting chat title in chat {}", cmd.chat_id);
 
         if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1517,7 +1540,7 @@ impl OutboundProcessor {
         req.description = Some(cmd.description);
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1577,7 +1600,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1596,7 +1619,7 @@ impl OutboundProcessor {
         };
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1626,7 +1649,7 @@ impl OutboundProcessor {
         }
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1651,7 +1674,7 @@ impl OutboundProcessor {
         req.language_code = cmd.language_code;
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1670,7 +1693,7 @@ impl OutboundProcessor {
         req.language_code = cmd.language_code;
 
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1709,7 +1732,7 @@ impl OutboundProcessor {
                 }
             }
             Err(e) => {
-                self.handle_telegram_error(&subject, e, prefix).await;
+                self.handle_telegram_error(&subject, e, prefix).await?;
             }
         }
 
@@ -1739,7 +1762,7 @@ impl OutboundProcessor {
                     let _ = self.subscriber.client().publish(subj, payload.into()).await;
                 }
             }
-            Err(e) => self.handle_telegram_error(&subject, e, prefix).await,
+            Err(e) => self.handle_telegram_error(&subject, e, prefix).await?,
         }
 
         Ok(())
@@ -1762,7 +1785,7 @@ impl OutboundProcessor {
                     let _ = self.subscriber.client().publish(subj, payload.into()).await;
                 }
             }
-            Err(e) => self.handle_telegram_error(&subject, e, prefix).await,
+            Err(e) => self.handle_telegram_error(&subject, e, prefix).await?,
         }
 
         Ok(())
@@ -1786,7 +1809,7 @@ impl OutboundProcessor {
         }
         req.needs_repainting = cmd.needs_repainting;
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1802,7 +1825,7 @@ impl OutboundProcessor {
             &cmd.name,
             sticker,
         ).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1813,7 +1836,7 @@ impl OutboundProcessor {
         debug!("Setting sticker position to {}", cmd.position);
 
         if let Err(e) = self.bot.set_sticker_position_in_set(&cmd.sticker, cmd.position).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1824,7 +1847,7 @@ impl OutboundProcessor {
         debug!("Deleting sticker from set: {}", cmd.sticker);
 
         if let Err(e) = self.bot.delete_sticker_from_set(&cmd.sticker).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1835,7 +1858,7 @@ impl OutboundProcessor {
         debug!("Setting title of sticker set '{}' to '{}'", cmd.name, cmd.title);
 
         if let Err(e) = self.bot.set_sticker_set_title(&cmd.name, &cmd.title).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1855,7 +1878,7 @@ impl OutboundProcessor {
             req.thumbnail = Some(teloxide::types::InputFile::file_id(file_id));
         }
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1866,7 +1889,7 @@ impl OutboundProcessor {
         debug!("Deleting sticker set '{}'", cmd.name);
 
         if let Err(e) = self.bot.delete_sticker_set(&cmd.name).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1877,7 +1900,7 @@ impl OutboundProcessor {
         debug!("Setting emoji list for sticker {}", cmd.sticker);
 
         if let Err(e) = self.bot.set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list).await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1890,7 +1913,7 @@ impl OutboundProcessor {
         let mut req = self.bot.set_sticker_keywords(&cmd.sticker);
         req.keywords = Some(cmd.keywords);
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1905,7 +1928,7 @@ impl OutboundProcessor {
             req.mask_position = Some(convert_mask_position(mp));
         }
         if let Err(e) = req.await {
-            self.handle_telegram_error(&subject, e, prefix).await;
+            self.handle_telegram_error(&subject, e, prefix).await?;
         }
 
         Ok(())
@@ -1918,13 +1941,21 @@ impl OutboundProcessor {
     /// - `Retry`    → logs a warning (actual re-execution is the caller's responsibility)
     /// - `Migrated` → logs the new chat ID
     /// - `Permanent` / `Transient` → publishes the event to `telegram.{prefix}.bot.error.command`
+    /// Classify a Telegram API error, publish a `CommandErrorEvent` to NATS, and
+    /// return the appropriate NAK signal to the dispatch loop:
+    ///
+    /// - `Retry(d)`   → `Err(NakError { delay: Some(d) })` — redeliver after rate-limit window
+    /// - `Transient`  → `Err(NakError { delay: None })` — redeliver immediately
+    /// - `Permanent` / `Migrated` → `Ok(())` — ack, do not redeliver
     pub(crate) async fn handle_telegram_error(
         &self,
         command_subject: &str,
         err: teloxide::RequestError,
         prefix: &str,
-    ) {
-        let evt = match classify(command_subject, &err) {
+    ) -> anyhow::Result<()> {
+        let outcome = classify(command_subject, &err);
+
+        let evt = match &outcome {
             ErrorOutcome::Retry(duration) => {
                 warn!(
                     "Rate limited on '{}': retry after {:?}",
@@ -1943,7 +1974,7 @@ impl OutboundProcessor {
             ErrorOutcome::Migrated(new_chat_id) => {
                 warn!(
                     "Chat migrated on '{}': new chat_id={}",
-                    command_subject, new_chat_id
+                    command_subject, new_chat_id.0
                 );
                 telegram_types::errors::CommandErrorEvent {
                     command_subject: command_subject.to_string(),
@@ -1955,7 +1986,7 @@ impl OutboundProcessor {
                     is_permanent: false,
                 }
             }
-            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => evt,
+            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => evt.clone(),
         };
 
         let error_subject = subjects::bot::command_error(prefix);
@@ -1975,18 +2006,17 @@ impl OutboundProcessor {
             }
             Err(e) => error!("Failed to serialize CommandErrorEvent: {}", e),
         }
+
+        match outcome {
+            ErrorOutcome::Retry(d) => Err(NakError { delay: Some(d) }.into()),
+            ErrorOutcome::Transient(_) => Err(NakError { delay: None }.into()),
+            ErrorOutcome::Permanent(_) | ErrorOutcome::Migrated(_) => Ok(()),
+        }
     }
 
     // Stream message handling in outbound_streaming.rs module
 }
 
-/// Returns true if the error is permanent (payload won't change on retry)
-fn is_permanent_error(err: &anyhow::Error) -> bool {
-    // Deserialization errors are permanent - payload won't change on retry
-    err.to_string().contains("serde")
-        || err.to_string().contains("deserialize")
-        || err.to_string().contains("invalid")
-}
 
 /// Convert our ParseMode to Teloxide's ParseMode
 #[allow(deprecated)]
