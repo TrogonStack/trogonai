@@ -380,4 +380,10 @@ pub struct CommandErrorEvent {
     pub migrated_to_chat_id: Option<i64>,
     /// True if the operation should not be retried
     pub is_permanent: bool,
+    /// Chat ID associated with the failed command (when available)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<i64>,
+    /// Session ID associated with the failed command (from command metadata headers)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }

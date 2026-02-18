@@ -43,6 +43,17 @@ pub(crate) struct StreamingMessage {
     pub edit_count: u32,
 }
 
+/// Per-message context set before each dispatch call and read by `handle_telegram_error`.
+///
+/// Populated from NATS message headers (Gap B) and from a generic chat_id
+/// parse of the payload.  Kept in an `Arc<RwLock<…>>` so `handle_telegram_error`
+/// can read it from `&self` without changing the signature of every handler.
+#[derive(Default, Clone)]
+struct DispatchContext {
+    session_id: Option<String>,
+    chat_id: Option<i64>,
+}
+
 /// Outbound processor that listens to agent commands and executes them
 pub struct OutboundProcessor {
     pub(crate) bot: Bot,
@@ -50,16 +61,28 @@ pub struct OutboundProcessor {
     pub(crate) js: async_nats::jetstream::Context,
     /// Track streaming messages by (chat_id, session_id)
     pub(crate) streaming_messages: Arc<RwLock<HashMap<(i64, String), StreamingMessage>>>,
+    /// Dedup store — prevents duplicate Telegram API calls on JetStream redelivery
+    dedup: Option<crate::dedup::DedupStore>,
+    /// Context for the message currently being dispatched (session_id, chat_id)
+    dispatch_ctx: Arc<RwLock<DispatchContext>>,
 }
 
 impl OutboundProcessor {
     /// Create a new outbound processor
-    pub fn new(bot: Bot, client: Client, prefix: String, js: async_nats::jetstream::Context) -> Self {
+    pub fn new(
+        bot: Bot,
+        client: Client,
+        prefix: String,
+        js: async_nats::jetstream::Context,
+        dedup_kv: Option<async_nats::jetstream::kv::Store>,
+    ) -> Self {
         Self {
             bot,
             subscriber: MessageSubscriber::new(client.clone(), prefix),
             js,
             streaming_messages: Arc::new(RwLock::new(HashMap::new())),
+            dedup: dedup_kv.map(crate::dedup::DedupStore::new),
+            dispatch_ctx: Arc::new(RwLock::new(DispatchContext::default())),
         }
     }
 
@@ -67,6 +90,7 @@ impl OutboundProcessor {
     pub async fn run(self) -> Result<()> {
         use futures::StreamExt;
         use telegram_nats::nats::create_outbound_consumer;
+        use telegram_nats::read_cmd_metadata;
 
         info!("Starting outbound processor (JetStream pull consumer)");
         let prefix = self.subscriber.prefix().to_string();
@@ -78,6 +102,56 @@ impl OutboundProcessor {
             let msg = msg?;
             let subject = msg.subject.as_str().to_string();
             let payload = msg.payload.clone();
+
+            // ── Extract tracing metadata from headers (Gap B) ─────────────────
+            let cmd_meta = msg.headers.as_ref().and_then(read_cmd_metadata);
+            let session_id = cmd_meta.as_ref().and_then(|m| m.session_id.clone());
+
+            // Generic chat_id extraction (most commands have it at top-level)
+            #[derive(serde::Deserialize)]
+            struct WithChatId {
+                #[serde(default)]
+                chat_id: Option<i64>,
+            }
+            let chat_id = serde_json::from_slice::<WithChatId>(&payload)
+                .ok()
+                .and_then(|w| w.chat_id);
+
+            // Populate dispatch context for use by handle_telegram_error
+            *self.dispatch_ctx.write().await = DispatchContext {
+                session_id: session_id.clone(),
+                chat_id,
+            };
+
+            // ── Idempotency guard (Gap A) ──────────────────────────────────────
+            // Use command_id from headers when available, fall back to stream_sequence.
+            let dedup_key = cmd_meta
+                .as_ref()
+                .map(|m| format!("cmd:{}", m.command_id))
+                .or_else(|| {
+                    msg.info()
+                        .map(|i| format!("seq:{}", i.stream_sequence))
+                        .ok()
+                })
+                .unwrap_or_default();
+
+            if !dedup_key.is_empty() {
+                if let Some(ref dedup) = self.dedup {
+                    if dedup.is_seen(&dedup_key).await {
+                        debug!("Skipping duplicate outbound command (key={})", dedup_key);
+                        if let Err(e) = msg.ack().await {
+                            warn!("Failed to ack duplicate command on '{}': {}", subject, e);
+                        }
+                        continue;
+                    }
+                    // Optimistic mark before Telegram API call — prevents racing redelivery
+                    if let Err(e) = dedup.mark_seen(&dedup_key).await {
+                        warn!("Failed to mark command as seen (key={}): {}", dedup_key, e);
+                    }
+                }
+            }
+            // ── End idempotency guard ──────────────────────────────────────────
+
             let attempt = msg.info().map(|i| i.delivered as u32).unwrap_or(1);
 
             match self.dispatch(&subject, &payload, &prefix, attempt).await {
@@ -1955,6 +2029,9 @@ impl OutboundProcessor {
     ) -> anyhow::Result<()> {
         let outcome = classify(command_subject, &err);
 
+        // Read the dispatch context populated by the run() loop
+        let ctx = self.dispatch_ctx.read().await.clone();
+
         let evt = match &outcome {
             ErrorOutcome::Retry(duration) => {
                 warn!(
@@ -1969,6 +2046,8 @@ impl OutboundProcessor {
                     retry_after_secs: Some(duration.as_secs()),
                     migrated_to_chat_id: None,
                     is_permanent: false,
+                    chat_id: ctx.chat_id,
+                    session_id: ctx.session_id.clone(),
                 }
             }
             ErrorOutcome::Migrated(new_chat_id) => {
@@ -1984,9 +2063,16 @@ impl OutboundProcessor {
                     retry_after_secs: None,
                     migrated_to_chat_id: Some(new_chat_id.0),
                     is_permanent: false,
+                    chat_id: ctx.chat_id,
+                    session_id: ctx.session_id.clone(),
                 }
             }
-            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => evt.clone(),
+            ErrorOutcome::Permanent(evt) | ErrorOutcome::Transient(evt) => {
+                let mut evt = evt.clone();
+                evt.chat_id = ctx.chat_id;
+                evt.session_id = ctx.session_id.clone();
+                evt
+            }
         };
 
         let error_subject = subjects::bot::command_error(prefix);
