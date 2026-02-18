@@ -429,6 +429,45 @@ pub struct StickerInfo {
     pub name: String,
 }
 
+/// Simplified audit log entry
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuditLogEntryInfo {
+    pub id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<u64>,
+    /// Numeric action type code
+    pub action_type: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// User who RSVPed to a scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScheduledEventUserInfo {
+    pub event_id: u64,
+    pub user: DiscordUser,
+}
+
+/// Discord voice region
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceRegionInfo {
+    pub id: String,
+    pub name: String,
+    pub optimal: bool,
+    pub deprecated: bool,
+}
+
+/// Minimal application info
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AppInfo {
+    pub id: u64,
+    pub name: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

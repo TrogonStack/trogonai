@@ -17,23 +17,27 @@ use discord_types::{
     CreateDmChannelCommand, CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand,
     CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand, CreateThreadCommand,
     CreateWebhookCommand, CrosspostMessageCommand, DeleteChannelCommand, DeleteChannelPermissionsCommand,
-    DeleteEmojiCommand, DeleteInteractionResponseCommand, DeleteMessageCommand, DeleteRoleCommand,
-    DeleteScheduledEventCommand, DeleteStageInstanceCommand, DeleteWebhookCommand, EditChannelCommand,
+    DeleteEmojiCommand, DeleteIntegrationCommand, DeleteInteractionResponseCommand,
+    DeleteMessageCommand, DeleteRoleCommand, DeleteScheduledEventCommand, DeleteStickerCommand,
+    DeleteStageInstanceCommand, DeleteWebhookCommand, EditChannelCommand,
     EditEmojiCommand, EditInteractionResponseCommand, EditMessageCommand, EditRoleCommand,
-    EditScheduledEventCommand, EditWebhookCommand, ExecuteWebhookCommand, FetchChannelCommand,
+    EditScheduledEventCommand, EditStickerCommand, EditWebhookCommand, ExecuteWebhookCommand,
+    FetchAuditLogCommand, FetchChannelCommand,
     FetchGuildChannelsCommand, FetchGuildCommand, FetchGuildMembersCommand, FetchInvitesCommand,
     FetchMemberCommand, FetchMessagesCommand, FetchPinnedMessagesCommand, FetchRolesCommand,
+    FetchScheduledEventUsersCommand,
     GuildMemberNickCommand, InteractionDeferCommand, InteractionFollowupCommand,
     InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
-    RemoveAllReactionsCommand, RemoveReactionCommand, RemoveRoleCommand, RemoveThreadMemberCommand,
-    RevokeInviteCommand, SendMessageCommand, SetBotPresenceCommand, SetChannelPermissionsCommand,
-    TimeoutUserCommand, TypingCommand, UnbanUserCommand, UnpinMessageCommand,
-    VoiceDisconnectCommand, VoiceMoveCommand,
+    PruneMembersCommand, RemoveAllReactionsCommand, RemoveReactionCommand, RemoveRoleCommand,
+    RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand, SetBotPresenceCommand,
+    SetChannelPermissionsCommand, SyncIntegrationCommand, TimeoutUserCommand, TypingCommand,
+    UnbanUserCommand, UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
 };
 use discord_types::types::{
-    ActionRowComponent, AttachedFile, ButtonStyle as DcButtonStyle, ChannelType, DiscordUser,
-    Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, FetchedChannel, FetchedGuild,
-    FetchedInvite, FetchedMember, FetchedMessage, FetchedRole,
+    ActionRowComponent, AppInfo, AttachedFile, AuditLogEntryInfo, ButtonStyle as DcButtonStyle,
+    ChannelType, DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia,
+    FetchedChannel, FetchedGuild, FetchedInvite, FetchedMember, FetchedMessage, FetchedRole,
+    ScheduledEventUserInfo, VoiceRegionInfo,
 };
 use serenity::builder::{
     CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
@@ -354,6 +358,7 @@ impl OutboundProcessor {
             r44, r45, r46, r47, r48,
             r49, r50, r51, r52, r53, r54, r55, r56,
             r57, r58, r59, r60, r61, r62, r63, r64, r65, r66,
+            r67, r68, r69, r70, r71, r72, r73, r74, r75,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -456,6 +461,15 @@ impl OutboundProcessor {
             Self::handle_delete_interaction_response(http.clone(), client.clone(), prefix.clone()),
             Self::handle_set_channel_permissions(http.clone(), client.clone(), prefix.clone()),
             Self::handle_delete_channel_permissions(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_prune_members(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_audit_log(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_scheduled_event_users(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_edit_sticker(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_delete_sticker(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_delete_integration(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_sync_integration(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_voice_regions(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_application_info(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -526,6 +540,15 @@ impl OutboundProcessor {
             ("delete_interaction_response", r64),
             ("set_channel_permissions", r65),
             ("delete_channel_permissions", r66),
+            ("prune_members", r67),
+            ("fetch_audit_log", r68),
+            ("fetch_scheduled_event_users", r69),
+            ("edit_sticker", r70),
+            ("delete_sticker", r71),
+            ("delete_integration", r72),
+            ("sync_integration", r73),
+            ("fetch_voice_regions", r74),
+            ("fetch_application_info", r75),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -3348,6 +3371,316 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => warn!("Failed to deserialize channel_delete_permissions command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_prune_members(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::prune_members(&prefix);
+        let mut stream = subscriber.subscribe::<PruneMembersCommand>(&subject).await?;
+        info!("Listening for prune_members commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    if let Err(e) = http.start_guild_prune(guild, cmd.days, None).await {
+                        warn!("Failed to prune members in guild {}: {}", cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize prune_members command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_audit_log(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_audit_log(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_audit_log requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_audit_log: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchAuditLogCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_audit_log: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let guild = GuildId::new(cmd.guild_id);
+            let before = cmd.before_id.map(serenity::model::id::AuditLogEntryId::new);
+            let user = cmd.user_id.map(UserId::new);
+            let response_bytes = match http.get_audit_logs(guild, None, user, before, cmd.limit).await {
+                Ok(logs) => {
+                    let entries: Vec<AuditLogEntryInfo> = logs.entries.iter().map(|e| AuditLogEntryInfo {
+                        id: e.id.get(),
+                        user_id: e.user_id.get(),
+                        target_id: e.target_id.map(|t| t.get()),
+                        action_type: e.action.num() as u32,
+                        reason: e.reason.clone(),
+                    }).collect();
+                    serde_json::to_vec(&entries).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_audit_log: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    serde_json::to_vec::<Vec<AuditLogEntryInfo>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_audit_log: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_scheduled_event_users(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_scheduled_event_users(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_scheduled_event_users requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_scheduled_event_users: received message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchScheduledEventUsersCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_scheduled_event_users: failed to deserialize: {}", e);
+                    continue;
+                }
+            };
+            let guild = GuildId::new(cmd.guild_id);
+            let event_id = serenity::model::id::ScheduledEventId::new(cmd.event_id);
+            let response_bytes = match http.get_scheduled_event_users(guild, event_id, cmd.limit, None, None).await {
+                Ok(users) => {
+                    let fetched: Vec<ScheduledEventUserInfo> = users.iter().map(|u| ScheduledEventUserInfo {
+                        event_id: cmd.event_id,
+                        user: DiscordUser {
+                            id: u.user.id.get(),
+                            username: u.user.name.clone(),
+                            global_name: u.user.global_name.as_deref().map(String::from),
+                            bot: u.user.bot,
+                        },
+                    }).collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_scheduled_event_users: Discord API error: {}", e);
+                    serde_json::to_vec::<Vec<ScheduledEventUserInfo>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_scheduled_event_users: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_edit_sticker(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::model::id::StickerId;
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::sticker_edit(&prefix);
+        let mut stream = subscriber.subscribe::<EditStickerCommand>(&subject).await?;
+        info!("Listening for sticker_edit commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let sticker_id = StickerId::new(cmd.sticker_id);
+                    let mut map = serde_json::Map::new();
+                    if let Some(ref name) = cmd.name {
+                        map.insert("name".to_string(), serde_json::json!(name));
+                    }
+                    if let Some(ref desc) = cmd.description {
+                        map.insert("description".to_string(), serde_json::json!(desc));
+                    }
+                    let value = serde_json::Value::Object(map);
+                    if let Err(e) = http.edit_sticker(guild, sticker_id, &value, None).await {
+                        warn!("Failed to edit sticker {} in guild {}: {}", cmd.sticker_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize sticker_edit command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_delete_sticker(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::model::id::StickerId;
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::sticker_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteStickerCommand>(&subject).await?;
+        info!("Listening for sticker_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let sticker_id = StickerId::new(cmd.sticker_id);
+                    if let Err(e) = http.delete_sticker(guild, sticker_id, None).await {
+                        warn!("Failed to delete sticker {} in guild {}: {}", cmd.sticker_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize sticker_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_delete_integration(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::model::id::IntegrationId;
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::integration_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteIntegrationCommand>(&subject).await?;
+        info!("Listening for integration_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let integration_id = IntegrationId::new(cmd.integration_id);
+                    if let Err(e) = http.delete_guild_integration(guild, integration_id, None).await {
+                        warn!("Failed to delete integration {} in guild {}: {}", cmd.integration_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize integration_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_sync_integration(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::model::id::IntegrationId;
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::integration_sync(&prefix);
+        let mut stream = subscriber.subscribe::<SyncIntegrationCommand>(&subject).await?;
+        info!("Listening for integration_sync commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let integration_id = IntegrationId::new(cmd.integration_id);
+                    if let Err(e) = http.start_integration_sync(guild, integration_id).await {
+                        warn!("Failed to sync integration {} in guild {}: {}", cmd.integration_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize integration_sync command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_voice_regions(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_voice_regions(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_voice_regions requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_voice_regions: received message without reply subject");
+                    continue;
+                }
+            };
+            let response_bytes = match http.get_voice_regions().await {
+                Ok(regions) => {
+                    let fetched: Vec<VoiceRegionInfo> = regions.iter().map(|r| VoiceRegionInfo {
+                        id: r.id.clone(),
+                        name: r.name.clone(),
+                        optimal: r.optimal,
+                        deprecated: r.deprecated,
+                    }).collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_voice_regions: Discord API error: {}", e);
+                    serde_json::to_vec::<Vec<VoiceRegionInfo>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_voice_regions: failed to send reply: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch_application_info(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+        let subject = subjects::agent::fetch_application_info(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_application_info requests on {}", subject);
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_application_info: received message without reply subject");
+                    continue;
+                }
+            };
+            let response_bytes = match http.get_current_application_info().await {
+                Ok(info) => {
+                    let fetched = AppInfo {
+                        id: info.id.get(),
+                        name: info.name.clone(),
+                        description: info.description.clone(),
+                        owner_id: info.owner.as_ref().map(|u| u.id.get()),
+                    };
+                    serde_json::to_vec(&Some(fetched)).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_application_info: Discord API error: {}", e);
+                    serde_json::to_vec::<Option<AppInfo>>(&None).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_application_info: failed to send reply: {}", e);
             }
         }
         Ok(())

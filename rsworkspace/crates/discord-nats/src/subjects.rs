@@ -276,6 +276,126 @@ pub mod bot {
         format!("discord.{}.bot.scheduled_event.user_remove", prefix)
     }
 
+    /// Category channel created event subject
+    pub fn category_create(prefix: &str) -> String {
+        format!("discord.{}.bot.category.create", prefix)
+    }
+
+    /// Category channel deleted event subject
+    pub fn category_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.category.delete", prefix)
+    }
+
+    /// Bot reconnected to gateway event subject
+    pub fn bot_resume(prefix: &str) -> String {
+        format!("discord.{}.bot.bot.resume", prefix)
+    }
+
+    /// Current user (bot) updated event subject
+    pub fn user_update(prefix: &str) -> String {
+        format!("discord.{}.bot.user.update", prefix)
+    }
+
+    /// Guild members chunk received event subject
+    pub fn guild_members_chunk(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.members_chunk", prefix)
+    }
+
+    /// Voice server update event subject
+    pub fn voice_server_update(prefix: &str) -> String {
+        format!("discord.{}.bot.voice.server_update", prefix)
+    }
+
+    /// Guild audit log entry created event subject
+    pub fn guild_audit_log_entry(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.audit_log_entry", prefix)
+    }
+
+    /// Thread list synced event subject
+    pub fn thread_list_sync(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.list_sync", prefix)
+    }
+
+    /// Thread member updated event subject
+    pub fn thread_member_update(prefix: &str) -> String {
+        format!("discord.{}.bot.thread.member_update", prefix)
+    }
+
+    /// Integration created event subject
+    pub fn integration_create(prefix: &str) -> String {
+        format!("discord.{}.bot.integration.create", prefix)
+    }
+
+    /// Integration updated event subject
+    pub fn integration_update(prefix: &str) -> String {
+        format!("discord.{}.bot.integration.update", prefix)
+    }
+
+    /// Integration deleted event subject
+    pub fn integration_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.integration.delete", prefix)
+    }
+
+    /// Voice channel status updated event subject
+    pub fn voice_channel_status_update(prefix: &str) -> String {
+        format!("discord.{}.bot.voice.channel_status_update", prefix)
+    }
+
+    /// Auto-moderation rule created event subject
+    pub fn automod_rule_create(prefix: &str) -> String {
+        format!("discord.{}.bot.automod.rule_create", prefix)
+    }
+
+    /// Auto-moderation rule updated event subject
+    pub fn automod_rule_update(prefix: &str) -> String {
+        format!("discord.{}.bot.automod.rule_update", prefix)
+    }
+
+    /// Auto-moderation rule deleted event subject
+    pub fn automod_rule_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.automod.rule_delete", prefix)
+    }
+
+    /// Auto-moderation action executed event subject
+    pub fn automod_action_execution(prefix: &str) -> String {
+        format!("discord.{}.bot.automod.action_execution", prefix)
+    }
+
+    /// Application command permissions updated event subject
+    pub fn command_permissions_update(prefix: &str) -> String {
+        format!("discord.{}.bot.command.permissions_update", prefix)
+    }
+
+    /// Entitlement created event subject
+    pub fn entitlement_create(prefix: &str) -> String {
+        format!("discord.{}.bot.entitlement.create", prefix)
+    }
+
+    /// Entitlement updated event subject
+    pub fn entitlement_update(prefix: &str) -> String {
+        format!("discord.{}.bot.entitlement.update", prefix)
+    }
+
+    /// Entitlement deleted event subject
+    pub fn entitlement_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.entitlement.delete", prefix)
+    }
+
+    /// Poll vote added event subject
+    pub fn poll_vote_add(prefix: &str) -> String {
+        format!("discord.{}.bot.poll.vote_add", prefix)
+    }
+
+    /// Poll vote removed event subject
+    pub fn poll_vote_remove(prefix: &str) -> String {
+        format!("discord.{}.bot.poll.vote_remove", prefix)
+    }
+
+    /// All reactions for a specific emoji removed from a message
+    pub fn reaction_remove_emoji(prefix: &str) -> String {
+        format!("discord.{}.bot.reaction.remove_emoji", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -612,6 +732,51 @@ pub mod agent {
     /// Delete channel permission overwrite command subject
     pub fn channel_delete_permissions(prefix: &str) -> String {
         format!("discord.{}.agent.channel.delete_permissions", prefix)
+    }
+
+    /// Prune (kick inactive) guild members command subject
+    pub fn prune_members(prefix: &str) -> String {
+        format!("discord.{}.agent.guild.prune", prefix)
+    }
+
+    /// Fetch audit log entries (request-reply)
+    pub fn fetch_audit_log(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.audit_log", prefix)
+    }
+
+    /// Fetch scheduled event users (request-reply)
+    pub fn fetch_scheduled_event_users(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.scheduled_event_users", prefix)
+    }
+
+    /// Edit sticker command subject
+    pub fn sticker_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.sticker.edit", prefix)
+    }
+
+    /// Delete sticker command subject
+    pub fn sticker_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.sticker.delete", prefix)
+    }
+
+    /// Delete integration command subject
+    pub fn integration_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.integration.delete", prefix)
+    }
+
+    /// Sync integration command subject
+    pub fn integration_sync(prefix: &str) -> String {
+        format!("discord.{}.agent.integration.sync", prefix)
+    }
+
+    /// Fetch voice regions (request-reply)
+    pub fn fetch_voice_regions(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.voice_regions", prefix)
+    }
+
+    /// Fetch application info (request-reply)
+    pub fn fetch_application_info(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.application_info", prefix)
     }
 
     /// Wildcard for all agent commands
