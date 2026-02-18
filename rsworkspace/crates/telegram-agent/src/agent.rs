@@ -43,7 +43,10 @@ impl TelegramAgent {
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
         dedup_kv: Option<async_nats::jetstream::kv::Store>,
     ) -> Self {
-        let publisher = MessagePublisher::new(client, prefix.clone());
+        // Use JetStream publish for outbound commands so each publish_command()
+        // blocks until a PubAck is received, guaranteeing durable persistence
+        // in the telegram_commands_{prefix} stream before we return to the caller.
+        let publisher = MessagePublisher::with_jetstream(client, js.clone(), prefix.clone());
         let processor = MessageProcessor::new(llm_config, conversation_kv.clone());
         let dedup = dedup_kv.map(DedupStore::new);
 
@@ -127,7 +130,7 @@ impl TelegramAgent {
     /// - Other transient → warning log; JetStream will retry the original command
     pub(crate) async fn run_error_consumer(&self) -> Result<()> {
         use futures::StreamExt;
-        use telegram_nats::nats::create_inbound_consumer;
+        use telegram_nats::nats::create_error_consumer;
         use telegram_types::errors::{CommandErrorEvent, ErrorCategory};
 
         let consumer_name = format!("{}-errors", self.agent_name);
@@ -137,7 +140,7 @@ impl TelegramAgent {
         );
 
         let consumer =
-            create_inbound_consumer(&self.js, &self.prefix, &consumer_name).await?;
+            create_error_consumer(&self.js, &self.prefix, &consumer_name).await?;
         let mut messages = consumer.messages().await?;
 
         while let Some(msg) = messages.next().await {

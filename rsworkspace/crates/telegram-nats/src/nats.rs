@@ -221,6 +221,45 @@ pub async fn create_inbound_consumer(
         .map_err(|e| Error::Other(anyhow::anyhow!("Failed to create inbound consumer: {}", e)))
 }
 
+/// Create a durable pull consumer for error events only (`bot.error.command`).
+///
+/// Unlike `create_inbound_consumer`, this consumer has a `filter_subject` so it
+/// only receives messages published to `telegram.{prefix}.bot.error.command`,
+/// not all events in the stream.  This avoids noisy deserialization failures
+/// when trying to parse regular text/photo/command events as `CommandErrorEvent`.
+pub async fn create_error_consumer(
+    js: &async_nats::jetstream::Context,
+    prefix: &str,
+    consumer_name: &str,
+) -> Result<async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>>
+{
+    let stream_name = format!("telegram_events_{}", prefix);
+    let filter = format!("telegram.{}.bot.error.command", prefix);
+
+    info!(
+        "Creating error consumer '{}' on stream '{}' (filter: {})",
+        consumer_name, stream_name, filter
+    );
+
+    let consumer_config = async_nats::jetstream::consumer::pull::Config {
+        durable_name: Some(consumer_name.to_string()),
+        filter_subject: filter,
+        ack_wait: std::time::Duration::from_secs(30),
+        max_deliver: 5,
+        ..Default::default()
+    };
+
+    let stream = js
+        .get_stream(&stream_name)
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("Failed to get inbound stream: {}", e)))?;
+
+    stream
+        .get_or_create_consumer(consumer_name, consumer_config)
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("Failed to create error consumer: {}", e)))
+}
+
 /// Create a durable pull consumer for outbound agent commands
 pub async fn create_outbound_consumer(
     js: &async_nats::jetstream::Context,
@@ -277,6 +316,68 @@ mod tests {
 
     async fn try_connect() -> Option<async_nats::Client> {
         async_nats::connect(NATS_URL).await.ok()
+    }
+
+    /// Error consumer filter — only error events reach the consumer:
+    /// Publishing a regular text event AND an error event to the stream must
+    /// result in the error consumer receiving ONLY the error event.
+    #[tokio::test]
+    async fn test_error_consumer_only_receives_error_events() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("errconsumer-{}", uuid::Uuid::new_v4().simple());
+
+        setup_event_stream(&js, &prefix).await.unwrap();
+
+        // Publish a regular text event — the error consumer must NOT see this
+        let text_subject = crate::subjects::bot::message_text(&prefix);
+        client
+            .publish(text_subject, b"text-payload".as_ref().into())
+            .await
+            .unwrap();
+
+        // Publish an error event — the error consumer MUST see this
+        let error_subject = crate::subjects::bot::command_error(&prefix);
+        client
+            .publish(error_subject, b"error-payload".as_ref().into())
+            .await
+            .unwrap();
+
+        let consumer_name = format!("err-filter-{}", uuid::Uuid::new_v4().simple());
+        let consumer = create_error_consumer(&js, &prefix, &consumer_name)
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — error event not received")
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            &msg.payload[..],
+            b"error-payload",
+            "error consumer must only receive error events, not text events"
+        );
+        msg.ack().await.unwrap();
+
+        // No second message should arrive (text event filtered out)
+        let second = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await;
+        assert!(
+            second.is_err(),
+            "error consumer must not receive the text event"
+        );
     }
 
     /// Issue 3 – Inbound at-least-once:
