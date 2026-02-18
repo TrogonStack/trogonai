@@ -719,6 +719,8 @@ mod tests {
             retry_after_secs: None,
             migrated_to_chat_id: None,
             is_permanent: true,
+            chat_id: None,
+            session_id: None,
         };
 
         let json = serde_json::to_string(&evt).expect("serialize");

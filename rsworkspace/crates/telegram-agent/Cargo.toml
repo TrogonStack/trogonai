@@ -34,3 +34,6 @@ futures = "0.3"
 
 # HTTP client for LLM API
 reqwest = { version = "0.12", features = ["json", "stream"] }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }

@@ -11,6 +11,11 @@ use tokio::sync::RwLock;
 /// Maximum messages to keep in history per session
 const MAX_HISTORY_SIZE: usize = 20;
 
+/// Sanitise a session_id for use as a NATS KV key (`:` is not a valid character).
+fn kv_key(s: &str) -> String {
+    s.replace(':', ".")
+}
+
 /// Conversation manager
 ///
 /// Use `ConversationManager::new()` for in-memory storage (lost on restart).
@@ -57,7 +62,7 @@ impl ConversationManager {
         if let Some(ref kv) = self.kv {
             match serde_json::to_vec(&history) {
                 Ok(bytes) => {
-                    if let Err(e) = kv.put(session_id, bytes.into()).await {
+                    if let Err(e) = kv.put(&kv_key(session_id), bytes.into()).await {
                         tracing::warn!("Failed to persist conversation for {}: {}", session_id, e);
                         // Fall through to in-memory update
                     }
@@ -85,7 +90,7 @@ impl ConversationManager {
 
         // If KV is available, try loading from persistent storage
         if let Some(ref kv) = self.kv {
-            match kv.get(session_id).await {
+            match kv.get(&kv_key(session_id)).await {
                 Ok(Some(bytes)) => {
                     match serde_json::from_slice::<Vec<Message>>(&bytes) {
                         Ok(history) => {
@@ -119,7 +124,7 @@ impl ConversationManager {
         sessions.remove(session_id);
 
         if let Some(ref kv) = self.kv {
-            if let Err(e) = kv.delete(session_id).await {
+            if let Err(e) = kv.delete(&kv_key(session_id)).await {
                 tracing::warn!(
                     "Failed to delete conversation from KV for {}: {}",
                     session_id,
