@@ -24,68 +24,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Telegram Bot
-  telegram-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile.bot
-    container_name: trogonai-telegram-bot
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - NATS_URL=nats://nats:4222
-      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
-      - RUST_LOG=${RUST_LOG:-telegram_bot=info,telegram_nats=info,info}
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks:
-      - trogonai-network
-    restart: unless-stopped
-
-  # Telegram Agent (Echo mode)
-  telegram-agent-echo:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    container_name: trogonai-agent-echo
-    environment:
-      - NATS_URL=nats://nats:4222
-      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
-      - AGENT_NAME=agent-echo
-      - ENABLE_LLM=false
-      - RUST_LOG=${RUST_LOG:-telegram_agent=info,telegram_nats=info,info}
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks:
-      - trogonai-network
-    restart: unless-stopped
-    profiles:
-      - echo
-
-  # Telegram Agent (LLM mode)
-  telegram-agent-llm:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    container_name: trogonai-agent-llm
-    environment:
-      - NATS_URL=nats://nats:4222
-      - TELEGRAM_PREFIX=${TELEGRAM_PREFIX:-prod}
-      - AGENT_NAME=agent-llm
-      - ENABLE_LLM=true
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250929}
-      - RUST_LOG=${RUST_LOG:-telegram_agent=info,telegram_nats=info,info}
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks:
-      - trogonai-network
-    restart: unless-stopped
-    profiles:
-      - llm
-
   # Discord Bot
   discord-bot:
     build:
@@ -103,8 +41,6 @@ services:
     networks:
       - trogonai-network
     restart: unless-stopped
-    profiles:
-      - discord
 
   # Discord Agent (Echo mode)
   discord-agent-echo:
@@ -125,8 +61,7 @@ services:
       - trogonai-network
     restart: unless-stopped
     profiles:
-      - discord
-      - discord-echo
+      - echo
 
   # Discord Agent (LLM mode)
   discord-agent-llm:
@@ -149,8 +84,7 @@ services:
       - trogonai-network
     restart: unless-stopped
     profiles:
-      - discord
-      - discord-llm
+      - llm
 
   # NATS Monitoring (optional)
   nats-surveyor:
