@@ -13,13 +13,15 @@ use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
 use discord_types::{
     AddReactionCommand, ArchiveThreadCommand, AssignRoleCommand, AutocompleteRespondCommand,
-    BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateRoleCommand,
-    CreateThreadCommand, CreateWebhookCommand, DeleteChannelCommand, DeleteMessageCommand,
-    DeleteRoleCommand, DeleteWebhookCommand, EditChannelCommand, EditMessageCommand,
-    ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand, GuildMemberNickCommand,
-    InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand,
-    ModalRespondCommand, PinMessageCommand, RemoveReactionCommand, RemoveRoleCommand,
-    SendMessageCommand, SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnbanUserCommand,
+    BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand, CreateEmojiCommand,
+    CreateInviteCommand, CreateRoleCommand, CreateScheduledEventCommand, CreateThreadCommand,
+    CreateWebhookCommand, DeleteChannelCommand, DeleteEmojiCommand, DeleteMessageCommand,
+    DeleteRoleCommand, DeleteScheduledEventCommand, DeleteWebhookCommand, EditChannelCommand,
+    EditMessageCommand, ExecuteWebhookCommand, FetchMemberCommand, FetchMessagesCommand,
+    GuildMemberNickCommand, InteractionDeferCommand, InteractionFollowupCommand,
+    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
+    RemoveReactionCommand, RemoveRoleCommand, RevokeInviteCommand, SendMessageCommand,
+    SetBotPresenceCommand, TimeoutUserCommand, TypingCommand, UnbanUserCommand,
     UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
 };
 use discord_types::types::{
@@ -338,6 +340,7 @@ impl OutboundProcessor {
             r11, r12, r13, r14, r15, r16, r17, r18, r19, r20,
             r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
             r31, r32, r33, r34, r35, r36, r37,
+            r38, r39, r40, r41, r42, r43,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -411,6 +414,12 @@ impl OutboundProcessor {
             Self::handle_webhook_delete(http.clone(), client.clone(), prefix.clone()),
             Self::handle_voice_move(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
             Self::handle_voice_disconnect(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_invite_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_invite_revoke(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_emoji_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_emoji_delete(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_scheduled_event_create(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_scheduled_event_delete(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -452,6 +461,12 @@ impl OutboundProcessor {
             ("webhook_delete", r35),
             ("voice_move", r36),
             ("voice_disconnect", r37),
+            ("invite_create", r38),
+            ("invite_revoke", r39),
+            ("emoji_create", r40),
+            ("emoji_delete", r41),
+            ("scheduled_event_create", r42),
+            ("scheduled_event_delete", r43),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -2259,6 +2274,182 @@ impl OutboundProcessor {
                     }
                 }
                 Err(e) => warn!("Failed to deserialize voice_disconnect command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_invite_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::invite_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateInviteCommand>(&subject).await?;
+        info!("Listening for invite_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let channel = ChannelId::new(cmd.channel_id);
+                    let builder = serenity::builder::CreateInvite::new()
+                        .max_age(cmd.max_age_secs as u32)
+                        .max_uses(cmd.max_uses as u8)
+                        .temporary(cmd.temporary)
+                        .unique(cmd.unique);
+                    if let Err(e) = channel.create_invite(&*http, builder).await {
+                        warn!("Failed to create invite for channel {}: {}", cmd.channel_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize invite_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_invite_revoke(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::invite_revoke(&prefix);
+        let mut stream = subscriber.subscribe::<RevokeInviteCommand>(&subject).await?;
+        info!("Listening for invite_revoke commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let reason = cmd.reason.as_deref();
+                    if let Err(e) = http.delete_invite(&cmd.code, reason).await {
+                        warn!("Failed to revoke invite {}: {}", cmd.code, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize invite_revoke command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_emoji_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::emoji_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateEmojiCommand>(&subject).await?;
+        info!("Listening for emoji_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    if let Err(e) = guild.create_emoji(&*http, &cmd.name, &cmd.image_data).await {
+                        warn!("Failed to create emoji '{}' in guild {}: {}", cmd.name, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize emoji_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_emoji_delete(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::emoji_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteEmojiCommand>(&subject).await?;
+        info!("Listening for emoji_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let emoji_id = serenity::model::id::EmojiId::new(cmd.emoji_id);
+                    if let Err(e) = guild.delete_emoji(&*http, emoji_id).await {
+                        warn!("Failed to delete emoji {} from guild {}: {}", cmd.emoji_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize emoji_delete command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_scheduled_event_create(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::builder::CreateScheduledEvent;
+        use serenity::model::guild::ScheduledEventType;
+
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::scheduled_event_create(&prefix);
+        let mut stream = subscriber.subscribe::<CreateScheduledEventCommand>(&subject).await?;
+        info!("Listening for scheduled_event_create commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let start = match cmd.start_time.parse::<serenity::model::Timestamp>() {
+                        Ok(t) => t,
+                        Err(e) => {
+                            warn!("Invalid start_time '{}': {}", cmd.start_time, e);
+                            continue;
+                        }
+                    };
+
+                    let (kind, mut builder) = if let Some(channel_id) = cmd.channel_id {
+                        let b = CreateScheduledEvent::new(ScheduledEventType::Voice, &cmd.name, start)
+                            .channel_id(ChannelId::new(channel_id));
+                        (ScheduledEventType::Voice, b)
+                    } else {
+                        let location = cmd.external_location.unwrap_or_default();
+                        let end = cmd.end_time.as_deref()
+                            .and_then(|s| s.parse::<serenity::model::Timestamp>().ok());
+                        let mut b = CreateScheduledEvent::new(ScheduledEventType::External, &cmd.name, start)
+                            .location(&location);
+                        if let Some(end_ts) = end {
+                            b = b.end_time(end_ts);
+                        }
+                        (ScheduledEventType::External, b)
+                    };
+                    let _ = kind;
+                    if let Some(ref desc) = cmd.description {
+                        builder = builder.description(desc);
+                    }
+
+                    if let Err(e) = guild.create_scheduled_event(&*http, builder).await {
+                        warn!("Failed to create scheduled event '{}' in guild {}: {}", cmd.name, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize scheduled_event_create command: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_scheduled_event_delete(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        let subscriber = MessageSubscriber::new(client, &prefix);
+        let subject = subjects::agent::scheduled_event_delete(&prefix);
+        let mut stream = subscriber.subscribe::<DeleteScheduledEventCommand>(&subject).await?;
+        info!("Listening for scheduled_event_delete commands on {}", subject);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(cmd) => {
+                    let guild = GuildId::new(cmd.guild_id);
+                    let event_id = serenity::model::id::ScheduledEventId::new(cmd.event_id);
+                    if let Err(e) = guild.delete_scheduled_event(&*http, event_id).await {
+                        warn!("Failed to delete scheduled event {} from guild {}: {}", cmd.event_id, cmd.guild_id, e);
+                    }
+                }
+                Err(e) => warn!("Failed to deserialize scheduled_event_delete command: {}", e),
             }
         }
         Ok(())

@@ -392,6 +392,75 @@ pub struct VoiceDisconnectCommand {
     pub user_id: u64,
 }
 
+/// Create an invite for a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateInviteCommand {
+    pub channel_id: u64,
+    /// Expiry in seconds (0 = never expires)
+    #[serde(default)]
+    pub max_age_secs: u64,
+    /// Maximum uses (0 = unlimited)
+    #[serde(default)]
+    pub max_uses: u32,
+    /// Whether the invite grants temporary membership
+    #[serde(default)]
+    pub temporary: bool,
+    /// Whether to always create a unique invite URL
+    #[serde(default)]
+    pub unique: bool,
+}
+
+/// Revoke (delete) an invite by its code
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RevokeInviteCommand {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Create a custom emoji in a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateEmojiCommand {
+    pub guild_id: u64,
+    pub name: String,
+    /// Base64 data URI (e.g. "data:image/png;base64,...")
+    pub image_data: String,
+}
+
+/// Delete a custom emoji from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteEmojiCommand {
+    pub guild_id: u64,
+    pub emoji_id: u64,
+}
+
+/// Create a guild scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateScheduledEventCommand {
+    pub guild_id: u64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// ISO 8601 start time
+    pub start_time: String,
+    /// ISO 8601 end time (required for external events)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    /// Voice/stage channel ID for in-channel events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+    /// Location string for external events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_location: Option<String>,
+}
+
+/// Delete (cancel) a guild scheduled event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteScheduledEventCommand {
+    pub guild_id: u64,
+    pub event_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

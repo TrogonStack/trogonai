@@ -978,6 +978,52 @@ impl DiscordBridge {
         Ok(())
     }
 
+    pub async fn publish_invite_create(
+        &self,
+        data: &serenity::model::event::InviteCreateEvent,
+    ) -> Result<()> {
+        let guild_id = data.guild_id.map(|g| g.get());
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id.unwrap_or(0)),
+            self.next_sequence(),
+        );
+        let ev = InviteCreateEvent {
+            metadata: meta,
+            code: data.code.clone(),
+            channel_id: data.channel_id.get(),
+            guild_id,
+            inviter_id: data.inviter.as_ref().map(|u| u.id.get()),
+            max_age_secs: data.max_age as u64,
+            max_uses: data.max_uses as u64,
+            temporary: data.temporary,
+        };
+        let subject = subjects::bot::invite_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published invite_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_invite_delete(
+        &self,
+        data: &serenity::model::event::InviteDeleteEvent,
+    ) -> Result<()> {
+        let guild_id = data.guild_id.map(|g| g.get());
+        let meta = EventMetadata::new(
+            format!("dc-guild-{}", guild_id.unwrap_or(0)),
+            self.next_sequence(),
+        );
+        let ev = InviteDeleteEvent {
+            metadata: meta,
+            code: data.code.clone(),
+            channel_id: data.channel_id.get(),
+            guild_id,
+        };
+        let subject = subjects::bot::invite_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published invite_delete to {}", subject);
+        Ok(())
+    }
+
     pub async fn publish_thread_created(&self, thread: &GuildChannel) -> Result<()> {
         let meta = EventMetadata::new(
             format!("dc-guild-{}", thread.guild_id.get()),
