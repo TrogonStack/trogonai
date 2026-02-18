@@ -36,6 +36,13 @@ services:
       - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
       - HEALTH_CHECK_PORT=3001
       - RUST_LOG=${RUST_LOG:-discord_bot=info,discord_nats=info,info}
+      # Access control (uncomment and set as needed)
+      # - DISCORD_GUILD_POLICY=${DISCORD_GUILD_POLICY:-allowlist}   # open|allowlist|disabled
+      # - DISCORD_GUILD_ALLOWLIST=${DISCORD_GUILD_ALLOWLIST:-}       # comma-separated guild IDs
+      # - DISCORD_DM_POLICY=${DISCORD_DM_POLICY:-allowlist}          # open|allowlist|disabled
+      # - DISCORD_USER_ALLOWLIST=${DISCORD_USER_ALLOWLIST:-}         # comma-separated user IDs
+      # - DISCORD_ADMIN_USERS=${DISCORD_ADMIN_USERS:-}               # comma-separated user IDs
+      # - DISCORD_REQUIRE_MENTION=${DISCORD_REQUIRE_MENTION:-false}  # true|false
     ports:
       - "3001:3001"
     depends_on:

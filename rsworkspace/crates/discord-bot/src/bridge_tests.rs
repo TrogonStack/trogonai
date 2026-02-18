@@ -70,6 +70,7 @@ mod tests {
             guild_allowlist: vec![100, 200],
             user_allowlist: vec![],
             admin_users: vec![999],
+            require_mention: false,
         }
     }
 
@@ -80,6 +81,7 @@ mod tests {
             user_allowlist: vec![10, 20, 30],
             guild_allowlist: vec![100, 200],
             admin_users: vec![999],
+            require_mention: false,
         }
     }
 
@@ -90,6 +92,7 @@ mod tests {
             user_allowlist: vec![10],
             guild_allowlist: vec![100],
             admin_users: vec![],
+            require_mention: false,
         }
     }
 

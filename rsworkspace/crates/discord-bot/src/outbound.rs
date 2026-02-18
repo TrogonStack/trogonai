@@ -25,12 +25,15 @@ use serenity::model::id::{ChannelId, MessageId};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-use crate::errors::log_error;
+use crate::errors::{classify, log_error, log_outcome, ErrorOutcome};
 
 use crate::outbound_streaming::{StreamingMessages, StreamingState};
 
 /// Discord's maximum message content length in characters.
 const MAX_DISCORD_LEN: usize = 2000;
+
+/// Maximum retry attempts for rate-limited Discord API calls.
+const MAX_RETRIES: u32 = 3;
 
 /// Truncate a string to Discord's 2000-character limit.
 fn truncate(s: &str) -> &str {
@@ -131,18 +134,24 @@ impl OutboundProcessor {
             match result {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
+                    let context = format!("Failed to send message to channel {}", cmd.channel_id);
                     let mut builder = CreateMessage::new().content(truncate(&cmd.content));
-
                     if let Some(reply_id) = cmd.reply_to_message_id {
                         builder = builder.reference_message((channel, MessageId::new(reply_id)));
                     }
-
-                    if let Err(e) = channel.send_message(&*http, builder).await {
-                        log_error(
-                            &subject,
-                            &format!("Failed to send message to channel {}", cmd.channel_id),
-                            &e,
-                        );
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.send_message(&*http, builder.clone()).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(e) => {
@@ -170,21 +179,27 @@ impl OutboundProcessor {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message_id = MessageId::new(cmd.message_id);
-                    let mut builder = EditMessage::new();
-
-                    if let Some(content) = &cmd.content {
-                        builder = builder.content(truncate(content));
-                    }
-
-                    if let Err(e) = channel.edit_message(&*http, message_id, builder).await {
-                        log_error(
-                            &subject,
-                            &format!(
-                                "Failed to edit message {} in channel {}",
-                                cmd.message_id, cmd.channel_id
-                            ),
-                            &e,
-                        );
+                    let context = format!(
+                        "Failed to edit message {} in channel {}",
+                        cmd.message_id, cmd.channel_id
+                    );
+                    for attempt in 0..=MAX_RETRIES {
+                        let mut builder = EditMessage::new();
+                        if let Some(content) = &cmd.content {
+                            builder = builder.content(truncate(content));
+                        }
+                        match channel.edit_message(&*http, message_id, builder).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(e) => {
@@ -214,16 +229,23 @@ impl OutboundProcessor {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message_id = MessageId::new(cmd.message_id);
-
-                    if let Err(e) = channel.delete_message(&*http, message_id).await {
-                        log_error(
-                            &subject,
-                            &format!(
-                                "Failed to delete message {} in channel {}",
-                                cmd.message_id, cmd.channel_id
-                            ),
-                            &e,
-                        );
+                    let context = format!(
+                        "Failed to delete message {} in channel {}",
+                        cmd.message_id, cmd.channel_id
+                    );
+                    for attempt in 0..=MAX_RETRIES {
+                        match channel.delete_message(&*http, message_id).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(e) => {
@@ -421,16 +443,23 @@ impl OutboundProcessor {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message_id = MessageId::new(cmd.message_id);
                     let reaction = parse_reaction_type(&cmd.emoji);
-
-                    if let Err(e) = http.create_reaction(channel, message_id, &reaction).await {
-                        log_error(
-                            &subject,
-                            &format!(
-                                "Failed to add reaction '{}' to message {}",
-                                cmd.emoji, cmd.message_id
-                            ),
-                            &e,
-                        );
+                    let context = format!(
+                        "Failed to add reaction '{}' to message {}",
+                        cmd.emoji, cmd.message_id
+                    );
+                    for attempt in 0..=MAX_RETRIES {
+                        match http.create_reaction(channel, message_id, &reaction).await {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(e) => {
@@ -461,19 +490,26 @@ impl OutboundProcessor {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message_id = MessageId::new(cmd.message_id);
                     let reaction = parse_reaction_type(&cmd.emoji);
-
-                    if let Err(e) = http
-                        .delete_reaction_me(channel, message_id, &reaction)
-                        .await
-                    {
-                        log_error(
-                            &subject,
-                            &format!(
-                                "Failed to remove reaction '{}' from message {}",
-                                cmd.emoji, cmd.message_id
-                            ),
-                            &e,
-                        );
+                    let context = format!(
+                        "Failed to remove reaction '{}' from message {}",
+                        cmd.emoji, cmd.message_id
+                    );
+                    for attempt in 0..=MAX_RETRIES {
+                        match http
+                            .delete_reaction_me(channel, message_id, &reaction)
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(e) => match classify(&subject, &e) {
+                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                    tokio::time::sleep(dur).await;
+                                }
+                                outcome => {
+                                    log_outcome(&subject, &context, outcome);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(e) => {
