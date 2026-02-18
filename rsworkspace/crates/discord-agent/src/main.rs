@@ -134,11 +134,35 @@ async fn main() -> Result<()> {
 
     info!("Agent initialized, starting message processing...");
 
-    if let Err(e) = agent.run().await {
-        error!("Agent error: {}", e);
-        return Err(e);
+    tokio::select! {
+        result = agent.run() => {
+            if let Err(e) = result {
+                error!("Agent error: {}", e);
+                return Err(e);
+            }
+        }
+        _ = shutdown_signal() => {
+            info!("Shutdown signal received, stopping agent...");
+        }
     }
 
     info!("Discord agent stopped");
     Ok(())
+}
+
+/// Resolves on SIGTERM (Unix) or Ctrl+C.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await.ok();
+    }
 }

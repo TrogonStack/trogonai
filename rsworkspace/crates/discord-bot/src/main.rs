@@ -162,13 +162,34 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Graceful shutdown: close all shards on SIGTERM or Ctrl+C.
+    let shard_manager = client.shard_manager.clone();
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = sigterm.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+        }
+        info!("Shutdown signal received, stopping Discord client...");
+        shard_manager.shutdown_all().await;
+    });
+
     info!("Starting Discord gateway connection...");
 
-    // Start the Discord client (blocks until stopped)
+    // Start the Discord client (blocks until all shards are stopped)
     client
         .start()
         .await
         .map_err(|e| anyhow::anyhow!("Discord client error: {}", e))?;
 
+    info!("Discord bot stopped");
     Ok(())
 }
