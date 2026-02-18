@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use trogonstd::env::ReadEnv;
+use trogon_std::env::ReadEnv;
 
 const ENV_NATS_URL: &str = "NATS_URL";
 const ENV_NATS_CREDS: &str = "NATS_CREDS";
@@ -98,7 +98,7 @@ fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogonstd::env::InMemoryEnv;
+    use trogon_std::env::InMemoryEnv;
 
     #[test]
     fn from_env_defaults_to_localhost_with_no_auth() {

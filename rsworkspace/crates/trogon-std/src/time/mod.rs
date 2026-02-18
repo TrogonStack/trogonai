@@ -29,15 +29,13 @@
 //! assert!(is_expired(&clock, start, Duration::from_secs(30)));
 //! ```
 
-mod epoch_clock;
 mod get_elapsed;
 mod get_now;
 mod mock;
 mod system;
 
-pub use epoch_clock::EpochClock;
 pub use get_elapsed::GetElapsed;
 pub use get_now::GetNow;
 #[cfg(any(test, feature = "test-support"))]
-pub use mock::{FixedEpochClock, MockClock, MockInstant};
+pub use mock::{MockClock, MockInstant};
 pub use system::SystemClock;

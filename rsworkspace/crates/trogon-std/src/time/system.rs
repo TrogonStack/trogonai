@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use super::{EpochClock, GetElapsed, GetNow};
+use super::{GetElapsed, GetNow};
 
 /// Zero-sized type — delegates to `std::time::Instant`.
-#[derive(Clone)]
 pub struct SystemClock;
 
 impl GetNow for SystemClock {
@@ -22,12 +21,32 @@ impl GetElapsed for SystemClock {
     }
 }
 
-impl EpochClock for SystemClock {
-    #[inline]
-    fn system_time(&self) -> std::time::SystemTime {
-        std::time::SystemTime::now()
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_system_clock_now_returns_value() {
+        let clock = SystemClock;
+        let instant = clock.now();
+        let elapsed = clock.elapsed(instant);
+        assert!(elapsed < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_generic_function_with_system_clock() {
+        fn is_expired<C: GetNow + GetElapsed>(
+            clock: &C,
+            started_at: C::Instant,
+            ttl: Duration,
+        ) -> bool {
+            clock.elapsed(started_at) >= ttl
+        }
+
+        let clock = SystemClock;
+        let start = clock.now();
+        assert!(!is_expired(&clock, start, Duration::from_secs(9999)));
     }
 }
-
-#[cfg(test)]
-mod tests;
