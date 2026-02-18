@@ -8,8 +8,10 @@ mod bridge_tests;
 #[path = "bridge_nats_tests.rs"]
 mod bridge_nats_tests;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher};
@@ -22,8 +24,108 @@ use discord_types::{
         DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji, FetchedMember,
         ModalInput, SoundInfo, StickerInfo, VoiceState as BridgeVoiceState,
     },
-    AccessConfig,
+    AccessConfig, DmPolicy,
 };
+
+// ── Pairing state ─────────────────────────────────────────────────────────────
+
+/// A single pending pairing request.
+struct PendingPairing {
+    code: String,
+    channel_id: u64,
+    expires_at: u64, // Unix seconds
+}
+
+/// Runtime state for DM pairing flow.
+///
+/// Shared between the event bridge (inbound DMs) and the outbound processor
+/// (approve/reject commands from admins).
+pub struct PairingState {
+    pending: Mutex<HashMap<u64, PendingPairing>>, // user_id → pending
+    approved: Mutex<HashSet<u64>>,
+}
+
+impl PairingState {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(HashMap::new()),
+            approved: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Returns true if the user has been approved to send DMs.
+    pub fn is_paired(&self, user_id: u64) -> bool {
+        self.approved.lock().unwrap().contains(&user_id)
+    }
+
+    /// Begin a pairing session for `user_id`.
+    ///
+    /// Returns `(code, expires_at)`. If a pending entry already exists it is
+    /// reused so the user always receives the same code within one session.
+    /// Returns `None` when the user is already approved.
+    pub fn start_pairing(&self, user_id: u64, channel_id: u64) -> Option<(String, u64)> {
+        if self.is_paired(user_id) {
+            return None;
+        }
+        let mut pending = self.pending.lock().unwrap();
+        if let Some(p) = pending.get(&user_id) {
+            return Some((p.code.clone(), p.expires_at));
+        }
+        let code = generate_pairing_code();
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            + 300; // 5 minutes
+        pending.insert(
+            user_id,
+            PendingPairing { code: code.clone(), channel_id, expires_at },
+        );
+        Some((code, expires_at))
+    }
+
+    /// Approve by code. Returns `(user_id, channel_id)` if the code was valid.
+    pub fn approve_by_code(&self, code: &str) -> Option<(u64, u64)> {
+        let mut pending = self.pending.lock().unwrap();
+        let user_id = pending
+            .iter()
+            .find(|(_, p)| p.code == code)
+            .map(|(uid, _)| *uid)?;
+        let entry = pending.remove(&user_id)?;
+        self.approved.lock().unwrap().insert(user_id);
+        Some((user_id, entry.channel_id))
+    }
+
+    /// Reject by code. Returns `(user_id, channel_id)` if the code was valid.
+    pub fn reject_by_code(&self, code: &str) -> Option<(u64, u64)> {
+        let mut pending = self.pending.lock().unwrap();
+        let user_id = pending
+            .iter()
+            .find(|(_, p)| p.code == code)
+            .map(|(uid, _)| *uid)?;
+        let entry = pending.remove(&user_id)?;
+        Some((user_id, entry.channel_id))
+    }
+}
+
+/// Generate a 6-character alphanumeric pairing code (no rand crate needed).
+fn generate_pairing_code() -> String {
+    // Use the lower bits of nanosecond timestamp as entropy source.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    // Mix with memory address of a local variable for extra variance.
+    let addr = &nanos as *const u32 as u64;
+    let mut n = (nanos as u64).wrapping_add(addr.wrapping_mul(6364136223846793005));
+    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars
+    let mut code = String::with_capacity(6);
+    for _ in 0..6 {
+        code.push(ALPHABET[(n % 32) as usize] as char);
+        n >>= 5;
+    }
+    code
+}
 use serenity::model::application::{
     CommandInteraction, ComponentInteraction, ComponentInteractionDataKind,
     ModalInteraction, ResolvedValue,
@@ -53,7 +155,6 @@ use serenity::model::id::{ApplicationId, IntegrationId};
 use serenity::model::monetization::Entitlement as SerenityEntitlement;
 use serenity::model::user::CurrentUser;
 use serenity::model::guild::ScheduledEvent;
-use std::collections::HashMap;
 use serenity::model::gateway::{Presence, Ready};
 use serenity::model::guild::{PartialGuild, Role, UnavailableGuild};
 use serenity::model::voice::VoiceState as SerenityVoiceState;
@@ -76,6 +177,8 @@ pub struct DiscordBridge {
     pub presence_enabled: bool,
     /// When set, slash commands are registered to this guild ID instead of globally.
     pub guild_commands_guild_id: Option<u64>,
+    /// Runtime state for the DM pairing flow (shared with OutboundProcessor).
+    pub pairing_state: Arc<PairingState>,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -98,6 +201,7 @@ impl DiscordBridge {
             bot_user_id: Arc::new(AtomicU64::new(0)),
             presence_enabled,
             guild_commands_guild_id,
+            pairing_state: Arc::new(PairingState::new()),
         }
     }
 
@@ -136,9 +240,49 @@ impl DiscordBridge {
         self.access_config.can_access_guild(guild_id)
     }
 
-    /// Check if a user has DM access
+    /// Check if a user has DM access.
+    ///
+    /// For `DmPolicy::Pairing` the static config always returns `false`; the
+    /// runtime pairing_state is checked here to allow previously-approved users.
     pub fn check_dm_access(&self, user_id: u64) -> bool {
+        if self.access_config.is_admin(user_id) {
+            return true;
+        }
+        if self.access_config.dm_policy == DmPolicy::Pairing {
+            return self.pairing_state.is_paired(user_id);
+        }
         self.access_config.can_access_dm(user_id)
+    }
+
+    /// Attempt to start a pairing session for a user who sent a DM.
+    ///
+    /// Returns `Some((code, expires_at))` when a new or existing pending
+    /// session is available; `None` when the user is already approved.
+    pub fn try_start_pairing(&self, user_id: u64, channel_id: u64) -> Option<(String, u64)> {
+        self.pairing_state.start_pairing(user_id, channel_id)
+    }
+
+    /// Publish a pairing_requested event so admins are notified.
+    pub async fn publish_pairing_requested(
+        &self,
+        user_id: u64,
+        username: &str,
+        code: &str,
+        expires_at: u64,
+    ) -> Result<()> {
+        let sid = session_id(&ChannelType::Dm, user_id, None, Some(user_id));
+        let meta = EventMetadata::new(sid, self.next_sequence());
+        let event = PairingRequestedEvent {
+            metadata: meta,
+            user_id,
+            username: username.to_string(),
+            code: code.to_string(),
+            expires_at,
+        };
+        self.publisher
+            .publish(&subjects::bot::pairing_requested(self.prefix()), &event)
+            .await?;
+        Ok(())
     }
 
     /// Check if a channel is allowed

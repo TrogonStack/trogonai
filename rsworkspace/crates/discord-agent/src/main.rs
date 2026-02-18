@@ -90,6 +90,10 @@ struct Args {
     /// Maximum seconds to wait for an LLM streaming response before timing out (0 = no timeout)
     #[arg(long, env = "CLAUDE_STREAM_TIMEOUT_SECS", default_value = "120")]
     stream_timeout_secs: u64,
+
+    /// Emoji to react with while the LLM processes a message (e.g. "⏳" or "thinking:123456789")
+    #[arg(long, env = "ACK_EMOJI")]
+    ack_emoji: Option<String>,
 }
 
 #[tokio::main]
@@ -271,6 +275,7 @@ async fn main() -> Result<()> {
         metrics,
         args.max_history,
         stream_timeout_secs,
+        args.ack_emoji,
     );
 
     info!("Agent initialized, starting message processing...");

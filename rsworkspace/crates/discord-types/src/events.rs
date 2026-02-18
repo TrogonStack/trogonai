@@ -874,6 +874,31 @@ pub struct RatelimitEvent {
     pub global: bool,
 }
 
+/// A user has requested DM pairing and is awaiting admin approval
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PairingRequestedEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+    pub username: String,
+    pub code: String,
+    /// Unix timestamp (seconds) when the code expires
+    pub expires_at: u64,
+}
+
+/// A user's DM pairing request was approved
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PairingApprovedEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+}
+
+/// A user's DM pairing request was rejected
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PairingRejectedEvent {
+    pub metadata: EventMetadata,
+    pub user_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

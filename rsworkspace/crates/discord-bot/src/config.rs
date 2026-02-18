@@ -97,6 +97,7 @@ impl Config {
             .as_str()
         {
             "open" => DmPolicy::Open,
+            "pairing" => DmPolicy::Pairing,
             "disabled" => DmPolicy::Disabled,
             _ => DmPolicy::Allowlist,
         };

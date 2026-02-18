@@ -55,6 +55,7 @@ use serenity::model::permissions::Permissions;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use crate::bridge::PairingState;
 use crate::errors::{classify, log_error, log_outcome, ErrorOutcome};
 
 use crate::outbound_streaming::{StreamingMessages, StreamingState};
@@ -320,6 +321,7 @@ pub struct OutboundProcessor {
     pub(crate) prefix: String,
     pub(crate) streaming_messages: StreamingMessages,
     pub(crate) shard_manager: Option<Arc<serenity::all::ShardManager>>,
+    pub(crate) pairing_state: Arc<PairingState>,
 }
 
 impl OutboundProcessor {
@@ -328,6 +330,7 @@ impl OutboundProcessor {
         client: async_nats::Client,
         prefix: String,
         shard_manager: Option<Arc<serenity::all::ShardManager>>,
+        pairing_state: Arc<PairingState>,
     ) -> Self {
         Self {
             http,
@@ -335,6 +338,7 @@ impl OutboundProcessor {
             prefix,
             streaming_messages: Arc::new(RwLock::new(HashMap::new())),
             shard_manager,
+            pairing_state,
         }
     }
 
@@ -345,6 +349,7 @@ impl OutboundProcessor {
         let prefix = self.prefix;
         let streaming_messages = self.streaming_messages;
         let shard_manager = self.shard_manager;
+        let pairing_state = self.pairing_state;
         let publisher = MessagePublisher::new(client.clone(), prefix.clone());
 
         info!("Starting outbound processor for prefix: {}", prefix);
@@ -359,6 +364,7 @@ impl OutboundProcessor {
             r49, r50, r51, r52, r53, r54, r55, r56,
             r57, r58, r59, r60, r61, r62, r63, r64, r65, r66,
             r67, r68, r69, r70, r71, r72, r73, r74, r75,
+            r76, r77,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
@@ -470,6 +476,8 @@ impl OutboundProcessor {
             Self::handle_sync_integration(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_voice_regions(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_application_info(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_pairing_approve(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
+            Self::handle_pairing_reject(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -549,6 +557,8 @@ impl OutboundProcessor {
             ("sync_integration", r73),
             ("fetch_voice_regions", r74),
             ("fetch_application_info", r75),
+            ("pairing_approve", r76),
+            ("pairing_reject", r77),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -3683,6 +3693,122 @@ impl OutboundProcessor {
                 error!("fetch_application_info: failed to send reply: {}", e);
             }
         }
+        Ok(())
+    }
+
+    async fn handle_pairing_approve(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        pairing_state: Arc<PairingState>,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        use discord_types::PairingApproveCommand;
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::pairing_approve(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for pairing_approve on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let cmd: PairingApproveCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("pairing_approve: bad payload: {}", e);
+                    continue;
+                }
+            };
+
+            match pairing_state.approve_by_code(&cmd.code) {
+                Some((user_id, channel_id)) => {
+                    info!(user_id, "Pairing approved for user");
+
+                    // Send DM notification
+                    let channel = serenity::model::id::ChannelId::new(channel_id);
+                    if let Err(e) = channel
+                        .say(&http, "✅ Your account has been approved! You can now send me messages.")
+                        .await
+                    {
+                        warn!(user_id, "Failed to send pairing approval DM: {}", e);
+                    }
+
+                    // Publish event
+                    let event = discord_types::events::PairingApprovedEvent {
+                        metadata: discord_types::events::EventMetadata::new(
+                            format!("dm:{}:{}", user_id, user_id),
+                            0,
+                        ),
+                        user_id,
+                    };
+                    let event_subject = subjects::bot::pairing_approved(&prefix);
+                    if let Err(e) = publisher.publish(&event_subject, &event).await {
+                        warn!("Failed to publish pairing_approved: {}", e);
+                    }
+                }
+                None => {
+                    warn!(code = %cmd.code, "pairing_approve: code not found");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_pairing_reject(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+        pairing_state: Arc<PairingState>,
+        publisher: MessagePublisher,
+    ) -> Result<()> {
+        use discord_types::PairingRejectCommand;
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::pairing_reject(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for pairing_reject on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let cmd: PairingRejectCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("pairing_reject: bad payload: {}", e);
+                    continue;
+                }
+            };
+
+            match pairing_state.reject_by_code(&cmd.code) {
+                Some((user_id, channel_id)) => {
+                    info!(user_id, "Pairing rejected for user");
+
+                    // Send DM notification
+                    let channel = serenity::model::id::ChannelId::new(channel_id);
+                    if let Err(e) = channel
+                        .say(&http, "❌ Your pairing request was rejected.")
+                        .await
+                    {
+                        warn!(user_id, "Failed to send pairing rejection DM: {}", e);
+                    }
+
+                    // Publish event
+                    let event = discord_types::events::PairingRejectedEvent {
+                        metadata: discord_types::events::EventMetadata::new(
+                            format!("dm:{}:{}", user_id, user_id),
+                            0,
+                        ),
+                        user_id,
+                    };
+                    let event_subject = subjects::bot::pairing_rejected(&prefix);
+                    if let Err(e) = publisher.publish(&event_subject, &event).await {
+                        warn!("Failed to publish pairing_rejected: {}", e);
+                    }
+                }
+                None => {
+                    warn!(code = %cmd.code, "pairing_reject: code not found");
+                }
+            }
+        }
+
         Ok(())
     }
 }
