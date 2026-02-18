@@ -349,6 +349,49 @@ pub struct GuildMemberNickCommand {
     pub nick: Option<String>,
 }
 
+/// Create a webhook in a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateWebhookCommand {
+    pub channel_id: u64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+}
+
+/// Execute (send a message via) a webhook
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExecuteWebhookCommand {
+    pub webhook_id: u64,
+    pub webhook_token: String,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+}
+
+/// Delete a webhook
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteWebhookCommand {
+    pub webhook_id: u64,
+    pub webhook_token: String,
+}
+
+/// Move a guild member to a different voice channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceMoveCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub channel_id: u64,
+}
+
+/// Disconnect a guild member from voice
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceDisconnectCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -295,6 +295,9 @@ fn default_max_values() -> u8 {
 pub enum ActionRowComponent {
     Button(Button),
     StringSelect(StringSelectMenu),
+    UserSelect(StringSelectMenu),
+    RoleSelect(StringSelectMenu),
+    ChannelSelect(StringSelectMenu),
 }
 
 /// An action row — holds up to 5 buttons or 1 select menu
