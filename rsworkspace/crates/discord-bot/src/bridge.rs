@@ -49,6 +49,8 @@ pub struct DiscordBridge {
     bot_user_id: Arc<AtomicU64>,
     /// Whether to publish presence update events (requires GUILD_PRESENCES intent)
     pub presence_enabled: bool,
+    /// When set, slash commands are registered to this guild ID instead of globally.
+    pub guild_commands_guild_id: Option<u64>,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -62,6 +64,7 @@ impl DiscordBridge {
         prefix: String,
         access_config: AccessConfig,
         presence_enabled: bool,
+        guild_commands_guild_id: Option<u64>,
     ) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
@@ -69,6 +72,7 @@ impl DiscordBridge {
             sequence: Arc::new(AtomicU64::new(0)),
             bot_user_id: Arc::new(AtomicU64::new(0)),
             presence_enabled,
+            guild_commands_guild_id,
         }
     }
 
@@ -163,6 +167,11 @@ impl DiscordBridge {
                     })
                     .collect(),
                 color: e.colour.map(|c| c.0),
+                author: None,
+                footer: None,
+                image: None,
+                thumbnail: None,
+                timestamp: None,
             })
             .collect();
 
@@ -255,6 +264,11 @@ impl DiscordBridge {
                                 })
                                 .collect(),
                             color: e.colour.map(|c| c.0),
+                            author: None,
+                            footer: None,
+                            image: None,
+                            thumbnail: None,
+                            timestamp: None,
                         })
                         .collect()
                 })

@@ -69,6 +69,8 @@ mod tests {
             content: "Hello from test".to_string(),
             embeds: vec![],
             reply_to_message_id: None,
+            files: vec![],
+            components: vec![],
         };
         publish(&client, &subject, &cmd).await;
 
@@ -91,6 +93,8 @@ mod tests {
             content: "Reply message".to_string(),
             embeds: vec![],
             reply_to_message_id: Some(50),
+            files: vec![],
+            components: vec![],
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -156,6 +160,7 @@ mod tests {
             content: Some("pong".to_string()),
             embeds: vec![],
             ephemeral: false,
+            components: vec![],
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -200,6 +205,8 @@ mod tests {
             embeds: vec![],
             ephemeral: false,
             session_id: None,
+            files: vec![],
+            components: vec![],
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -546,6 +553,8 @@ mod tests {
                 content: format!("message {}", i),
                 embeds: vec![],
                 reply_to_message_id: None,
+                files: vec![],
+                components: vec![],
             };
             publish(&client, &subjects::agent::message_send(&prefix), &cmd).await;
         }

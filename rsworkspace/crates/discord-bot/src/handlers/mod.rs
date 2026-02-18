@@ -40,7 +40,7 @@ impl EventHandler for Handler {
             }
         }
 
-        // Register slash commands globally (takes ~1 hour to propagate after first deploy)
+        // Register slash commands — guild-level (instant) or global (~1 hour propagation)
         let commands = vec![
             CreateCommand::new("ping").description("Check if the bot is alive"),
             CreateCommand::new("help").description("Show available commands"),
@@ -61,9 +61,26 @@ impl EventHandler for Handler {
                 ),
         ];
 
-        match Command::set_global_commands(&ctx.http, commands).await {
-            Ok(cmds) => info!("Registered {} slash commands globally", cmds.len()),
-            Err(e) => warn!("Failed to register slash commands: {}", e),
+        let guild_commands_guild_id = {
+            let data = ctx.data.read().await;
+            data.get::<DiscordBridge>()
+                .and_then(|b| b.guild_commands_guild_id)
+        };
+
+        if let Some(guild_id) = guild_commands_guild_id {
+            match GuildId::new(guild_id).set_commands(&ctx.http, commands).await {
+                Ok(cmds) => info!(
+                    "Registered {} slash commands for guild {}",
+                    cmds.len(),
+                    guild_id
+                ),
+                Err(e) => warn!("Failed to register guild slash commands: {}", e),
+            }
+        } else {
+            match Command::set_global_commands(&ctx.http, commands).await {
+                Ok(cmds) => info!("Registered {} slash commands globally", cmds.len()),
+                Err(e) => warn!("Failed to register slash commands: {}", e),
+            }
         }
     }
 

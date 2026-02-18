@@ -294,6 +294,21 @@ pub mod agent {
         format!("discord.{}.agent.thread.archive", prefix)
     }
 
+    /// Set bot presence/status command subject
+    pub fn bot_presence(prefix: &str) -> String {
+        format!("discord.{}.agent.bot.presence", prefix)
+    }
+
+    /// Fetch messages from a channel (request-reply)
+    pub fn fetch_messages(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.messages", prefix)
+    }
+
+    /// Fetch a single guild member (request-reply)
+    pub fn fetch_member(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.member", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)
@@ -429,6 +444,9 @@ mod tests {
         assert_eq!(agent::message_bulk_delete("prod"),             "discord.prod.agent.message.bulk_delete");
         assert_eq!(agent::thread_create("prod"),                   "discord.prod.agent.thread.create");
         assert_eq!(agent::thread_archive("prod"),                  "discord.prod.agent.thread.archive");
+        assert_eq!(agent::bot_presence("prod"),                    "discord.prod.agent.bot.presence");
+        assert_eq!(agent::fetch_messages("prod"),                  "discord.prod.agent.fetch.messages");
+        assert_eq!(agent::fetch_member("prod"),                    "discord.prod.agent.fetch.member");
     }
 
     #[test]

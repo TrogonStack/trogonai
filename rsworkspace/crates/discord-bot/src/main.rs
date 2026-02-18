@@ -118,6 +118,7 @@ async fn main() -> Result<()> {
         config.nats.prefix.clone(),
         config.discord.access.clone(),
         config.discord.presence_enabled,
+        config.discord.guild_commands_guild_id,
     ));
 
     // Build the outbound processor (NATS → Discord)
