@@ -2,6 +2,7 @@
 
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
+use serenity::prelude::TypeMapKey;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
@@ -39,6 +40,10 @@ impl Default for AppState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl TypeMapKey for AppState {
+    type Value = AppState;
 }
 
 async fn health_handler(State(state): State<AppState>) -> (StatusCode, Json<HealthStatus>) {

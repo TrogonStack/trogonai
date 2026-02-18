@@ -88,8 +88,7 @@ impl DiscordAgent {
     async fn handle_slash_commands(&self) -> Result<()> {
         use discord_types::events::SlashCommandEvent;
 
-        let subject =
-            discord_nats::subjects::bot::interaction_command(self.subscriber.prefix());
+        let subject = discord_nats::subjects::bot::interaction_command(self.subscriber.prefix());
         info!("Subscribing to slash commands: {}", subject);
 
         let mut stream = self
@@ -123,8 +122,7 @@ impl DiscordAgent {
     async fn handle_component_interactions(&self) -> Result<()> {
         use discord_types::events::ComponentInteractionEvent;
 
-        let subject =
-            discord_nats::subjects::bot::interaction_component(self.subscriber.prefix());
+        let subject = discord_nats::subjects::bot::interaction_component(self.subscriber.prefix());
         info!("Subscribing to component interactions: {}", subject);
 
         let mut stream = self
