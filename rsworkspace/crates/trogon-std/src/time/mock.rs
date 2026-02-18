@@ -4,26 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[cfg(any(test, feature = "test-support"))]
-use super::{EpochClock, GetElapsed, GetNow};
-
-/// Fixed wall-clock time source for deterministic tests.
-#[cfg(any(test, feature = "test-support"))]
-#[derive(Clone)]
-pub struct FixedEpochClock(pub std::time::SystemTime);
-
-#[cfg(any(test, feature = "test-support"))]
-impl FixedEpochClock {
-    pub fn from_secs(secs: u64) -> Self {
-        Self(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl EpochClock for FixedEpochClock {
-    fn system_time(&self) -> std::time::SystemTime {
-        self.0
-    }
-}
+use super::{GetElapsed, GetNow};
 
 /// Time only advances when you call [`advance`](MockClock::advance) or
 /// [`set`](MockClock::set), eliminating flakiness from real-time
@@ -232,7 +213,11 @@ mod tests {
     fn test_generic_function_with_mock_clock() {
         use super::super::{GetElapsed, GetNow};
 
-        fn is_expired<C: GetNow + GetElapsed>(clock: &C, started_at: C::Instant, ttl: Duration) -> bool {
+        fn is_expired<C: GetNow + GetElapsed>(
+            clock: &C,
+            started_at: C::Instant,
+            ttl: Duration,
+        ) -> bool {
             clock.elapsed(started_at) >= ttl
         }
 
