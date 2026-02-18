@@ -3,7 +3,11 @@ mod tests {
     use crate::config::Config;
     use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
     use std::io::Write;
+    use std::sync::Mutex;
     use tempfile::NamedTempFile;
+
+    /// Serialize all tests that read/write process-wide env vars to avoid races.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn write_toml(content: &str) -> NamedTempFile {
         let mut f = NamedTempFile::new().unwrap();
@@ -110,10 +114,13 @@ prefix = "prod"
     }
 
     // ── from_env ──────────────────────────────────────────────────────────────
+    //
+    // These three tests all mutate DISCORD_BOT_TOKEN (a process-wide resource)
+    // and must therefore run sequentially under ENV_MUTEX.
 
     #[test]
     fn test_from_env_missing_token_returns_error() {
-        // Make sure the env var is not set
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::remove_var("DISCORD_BOT_TOKEN");
         let result = Config::from_env();
         assert!(result.is_err());
@@ -121,6 +128,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_reads_token() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DISCORD_BOT_TOKEN", "env-token-abc");
         std::env::set_var("NATS_URL", "nats://nats-env:4222");
         std::env::set_var("DISCORD_PREFIX", "staging");
@@ -136,6 +144,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_defaults_nats_url() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DISCORD_BOT_TOKEN", "tok");
         std::env::remove_var("NATS_URL");
         std::env::remove_var("DISCORD_PREFIX");
