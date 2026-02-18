@@ -410,6 +410,94 @@ pub struct StageInstanceDeleteEvent {
     pub channel_id: u64,
 }
 
+/// A user was banned from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildBanAddEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub user: DiscordUser,
+}
+
+/// A user was unbanned from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildBanRemoveEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub user: DiscordUser,
+}
+
+/// Guild custom emoji list changed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildEmojisUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub emojis: Vec<Emoji>,
+}
+
+/// A guild scheduled event was created
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildScheduledEventCreateEvent {
+    pub metadata: EventMetadata,
+    pub event_id: u64,
+    pub guild_id: u64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub start_time: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+}
+
+/// A guild scheduled event was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildScheduledEventUpdateEvent {
+    pub metadata: EventMetadata,
+    pub event_id: u64,
+    pub guild_id: u64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub start_time: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+}
+
+/// A guild scheduled event was deleted or cancelled
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildScheduledEventDeleteEvent {
+    pub metadata: EventMetadata,
+    pub event_id: u64,
+    pub guild_id: u64,
+    pub name: String,
+}
+
+/// A channel's pinned messages list was updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChannelPinsUpdateEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_pin_timestamp: Option<String>,
+}
+
+/// All reactions were removed from a message
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReactionRemoveAllEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    pub message_id: u64,
+}
+
+/// A guild's webhooks were updated
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WebhooksUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub channel_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

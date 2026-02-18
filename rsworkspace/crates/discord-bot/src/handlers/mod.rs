@@ -4,13 +4,14 @@ use serenity::async_trait;
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::application::{Command, CommandOptionType, Interaction};
 use serenity::model::channel::{GuildChannel, Message};
-use serenity::model::event::{MessageUpdateEvent, TypingStartEvent};
+use serenity::model::event::{ChannelPinsUpdateEvent, MessageUpdateEvent, TypingStartEvent};
 use serenity::model::gateway::{Presence, Ready};
-use serenity::model::guild::{Guild, Member, PartialGuild, Role, UnavailableGuild};
+use serenity::model::guild::{Guild, Member, PartialGuild, Role, ScheduledEvent, UnavailableGuild};
 use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId};
 use serenity::model::user::User;
 use serenity::model::voice::VoiceState;
 use serenity::prelude::*;
+use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
 use crate::bridge::DiscordBridge;
@@ -823,6 +824,168 @@ impl EventHandler for Handler {
         }
         if let Err(e) = bridge.publish_stage_instance_delete(&stage).await {
             error!("Failed to publish stage_instance_delete: {}", e);
+        }
+    }
+
+    async fn guild_ban_addition(&self, ctx: Context, guild_id: GuildId, banned_user: User) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_ban_add(guild_id, &banned_user).await {
+            error!("Failed to publish guild_ban_add: {}", e);
+        }
+    }
+
+    async fn guild_ban_removal(&self, ctx: Context, guild_id: GuildId, unbanned_user: User) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_ban_remove(guild_id, &unbanned_user).await {
+            error!("Failed to publish guild_ban_remove: {}", e);
+        }
+    }
+
+    async fn guild_emojis_update(
+        &self,
+        ctx: Context,
+        guild_id: GuildId,
+        current_state: HashMap<serenity::model::id::EmojiId, serenity::model::guild::Emoji>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_emojis_update(guild_id, &current_state).await {
+            error!("Failed to publish guild_emojis_update: {}", e);
+        }
+    }
+
+    async fn guild_scheduled_event_create(&self, ctx: Context, event: ScheduledEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(event.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_scheduled_event_create(&event).await {
+            error!("Failed to publish guild_scheduled_event_create: {}", e);
+        }
+    }
+
+    async fn guild_scheduled_event_update(&self, ctx: Context, event: ScheduledEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(event.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_scheduled_event_update(&event).await {
+            error!("Failed to publish guild_scheduled_event_update: {}", e);
+        }
+    }
+
+    async fn guild_scheduled_event_delete(&self, ctx: Context, event: ScheduledEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(event.guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_guild_scheduled_event_delete(&event).await {
+            error!("Failed to publish guild_scheduled_event_delete: {}", e);
+        }
+    }
+
+    async fn channel_pins_update(&self, ctx: Context, pin: ChannelPinsUpdateEvent) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        // Only publish for guilds we have access to; skip DM pins
+        if let Some(gid) = pin.guild_id {
+            if !bridge.check_guild_access(gid.get()) {
+                return;
+            }
+        }
+        if let Err(e) = bridge.publish_channel_pins_update(&pin).await {
+            error!("Failed to publish channel_pins_update: {}", e);
+        }
+    }
+
+    async fn reaction_remove_all(
+        &self,
+        ctx: Context,
+        channel_id: ChannelId,
+        removed_from_message_id: MessageId,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if let Err(e) = bridge
+            .publish_reaction_remove_all(channel_id, removed_from_message_id)
+            .await
+        {
+            error!("Failed to publish reaction_remove_all: {}", e);
+        }
+    }
+
+    async fn webhook_update(
+        &self,
+        ctx: Context,
+        guild_id: GuildId,
+        belongs_to_channel_id: ChannelId,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+        if !bridge.check_guild_access(guild_id.get()) {
+            return;
+        }
+        if let Err(e) = bridge.publish_webhooks_update(guild_id, belongs_to_channel_id).await {
+            error!("Failed to publish webhooks_update: {}", e);
         }
     }
 }

@@ -503,6 +503,69 @@ pub struct RemoveThreadMemberCommand {
     pub user_id: u64,
 }
 
+/// Edit a guild role's name, color, hoist, or mentionable flag
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditRoleCommand {
+    pub guild_id: u64,
+    pub role_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hoist: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mentionable: Option<bool>,
+}
+
+/// Start a stage instance in a stage voice channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateStageInstanceCommand {
+    pub channel_id: u64,
+    pub topic: String,
+}
+
+/// End (delete) a stage instance
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteStageInstanceCommand {
+    pub channel_id: u64,
+}
+
+/// Edit a webhook's name or target channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditWebhookCommand {
+    pub webhook_id: u64,
+    pub webhook_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<u64>,
+}
+
+/// Open a DM channel with a user (request-reply: returns channel_id as `Option<u64>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateDmChannelCommand {
+    pub user_id: u64,
+}
+
+/// Fetch guild info (request-reply: returns `Option<FetchedGuild>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchGuildCommand {
+    pub guild_id: u64,
+}
+
+/// Fetch channel info (request-reply: returns `Option<FetchedChannel>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchChannelCommand {
+    pub channel_id: u64,
+}
+
+/// Fetch active invites for a channel (request-reply: returns `Vec<FetchedInvite>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchInvitesCommand {
+    pub channel_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

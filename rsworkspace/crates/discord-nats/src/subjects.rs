@@ -211,6 +211,51 @@ pub mod bot {
         format!("discord.{}.bot.stage.instance_delete", prefix)
     }
 
+    /// Guild ban add event subject
+    pub fn guild_ban_add(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.ban_add", prefix)
+    }
+
+    /// Guild ban remove event subject
+    pub fn guild_ban_remove(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.ban_remove", prefix)
+    }
+
+    /// Guild emojis update event subject
+    pub fn guild_emojis_update(prefix: &str) -> String {
+        format!("discord.{}.bot.guild.emojis_update", prefix)
+    }
+
+    /// Guild scheduled event created subject
+    pub fn guild_scheduled_event_create(prefix: &str) -> String {
+        format!("discord.{}.bot.scheduled_event.create", prefix)
+    }
+
+    /// Guild scheduled event updated subject
+    pub fn guild_scheduled_event_update(prefix: &str) -> String {
+        format!("discord.{}.bot.scheduled_event.update", prefix)
+    }
+
+    /// Guild scheduled event deleted subject
+    pub fn guild_scheduled_event_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.scheduled_event.delete", prefix)
+    }
+
+    /// Channel pins updated event subject
+    pub fn channel_pins_update(prefix: &str) -> String {
+        format!("discord.{}.bot.channel.pins_update", prefix)
+    }
+
+    /// All reactions removed from message event subject
+    pub fn reaction_remove_all_notification(prefix: &str) -> String {
+        format!("discord.{}.bot.reaction.remove_all", prefix)
+    }
+
+    /// Webhooks updated event subject
+    pub fn webhooks_update(prefix: &str) -> String {
+        format!("discord.{}.bot.webhooks.update", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -457,6 +502,46 @@ pub mod agent {
     /// Remove member from thread command subject
     pub fn thread_member_remove(prefix: &str) -> String {
         format!("discord.{}.agent.thread.member_remove", prefix)
+    }
+
+    /// Edit role command subject
+    pub fn role_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.role.edit", prefix)
+    }
+
+    /// Create stage instance command subject
+    pub fn stage_create(prefix: &str) -> String {
+        format!("discord.{}.agent.stage.create", prefix)
+    }
+
+    /// Delete stage instance command subject
+    pub fn stage_delete(prefix: &str) -> String {
+        format!("discord.{}.agent.stage.delete", prefix)
+    }
+
+    /// Edit webhook command subject
+    pub fn webhook_edit(prefix: &str) -> String {
+        format!("discord.{}.agent.webhook.edit", prefix)
+    }
+
+    /// Create DM channel command subject (request-reply)
+    pub fn dm_create(prefix: &str) -> String {
+        format!("discord.{}.agent.dm.create", prefix)
+    }
+
+    /// Fetch guild info subject (request-reply)
+    pub fn fetch_guild(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.guild", prefix)
+    }
+
+    /// Fetch channel info subject (request-reply)
+    pub fn fetch_channel(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.channel", prefix)
+    }
+
+    /// Fetch channel invites subject (request-reply)
+    pub fn fetch_invites(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.invites", prefix)
     }
 
     /// Wildcard for all agent commands

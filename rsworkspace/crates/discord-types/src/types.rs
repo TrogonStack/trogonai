@@ -376,6 +376,40 @@ pub struct FetchedMember {
     pub joined_at: Option<String>,
 }
 
+/// A guild returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedGuild {
+    pub id: u64,
+    pub name: String,
+    pub member_count: u64,
+}
+
+/// A channel returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedChannel {
+    pub id: u64,
+    pub channel_type: ChannelType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+}
+
+/// An invite returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedInvite {
+    pub code: String,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inviter_id: Option<u64>,
+    pub uses: u64,
+    pub max_uses: u64,
+    pub max_age_secs: u64,
+    pub temporary: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
