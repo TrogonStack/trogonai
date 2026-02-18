@@ -22,6 +22,9 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
+/// Discord's maximum message content length in characters.
+const MAX_DISCORD_LEN: usize = 2000;
+
 /// Minimum time between edits to the same message.
 /// Discord allows ~5 edits/s per channel; 400 ms gives comfortable headroom.
 const MIN_EDIT_INTERVAL: Duration = Duration::from_millis(400);
@@ -183,10 +186,24 @@ async fn process_stream_message(
     Ok(())
 }
 
+/// Truncate content to Discord's 2000-character limit, appending "…" if cut.
+fn truncate(content: &str) -> &str {
+    if content.len() <= MAX_DISCORD_LEN {
+        content
+    } else {
+        // Walk back to a char boundary so we don't split a multi-byte char.
+        let mut end = MAX_DISCORD_LEN - 1; // leave room for the ellipsis
+        while !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        &content[..end]
+    }
+}
+
 /// Send the initial message (with optional reply) and return the new message ID.
 async fn send_initial_message(http: &Http, cmd: &StreamMessageCommand) -> Result<u64> {
     let channel = ChannelId::new(cmd.channel_id);
-    let mut builder = CreateMessage::new().content(&cmd.content);
+    let mut builder = CreateMessage::new().content(truncate(&cmd.content));
 
     if let Some(reply_id) = cmd.reply_to_message_id {
         builder = builder.reference_message((channel, MessageId::new(reply_id)));
@@ -225,7 +242,7 @@ async fn edit_message_with_retry(
 
     loop {
         attempts += 1;
-        let builder = EditMessage::new().content(content);
+        let builder = EditMessage::new().content(truncate(content));
         match channel.edit_message(http, msg_id, builder).await {
             Ok(_) => {
                 debug!("Edited message {} (attempt {})", message_id, attempts);
