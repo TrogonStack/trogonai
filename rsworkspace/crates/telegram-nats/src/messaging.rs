@@ -397,6 +397,87 @@ mod tests {
         let _ = subscriber.client();
     }
 
+    // ── Issue 4: CommandMetadata headers roundtrip ────────────────────────────
+
+    #[test]
+    fn test_read_cmd_metadata_missing_command_id_returns_none() {
+        // X-Command-Id is required — absent means no metadata
+        let headers = async_nats::HeaderMap::new();
+        assert!(
+            read_cmd_metadata(&headers).is_none(),
+            "absent X-Command-Id must yield None"
+        );
+    }
+
+    #[test]
+    fn test_read_cmd_metadata_only_command_id_fills_defaults() {
+        // Partial headers: only X-Command-Id → attempt defaults to 1, optionals are None
+        let mut headers = async_nats::HeaderMap::new();
+        let id = uuid::Uuid::new_v4();
+        headers.insert("X-Command-Id", id.to_string().as_str());
+
+        let meta = read_cmd_metadata(&headers).expect("must parse with just X-Command-Id");
+        assert_eq!(meta.command_id, id);
+        assert_eq!(meta.attempt, 1, "attempt must default to 1");
+        assert!(meta.session_id.is_none());
+        assert!(meta.causation_id.is_none());
+        assert!(meta.correlation_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_publish_command_sets_all_metadata_headers() {
+        // Verifies that publish_command serialises every CommandMetadata field
+        // into NATS headers and read_cmd_metadata recovers them correctly.
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+
+        let subject = format!(
+            "test.metadata.headers.{}",
+            uuid::Uuid::new_v4().simple()
+        );
+
+        let meta = telegram_types::commands::CommandMetadata::new()
+            .with_causation("session-abc", "event-xyz");
+        let expected_cmd_id = meta.command_id;
+        let expected_session = meta.session_id.clone().unwrap();
+        let expected_causation = meta.causation_id.clone().unwrap();
+        let expected_attempt = meta.attempt;
+
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let mut raw_sub = client.subscribe(subject.clone()).await.unwrap();
+
+        publisher
+            .publish_command(&subject, &TestMsg { value: "cmd".into(), count: 0 }, meta)
+            .await
+            .unwrap();
+
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut raw_sub),
+        )
+        .await
+        .expect("timed out waiting for message")
+        .expect("subscriber closed");
+
+        let headers = msg.headers.as_ref().expect("headers must be present");
+        let read_back = read_cmd_metadata(headers).expect("must parse CommandMetadata from headers");
+
+        assert_eq!(read_back.command_id, expected_cmd_id, "command_id must round-trip");
+        assert_eq!(
+            read_back.session_id.as_deref(),
+            Some(expected_session.as_str()),
+            "session_id must round-trip"
+        );
+        assert_eq!(
+            read_back.causation_id.as_deref(),
+            Some(expected_causation.as_str()),
+            "causation_id must round-trip"
+        );
+        assert_eq!(read_back.attempt, expected_attempt, "attempt must round-trip");
+    }
+
     #[tokio::test]
     async fn test_multiple_messages_in_order() {
         let Some(client) = try_connect().await else {

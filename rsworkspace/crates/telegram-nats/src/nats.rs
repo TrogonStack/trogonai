@@ -270,4 +270,131 @@ mod tests {
         assert_eq!(config.servers.len(), 2);
         assert_eq!(config.prefix, "dev");
     }
+
+    // ── Issues 1 + 3: JetStream durable delivery semantics ───────────────────
+
+    const NATS_URL: &str = "nats://localhost:14222";
+
+    async fn try_connect() -> Option<async_nats::Client> {
+        async_nats::connect(NATS_URL).await.ok()
+    }
+
+    /// Issue 3 – Inbound at-least-once:
+    /// A message published BEFORE any consumer is active must still be
+    /// retrievable once a durable pull consumer is created later.
+    #[tokio::test]
+    async fn test_inbound_message_persists_without_active_consumer() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("persist-{}", uuid::Uuid::new_v4().simple());
+
+        setup_event_stream(&js, &prefix).await.unwrap();
+
+        // Publish BEFORE creating any consumer — stream must buffer the message
+        let subject = crate::subjects::bot::message_text(&prefix);
+        client
+            .publish(subject, b"at-least-once-payload".as_ref().into())
+            .await
+            .unwrap();
+
+        // Brief pause (no consumer active during this window)
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Now create the consumer — message must still be available
+        let consumer_name = format!("persist-test-{}", uuid::Uuid::new_v4().simple());
+        let consumer = create_inbound_consumer(&js, &prefix, &consumer_name)
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — message was not retained in JetStream stream")
+        .expect("stream closed unexpectedly")
+        .unwrap();
+
+        assert_eq!(&msg.payload[..], b"at-least-once-payload");
+        msg.ack().await.unwrap();
+    }
+
+    /// Issue 1 – Durable consumer redelivers unacked message:
+    /// If a consumer receives a message but does NOT ack within ack_wait,
+    /// JetStream must redeliver it (at-least-once guarantee on crash).
+    #[tokio::test]
+    async fn test_durable_consumer_redelivers_unacked_message() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("redeliver-{}", uuid::Uuid::new_v4().simple());
+
+        setup_event_stream(&js, &prefix).await.unwrap();
+
+        let subject = crate::subjects::bot::message_text(&prefix);
+        client
+            .publish(subject, b"redeliver-payload".as_ref().into())
+            .await
+            .unwrap();
+
+        // Create consumer with a short ack_wait so the test doesn't take too long
+        let stream_name = format!("telegram_events_{}", prefix);
+        let stream = js.get_stream(&stream_name).await.unwrap();
+        let consumer_name = format!("redeliver-{}", uuid::Uuid::new_v4().simple());
+        let config = async_nats::jetstream::consumer::pull::Config {
+            durable_name: Some(consumer_name.clone()),
+            ack_wait: std::time::Duration::from_secs(2),
+            max_deliver: 5,
+            ..Default::default()
+        };
+        let consumer = stream
+            .get_or_create_consumer(&consumer_name, config)
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        // First delivery — do NOT ack (simulates consumer crash)
+        let first = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out on first delivery")
+        .unwrap()
+        .unwrap();
+
+        let first_seq = first.info().unwrap().stream_sequence;
+        // Intentionally drop without acking — triggers redelivery after ack_wait
+        drop(first);
+
+        // Wait past ack_wait (2 s) so JetStream redelivers
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        // Second delivery must be the same message
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — JetStream did not redeliver unacked message")
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            second.info().unwrap().stream_sequence,
+            first_seq,
+            "redelivered message must have the same stream_sequence"
+        );
+        assert!(
+            second.info().unwrap().delivered >= 2,
+            "delivered count must be >= 2 on redelivery"
+        );
+        second.ack().await.unwrap();
+    }
 }

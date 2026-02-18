@@ -33,6 +33,18 @@ mod nats_tests {
         }
     }
 
+    async fn make_dedup(js: &jetstream::Context) -> crate::dedup::DedupStore {
+        let bucket = format!("dedup-{}", uuid::Uuid::new_v4().simple());
+        let kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create dedup KV bucket");
+        crate::dedup::DedupStore::new(kv)
+    }
+
     async fn make_bridge(
         client: async_nats::Client,
         js: jetstream::Context,
@@ -47,15 +59,7 @@ mod nats_tests {
             .await
             .expect("create KV bucket");
 
-        let dedup_bucket = format!("dedup-{}", uuid::Uuid::new_v4().simple());
-        let dedup_kv = js
-            .create_key_value(jetstream::kv::Config {
-                bucket: dedup_bucket,
-                ..Default::default()
-            })
-            .await
-            .expect("create dedup KV bucket");
-        let dedup = crate::dedup::DedupStore::new(dedup_kv);
+        let dedup = make_dedup(&js).await;
 
         TelegramBridge::new(
             client,
@@ -139,7 +143,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -332,7 +336,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_photo_message(fake_bot(), message, bridge, health())
+        handlers::handle_photo_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -414,7 +418,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_video_message(fake_bot(), message, bridge, health())
+        handlers::handle_video_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -497,7 +501,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_audio_message(fake_bot(), message, bridge, health())
+        handlers::handle_audio_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -580,7 +584,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_document_message(fake_bot(), message, bridge, health())
+        handlers::handle_document_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -606,7 +610,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.voice", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_voice_message(fake_bot(), message, bridge, health())
+        handlers::handle_voice_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -618,6 +622,18 @@ mod nats_tests {
 
     fn fake_bot() -> Bot {
         Bot::new("0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    }
+
+    fn fake_update(id: u32) -> teloxide::types::Update {
+        serde_json::from_value(serde_json::json!({
+            "update_id": id,
+            "message": {
+                "message_id": 1, "date": 0,
+                "chat": {"id": 1, "type": "private"},
+                "from": {"id": 1, "is_bot": false, "first_name": "T"}
+            }
+        }))
+        .unwrap()
     }
 
     fn health() -> AppState {
@@ -640,7 +656,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -666,7 +682,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_photo_message(fake_bot(), message, bridge, health())
+        handlers::handle_photo_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -690,6 +706,8 @@ mod nats_tests {
             .await
             .unwrap();
 
+        let dedup = make_dedup(&js).await;
+
         TelegramBridge::new(
             client,
             prefix.to_string(),
@@ -699,6 +717,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         )
     }
 
@@ -718,7 +737,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -752,7 +771,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -783,7 +802,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -810,7 +829,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.help", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -835,7 +854,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.search", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -864,7 +883,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -894,6 +913,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV bucket");
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -904,6 +924,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let mut json = private_base(ADMIN_ID);
@@ -914,7 +935,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -941,6 +962,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV bucket");
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -951,6 +973,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let mut json = group_base(42, GROUP_ID);
@@ -961,7 +984,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_text_message(fake_bot(), message, bridge, health())
+        handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1008,7 +1031,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1031,7 +1054,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1064,7 +1087,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1104,7 +1127,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1125,7 +1148,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1151,6 +1174,7 @@ mod nats_tests {
             })
             .await
             .unwrap();
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -1161,13 +1185,14 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let query = callback_query_json(ADMIN_ID, "admin:action", 1, ADMIN_ID as i64);
         let subject = format!("telegram.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_callback_query(fake_bot(), query, bridge, health())
+        handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1201,7 +1226,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1224,7 +1249,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1252,6 +1277,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV bucket");
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -1262,13 +1288,14 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let query = inline_query_json(ADMIN_ID, "admin query");
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1290,7 +1317,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1320,7 +1347,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1351,7 +1378,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1386,7 +1413,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_chosen_inline_result(fake_bot(), result, bridge, health())
+        handlers::handle_chosen_inline_result(fake_bot(), fake_update(42), result, bridge, health())
             .await
             .unwrap();
 
@@ -1418,7 +1445,7 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_inline_query(fake_bot(), query, bridge, health())
+        handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1447,7 +1474,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.location", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_location_message(fake_bot(), message, bridge, health())
+        handlers::handle_location_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1475,7 +1502,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.venue", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_venue_message(fake_bot(), message, bridge, health())
+        handlers::handle_venue_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1499,7 +1526,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.contact", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_contact_message(fake_bot(), message, bridge, health())
+        handlers::handle_contact_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1527,7 +1554,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1560,7 +1587,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+        handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1589,7 +1616,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.video_note", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_video_note_message(fake_bot(), message, bridge, health())
+        handlers::handle_video_note_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1622,7 +1649,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1651,7 +1678,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1678,7 +1705,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1706,7 +1733,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1734,7 +1761,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1761,7 +1788,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_sticker_message(fake_bot(), message, bridge, health())
+        handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1798,7 +1825,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+        handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1830,7 +1857,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_animation_message(fake_bot(), message, bridge, health())
+        handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -1862,7 +1889,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chosen_inline_result(fake_bot(), result, bridge, health())
+        handlers::handle_chosen_inline_result(fake_bot(), fake_update(42), result, bridge, health())
             .await
             .unwrap();
 
@@ -1909,7 +1936,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chat_member_updated(fake_bot(), update, bridge, health())
+        handlers::handle_chat_member_updated(fake_bot(), fake_update(42), update, bridge, health())
             .await
             .unwrap();
 
@@ -1932,7 +1959,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.my_member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_my_chat_member_updated(fake_bot(), update, bridge, health())
+        handlers::handle_my_chat_member_updated(fake_bot(), fake_update(42), update, bridge, health())
             .await
             .unwrap();
 
@@ -1962,7 +1989,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.payment.pre_checkout", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_pre_checkout_query(fake_bot(), query, bridge, health())
+        handlers::handle_pre_checkout_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -1995,7 +2022,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.payment.shipping", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_shipping_query(fake_bot(), query, bridge, health())
+        handlers::handle_shipping_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
             .unwrap();
 
@@ -2024,7 +2051,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.payment.successful", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_successful_payment(fake_bot(), message, bridge, health())
+        handlers::handle_successful_payment(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2064,7 +2091,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.poll", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_message(fake_bot(), message, bridge, health())
+        handlers::handle_poll_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2086,7 +2113,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.poll.update", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_update(fake_bot(), poll, bridge, health())
+        handlers::handle_poll_update(fake_bot(), fake_update(42), poll, bridge, health())
             .await
             .unwrap();
 
@@ -2113,7 +2140,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.poll.answer", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_poll_answer(fake_bot(), answer, bridge, health())
+        handlers::handle_poll_answer(fake_bot(), fake_update(42), answer, bridge, health())
             .await
             .unwrap();
 
@@ -2141,7 +2168,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_edited_message(fake_bot(), message, bridge, health())
+        handlers::handle_edited_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2166,6 +2193,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV");
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -2176,6 +2204,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let message: Message = serde_json::from_value(serde_json::json!({
@@ -2187,7 +2216,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+        handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2209,6 +2238,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV");
+        let dedup = make_dedup(&js).await;
         TelegramBridge::new(
             client,
             prefix.to_string(),
@@ -2219,6 +2249,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         )
     }
 
@@ -2240,7 +2271,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+        handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2271,7 +2302,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+        handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2298,7 +2329,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_channel_post(fake_bot(), message, bridge, health())
+        handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2323,6 +2354,7 @@ mod nats_tests {
             })
             .await
             .expect("create KV");
+        let dedup = make_dedup(&js).await;
         let bridge = TelegramBridge::new(
             client.clone(),
             prefix.to_string(),
@@ -2333,6 +2365,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         );
 
         let message: Message = serde_json::from_value(serde_json::json!({
@@ -2345,7 +2378,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_edited_channel_post(fake_bot(), message, bridge, health())
+        handlers::handle_edited_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2374,7 +2407,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.join_request", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chat_join_request(fake_bot(), request, bridge, health())
+        handlers::handle_chat_join_request(fake_bot(), fake_update(42), request, bridge, health())
             .await
             .unwrap();
 
@@ -2409,7 +2442,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.created", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_created(fake_bot(), message, bridge, health())
+        handlers::handle_forum_topic_created(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2432,7 +2465,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_edited(fake_bot(), message, bridge, health())
+        handlers::handle_forum_topic_edited(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2455,7 +2488,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.closed", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_closed(fake_bot(), message, bridge, health())
+        handlers::handle_forum_topic_closed(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2477,7 +2510,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.reopened", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_reopened(fake_bot(), message, bridge, health())
+        handlers::handle_forum_topic_reopened(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2499,7 +2532,7 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_hidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_hidden(fake_bot(), message, bridge, health())
+        handlers::handle_general_forum_topic_hidden(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
@@ -2521,10 +2554,77 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_unhidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_unhidden(fake_bot(), message, bridge, health())
+        handlers::handle_general_forum_topic_unhidden(fake_bot(), fake_update(42), message, bridge, health())
             .await
             .unwrap();
 
         recv(&mut sub).await;
+    }
+
+    // ── Issue 2: Bridge dedup — same update_id must be published only once ────
+
+    /// Calling publish_text_message twice with the SAME update_id (same Telegram
+    /// update arriving twice due to webhook/polling retry) must result in exactly
+    /// one NATS event.  The second call must be silently dropped by the dedup store.
+    #[tokio::test]
+    async fn test_bridge_dedup_same_update_id_published_once() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = format!("bridge-dedup-same-{}", uuid::Uuid::new_v4().simple());
+        let bridge = make_bridge(client.clone(), js, &prefix).await;
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        let mut json = private_base(1);
+        json["text"] = serde_json::json!("duplicate message");
+        let message = msg(json);
+
+        // Publish twice with the SAME update_id = 999
+        bridge.publish_text_message(&message, 999).await.unwrap();
+        bridge.publish_text_message(&message, 999).await.unwrap();
+
+        // First event must arrive
+        let _ = recv(&mut sub).await;
+
+        // Second must NOT arrive within the timeout window
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(400), sub.next()).await;
+        assert!(
+            result.is_err(),
+            "duplicate update_id must NOT produce a second NATS event"
+        );
+    }
+
+    /// Calling publish_text_message with DIFFERENT update_ids must publish both events.
+    /// Verifies the dedup store does not over-filter distinct updates.
+    #[tokio::test]
+    async fn test_bridge_dedup_different_update_ids_both_published() {
+        let Some((client, js)) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let prefix = format!("bridge-dedup-diff-{}", uuid::Uuid::new_v4().simple());
+        let bridge = make_bridge(client.clone(), js, &prefix).await;
+
+        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let mut sub = client.subscribe(subject).await.unwrap();
+
+        let mut json = private_base(1);
+        json["text"] = serde_json::json!("first");
+        let m1 = msg(json.clone());
+        json["text"] = serde_json::json!("second");
+        let m2 = msg(json);
+
+        // Different update_ids — both must be published
+        bridge.publish_text_message(&m1, 100).await.unwrap();
+        bridge.publish_text_message(&m2, 101).await.unwrap();
+
+        let e1 = recv(&mut sub).await;
+        let e2 = recv(&mut sub).await;
+        assert_eq!(e1["text"], "first");
+        assert_eq!(e2["text"], "second");
     }
 }
