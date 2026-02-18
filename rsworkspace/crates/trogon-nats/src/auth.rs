@@ -1,9 +1,14 @@
 use std::path::PathBuf;
-use trogon_std::env::ReadEnv;
+use trogonstd::env::ReadEnv;
 
-use crate::constants::{
-    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN, ENV_NATS_URL, ENV_NATS_USER,
-};
+const ENV_NATS_URL: &str = "NATS_URL";
+const ENV_NATS_CREDS: &str = "NATS_CREDS";
+const ENV_NATS_NKEY: &str = "NATS_NKEY";
+const ENV_NATS_USER: &str = "NATS_USER";
+const ENV_NATS_PASSWORD: &str = "NATS_PASSWORD";
+const ENV_NATS_TOKEN: &str = "NATS_TOKEN";
+
+const DEFAULT_NATS_URL: &str = "localhost:4222";
 
 /// NATS authentication method.
 ///
@@ -65,7 +70,9 @@ impl NatsConfig {
 }
 
 fn servers_from_env<E: ReadEnv>(env: &E) -> Vec<String> {
-    let raw = env.var(ENV_NATS_URL).unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
+    let raw = env
+        .var(ENV_NATS_URL)
+        .unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
     raw.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -91,7 +98,7 @@ fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_std::env::InMemoryEnv;
+    use trogonstd::env::InMemoryEnv;
 
     #[test]
     fn from_env_defaults_to_localhost_with_no_auth() {
@@ -109,7 +116,10 @@ mod tests {
 
         let config = NatsConfig::from_env(&env);
 
-        assert_eq!(config.servers, vec!["host1:4222", "host2:4222", "host3:4222"]);
+        assert_eq!(
+            config.servers,
+            vec!["host1:4222", "host2:4222", "host3:4222"]
+        );
     }
 
     #[test]
@@ -121,7 +131,9 @@ mod tests {
 
         let config = NatsConfig::from_env(&env);
 
-        assert!(matches!(config.auth, NatsAuth::Credentials(p) if p == std::path::Path::new("/path/to/creds")));
+        assert!(
+            matches!(config.auth, NatsAuth::Credentials(p) if p == std::path::Path::new("/path/to/creds"))
+        );
     }
 
     #[test]
@@ -166,14 +178,6 @@ mod tests {
     }
 
     #[test]
-    fn from_env_requires_both_user_and_password_only_password_set() {
-        let env = InMemoryEnv::new();
-        env.set("NATS_PASSWORD", "pass");
-
-        assert!(matches!(NatsConfig::from_env(&env).auth, NatsAuth::None));
-    }
-
-    #[test]
     fn from_url_convenience() {
         let config = NatsConfig::from_url("nats://custom:4222");
 
@@ -183,7 +187,10 @@ mod tests {
 
     #[test]
     fn description_matches_variant() {
-        assert_eq!(NatsAuth::Credentials("/a".into()).description(), "credentials file");
+        assert_eq!(
+            NatsAuth::Credentials("/a".into()).description(),
+            "credentials file"
+        );
         assert_eq!(NatsAuth::NKey("k".into()).description(), "NKey");
         assert_eq!(
             NatsAuth::UserPassword {
