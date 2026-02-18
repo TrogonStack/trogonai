@@ -47,6 +47,16 @@ mod nats_tests {
             .await
             .expect("create KV bucket");
 
+        let dedup_bucket = format!("dedup-{}", uuid::Uuid::new_v4().simple());
+        let dedup_kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket: dedup_bucket,
+                ..Default::default()
+            })
+            .await
+            .expect("create dedup KV bucket");
+        let dedup = crate::dedup::DedupStore::new(dedup_kv);
+
         TelegramBridge::new(
             client,
             prefix.to_string(),
@@ -56,6 +66,7 @@ mod nats_tests {
                 ..Default::default()
             },
             kv,
+            dedup,
         )
     }
 

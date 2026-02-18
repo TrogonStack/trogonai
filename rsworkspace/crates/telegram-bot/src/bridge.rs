@@ -24,6 +24,7 @@ use telegram_types::{
 use teloxide::types::{CallbackQuery, Message};
 use tracing::{debug, info, warn};
 
+use crate::dedup::DedupStore;
 use crate::session::SessionManager;
 
 /// Telegram to NATS bridge
@@ -32,16 +33,37 @@ pub struct TelegramBridge {
     publisher: MessagePublisher,
     pub access_config: AccessConfig,
     session_manager: SessionManager,
+    dedup: DedupStore,
 }
 
 impl TelegramBridge {
     /// Create a new bridge
-    pub fn new(client: Client, prefix: String, access_config: AccessConfig, kv: Store) -> Self {
+    pub fn new(
+        client: Client,
+        prefix: String,
+        access_config: AccessConfig,
+        kv: Store,
+        dedup: DedupStore,
+    ) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
             access_config,
             session_manager: SessionManager::new(kv),
+            dedup,
         }
+    }
+
+    /// Check dedup and mark as seen. Returns `true` if the update was already processed.
+    async fn is_dedup(&self, session_id: &str, update_id: i64) -> bool {
+        if self.dedup.is_update_duplicate(session_id, update_id).await {
+            debug!(
+                "Dropping duplicate update_id={} for session {}",
+                update_id, session_id
+            );
+            return true;
+        }
+        let _ = self.dedup.mark_update_seen(session_id, update_id).await;
+        false
     }
 
     /// Check if a user has access for DMs
@@ -96,6 +118,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         // Update session
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -129,6 +155,10 @@ impl TelegramBridge {
         let caption = msg.caption().map(|s| s.to_string());
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -167,6 +197,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -198,6 +232,10 @@ impl TelegramBridge {
         let caption = msg.caption().map(|s| s.to_string());
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -231,6 +269,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -261,6 +303,10 @@ impl TelegramBridge {
         let voice = msg.voice().unwrap();
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -294,6 +340,10 @@ impl TelegramBridge {
         let sticker = msg.sticker().unwrap();
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -351,6 +401,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -394,6 +448,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -435,6 +493,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -467,6 +529,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -497,6 +563,10 @@ impl TelegramBridge {
         let contact = msg.contact().unwrap();
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -546,6 +616,10 @@ impl TelegramBridge {
 
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let event = CallbackQueryEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             callback_query_id: query.id.clone(),
@@ -572,6 +646,10 @@ impl TelegramBridge {
     ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -625,6 +703,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let event = ChatMemberUpdatedEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             chat,
@@ -655,6 +737,10 @@ impl TelegramBridge {
     ) -> Result<()> {
         let chat = self.convert_chat(&update.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let event = MyChatMemberUpdatedEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
@@ -687,6 +773,10 @@ impl TelegramBridge {
         // Payments are always in private chats
         let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let event = PreCheckoutQueryEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             pre_checkout_query_id: query.id.clone(),
@@ -714,6 +804,10 @@ impl TelegramBridge {
         // Payments are always in private chats
         let session_id = SessionId::for_private_chat(query.from.id.0 as i64);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let event = ShippingQueryEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             shipping_query_id: query.id.clone(),
@@ -738,6 +832,10 @@ impl TelegramBridge {
     ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -877,6 +975,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -912,6 +1014,10 @@ impl TelegramBridge {
     ) -> Result<()> {
         // Standalone polls have no chat context — use poll_id as session key
         let session_id = format!("tg-poll-{}", poll.id);
+
+        if self.is_dedup(&session_id, update_id).await {
+            return Ok(());
+        }
 
         let event = PollUpdateEvent {
             metadata: EventMetadata::new(session_id, update_id),
@@ -952,6 +1058,10 @@ impl TelegramBridge {
             .or_else(|| voter_chat_id.map(|cid| format!("tg-group-{}", cid)))
             .unwrap_or_else(|| format!("tg-poll-{}", answer.poll_id));
 
+        if self.is_dedup(&session_id, update_id).await {
+            return Ok(());
+        }
+
         let event = PollAnswerEvent {
             metadata: EventMetadata::new(session_id, update_id),
             poll_id: answer.poll_id.clone(),
@@ -971,6 +1081,10 @@ impl TelegramBridge {
         let topic = msg.forum_topic_created().unwrap();
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -1006,6 +1120,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -1030,6 +1148,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -1051,6 +1173,10 @@ impl TelegramBridge {
     pub async fn publish_forum_topic_reopened(&self, msg: &Message, update_id: i64) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -1078,6 +1204,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
             .get_or_create(&session_id, chat.id, user_id)
@@ -1099,6 +1229,10 @@ impl TelegramBridge {
     pub async fn publish_edited_message(&self, msg: &Message, update_id: i64) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager
@@ -1135,6 +1269,10 @@ impl TelegramBridge {
         let chat = self.convert_chat(&request.chat);
         let session_id = SessionId::from_chat(&chat);
 
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
+
         let event = ChatJoinRequestEvent {
             metadata: EventMetadata::new(session_id.to_string(), update_id),
             chat,
@@ -1162,6 +1300,10 @@ impl TelegramBridge {
     ) -> Result<()> {
         let chat = self.convert_chat(&msg.chat);
         let session_id = SessionId::from_chat(&chat);
+
+        if self.is_dedup(&session_id.to_string(), update_id).await {
+            return Ok(());
+        }
 
         let user_id = msg.from.as_ref().map(|u| u.id.0 as i64);
         self.session_manager

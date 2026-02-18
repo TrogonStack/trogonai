@@ -23,7 +23,6 @@ axum = "0.7"
 url = "2.5"
 mime = "0.3"
 reqwest = "0.12"
-uuid = { version = "1", features = ["v4"], optional = true }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-uuid = { version = "1", features = ["v4"] }

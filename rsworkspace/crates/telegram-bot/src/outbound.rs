@@ -29,2322 +29,1889 @@ pub(crate) struct StreamingMessage {
 pub struct OutboundProcessor {
     pub(crate) bot: Bot,
     pub(crate) subscriber: MessageSubscriber,
+    pub(crate) js: async_nats::jetstream::Context,
     /// Track streaming messages by (chat_id, session_id)
     pub(crate) streaming_messages: Arc<RwLock<HashMap<(i64, String), StreamingMessage>>>,
 }
 
 impl OutboundProcessor {
     /// Create a new outbound processor
-    pub fn new(bot: Bot, client: Client, prefix: String) -> Self {
+    pub fn new(bot: Bot, client: Client, prefix: String, js: async_nats::jetstream::Context) -> Self {
         Self {
             bot,
-            subscriber: MessageSubscriber::new(client, prefix),
+            subscriber: MessageSubscriber::new(client.clone(), prefix),
+            js,
             streaming_messages: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Run the outbound processor
+    /// Run the outbound processor using a JetStream pull consumer
     pub async fn run(self) -> Result<()> {
-        info!("Starting outbound processor");
+        use futures::StreamExt;
+        use telegram_nats::nats::create_outbound_consumer;
 
-        // Subscribe to all agent commands
+        info!("Starting outbound processor (JetStream pull consumer)");
         let prefix = self.subscriber.prefix().to_string();
 
-        // Spawn tasks for each command type
-        let send_task = self.handle_send_messages(prefix.clone());
-        let edit_task = self.handle_edit_messages(prefix.clone());
-        let delete_task = self.handle_delete_messages(prefix.clone());
-        let poll_task = self.handle_polls(prefix.clone());
-        let photo_task = self.handle_send_photos(prefix.clone());
-        let video_task = self.handle_send_videos(prefix.clone());
-        let audio_task = self.handle_send_audios(prefix.clone());
-        let document_task = self.handle_send_documents(prefix.clone());
-        let voice_task = self.handle_send_voices(prefix.clone());
-        let media_group_task = self.handle_send_media_groups(prefix.clone());
-        let sticker_task = self.handle_send_stickers(prefix.clone());
-        let animation_task = self.handle_send_animations(prefix.clone());
-        let video_note_task = self.handle_send_video_notes(prefix.clone());
-        let location_task = self.handle_send_locations(prefix.clone());
-        let venue_task = self.handle_send_venues(prefix.clone());
-        let contact_task = self.handle_send_contacts(prefix.clone());
-        let callback_task = self.handle_answer_callbacks(prefix.clone());
-        let action_task = self.handle_chat_actions(prefix.clone());
-        let stream_task = self.handle_stream_messages(prefix.clone());
-        let inline_task = self.handle_answer_inline_queries(prefix.clone());
-        let forum_task = self.handle_forum_topics(prefix.clone());
-        let admin_task = self.handle_admin_commands(prefix.clone());
-        let file_task = self.handle_file_commands(prefix.clone());
-        let payment_task = self.handle_payment_commands(prefix.clone());
-        let bot_commands_task = self.handle_bot_commands(prefix.clone());
-        let sticker_mgmt_task = self.handle_sticker_management(prefix.clone());
-        let forward_task = self.handle_forward_messages(prefix.clone());
-        let copy_task = self.handle_copy_messages(prefix.clone());
+        let consumer = create_outbound_consumer(&self.js, &prefix).await?;
+        let mut messages = consumer.messages().await?;
 
-        // Run all tasks concurrently
-        tokio::try_join!(
-            send_task,
-            edit_task,
-            delete_task,
-            poll_task,
-            photo_task,
-            video_task,
-            audio_task,
-            document_task,
-            voice_task,
-            media_group_task,
-            sticker_task,
-            animation_task,
-            video_note_task,
-            location_task,
-            venue_task,
-            contact_task,
-            callback_task,
-            action_task,
-            stream_task,
-            inline_task,
-            forum_task,
-            admin_task,
-            file_task,
-            payment_task,
-            bot_commands_task,
-            sticker_mgmt_task,
-            forward_task,
-            copy_task
-        )?;
+        while let Some(msg) = messages.next().await {
+            let msg = msg?;
+            let subject = msg.subject.as_str().to_string();
+            let payload = msg.payload.clone();
+            let attempt = msg.info().map(|i| i.delivered as u32).unwrap_or(1);
 
-        Ok(())
-    }
-
-    /// Handle send poll and stop poll commands
-    async fn handle_polls(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::PollKind;
-        use teloxide::types::PollType as TgPollType;
-
-        let send_subject = subjects::agent::poll_send(&prefix);
-        let stop_subject = subjects::agent::poll_stop(&prefix);
-
-        info!("Subscribing to {} and {}", send_subject, stop_subject);
-
-        let mut send_stream = self
-            .subscriber
-            .subscribe::<SendPollCommand>(&send_subject)
-            .await?;
-        let mut stop_stream = self
-            .subscriber
-            .subscribe::<StopPollCommand>(&stop_subject)
-            .await?;
-
-        loop {
-            tokio::select! {
-                Some(result) = send_stream.next() => {
-                    match result {
-                        Ok(cmd) => {
-                            debug!("Received send poll command for chat {}", cmd.chat_id);
-
-                            let options: Vec<teloxide::types::InputPollOption> = cmd.options
-                                .into_iter()
-                                .map(teloxide::types::InputPollOption::new)
-                                .collect();
-
-                            let poll_type = match cmd.poll_type {
-                                Some(PollKind::Quiz) => TgPollType::Quiz,
-                                _ => TgPollType::Regular,
-                            };
-
-                            let mut req = self.bot.send_poll(
-                                ChatId(cmd.chat_id),
-                                cmd.question,
-                                options,
-                            );
-
-                            req.is_anonymous = cmd.is_anonymous;
-                            req.type_ = Some(poll_type);
-                            req.allows_multiple_answers = cmd.allows_multiple_answers;
-                            req.correct_option_id = cmd.correct_option_id;
-
-                            if let Some(explanation) = cmd.explanation {
-                                req.explanation = Some(explanation);
-                            }
-
-                            if let Some(pm) = cmd.explanation_parse_mode {
-                                req.explanation_parse_mode = Some(convert_parse_mode(pm));
-                            }
-
-                            if let Some(period) = cmd.open_period {
-                                req.open_period = Some(period);
-                            }
-
-                            req.is_closed = cmd.is_closed;
-
-                            if let Some(reply_to) = cmd.reply_to_message_id {
-                                req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                            }
-
-                            if let Some(thread_id) = cmd.message_thread_id {
-                                req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                            }
-
-                            if let Err(e) = req.await {
-                                self.handle_telegram_error(&send_subject, e, &prefix).await;
-                            }
-                        }
-                        Err(e) => error!("Failed to deserialize send poll command: {}", e),
+            match self.dispatch(&subject, &payload, &prefix, attempt).await {
+                Ok(_) => {
+                    if let Err(e) = msg.ack().await {
+                        warn!("Failed to ack message on '{}': {}", subject, e);
                     }
                 }
-                Some(result) = stop_stream.next() => {
-                    match result {
-                        Ok(cmd) => {
-                            debug!("Received stop poll command for chat {}", cmd.chat_id);
-
-                            let mut req = self.bot.stop_poll(ChatId(cmd.chat_id), MessageId(cmd.message_id));
-
-                            if let Some(markup) = cmd.reply_markup {
-                                req.reply_markup = Some(convert_inline_keyboard(markup));
-                            }
-
-                            if let Err(e) = req.await {
-                                self.handle_telegram_error(&stop_subject, e, &prefix).await;
-                            }
-                        }
-                        Err(e) => error!("Failed to deserialize stop poll command: {}", e),
+                Err(e) if is_permanent_error(&e) => {
+                    warn!("Permanent error on '{}' (attempt {}): {}", subject, attempt, e);
+                    if let Err(e) = msg.ack().await {
+                        warn!("Failed to ack permanent error message: {}", e);
                     }
                 }
-                else => break,
+                Err(e) => {
+                    warn!("Transient error on '{}' (attempt {}): {}", subject, attempt, e);
+                    if let Err(e) = msg.ack_with(async_nats::jetstream::AckKind::Nak(None)).await {
+                        warn!("Failed to nak message: {}", e);
+                    }
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Handle send message commands
-    async fn handle_send_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send(&prefix);
-        info!("Subscribing to {}", subject);
+    /// Dispatch a message to the appropriate handler based on subject
+    async fn dispatch(&self, subject: &str, payload: &[u8], prefix: &str, _attempt: u32) -> Result<()> {
+        use telegram_nats::subjects::agent;
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendMessageCommand>(&subject)
-            .await?;
+        if subject == agent::message_send(prefix) {
+            self.handle_send_message(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_edit(prefix) {
+            self.handle_edit_message(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_delete(prefix) {
+            self.handle_delete_message(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_forward(prefix) {
+            self.handle_forward_message(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_copy(prefix) {
+            self.handle_copy_message(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_photo(prefix) {
+            self.handle_send_photo(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_video(prefix) {
+            self.handle_send_video(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_audio(prefix) {
+            self.handle_send_audio(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_document(prefix) {
+            self.handle_send_document(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_voice(prefix) {
+            self.handle_send_voice(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_media_group(prefix) {
+            self.handle_send_media_group(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_sticker(prefix) {
+            self.handle_send_sticker(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_animation(prefix) {
+            self.handle_send_animation(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_video_note(prefix) {
+            self.handle_send_video_note(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_location(prefix) {
+            self.handle_send_location(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_venue(prefix) {
+            self.handle_send_venue(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_send_contact(prefix) {
+            self.handle_send_contact(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::message_stream(prefix) {
+            self.handle_stream_message(serde_json::from_slice(payload)?).await
+        } else if subject == agent::poll_send(prefix) {
+            self.handle_send_poll(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::poll_stop(prefix) {
+            self.handle_stop_poll(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::callback_answer(prefix) {
+            self.handle_answer_callback(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::chat_action(prefix) {
+            self.handle_chat_action(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::inline_answer(prefix) {
+            self.handle_answer_inline_query(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_create(prefix) {
+            self.handle_forum_create(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_edit(prefix) {
+            self.handle_forum_edit(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_close(prefix) {
+            self.handle_forum_close(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_reopen(prefix) {
+            self.handle_forum_reopen(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_delete(prefix) {
+            self.handle_forum_delete(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_unpin(prefix) {
+            self.handle_forum_unpin(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_edit_general(prefix) {
+            self.handle_forum_edit_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_close_general(prefix) {
+            self.handle_forum_close_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_reopen_general(prefix) {
+            self.handle_forum_reopen_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_hide_general(prefix) {
+            self.handle_forum_hide_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_unhide_general(prefix) {
+            self.handle_forum_unhide_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::forum_unpin_general(prefix) {
+            self.handle_forum_unpin_general(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::file_get(prefix) {
+            self.handle_file_get(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::file_download(prefix) {
+            self.handle_file_download(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_promote(prefix) {
+            self.handle_admin_promote(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_restrict(prefix) {
+            self.handle_admin_restrict(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_ban(prefix) {
+            self.handle_admin_ban(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_unban(prefix) {
+            self.handle_admin_unban(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_set_permissions(prefix) {
+            self.handle_admin_set_permissions(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_set_title(prefix) {
+            self.handle_admin_set_title(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_pin(prefix) {
+            self.handle_admin_pin(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_unpin(prefix) {
+            self.handle_admin_unpin(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_unpin_all(prefix) {
+            self.handle_admin_unpin_all(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_set_chat_title(prefix) {
+            self.handle_admin_set_chat_title(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::admin_set_chat_description(prefix) {
+            self.handle_admin_set_chat_description(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::payment_send_invoice(prefix) {
+            self.handle_payment_send_invoice(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::payment_answer_pre_checkout(prefix) {
+            self.handle_payment_answer_pre_checkout(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::payment_answer_shipping(prefix) {
+            self.handle_payment_answer_shipping(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::bot_commands_set(prefix) {
+            self.handle_bot_commands_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::bot_commands_delete(prefix) {
+            self.handle_bot_commands_delete(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::bot_commands_get(prefix) {
+            self.handle_bot_commands_get(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_get_set(prefix) {
+            self.handle_sticker_get_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_upload_file(prefix) {
+            self.handle_sticker_upload_file(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_create_set(prefix) {
+            self.handle_sticker_create_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_add_to_set(prefix) {
+            self.handle_sticker_add_to_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_position(prefix) {
+            self.handle_sticker_set_position(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_delete_from_set(prefix) {
+            self.handle_sticker_delete_from_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_title(prefix) {
+            self.handle_sticker_set_title(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_thumbnail(prefix) {
+            self.handle_sticker_set_thumbnail(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_delete_set(prefix) {
+            self.handle_sticker_delete_set(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_emoji_list(prefix) {
+            self.handle_sticker_set_emoji_list(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_keywords(prefix) {
+            self.handle_sticker_set_keywords(serde_json::from_slice(payload)?, prefix).await
+        } else if subject == agent::sticker_set_mask_position(prefix) {
+            self.handle_sticker_set_mask_position(serde_json::from_slice(payload)?, prefix).await
+        } else {
+            warn!("Unknown command subject: {}", subject);
+            Ok(())
+        }
+    }
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send message command for chat {}", cmd.chat_id);
+    // ── Message handlers ──────────────────────────────────────────────────────
 
-                    let mut req = self.bot.send_message(ChatId(cmd.chat_id), cmd.text);
+    async fn handle_send_message(&self, cmd: SendMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send(prefix);
+        debug!("Received send message command for chat {}", cmd.chat_id);
 
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
+        let mut req = self.bot.send_message(ChatId(cmd.chat_id), cmd.text);
 
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
 
-                    if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
-                            convert_inline_keyboard(markup),
-                        ));
-                    }
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
 
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                convert_inline_keyboard(markup),
+            ));
+        }
 
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send message command: {}", e),
-            }
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle edit message commands
-    async fn handle_edit_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_edit(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_edit_message(&self, cmd: EditMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_edit(prefix);
+        debug!(
+            "Received edit message command for chat {} msg {}",
+            cmd.chat_id, cmd.message_id
+        );
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<EditMessageCommand>(&subject)
-            .await?;
+        let mut req = self.bot.edit_message_text(
+            ChatId(cmd.chat_id),
+            MessageId(cmd.message_id),
+            cmd.text,
+        );
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received edit message command for chat {} msg {}",
-                        cmd.chat_id, cmd.message_id
-                    );
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
 
-                    let mut req = self.bot.edit_message_text(
-                        ChatId(cmd.chat_id),
-                        MessageId(cmd.message_id),
-                        cmd.text,
-                    );
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(convert_inline_keyboard(markup));
+        }
 
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
-
-                    if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(convert_inline_keyboard(markup));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize edit message command: {}", e),
-            }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle delete message commands
-    async fn handle_delete_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_delete(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_delete_message(&self, cmd: DeleteMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_delete(prefix);
+        debug!(
+            "Received delete message command for chat {} msg {}",
+            cmd.chat_id, cmd.message_id
+        );
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<DeleteMessageCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received delete message command for chat {} msg {}",
-                        cmd.chat_id, cmd.message_id
-                    );
-
-                    if let Err(e) = self
-                        .bot
-                        .delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id))
-                        .await
-                    {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize delete message command: {}", e),
-            }
+        if let Err(e) = self
+            .bot
+            .delete_message(ChatId(cmd.chat_id), MessageId(cmd.message_id))
+            .await
+        {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send photo commands
-    async fn handle_send_photos(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_photo(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_forward_message(&self, cmd: ForwardMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_forward(prefix);
+        debug!(
+            "Received forward message command: from_chat={} msg={} to_chat={}",
+            cmd.from_chat_id, cmd.message_id, cmd.chat_id
+        );
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendPhotoCommand>(&subject)
-            .await?;
+        let mut req = self.bot.forward_message(
+            ChatId(cmd.chat_id),
+            ChatId(cmd.from_chat_id),
+            MessageId(cmd.message_id),
+        );
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send photo command for chat {}", cmd.chat_id);
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+        req.disable_notification = cmd.disable_notification;
+        req.protect_content = cmd.protect_content;
 
-                    let photo = teloxide::types::InputFile::file_id(cmd.photo);
-                    let mut req = self.bot.send_photo(ChatId(cmd.chat_id), photo);
-
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
-
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send photo command: {}", e),
-            }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send video commands
-    async fn handle_send_videos(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_video(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_copy_message(&self, cmd: CopyMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_copy(prefix);
+        debug!(
+            "Received copy message command: from_chat={} msg={} to_chat={}",
+            cmd.from_chat_id, cmd.message_id, cmd.chat_id
+        );
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendVideoCommand>(&subject)
-            .await?;
+        let mut req = self.bot.copy_message(
+            ChatId(cmd.chat_id),
+            ChatId(cmd.from_chat_id),
+            MessageId(cmd.message_id),
+        );
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send video command for chat {}", cmd.chat_id);
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(match parse_mode {
+                ParseMode::HTML => TgParseMode::Html,
+                ParseMode::Markdown => TgParseMode::MarkdownV2,
+                ParseMode::MarkdownV2 => TgParseMode::MarkdownV2,
+            });
+        }
+        if let Some(reply_id) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
+        }
+        req.disable_notification = cmd.disable_notification;
+        req.protect_content = cmd.protect_content;
 
-                    let video = teloxide::types::InputFile::file_id(cmd.video);
-                    let mut req = self.bot.send_video(ChatId(cmd.chat_id), video);
-
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
-
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
-
-                    if let Some(duration) = cmd.duration {
-                        req.duration = Some(duration);
-                    }
-
-                    if let Some(width) = cmd.width {
-                        req.width = Some(width);
-                    }
-
-                    if let Some(height) = cmd.height {
-                        req.height = Some(height);
-                    }
-
-                    if let Some(supports_streaming) = cmd.supports_streaming {
-                        req.supports_streaming = Some(supports_streaming);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send video command: {}", e),
-            }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send audio commands
-    async fn handle_send_audios(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_audio(&prefix);
-        info!("Subscribing to {}", subject);
+    // ── Media handlers ────────────────────────────────────────────────────────
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendAudioCommand>(&subject)
-            .await?;
+    async fn handle_send_photo(&self, cmd: SendPhotoCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_photo(prefix);
+        debug!("Received send photo command for chat {}", cmd.chat_id);
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send audio command for chat {}", cmd.chat_id);
+        let photo = teloxide::types::InputFile::file_id(cmd.photo);
+        let mut req = self.bot.send_photo(ChatId(cmd.chat_id), photo);
 
-                    let audio = teloxide::types::InputFile::file_id(cmd.audio);
-                    let mut req = self.bot.send_audio(ChatId(cmd.chat_id), audio);
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
 
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
 
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
 
-                    if let Some(duration) = cmd.duration {
-                        req.duration = Some(duration);
-                    }
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
 
-                    if let Some(performer) = cmd.performer {
-                        req.performer = Some(performer);
-                    }
-
-                    if let Some(title) = cmd.title {
-                        req.title = Some(title);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send audio command: {}", e),
-            }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send document commands
-    async fn handle_send_documents(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_document(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_send_video(&self, cmd: SendVideoCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_video(prefix);
+        debug!("Received send video command for chat {}", cmd.chat_id);
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendDocumentCommand>(&subject)
-            .await?;
+        let video = teloxide::types::InputFile::file_id(cmd.video);
+        let mut req = self.bot.send_video(ChatId(cmd.chat_id), video);
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send document command for chat {}", cmd.chat_id);
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
 
-                    let document = teloxide::types::InputFile::file_id(cmd.document);
-                    let mut req = self.bot.send_document(ChatId(cmd.chat_id), document);
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
 
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
+        if let Some(duration) = cmd.duration {
+            req.duration = Some(duration);
+        }
 
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
+        if let Some(width) = cmd.width {
+            req.width = Some(width);
+        }
 
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
+        if let Some(height) = cmd.height {
+            req.height = Some(height);
+        }
 
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
+        if let Some(supports_streaming) = cmd.supports_streaming {
+            req.supports_streaming = Some(supports_streaming);
+        }
 
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send document command: {}", e),
-            }
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send voice commands
-    async fn handle_send_voices(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_voice(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_send_audio(&self, cmd: SendAudioCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_audio(prefix);
+        debug!("Received send audio command for chat {}", cmd.chat_id);
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendVoiceCommand>(&subject)
-            .await?;
+        let audio = teloxide::types::InputFile::file_id(cmd.audio);
+        let mut req = self.bot.send_audio(ChatId(cmd.chat_id), audio);
 
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send voice command for chat {}", cmd.chat_id);
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
 
-                    let voice = teloxide::types::InputFile::file_id(cmd.voice);
-                    let mut req = self.bot.send_voice(ChatId(cmd.chat_id), voice);
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
 
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
+        if let Some(duration) = cmd.duration {
+            req.duration = Some(duration);
+        }
 
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
+        if let Some(performer) = cmd.performer {
+            req.performer = Some(performer);
+        }
 
-                    if let Some(duration) = cmd.duration {
-                        req.duration = Some(duration);
-                    }
+        if let Some(title) = cmd.title {
+            req.title = Some(title);
+        }
 
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
 
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
 
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send voice command: {}", e),
-            }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
 
-    /// Handle send media group commands
-    async fn handle_send_media_groups(&self, prefix: String) -> Result<()> {
+    async fn handle_send_document(&self, cmd: SendDocumentCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_document(prefix);
+        debug!("Received send document command for chat {}", cmd.chat_id);
+
+        let document = teloxide::types::InputFile::file_id(cmd.document);
+        let mut req = self.bot.send_document(ChatId(cmd.chat_id), document);
+
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
+
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_voice(&self, cmd: SendVoiceCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_voice(prefix);
+        debug!("Received send voice command for chat {}", cmd.chat_id);
+
+        let voice = teloxide::types::InputFile::file_id(cmd.voice);
+        let mut req = self.bot.send_voice(ChatId(cmd.chat_id), voice);
+
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
+
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
+
+        if let Some(duration) = cmd.duration {
+            req.duration = Some(duration);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_media_group(&self, cmd: SendMediaGroupCommand, prefix: &str) -> Result<()> {
         use telegram_types::commands::InputMediaItem;
         use teloxide::types::{
             InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
         };
 
-        let subject = subjects::agent::message_send_media_group(&prefix);
-        info!("Subscribing to {}", subject);
+        let subject = subjects::agent::message_send_media_group(prefix);
+        debug!(
+            "Received send media group command for chat {} ({} items)",
+            cmd.chat_id,
+            cmd.media.len()
+        );
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendMediaGroupCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received send media group command for chat {} ({} items)",
-                        cmd.chat_id,
-                        cmd.media.len()
+        let media: Vec<InputMedia> = cmd
+            .media
+            .into_iter()
+            .map(|item| match item {
+                InputMediaItem::Photo {
+                    media,
+                    caption,
+                    parse_mode,
+                } => {
+                    let mut m = InputMediaPhoto::new(
+                        teloxide::types::InputFile::file_id(media),
                     );
-
-                    let media: Vec<InputMedia> = cmd
-                        .media
-                        .into_iter()
-                        .map(|item| match item {
-                            InputMediaItem::Photo {
-                                media,
-                                caption,
-                                parse_mode,
-                            } => {
-                                let mut m = InputMediaPhoto::new(
-                                    teloxide::types::InputFile::file_id(media),
-                                );
-                                m.caption = caption;
-                                m.parse_mode = parse_mode.map(convert_parse_mode);
-                                InputMedia::Photo(m)
-                            }
-                            InputMediaItem::Video {
-                                media,
-                                caption,
-                                parse_mode,
-                                duration,
-                                width,
-                                height,
-                                supports_streaming,
-                            } => {
-                                let mut m = InputMediaVideo::new(
-                                    teloxide::types::InputFile::file_id(media),
-                                );
-                                m.caption = caption;
-                                m.parse_mode = parse_mode.map(convert_parse_mode);
-                                m.duration = duration.map(|d| d as u16);
-                                m.width = width.map(|w| w as u16);
-                                m.height = height.map(|h| h as u16);
-                                m.supports_streaming = supports_streaming;
-                                InputMedia::Video(m)
-                            }
-                            InputMediaItem::Audio {
-                                media,
-                                caption,
-                                parse_mode,
-                                duration,
-                                performer,
-                                title,
-                            } => {
-                                let mut m = InputMediaAudio::new(
-                                    teloxide::types::InputFile::file_id(media),
-                                );
-                                m.caption = caption;
-                                m.parse_mode = parse_mode.map(convert_parse_mode);
-                                m.duration = duration.map(|d| d as u16);
-                                m.performer = performer;
-                                m.title = title;
-                                InputMedia::Audio(m)
-                            }
-                            InputMediaItem::Document {
-                                media,
-                                caption,
-                                parse_mode,
-                            } => {
-                                let mut m = InputMediaDocument::new(
-                                    teloxide::types::InputFile::file_id(media),
-                                );
-                                m.caption = caption;
-                                m.parse_mode = parse_mode.map(convert_parse_mode);
-                                InputMedia::Document(m)
-                            }
-                        })
-                        .collect();
-
-                    let mut req = self.bot.send_media_group(ChatId(cmd.chat_id), media);
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
+                    m.caption = caption;
+                    m.parse_mode = parse_mode.map(convert_parse_mode);
+                    InputMedia::Photo(m)
                 }
-                Err(e) => error!("Failed to deserialize send media group command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send sticker commands
-    async fn handle_send_stickers(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_sticker(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendStickerCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send sticker command for chat {}", cmd.chat_id);
-
-                    let sticker = teloxide::types::InputFile::file_id(cmd.sticker);
-                    let mut req = self.bot.send_sticker(ChatId(cmd.chat_id), sticker);
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
-                            convert_inline_keyboard(markup),
-                        ));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send sticker command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send animation (GIF) commands
-    async fn handle_send_animations(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_animation(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendAnimationCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send animation command for chat {}", cmd.chat_id);
-
-                    let animation = teloxide::types::InputFile::file_id(cmd.animation);
-                    let mut req = self.bot.send_animation(ChatId(cmd.chat_id), animation);
-
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
-
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(convert_parse_mode(parse_mode));
-                    }
-
-                    if let Some(duration) = cmd.duration {
-                        req.duration = Some(duration);
-                    }
-
-                    if let Some(width) = cmd.width {
-                        req.width = Some(width);
-                    }
-
-                    if let Some(height) = cmd.height {
-                        req.height = Some(height);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(markup) = cmd.reply_markup {
-                        req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
-                            convert_inline_keyboard(markup),
-                        ));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send animation command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send video note commands
-    async fn handle_send_video_notes(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_video_note(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendVideoNoteCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send video note command for chat {}", cmd.chat_id);
-
-                    let video_note = teloxide::types::InputFile::file_id(cmd.video_note);
-                    let mut req = self.bot.send_video_note(ChatId(cmd.chat_id), video_note);
-
-                    if let Some(duration) = cmd.duration {
-                        req.duration = Some(duration);
-                    }
-
-                    if let Some(length) = cmd.length {
-                        req.length = Some(length);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send video note command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send location commands
-    async fn handle_send_locations(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_location(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendLocationCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send location command for chat {}", cmd.chat_id);
-
-                    let mut req =
-                        self.bot
-                            .send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
-
-                    if let Some(live_period) = cmd.live_period {
-                        req.live_period = Some(live_period.into());
-                    }
-
-                    if let Some(horizontal_accuracy) = cmd.horizontal_accuracy {
-                        req.horizontal_accuracy = Some(horizontal_accuracy);
-                    }
-
-                    if let Some(heading) = cmd.heading {
-                        req.heading = Some(heading);
-                    }
-
-                    if let Some(proximity_alert_radius) = cmd.proximity_alert_radius {
-                        req.proximity_alert_radius = Some(proximity_alert_radius);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize send location command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send venue commands
-    async fn handle_send_venues(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_venue(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendVenueCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send venue command for chat {}", cmd.chat_id);
-
-                    let mut req = self.bot.send_venue(
-                        ChatId(cmd.chat_id),
-                        cmd.latitude,
-                        cmd.longitude,
-                        cmd.title,
-                        cmd.address,
+                InputMediaItem::Video {
+                    media,
+                    caption,
+                    parse_mode,
+                    duration,
+                    width,
+                    height,
+                    supports_streaming,
+                } => {
+                    let mut m = InputMediaVideo::new(
+                        teloxide::types::InputFile::file_id(media),
                     );
-
-                    if let Some(foursquare_id) = cmd.foursquare_id {
-                        req.foursquare_id = Some(foursquare_id);
-                    }
-
-                    if let Some(foursquare_type) = cmd.foursquare_type {
-                        req.foursquare_type = Some(foursquare_type);
-                    }
-
-                    if let Some(google_place_id) = cmd.google_place_id {
-                        req.google_place_id = Some(google_place_id);
-                    }
-
-                    if let Some(google_place_type) = cmd.google_place_type {
-                        req.google_place_type = Some(google_place_type);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
+                    m.caption = caption;
+                    m.parse_mode = parse_mode.map(convert_parse_mode);
+                    m.duration = duration.map(|d| d as u16);
+                    m.width = width.map(|w| w as u16);
+                    m.height = height.map(|h| h as u16);
+                    m.supports_streaming = supports_streaming;
+                    InputMedia::Video(m)
                 }
-                Err(e) => error!("Failed to deserialize send venue command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle send contact commands
-    async fn handle_send_contacts(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_send_contact(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendContactCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received send contact command for chat {}", cmd.chat_id);
-
-                    let mut req = self.bot.send_contact(
-                        ChatId(cmd.chat_id),
-                        cmd.phone_number,
-                        cmd.first_name,
+                InputMediaItem::Audio {
+                    media,
+                    caption,
+                    parse_mode,
+                    duration,
+                    performer,
+                    title,
+                } => {
+                    let mut m = InputMediaAudio::new(
+                        teloxide::types::InputFile::file_id(media),
                     );
-
-                    if let Some(last_name) = cmd.last_name {
-                        req.last_name = Some(last_name);
-                    }
-
-                    if let Some(vcard) = cmd.vcard {
-                        req.vcard = Some(vcard);
-                    }
-
-                    if let Some(reply_to) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                    }
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
+                    m.caption = caption;
+                    m.parse_mode = parse_mode.map(convert_parse_mode);
+                    m.duration = duration.map(|d| d as u16);
+                    m.performer = performer;
+                    m.title = title;
+                    InputMedia::Audio(m)
                 }
-                Err(e) => error!("Failed to deserialize send contact command: {}", e),
+                InputMediaItem::Document {
+                    media,
+                    caption,
+                    parse_mode,
+                } => {
+                    let mut m = InputMediaDocument::new(
+                        teloxide::types::InputFile::file_id(media),
+                    );
+                    m.caption = caption;
+                    m.parse_mode = parse_mode.map(convert_parse_mode);
+                    InputMedia::Document(m)
+                }
+            })
+            .collect();
+
+        let mut req = self.bot.send_media_group(ChatId(cmd.chat_id), media);
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_sticker(&self, cmd: SendStickerCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_sticker(prefix);
+        debug!("Received send sticker command for chat {}", cmd.chat_id);
+
+        let sticker = teloxide::types::InputFile::file_id(cmd.sticker);
+        let mut req = self.bot.send_sticker(ChatId(cmd.chat_id), sticker);
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                convert_inline_keyboard(markup),
+            ));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_animation(&self, cmd: SendAnimationCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_animation(prefix);
+        debug!("Received send animation command for chat {}", cmd.chat_id);
+
+        let animation = teloxide::types::InputFile::file_id(cmd.animation);
+        let mut req = self.bot.send_animation(ChatId(cmd.chat_id), animation);
+
+        if let Some(caption) = cmd.caption {
+            req.caption = Some(caption);
+        }
+
+        if let Some(parse_mode) = cmd.parse_mode {
+            req.parse_mode = Some(convert_parse_mode(parse_mode));
+        }
+
+        if let Some(duration) = cmd.duration {
+            req.duration = Some(duration);
+        }
+
+        if let Some(width) = cmd.width {
+            req.width = Some(width);
+        }
+
+        if let Some(height) = cmd.height {
+            req.height = Some(height);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(teloxide::types::ReplyMarkup::InlineKeyboard(
+                convert_inline_keyboard(markup),
+            ));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_video_note(&self, cmd: SendVideoNoteCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_video_note(prefix);
+        debug!("Received send video note command for chat {}", cmd.chat_id);
+
+        let video_note = teloxide::types::InputFile::file_id(cmd.video_note);
+        let mut req = self.bot.send_video_note(ChatId(cmd.chat_id), video_note);
+
+        if let Some(duration) = cmd.duration {
+            req.duration = Some(duration);
+        }
+
+        if let Some(length) = cmd.length {
+            req.length = Some(length);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_location(&self, cmd: SendLocationCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_location(prefix);
+        debug!("Received send location command for chat {}", cmd.chat_id);
+
+        let mut req =
+            self.bot
+                .send_location(ChatId(cmd.chat_id), cmd.latitude, cmd.longitude);
+
+        if let Some(live_period) = cmd.live_period {
+            req.live_period = Some(live_period.into());
+        }
+
+        if let Some(horizontal_accuracy) = cmd.horizontal_accuracy {
+            req.horizontal_accuracy = Some(horizontal_accuracy);
+        }
+
+        if let Some(heading) = cmd.heading {
+            req.heading = Some(heading);
+        }
+
+        if let Some(proximity_alert_radius) = cmd.proximity_alert_radius {
+            req.proximity_alert_radius = Some(proximity_alert_radius);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_venue(&self, cmd: SendVenueCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_venue(prefix);
+        debug!("Received send venue command for chat {}", cmd.chat_id);
+
+        let mut req = self.bot.send_venue(
+            ChatId(cmd.chat_id),
+            cmd.latitude,
+            cmd.longitude,
+            cmd.title,
+            cmd.address,
+        );
+
+        if let Some(foursquare_id) = cmd.foursquare_id {
+            req.foursquare_id = Some(foursquare_id);
+        }
+
+        if let Some(foursquare_type) = cmd.foursquare_type {
+            req.foursquare_type = Some(foursquare_type);
+        }
+
+        if let Some(google_place_id) = cmd.google_place_id {
+            req.google_place_id = Some(google_place_id);
+        }
+
+        if let Some(google_place_type) = cmd.google_place_type {
+            req.google_place_type = Some(google_place_type);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_contact(&self, cmd: SendContactCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::message_send_contact(prefix);
+        debug!("Received send contact command for chat {}", cmd.chat_id);
+
+        let mut req = self.bot.send_contact(
+            ChatId(cmd.chat_id),
+            cmd.phone_number,
+            cmd.first_name,
+        );
+
+        if let Some(last_name) = cmd.last_name {
+            req.last_name = Some(last_name);
+        }
+
+        if let Some(vcard) = cmd.vcard {
+            req.vcard = Some(vcard);
+        }
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters =
+                Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Poll handlers ─────────────────────────────────────────────────────────
+
+    async fn handle_send_poll(&self, cmd: SendPollCommand, prefix: &str) -> Result<()> {
+        use telegram_types::commands::PollKind;
+        use teloxide::types::PollType as TgPollType;
+
+        let subject = subjects::agent::poll_send(prefix);
+        debug!("Received send poll command for chat {}", cmd.chat_id);
+
+        let options: Vec<teloxide::types::InputPollOption> = cmd.options
+            .into_iter()
+            .map(teloxide::types::InputPollOption::new)
+            .collect();
+
+        let poll_type = match cmd.poll_type {
+            Some(PollKind::Quiz) => TgPollType::Quiz,
+            _ => TgPollType::Regular,
+        };
+
+        let mut req = self.bot.send_poll(
+            ChatId(cmd.chat_id),
+            cmd.question,
+            options,
+        );
+
+        req.is_anonymous = cmd.is_anonymous;
+        req.type_ = Some(poll_type);
+        req.allows_multiple_answers = cmd.allows_multiple_answers;
+        req.correct_option_id = cmd.correct_option_id;
+
+        if let Some(explanation) = cmd.explanation {
+            req.explanation = Some(explanation);
+        }
+
+        if let Some(pm) = cmd.explanation_parse_mode {
+            req.explanation_parse_mode = Some(convert_parse_mode(pm));
+        }
+
+        if let Some(period) = cmd.open_period {
+            req.open_period = Some(period);
+        }
+
+        req.is_closed = cmd.is_closed;
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id = Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_stop_poll(&self, cmd: StopPollCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::poll_stop(prefix);
+        debug!("Received stop poll command for chat {}", cmd.chat_id);
+
+        let mut req = self.bot.stop_poll(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(convert_inline_keyboard(markup));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Callback / action / inline handlers ───────────────────────────────────
+
+    async fn handle_answer_callback(&self, cmd: AnswerCallbackCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::callback_answer(prefix);
+        debug!("Received answer callback command");
+
+        let mut req = self.bot.answer_callback_query(&cmd.callback_query_id);
+
+        if let Some(text) = cmd.text {
+            req.text = Some(text);
+        }
+
+        if let Some(show_alert) = cmd.show_alert {
+            req.show_alert = Some(show_alert);
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_chat_action(&self, cmd: SendChatActionCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::chat_action(prefix);
+        debug!("Received chat action command for chat {}", cmd.chat_id);
+
+        let action = convert_chat_action(cmd.action);
+        let mut req = self.bot.send_chat_action(ChatId(cmd.chat_id), action);
+
+        if let Some(thread_id) = cmd.message_thread_id {
+            req.message_thread_id =
+                Some(teloxide::types::ThreadId(MessageId(thread_id)));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_answer_inline_query(&self, cmd: AnswerInlineQueryCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::inline_answer(prefix);
+        debug!(
+            "Received answer inline query command for query {}",
+            cmd.inline_query_id
+        );
+
+        let results: Vec<teloxide::types::InlineQueryResult> = cmd
+            .results
+            .into_iter()
+            .filter_map(convert_inline_query_result)
+            .collect();
+
+        let mut req = self.bot.answer_inline_query(&cmd.inline_query_id, results);
+
+        if let Some(cache_time) = cmd.cache_time {
+            req.cache_time = Some(cache_time as u32);
+        }
+
+        if let Some(is_personal) = cmd.is_personal {
+            req.is_personal = Some(is_personal);
+        }
+
+        if let Some(next_offset) = cmd.next_offset {
+            req.next_offset = Some(next_offset);
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Forum topic handlers ──────────────────────────────────────────────────
+
+    async fn handle_forum_create(&self, cmd: CreateForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_create(prefix);
+        debug!("Creating forum topic in chat {}", cmd.chat_id);
+
+        let icon_color = cmd.icon_color
+            .map(|c| teloxide::types::Rgb::from_u32(c as u32))
+            .unwrap_or_else(|| teloxide::types::Rgb::from_u32(0x6FB9F0));
+        let icon_custom_emoji_id = cmd.icon_custom_emoji_id.unwrap_or_default();
+        let req = self.bot.create_forum_topic(
+            ChatId(cmd.chat_id),
+            cmd.name,
+            icon_color,
+            icon_custom_emoji_id,
+        );
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_edit(&self, cmd: EditForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_edit(prefix);
+        debug!("Editing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+
+        let mut req = self.bot.edit_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id)));
+        if let Some(name) = cmd.name {
+            req.name = Some(name);
+        }
+        if let Some(emoji_id) = cmd.icon_custom_emoji_id {
+            req.icon_custom_emoji_id = Some(emoji_id);
+        }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_close(&self, cmd: CloseForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_close(prefix);
+        debug!("Closing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+
+        if let Err(e) = self.bot.close_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_reopen(&self, cmd: ReopenForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_reopen(prefix);
+        debug!("Reopening forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+
+        if let Err(e) = self.bot.reopen_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_delete(&self, cmd: DeleteForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_delete(prefix);
+        debug!("Deleting forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+
+        if let Err(e) = self.bot.delete_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_unpin(&self, cmd: UnpinAllForumTopicMessagesCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_unpin(prefix);
+        debug!("Unpinning all messages in topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
+
+        if let Err(e) = self.bot.unpin_all_forum_topic_messages(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_edit_general(&self, cmd: EditGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_edit_general(prefix);
+        debug!("Editing general forum topic in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_close_general(&self, cmd: CloseGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_close_general(prefix);
+        debug!("Closing general forum topic in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.close_general_forum_topic(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_reopen_general(&self, cmd: ReopenGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_reopen_general(prefix);
+        debug!("Reopening general forum topic in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.reopen_general_forum_topic(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_hide_general(&self, cmd: HideGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_hide_general(prefix);
+        debug!("Hiding general forum topic in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.hide_general_forum_topic(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_unhide_general(&self, cmd: UnhideGeneralForumTopicCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_unhide_general(prefix);
+        debug!("Unhiding general forum topic in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.unhide_general_forum_topic(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_forum_unpin_general(&self, cmd: UnpinAllGeneralForumTopicMessagesCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::forum_unpin_general(prefix);
+        debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── File handlers ─────────────────────────────────────────────────────────
+
+    async fn handle_file_get(&self, cmd: GetFileCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::file_get(prefix);
+        debug!("Getting file info for file_id: {}", cmd.file_id);
+
+        match self.bot.get_file(&cmd.file_id).await {
+            Ok(file) => {
+                let bot_token = self.bot.token();
+                let download_url = format!(
+                    "https://api.telegram.org/file/bot{}/{}",
+                    bot_token,
+                    file.path
+                );
+
+                let response = FileInfoResponse {
+                    file_id: cmd.file_id.clone(),
+                    file_unique_id: file.unique_id.clone(),
+                    file_size: Some(file.size as u64),
+                    file_path: file.path.clone(),
+                    download_url,
+                    request_id: cmd.request_id,
+                };
+
+                let response_subject = subjects::bot::file_info(prefix);
+                if let Err(e) = self.subscriber.client()
+                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                    .await
+                {
+                    error!("Failed to publish file info response: {}", e);
+                } else {
+                    debug!("Published file info response to {}", response_subject);
+                }
+            }
+            Err(e) => {
+                self.handle_telegram_error(&subject, e, prefix).await;
             }
         }
 
         Ok(())
     }
 
-    /// Handle answer callback commands
-    async fn handle_answer_callbacks(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::callback_answer(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<AnswerCallbackCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received answer callback command");
-
-                    let mut req = self.bot.answer_callback_query(&cmd.callback_query_id);
-
-                    if let Some(text) = cmd.text {
-                        req.text = Some(text);
-                    }
-
-                    if let Some(show_alert) = cmd.show_alert {
-                        req.show_alert = Some(show_alert);
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize answer callback command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle chat action commands
-    async fn handle_chat_actions(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::chat_action(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<SendChatActionCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!("Received chat action command for chat {}", cmd.chat_id);
-
-                    let action = convert_chat_action(cmd.action);
-                    let mut req = self.bot.send_chat_action(ChatId(cmd.chat_id), action);
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize chat action command: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle forum topic management commands
-    async fn handle_forum_topics(&self, prefix: String) -> Result<()> {
-        use telegram_nats::subjects;
-        use telegram_types::commands::*;
-
-        let create_subject = subjects::agent::forum_create(&prefix);
-        let edit_subject = subjects::agent::forum_edit(&prefix);
-        let close_subject = subjects::agent::forum_close(&prefix);
-        let reopen_subject = subjects::agent::forum_reopen(&prefix);
-        let delete_subject = subjects::agent::forum_delete(&prefix);
-        let unpin_subject = subjects::agent::forum_unpin(&prefix);
-        let edit_general_subject = subjects::agent::forum_edit_general(&prefix);
-        let close_general_subject = subjects::agent::forum_close_general(&prefix);
-        let reopen_general_subject = subjects::agent::forum_reopen_general(&prefix);
-        let hide_general_subject = subjects::agent::forum_hide_general(&prefix);
-        let unhide_general_subject = subjects::agent::forum_unhide_general(&prefix);
-        let unpin_general_subject = subjects::agent::forum_unpin_general(&prefix);
-
-        info!("Subscribing to forum topic commands");
-
-        let create_stream = self
-            .subscriber
-            .subscribe::<CreateForumTopicCommand>(&create_subject);
-        let edit_stream = self
-            .subscriber
-            .subscribe::<EditForumTopicCommand>(&edit_subject);
-        let close_stream = self
-            .subscriber
-            .subscribe::<CloseForumTopicCommand>(&close_subject);
-        let reopen_stream = self
-            .subscriber
-            .subscribe::<ReopenForumTopicCommand>(&reopen_subject);
-        let delete_stream = self
-            .subscriber
-            .subscribe::<DeleteForumTopicCommand>(&delete_subject);
-        let unpin_stream = self
-            .subscriber
-            .subscribe::<UnpinAllForumTopicMessagesCommand>(&unpin_subject);
-        let edit_general_stream = self
-            .subscriber
-            .subscribe::<EditGeneralForumTopicCommand>(&edit_general_subject);
-        let close_general_stream = self
-            .subscriber
-            .subscribe::<CloseGeneralForumTopicCommand>(&close_general_subject);
-        let reopen_general_stream = self
-            .subscriber
-            .subscribe::<ReopenGeneralForumTopicCommand>(&reopen_general_subject);
-        let hide_general_stream = self
-            .subscriber
-            .subscribe::<HideGeneralForumTopicCommand>(&hide_general_subject);
-        let unhide_general_stream = self
-            .subscriber
-            .subscribe::<UnhideGeneralForumTopicCommand>(&unhide_general_subject);
-        let unpin_general_stream = self
-            .subscriber
-            .subscribe::<UnpinAllGeneralForumTopicMessagesCommand>(&unpin_general_subject);
-
-        let (
-            mut create_stream,
-            mut edit_stream,
-            mut close_stream,
-            mut reopen_stream,
-            mut delete_stream,
-            mut unpin_stream,
-            mut edit_general_stream,
-            mut close_general_stream,
-            mut reopen_general_stream,
-            mut hide_general_stream,
-            mut unhide_general_stream,
-            mut unpin_general_stream,
-        ) = tokio::try_join!(
-            create_stream,
-            edit_stream,
-            close_stream,
-            reopen_stream,
-            delete_stream,
-            unpin_stream,
-            edit_general_stream,
-            close_general_stream,
-            reopen_general_stream,
-            hide_general_stream,
-            unhide_general_stream,
-            unpin_general_stream
-        )?;
-
-        loop {
-            tokio::select! {
-                Some(result) = create_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Creating forum topic in chat {}", cmd.chat_id);
-                        // Use default blue color if not specified (0x6FB9F0)
-                        let icon_color = cmd.icon_color
-                            .map(|c| teloxide::types::Rgb::from_u32(c as u32))
-                            .unwrap_or_else(|| teloxide::types::Rgb::from_u32(0x6FB9F0));
-                        let icon_custom_emoji_id = cmd.icon_custom_emoji_id.unwrap_or_default();
-                        let req = self.bot.create_forum_topic(
-                            ChatId(cmd.chat_id),
-                            cmd.name,
-                            icon_color,
-                            icon_custom_emoji_id
-                        );
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&create_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = edit_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Editing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
-                        let mut req = self.bot.edit_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id)));
-                        if let Some(name) = cmd.name {
-                            req.name = Some(name);
-                        }
-                        if let Some(emoji_id) = cmd.icon_custom_emoji_id {
-                            req.icon_custom_emoji_id = Some(emoji_id);
-                        }
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&edit_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = close_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Closing forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
-                        if let Err(e) = self.bot.close_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            self.handle_telegram_error(&close_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = reopen_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Reopening forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
-                        if let Err(e) = self.bot.reopen_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            self.handle_telegram_error(&reopen_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = delete_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Deleting forum topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
-                        if let Err(e) = self.bot.delete_forum_topic(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            self.handle_telegram_error(&delete_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unpin_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unpinning all messages in topic {} in chat {}", cmd.message_thread_id, cmd.chat_id);
-                        if let Err(e) = self.bot.unpin_all_forum_topic_messages(ChatId(cmd.chat_id), teloxide::types::ThreadId(MessageId(cmd.message_thread_id))).await {
-                            self.handle_telegram_error(&unpin_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = edit_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Editing general forum topic in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.edit_general_forum_topic(ChatId(cmd.chat_id), cmd.name).await {
-                            self.handle_telegram_error(&edit_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = close_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Closing general forum topic in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.close_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&close_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = reopen_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Reopening general forum topic in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.reopen_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&reopen_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = hide_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Hiding general forum topic in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.hide_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&hide_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unhide_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unhiding general forum topic in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.unhide_general_forum_topic(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&unhide_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unpin_general_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unpinning all general forum topic messages in chat {}", cmd.chat_id);
-                        if let Err(e) = self.bot.unpin_all_general_forum_topic_messages(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&unpin_general_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                else => break,
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle admin commands (permissions, pinning, etc.)
-    async fn handle_admin_commands(&self, prefix: String) -> Result<()> {
-        use telegram_nats::subjects;
-        use telegram_types::commands::*;
-
-        let promote_subject = subjects::agent::admin_promote(&prefix);
-        let restrict_subject = subjects::agent::admin_restrict(&prefix);
-        let ban_subject = subjects::agent::admin_ban(&prefix);
-        let unban_subject = subjects::agent::admin_unban(&prefix);
-        let set_permissions_subject = subjects::agent::admin_set_permissions(&prefix);
-        let set_title_subject = subjects::agent::admin_set_title(&prefix);
-        let pin_subject = subjects::agent::admin_pin(&prefix);
-        let unpin_subject = subjects::agent::admin_unpin(&prefix);
-        let unpin_all_subject = subjects::agent::admin_unpin_all(&prefix);
-        let set_chat_title_subject = subjects::agent::admin_set_chat_title(&prefix);
-        let set_chat_description_subject = subjects::agent::admin_set_chat_description(&prefix);
-
-        info!("Subscribing to admin commands");
-
-        let promote_stream = self
-            .subscriber
-            .subscribe::<PromoteChatMemberCommand>(&promote_subject);
-        let restrict_stream = self
-            .subscriber
-            .subscribe::<RestrictChatMemberCommand>(&restrict_subject);
-        let ban_stream = self
-            .subscriber
-            .subscribe::<BanChatMemberCommand>(&ban_subject);
-        let unban_stream = self
-            .subscriber
-            .subscribe::<UnbanChatMemberCommand>(&unban_subject);
-        let set_permissions_stream = self
-            .subscriber
-            .subscribe::<SetChatPermissionsCommand>(&set_permissions_subject);
-        let set_title_stream = self
-            .subscriber
-            .subscribe::<SetChatAdministratorCustomTitleCommand>(&set_title_subject);
-        let pin_stream = self
-            .subscriber
-            .subscribe::<PinChatMessageCommand>(&pin_subject);
-        let unpin_stream = self
-            .subscriber
-            .subscribe::<UnpinChatMessageCommand>(&unpin_subject);
-        let unpin_all_stream = self
-            .subscriber
-            .subscribe::<UnpinAllChatMessagesCommand>(&unpin_all_subject);
-        let set_chat_title_stream = self
-            .subscriber
-            .subscribe::<SetChatTitleCommand>(&set_chat_title_subject);
-        let set_chat_description_stream = self
-            .subscriber
-            .subscribe::<SetChatDescriptionCommand>(&set_chat_description_subject);
-
-        let (
-            mut promote_stream,
-            mut restrict_stream,
-            mut ban_stream,
-            mut unban_stream,
-            mut set_permissions_stream,
-            mut set_title_stream,
-            mut pin_stream,
-            mut unpin_stream,
-            mut unpin_all_stream,
-            mut set_chat_title_stream,
-            mut set_chat_description_stream,
-        ) = tokio::try_join!(
-            promote_stream,
-            restrict_stream,
-            ban_stream,
-            unban_stream,
-            set_permissions_stream,
-            set_title_stream,
-            pin_stream,
-            unpin_stream,
-            unpin_all_stream,
-            set_chat_title_stream,
-            set_chat_description_stream
-        )?;
-
-        loop {
-            tokio::select! {
-                Some(result) = promote_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Promoting user {} in chat {}", cmd.user_id, cmd.chat_id);
-                        let mut req = self.bot.promote_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
-
-                        if let Some(rights) = cmd.rights {
-                            req.is_anonymous = rights.is_anonymous;
-                            req.can_manage_chat = rights.can_manage_chat;
-                            req.can_delete_messages = rights.can_delete_messages;
-                            req.can_manage_video_chats = rights.can_manage_video_chats;
-                            req.can_restrict_members = rights.can_restrict_members;
-                            req.can_promote_members = rights.can_promote_members;
-                            req.can_change_info = rights.can_change_info;
-                            req.can_invite_users = rights.can_invite_users;
-                            req.can_pin_messages = rights.can_pin_messages;
-                            req.can_manage_topics = rights.can_manage_topics;
-                            req.can_post_messages = rights.can_post_messages;
-                            req.can_edit_messages = rights.can_edit_messages;
-                            req.can_post_stories = rights.can_post_stories;
-                            req.can_edit_stories = rights.can_edit_stories;
-                            req.can_delete_stories = rights.can_delete_stories;
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&promote_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = restrict_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Restricting user {} in chat {}", cmd.user_id, cmd.chat_id);
-                        let perms = convert_chat_permissions(&cmd.permissions);
-                        let mut req = self.bot.restrict_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64), perms);
-
-                        if let Some(until) = cmd.until_date {
-                            use chrono::{DateTime, Utc};
-                            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
-                                req.until_date = Some(dt);
-                            }
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&restrict_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = ban_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Banning user {} in chat {}", cmd.user_id, cmd.chat_id);
-                        let mut req = self.bot.ban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
-
-                        if let Some(until) = cmd.until_date {
-                            use chrono::{DateTime, Utc};
-                            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
-                                req.until_date = Some(dt);
-                            }
-                        }
-
-                        if let Some(revoke) = cmd.revoke_messages {
-                            req.revoke_messages = Some(revoke);
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&ban_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unban_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unbanning user {} in chat {}", cmd.user_id, cmd.chat_id);
-                        let mut req = self.bot.unban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
-
-                        if let Some(only_if_banned) = cmd.only_if_banned {
-                            req.only_if_banned = Some(only_if_banned);
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&unban_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_permissions_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting permissions in chat {}", cmd.chat_id);
-                        let perms = convert_chat_permissions(&cmd.permissions);
-
-                        if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
-                            self.handle_telegram_error(&set_permissions_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_title_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting custom title for user {} in chat {}", cmd.user_id, cmd.chat_id);
-
-                        if let Err(e) = self.bot.set_chat_administrator_custom_title(
-                            ChatId(cmd.chat_id),
-                            teloxide::types::UserId(cmd.user_id as u64),
-                            cmd.custom_title
-                        ).await {
-                            self.handle_telegram_error(&set_title_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = pin_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Pinning message {} in chat {}", cmd.message_id, cmd.chat_id);
-                        let mut req = self.bot.pin_chat_message(ChatId(cmd.chat_id), MessageId(cmd.message_id));
-
-                        if let Some(disable_notification) = cmd.disable_notification {
-                            req.disable_notification = Some(disable_notification);
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&pin_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unpin_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unpinning message in chat {}", cmd.chat_id);
-                        let mut req = self.bot.unpin_chat_message(ChatId(cmd.chat_id));
-
-                        if let Some(message_id) = cmd.message_id {
-                            req.message_id = Some(MessageId(message_id));
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&unpin_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = unpin_all_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Unpinning all messages in chat {}", cmd.chat_id);
-
-                        if let Err(e) = self.bot.unpin_all_chat_messages(ChatId(cmd.chat_id)).await {
-                            self.handle_telegram_error(&unpin_all_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_chat_title_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting chat title in chat {}", cmd.chat_id);
-
-                        if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
-                            self.handle_telegram_error(&set_chat_title_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_chat_description_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting chat description in chat {}", cmd.chat_id);
-
-                        let mut req = self.bot.set_chat_description(ChatId(cmd.chat_id));
-                        req.description = Some(cmd.description);
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&set_chat_description_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                else => break,
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle file download commands (getFile and download)
-    async fn handle_file_commands(&self, prefix: String) -> Result<()> {
-        use telegram_nats::subjects;
-        use telegram_types::commands::*;
-
-        let get_file_subject = subjects::agent::file_get(&prefix);
-        let download_file_subject = subjects::agent::file_download(&prefix);
-
-        info!("Subscribing to file commands");
-
-        let get_file_stream = self
-            .subscriber
-            .subscribe::<GetFileCommand>(&get_file_subject);
-        let download_file_stream = self
-            .subscriber
-            .subscribe::<DownloadFileCommand>(&download_file_subject);
-
-        let (mut get_file_stream, mut download_file_stream) =
-            tokio::try_join!(get_file_stream, download_file_stream)?;
-
-        loop {
-            tokio::select! {
-                Some(result) = get_file_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Getting file info for file_id: {}", cmd.file_id);
-
-                        match self.bot.get_file(&cmd.file_id).await {
-                            Ok(file) => {
-                                // Construct download URL
-                                let bot_token = self.bot.token();
-                                let download_url = format!(
-                                    "https://api.telegram.org/file/bot{}/{}",
-                                    bot_token,
-                                    file.path
-                                );
-
-                                let response = FileInfoResponse {
-                                    file_id: cmd.file_id.clone(),
-                                    file_unique_id: file.unique_id.clone(),
-                                    file_size: Some(file.size as u64),
-                                    file_path: file.path.clone(),
-                                    download_url,
-                                    request_id: cmd.request_id,
-                                };
-
-                                // Publish response
-                                let response_subject = subjects::bot::file_info(&prefix);
-                                if let Err(e) = self.subscriber.client()
-                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
-                                    .await
-                                {
-                                    error!("Failed to publish file info response: {}", e);
-                                } else {
-                                    debug!("Published file info response to {}", response_subject);
-                                }
-                            }
-                            Err(e) => {
-                                self.handle_telegram_error(&get_file_subject, e, &prefix).await;
-                            }
-                        }
-                    }
-                }
-
-                Some(result) = download_file_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Downloading file {} to {}", cmd.file_id, cmd.destination_path);
-
-                        // Get file info first
-                        match self.bot.get_file(&cmd.file_id).await {
-                            Ok(file) => {
-                                // Construct download URL
-                                let bot_token = self.bot.token();
-                                let download_url = format!(
-                                    "https://api.telegram.org/file/bot{}/{}",
-                                    bot_token,
-                                    file.path
-                                );
-
-                                // Download file using reqwest
-                                match download_file_from_url(&download_url, &cmd.destination_path).await {
-                                    Ok(file_size) => {
-                                        let response = FileDownloadResponse {
-                                            file_id: cmd.file_id.clone(),
-                                            local_path: cmd.destination_path.clone(),
-                                            file_size,
-                                            success: true,
-                                            error: None,
-                                            request_id: cmd.request_id,
-                                        };
-
-                                        // Publish response
-                                        let response_subject = subjects::bot::file_downloaded(&prefix);
-                                        if let Err(e) = self.subscriber.client()
-                                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
-                                            .await
-                                        {
-                                            error!("Failed to publish file download response: {}", e);
-                                        } else {
-                                            debug!("Published file download response to {}", response_subject);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to download file {}: {}", cmd.file_id, e);
-                                        let response = FileDownloadResponse {
-                                            file_id: cmd.file_id.clone(),
-                                            local_path: cmd.destination_path.clone(),
-                                            file_size: 0,
-                                            success: false,
-                                            error: Some(e.to_string()),
-                                            request_id: cmd.request_id,
-                                        };
-
-                                        // Publish error response
-                                        let response_subject = subjects::bot::file_downloaded(&prefix);
-                                        if let Err(e) = self.subscriber.client()
-                                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
-                                            .await
-                                        {
-                                            error!("Failed to publish file download error response: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let e_str = e.to_string();
-                                self.handle_telegram_error(&download_file_subject, e, &prefix).await;
-                                let response = FileDownloadResponse {
-                                    file_id: cmd.file_id.clone(),
-                                    local_path: cmd.destination_path.clone(),
-                                    file_size: 0,
-                                    success: false,
-                                    error: Some(format!("Failed to get file info: {}", e_str)),
-                                    request_id: cmd.request_id,
-                                };
-
-                                // Publish error response
-                                let response_subject = subjects::bot::file_downloaded(&prefix);
-                                if let Err(e) = self.subscriber.client()
-                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
-                                    .await
-                                {
-                                    error!("Failed to publish file download error response: {}", e);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                else => break,
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle payment commands (invoices, pre-checkout, shipping)
-    async fn handle_payment_commands(&self, prefix: String) -> Result<()> {
-        use telegram_nats::subjects;
-        use telegram_types::commands::*;
-
-        let send_invoice_subject = subjects::agent::payment_send_invoice(&prefix);
-        let answer_pre_checkout_subject = subjects::agent::payment_answer_pre_checkout(&prefix);
-        let answer_shipping_subject = subjects::agent::payment_answer_shipping(&prefix);
-
-        info!("Subscribing to payment commands");
-
-        let send_invoice_stream = self
-            .subscriber
-            .subscribe::<SendInvoiceCommand>(&send_invoice_subject);
-        let answer_pre_checkout_stream = self
-            .subscriber
-            .subscribe::<AnswerPreCheckoutQueryCommand>(&answer_pre_checkout_subject);
-        let answer_shipping_stream = self
-            .subscriber
-            .subscribe::<AnswerShippingQueryCommand>(&answer_shipping_subject);
-
-        let (mut send_invoice_stream, mut answer_pre_checkout_stream, mut answer_shipping_stream) =
-            tokio::try_join!(
-                send_invoice_stream,
-                answer_pre_checkout_stream,
-                answer_shipping_stream
-            )?;
-
-        loop {
-            tokio::select! {
-                Some(result) = send_invoice_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Sending invoice to chat {}", cmd.chat_id);
-
-                        // Convert prices (amount in smallest currency units as u32)
-                        let prices: Vec<teloxide::types::LabeledPrice> = cmd.prices.iter()
-                            .map(|p| teloxide::types::LabeledPrice {
-                                label: p.label.clone(),
-                                amount: p.amount as u32,
-                            })
-                            .collect();
-
-                        let mut req = self.bot.send_invoice(
-                            ChatId(cmd.chat_id),
-                            cmd.title,
-                            cmd.description,
-                            cmd.payload,
-                            cmd.currency,
-                            prices
-                        );
-
-                        // Set optional fields
-                        if !cmd.provider_token.is_empty() {
-                            req.provider_token = Some(cmd.provider_token);
-                        }
-                        req.max_tip_amount = cmd.max_tip_amount.map(|a| a as u32);
-                        req.suggested_tip_amounts = cmd.suggested_tip_amounts.map(|amounts|
-                            amounts.iter().map(|&a| a as u32).collect()
-                        );
-                        req.start_parameter = cmd.start_parameter;
-                        req.provider_data = cmd.provider_data;
-                        req.photo_url = cmd.photo_url.and_then(|u| u.parse().ok());
-                        req.photo_size = cmd.photo_size.map(|s| s as u32);
-                        req.photo_width = cmd.photo_width.map(|w| w as u32);
-                        req.photo_height = cmd.photo_height.map(|h| h as u32);
-                        req.need_name = cmd.need_name;
-                        req.need_phone_number = cmd.need_phone_number;
-                        req.need_email = cmd.need_email;
-                        req.need_shipping_address = cmd.need_shipping_address;
-                        req.send_phone_number_to_provider = cmd.send_phone_number_to_provider;
-                        req.send_email_to_provider = cmd.send_email_to_provider;
-                        req.is_flexible = cmd.is_flexible;
-                        req.disable_notification = cmd.disable_notification;
-                        req.protect_content = cmd.protect_content;
-
-                        if let Some(reply_to) = cmd.reply_to_message_id {
-                            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
-                        }
-
-                        if let Some(markup) = cmd.reply_markup {
-                            req.reply_markup = Some(convert_inline_keyboard(markup));
-                        }
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&send_invoice_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = answer_pre_checkout_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Answering pre-checkout query {}: ok={}", cmd.pre_checkout_query_id, cmd.ok);
-
-                        let req = if cmd.ok {
-                            self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, true)
-                        } else {
-                            let mut req = self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, false);
-                            req.error_message = cmd.error_message;
-                            req
+    async fn handle_file_download(&self, cmd: DownloadFileCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::file_download(prefix);
+        debug!("Downloading file {} to {}", cmd.file_id, cmd.destination_path);
+
+        match self.bot.get_file(&cmd.file_id).await {
+            Ok(file) => {
+                let bot_token = self.bot.token();
+                let download_url = format!(
+                    "https://api.telegram.org/file/bot{}/{}",
+                    bot_token,
+                    file.path
+                );
+
+                match download_file_from_url(&download_url, &cmd.destination_path).await {
+                    Ok(file_size) => {
+                        let response = FileDownloadResponse {
+                            file_id: cmd.file_id.clone(),
+                            local_path: cmd.destination_path.clone(),
+                            file_size,
+                            success: true,
+                            error: None,
+                            request_id: cmd.request_id,
                         };
 
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&answer_pre_checkout_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = answer_shipping_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Answering shipping query {}: ok={}", cmd.shipping_query_id, cmd.ok);
-
-                        let mut req = self.bot.answer_shipping_query(&cmd.shipping_query_id, cmd.ok);
-
-                        if cmd.ok {
-                            let options: Vec<teloxide::types::ShippingOption> = cmd.shipping_options.unwrap_or_default()
-                                .into_iter()
-                                .map(|opt| teloxide::types::ShippingOption {
-                                    id: opt.id,
-                                    title: opt.title,
-                                    prices: opt.prices.iter().map(|p| teloxide::types::LabeledPrice {
-                                        label: p.label.clone(),
-                                        amount: p.amount as u32,
-                                    }).collect(),
-                                })
-                                .collect();
-                            req.shipping_options = Some(options);
+                        let response_subject = subjects::bot::file_downloaded(prefix);
+                        if let Err(e) = self.subscriber.client()
+                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                            .await
+                        {
+                            error!("Failed to publish file download response: {}", e);
                         } else {
-                            req.error_message = cmd.error_message;
+                            debug!("Published file download response to {}", response_subject);
                         }
+                    }
+                    Err(e) => {
+                        error!("Failed to download file {}: {}", cmd.file_id, e);
+                        let response = FileDownloadResponse {
+                            file_id: cmd.file_id.clone(),
+                            local_path: cmd.destination_path.clone(),
+                            file_size: 0,
+                            success: false,
+                            error: Some(e.to_string()),
+                            request_id: cmd.request_id,
+                        };
 
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&answer_shipping_subject, e, &prefix).await;
+                        let response_subject = subjects::bot::file_downloaded(prefix);
+                        if let Err(e) = self.subscriber.client()
+                            .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                            .await
+                        {
+                            error!("Failed to publish file download error response: {}", e);
                         }
                     }
                 }
+            }
+            Err(e) => {
+                let e_str = e.to_string();
+                self.handle_telegram_error(&subject, e, prefix).await;
+                let response = FileDownloadResponse {
+                    file_id: cmd.file_id.clone(),
+                    local_path: cmd.destination_path.clone(),
+                    file_size: 0,
+                    success: false,
+                    error: Some(format!("Failed to get file info: {}", e_str)),
+                    request_id: cmd.request_id,
+                };
 
-                else => break,
+                let response_subject = subjects::bot::file_downloaded(prefix);
+                if let Err(e) = self.subscriber.client()
+                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                    .await
+                {
+                    error!("Failed to publish file download error response: {}", e);
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Handle bot commands setup (setMyCommands, deleteMyCommands, getMyCommands)
-    async fn handle_bot_commands(&self, prefix: String) -> Result<()> {
-        use telegram_nats::subjects;
-        use telegram_types::commands::*;
+    // ── Admin handlers ────────────────────────────────────────────────────────
 
-        let set_commands_subject = subjects::agent::bot_commands_set(&prefix);
-        let delete_commands_subject = subjects::agent::bot_commands_delete(&prefix);
-        let get_commands_subject = subjects::agent::bot_commands_get(&prefix);
+    async fn handle_admin_promote(&self, cmd: PromoteChatMemberCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_promote(prefix);
+        debug!("Promoting user {} in chat {}", cmd.user_id, cmd.chat_id);
 
-        info!("Subscribing to bot commands");
+        let mut req = self.bot.promote_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
 
-        let set_commands_stream = self
-            .subscriber
-            .subscribe::<SetMyCommandsCommand>(&set_commands_subject);
-        let delete_commands_stream = self
-            .subscriber
-            .subscribe::<DeleteMyCommandsCommand>(&delete_commands_subject);
-        let get_commands_stream = self
-            .subscriber
-            .subscribe::<GetMyCommandsCommand>(&get_commands_subject);
+        if let Some(rights) = cmd.rights {
+            req.is_anonymous = rights.is_anonymous;
+            req.can_manage_chat = rights.can_manage_chat;
+            req.can_delete_messages = rights.can_delete_messages;
+            req.can_manage_video_chats = rights.can_manage_video_chats;
+            req.can_restrict_members = rights.can_restrict_members;
+            req.can_promote_members = rights.can_promote_members;
+            req.can_change_info = rights.can_change_info;
+            req.can_invite_users = rights.can_invite_users;
+            req.can_pin_messages = rights.can_pin_messages;
+            req.can_manage_topics = rights.can_manage_topics;
+            req.can_post_messages = rights.can_post_messages;
+            req.can_edit_messages = rights.can_edit_messages;
+            req.can_post_stories = rights.can_post_stories;
+            req.can_edit_stories = rights.can_edit_stories;
+            req.can_delete_stories = rights.can_delete_stories;
+        }
 
-        let (mut set_commands_stream, mut delete_commands_stream, mut get_commands_stream) = tokio::try_join!(
-            set_commands_stream,
-            delete_commands_stream,
-            get_commands_stream
-        )?;
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
 
-        loop {
-            tokio::select! {
-                Some(result) = set_commands_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting bot commands ({} commands)", cmd.commands.len());
+        Ok(())
+    }
 
-                        let commands: Vec<teloxide::types::BotCommand> = cmd.commands.iter()
-                            .map(|c| teloxide::types::BotCommand::new(c.command.clone(), c.description.clone()))
-                            .collect();
+    async fn handle_admin_restrict(&self, cmd: RestrictChatMemberCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_restrict(prefix);
+        debug!("Restricting user {} in chat {}", cmd.user_id, cmd.chat_id);
 
-                        let mut req = self.bot.set_my_commands(commands);
+        let perms = convert_chat_permissions(&cmd.permissions);
+        let mut req = self.bot.restrict_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64), perms);
 
-                        if let Some(scope) = cmd.scope {
-                            req.scope = Some(convert_bot_command_scope(scope));
-                        }
+        if let Some(until) = cmd.until_date {
+            use chrono::{DateTime, Utc};
+            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
+                req.until_date = Some(dt);
+            }
+        }
 
-                        req.language_code = cmd.language_code;
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
 
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&set_commands_subject, e, &prefix).await;
-                        }
-                    }
+        Ok(())
+    }
+
+    async fn handle_admin_ban(&self, cmd: BanChatMemberCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_ban(prefix);
+        debug!("Banning user {} in chat {}", cmd.user_id, cmd.chat_id);
+
+        let mut req = self.bot.ban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+
+        if let Some(until) = cmd.until_date {
+            use chrono::{DateTime, Utc};
+            if let Some(dt) = DateTime::<Utc>::from_timestamp(until, 0) {
+                req.until_date = Some(dt);
+            }
+        }
+
+        if let Some(revoke) = cmd.revoke_messages {
+            req.revoke_messages = Some(revoke);
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_unban(&self, cmd: UnbanChatMemberCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_unban(prefix);
+        debug!("Unbanning user {} in chat {}", cmd.user_id, cmd.chat_id);
+
+        let mut req = self.bot.unban_chat_member(ChatId(cmd.chat_id), teloxide::types::UserId(cmd.user_id as u64));
+
+        if let Some(only_if_banned) = cmd.only_if_banned {
+            req.only_if_banned = Some(only_if_banned);
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_set_permissions(&self, cmd: SetChatPermissionsCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_set_permissions(prefix);
+        debug!("Setting permissions in chat {}", cmd.chat_id);
+
+        let perms = convert_chat_permissions(&cmd.permissions);
+
+        if let Err(e) = self.bot.set_chat_permissions(ChatId(cmd.chat_id), perms).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_set_title(&self, cmd: SetChatAdministratorCustomTitleCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_set_title(prefix);
+        debug!("Setting custom title for user {} in chat {}", cmd.user_id, cmd.chat_id);
+
+        if let Err(e) = self.bot.set_chat_administrator_custom_title(
+            ChatId(cmd.chat_id),
+            teloxide::types::UserId(cmd.user_id as u64),
+            cmd.custom_title,
+        ).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_pin(&self, cmd: PinChatMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_pin(prefix);
+        debug!("Pinning message {} in chat {}", cmd.message_id, cmd.chat_id);
+
+        let mut req = self.bot.pin_chat_message(ChatId(cmd.chat_id), MessageId(cmd.message_id));
+
+        if let Some(disable_notification) = cmd.disable_notification {
+            req.disable_notification = Some(disable_notification);
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_unpin(&self, cmd: UnpinChatMessageCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_unpin(prefix);
+        debug!("Unpinning message in chat {}", cmd.chat_id);
+
+        let mut req = self.bot.unpin_chat_message(ChatId(cmd.chat_id));
+
+        if let Some(message_id) = cmd.message_id {
+            req.message_id = Some(MessageId(message_id));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_unpin_all(&self, cmd: UnpinAllChatMessagesCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_unpin_all(prefix);
+        debug!("Unpinning all messages in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.unpin_all_chat_messages(ChatId(cmd.chat_id)).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_set_chat_title(&self, cmd: SetChatTitleCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_set_chat_title(prefix);
+        debug!("Setting chat title in chat {}", cmd.chat_id);
+
+        if let Err(e) = self.bot.set_chat_title(ChatId(cmd.chat_id), cmd.title).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_admin_set_chat_description(&self, cmd: SetChatDescriptionCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::admin_set_chat_description(prefix);
+        debug!("Setting chat description in chat {}", cmd.chat_id);
+
+        let mut req = self.bot.set_chat_description(ChatId(cmd.chat_id));
+        req.description = Some(cmd.description);
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Payment handlers ──────────────────────────────────────────────────────
+
+    async fn handle_payment_send_invoice(&self, cmd: SendInvoiceCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::payment_send_invoice(prefix);
+        debug!("Sending invoice to chat {}", cmd.chat_id);
+
+        let prices: Vec<teloxide::types::LabeledPrice> = cmd.prices.iter()
+            .map(|p| teloxide::types::LabeledPrice {
+                label: p.label.clone(),
+                amount: p.amount as u32,
+            })
+            .collect();
+
+        let mut req = self.bot.send_invoice(
+            ChatId(cmd.chat_id),
+            cmd.title,
+            cmd.description,
+            cmd.payload,
+            cmd.currency,
+            prices,
+        );
+
+        if !cmd.provider_token.is_empty() {
+            req.provider_token = Some(cmd.provider_token);
+        }
+        req.max_tip_amount = cmd.max_tip_amount.map(|a| a as u32);
+        req.suggested_tip_amounts = cmd.suggested_tip_amounts.map(|amounts|
+            amounts.iter().map(|&a| a as u32).collect()
+        );
+        req.start_parameter = cmd.start_parameter;
+        req.provider_data = cmd.provider_data;
+        req.photo_url = cmd.photo_url.and_then(|u| u.parse().ok());
+        req.photo_size = cmd.photo_size.map(|s| s as u32);
+        req.photo_width = cmd.photo_width.map(|w| w as u32);
+        req.photo_height = cmd.photo_height.map(|h| h as u32);
+        req.need_name = cmd.need_name;
+        req.need_phone_number = cmd.need_phone_number;
+        req.need_email = cmd.need_email;
+        req.need_shipping_address = cmd.need_shipping_address;
+        req.send_phone_number_to_provider = cmd.send_phone_number_to_provider;
+        req.send_email_to_provider = cmd.send_email_to_provider;
+        req.is_flexible = cmd.is_flexible;
+        req.disable_notification = cmd.disable_notification;
+        req.protect_content = cmd.protect_content;
+
+        if let Some(reply_to) = cmd.reply_to_message_id {
+            req.reply_parameters = Some(teloxide::types::ReplyParameters::new(MessageId(reply_to)));
+        }
+
+        if let Some(markup) = cmd.reply_markup {
+            req.reply_markup = Some(convert_inline_keyboard(markup));
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_payment_answer_pre_checkout(&self, cmd: AnswerPreCheckoutQueryCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::payment_answer_pre_checkout(prefix);
+        debug!("Answering pre-checkout query {}: ok={}", cmd.pre_checkout_query_id, cmd.ok);
+
+        let req = if cmd.ok {
+            self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, true)
+        } else {
+            let mut req = self.bot.answer_pre_checkout_query(&cmd.pre_checkout_query_id, false);
+            req.error_message = cmd.error_message;
+            req
+        };
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_payment_answer_shipping(&self, cmd: AnswerShippingQueryCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::payment_answer_shipping(prefix);
+        debug!("Answering shipping query {}: ok={}", cmd.shipping_query_id, cmd.ok);
+
+        let mut req = self.bot.answer_shipping_query(&cmd.shipping_query_id, cmd.ok);
+
+        if cmd.ok {
+            let options: Vec<teloxide::types::ShippingOption> = cmd.shipping_options.unwrap_or_default()
+                .into_iter()
+                .map(|opt| teloxide::types::ShippingOption {
+                    id: opt.id,
+                    title: opt.title,
+                    prices: opt.prices.iter().map(|p| teloxide::types::LabeledPrice {
+                        label: p.label.clone(),
+                        amount: p.amount as u32,
+                    }).collect(),
+                })
+                .collect();
+            req.shipping_options = Some(options);
+        } else {
+            req.error_message = cmd.error_message;
+        }
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Bot commands handlers ─────────────────────────────────────────────────
+
+    async fn handle_bot_commands_set(&self, cmd: SetMyCommandsCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::bot_commands_set(prefix);
+        debug!("Setting bot commands ({} commands)", cmd.commands.len());
+
+        let commands: Vec<teloxide::types::BotCommand> = cmd.commands.iter()
+            .map(|c| teloxide::types::BotCommand::new(c.command.clone(), c.description.clone()))
+            .collect();
+
+        let mut req = self.bot.set_my_commands(commands);
+
+        if let Some(scope) = cmd.scope {
+            req.scope = Some(convert_bot_command_scope(scope));
+        }
+
+        req.language_code = cmd.language_code;
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_bot_commands_delete(&self, cmd: DeleteMyCommandsCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::bot_commands_delete(prefix);
+        debug!("Deleting bot commands");
+
+        let mut req = self.bot.delete_my_commands();
+
+        if let Some(scope) = cmd.scope {
+            req.scope = Some(convert_bot_command_scope(scope));
+        }
+
+        req.language_code = cmd.language_code;
+
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_bot_commands_get(&self, cmd: GetMyCommandsCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::bot_commands_get(prefix);
+        debug!("Getting bot commands");
+
+        let mut req = self.bot.get_my_commands();
+
+        if let Some(scope) = cmd.scope {
+            req.scope = Some(convert_bot_command_scope(scope));
+        }
+
+        req.language_code = cmd.language_code;
+
+        match req.await {
+            Ok(commands) => {
+                let response = BotCommandsResponse {
+                    commands: commands.iter().map(|c| telegram_types::chat::BotCommand {
+                        command: c.command.clone(),
+                        description: c.description.clone(),
+                    }).collect(),
+                    request_id: cmd.request_id,
+                };
+
+                let response_subject = subjects::bot::bot_commands_response(prefix);
+                if let Err(e) = self.subscriber.client()
+                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
+                    .await
+                {
+                    error!("Failed to publish bot commands response: {}", e);
+                } else {
+                    debug!("Published bot commands response to {}", response_subject);
                 }
-
-                Some(result) = delete_commands_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Deleting bot commands");
-
-                        let mut req = self.bot.delete_my_commands();
-
-                        if let Some(scope) = cmd.scope {
-                            req.scope = Some(convert_bot_command_scope(scope));
-                        }
-
-                        req.language_code = cmd.language_code;
-
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&delete_commands_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = get_commands_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Getting bot commands");
-
-                        let mut req = self.bot.get_my_commands();
-
-                        if let Some(scope) = cmd.scope {
-                            req.scope = Some(convert_bot_command_scope(scope));
-                        }
-
-                        req.language_code = cmd.language_code;
-
-                        match req.await {
-                            Ok(commands) => {
-                                let response = BotCommandsResponse {
-                                    commands: commands.iter().map(|c| telegram_types::chat::BotCommand {
-                                        command: c.command.clone(),
-                                        description: c.description.clone(),
-                                    }).collect(),
-                                    request_id: cmd.request_id,
-                                };
-
-                                // Publish response
-                                let response_subject = subjects::bot::bot_commands_response(&prefix);
-                                if let Err(e) = self.subscriber.client()
-                                    .publish(response_subject.clone(), serde_json::to_vec(&response).unwrap().into())
-                                    .await
-                                {
-                                    error!("Failed to publish bot commands response: {}", e);
-                                } else {
-                                    debug!("Published bot commands response to {}", response_subject);
-                                }
-                            }
-                            Err(e) => {
-                                self.handle_telegram_error(&get_commands_subject, e, &prefix).await;
-                            }
-                        }
-                    }
-                }
-
-                else => break,
+            }
+            Err(e) => {
+                self.handle_telegram_error(&subject, e, prefix).await;
             }
         }
 
         Ok(())
     }
 
-    /// Handle sticker set management commands
-    async fn handle_sticker_management(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::*;
+    // ── Sticker management handlers ───────────────────────────────────────────
 
-        let get_set_subject = subjects::agent::sticker_get_set(&prefix);
-        let upload_subject = subjects::agent::sticker_upload_file(&prefix);
-        let create_subject = subjects::agent::sticker_create_set(&prefix);
-        let add_subject = subjects::agent::sticker_add_to_set(&prefix);
-        let set_position_subject = subjects::agent::sticker_set_position(&prefix);
-        let delete_from_subject = subjects::agent::sticker_delete_from_set(&prefix);
-        let set_title_subject = subjects::agent::sticker_set_title(&prefix);
-        let set_thumbnail_subject = subjects::agent::sticker_set_thumbnail(&prefix);
-        let delete_set_subject = subjects::agent::sticker_delete_set(&prefix);
-        let set_emoji_subject = subjects::agent::sticker_set_emoji_list(&prefix);
-        let set_keywords_subject = subjects::agent::sticker_set_keywords(&prefix);
-        let set_mask_subject = subjects::agent::sticker_set_mask_position(&prefix);
+    async fn handle_sticker_get_set(&self, cmd: GetStickerSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_get_set(prefix);
+        debug!("Getting sticker set: {}", cmd.name);
 
-        info!("Subscribing to sticker management commands");
-
-        let (
-            mut get_set_stream,
-            mut upload_stream,
-            mut create_stream,
-            mut add_stream,
-            mut set_position_stream,
-            mut delete_from_stream,
-            mut set_title_stream,
-            mut set_thumbnail_stream,
-            mut delete_set_stream,
-            mut set_emoji_stream,
-            mut set_keywords_stream,
-            mut set_mask_stream,
-        ) = tokio::try_join!(
-            self.subscriber
-                .subscribe::<GetStickerSetCommand>(&get_set_subject),
-            self.subscriber
-                .subscribe::<UploadStickerFileCommand>(&upload_subject),
-            self.subscriber
-                .subscribe::<CreateNewStickerSetCommand>(&create_subject),
-            self.subscriber
-                .subscribe::<AddStickerToSetCommand>(&add_subject),
-            self.subscriber
-                .subscribe::<SetStickerPositionInSetCommand>(&set_position_subject),
-            self.subscriber
-                .subscribe::<DeleteStickerFromSetCommand>(&delete_from_subject),
-            self.subscriber
-                .subscribe::<SetStickerSetTitleCommand>(&set_title_subject),
-            self.subscriber
-                .subscribe::<SetStickerSetThumbnailCommand>(&set_thumbnail_subject),
-            self.subscriber
-                .subscribe::<DeleteStickerSetCommand>(&delete_set_subject),
-            self.subscriber
-                .subscribe::<SetStickerEmojiListCommand>(&set_emoji_subject),
-            self.subscriber
-                .subscribe::<SetStickerKeywordsCommand>(&set_keywords_subject),
-            self.subscriber
-                .subscribe::<SetStickerMaskPositionCommand>(&set_mask_subject),
-        )?;
-
-        loop {
-            tokio::select! {
-                Some(result) = get_set_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Getting sticker set: {}", cmd.name);
-                        match self.bot.get_sticker_set(&cmd.name).await {
-                            Ok(set) => {
-                                let response = StickerSetResponse {
-                                    sticker_set: telegram_types::chat::StickerSet {
-                                        name: set.name.clone(),
-                                        title: set.title.clone(),
-                                        kind: format!("{:?}", set.kind).to_lowercase(),
-                                        sticker_file_ids: set.stickers.iter().map(|s| s.file.id.clone()).collect(),
-                                        thumbnail_file_id: set.thumbnail.as_ref().map(|t| t.file.id.clone()),
-                                    },
-                                    request_id: cmd.request_id,
-                                };
-                                let subj = subjects::bot::sticker_set_info(&prefix);
-                                if let Ok(payload) = serde_json::to_vec(&response) {
-                                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
-                                }
-                            }
-                            Err(e) => self.handle_telegram_error(&get_set_subject, e, &prefix).await,
-                        }
-                    }
+        match self.bot.get_sticker_set(&cmd.name).await {
+            Ok(set) => {
+                let response = StickerSetResponse {
+                    sticker_set: telegram_types::chat::StickerSet {
+                        name: set.name.clone(),
+                        title: set.title.clone(),
+                        kind: format!("{:?}", set.kind).to_lowercase(),
+                        sticker_file_ids: set.stickers.iter().map(|s| s.file.id.clone()).collect(),
+                        thumbnail_file_id: set.thumbnail.as_ref().map(|t| t.file.id.clone()),
+                    },
+                    request_id: cmd.request_id,
+                };
+                let subj = subjects::bot::sticker_set_info(prefix);
+                if let Ok(payload) = serde_json::to_vec(&response) {
+                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
                 }
-
-                Some(result) = upload_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Uploading sticker file for user {}", cmd.user_id);
-                        let sticker_file = teloxide::types::InputFile::file_id(&cmd.sticker);
-                        let format = convert_sticker_format(&cmd.format);
-                        match self.bot.upload_sticker_file(teloxide::types::UserId(cmd.user_id as u64), sticker_file, format).await {
-                            Ok(file) => {
-                                let response = UploadStickerFileResponse {
-                                    file_id: file.id.clone(),
-                                    request_id: cmd.request_id,
-                                };
-                                let subj = subjects::bot::sticker_uploaded(&prefix);
-                                if let Ok(payload) = serde_json::to_vec(&response) {
-                                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
-                                }
-                            }
-                            Err(e) => self.handle_telegram_error(&upload_subject, e, &prefix).await,
-                        }
-                    }
-                }
-
-                Some(result) = create_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Creating sticker set '{}' for user {}", cmd.name, cmd.user_id);
-                        let stickers: Vec<teloxide::types::InputSticker> = cmd.stickers.iter()
-                            .map(convert_input_sticker)
-                            .collect();
-                        let mut req = self.bot.create_new_sticker_set(
-                            teloxide::types::UserId(cmd.user_id as u64),
-                            &cmd.name,
-                            &cmd.title,
-                            stickers,
-                        );
-                        if let Some(ref kind) = cmd.sticker_type {
-                            req.sticker_type = Some(convert_sticker_type(kind));
-                        }
-                        req.needs_repainting = cmd.needs_repainting;
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&create_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = add_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Adding sticker to set '{}' for user {}", cmd.name, cmd.user_id);
-                        let sticker = convert_input_sticker(&cmd.sticker);
-                        if let Err(e) = self.bot.add_sticker_to_set(
-                            teloxide::types::UserId(cmd.user_id as u64),
-                            &cmd.name,
-                            sticker,
-                        ).await {
-                            self.handle_telegram_error(&add_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_position_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting sticker position to {}", cmd.position);
-                        if let Err(e) = self.bot.set_sticker_position_in_set(&cmd.sticker, cmd.position).await {
-                            self.handle_telegram_error(&set_position_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = delete_from_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Deleting sticker from set: {}", cmd.sticker);
-                        if let Err(e) = self.bot.delete_sticker_from_set(&cmd.sticker).await {
-                            self.handle_telegram_error(&delete_from_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_title_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting title of sticker set '{}' to '{}'", cmd.name, cmd.title);
-                        if let Err(e) = self.bot.set_sticker_set_title(&cmd.name, &cmd.title).await {
-                            self.handle_telegram_error(&set_title_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_thumbnail_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting thumbnail of sticker set '{}'", cmd.name);
-                        let format = convert_sticker_format(&cmd.format);
-                        let mut req = self.bot.set_sticker_set_thumbnail(
-                            &cmd.name,
-                            teloxide::types::UserId(cmd.user_id as u64),
-                            format,
-                        );
-                        if let Some(ref file_id) = cmd.thumbnail {
-                            req.thumbnail = Some(teloxide::types::InputFile::file_id(file_id));
-                        }
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&set_thumbnail_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = delete_set_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Deleting sticker set '{}'", cmd.name);
-                        if let Err(e) = self.bot.delete_sticker_set(&cmd.name).await {
-                            self.handle_telegram_error(&delete_set_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_emoji_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting emoji list for sticker {}", cmd.sticker);
-                        if let Err(e) = self.bot.set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list).await {
-                            self.handle_telegram_error(&set_emoji_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_keywords_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting keywords for sticker {}", cmd.sticker);
-                        let mut req = self.bot.set_sticker_keywords(&cmd.sticker);
-                        req.keywords = Some(cmd.keywords);
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&set_keywords_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                Some(result) = set_mask_stream.next() => {
-                    if let Ok(cmd) = result {
-                        debug!("Setting mask position for sticker {}", cmd.sticker);
-                        let mut req = self.bot.set_sticker_mask_position(&cmd.sticker);
-                        if let Some(mp) = cmd.mask_position {
-                            req.mask_position = Some(convert_mask_position(mp));
-                        }
-                        if let Err(e) = req.await {
-                            self.handle_telegram_error(&set_mask_subject, e, &prefix).await;
-                        }
-                    }
-                }
-
-                else => break,
             }
+            Err(e) => self.handle_telegram_error(&subject, e, prefix).await,
         }
 
         Ok(())
     }
 
-    /// Handle forwardMessage commands
-    async fn handle_forward_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_forward(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_sticker_upload_file(&self, cmd: UploadStickerFileCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_upload_file(prefix);
+        debug!("Uploading sticker file for user {}", cmd.user_id);
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<ForwardMessageCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received forward message command: from_chat={} msg={} to_chat={}",
-                        cmd.from_chat_id, cmd.message_id, cmd.chat_id
-                    );
-
-                    let mut req = self.bot.forward_message(
-                        ChatId(cmd.chat_id),
-                        ChatId(cmd.from_chat_id),
-                        MessageId(cmd.message_id),
-                    );
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-                    req.disable_notification = cmd.disable_notification;
-                    req.protect_content = cmd.protect_content;
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
+        let sticker_file = teloxide::types::InputFile::file_id(&cmd.sticker);
+        let format = convert_sticker_format(&cmd.format);
+        match self.bot.upload_sticker_file(teloxide::types::UserId(cmd.user_id as u64), sticker_file, format).await {
+            Ok(file) => {
+                let response = UploadStickerFileResponse {
+                    file_id: file.id.clone(),
+                    request_id: cmd.request_id,
+                };
+                let subj = subjects::bot::sticker_uploaded(prefix);
+                if let Ok(payload) = serde_json::to_vec(&response) {
+                    let _ = self.subscriber.client().publish(subj, payload.into()).await;
                 }
-                Err(e) => error!("Failed to deserialize forward message command: {}", e),
             }
+            Err(e) => self.handle_telegram_error(&subject, e, prefix).await,
         }
 
         Ok(())
     }
 
-    /// Handle copyMessage commands
-    async fn handle_copy_messages(&self, prefix: String) -> Result<()> {
-        let subject = subjects::agent::message_copy(&prefix);
-        info!("Subscribing to {}", subject);
+    async fn handle_sticker_create_set(&self, cmd: CreateNewStickerSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_create_set(prefix);
+        debug!("Creating sticker set '{}' for user {}", cmd.name, cmd.user_id);
 
-        let mut stream = self
-            .subscriber
-            .subscribe::<CopyMessageCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received copy message command: from_chat={} msg={} to_chat={}",
-                        cmd.from_chat_id, cmd.message_id, cmd.chat_id
-                    );
-
-                    let mut req = self.bot.copy_message(
-                        ChatId(cmd.chat_id),
-                        ChatId(cmd.from_chat_id),
-                        MessageId(cmd.message_id),
-                    );
-
-                    if let Some(thread_id) = cmd.message_thread_id {
-                        req.message_thread_id =
-                            Some(teloxide::types::ThreadId(MessageId(thread_id)));
-                    }
-                    if let Some(caption) = cmd.caption {
-                        req.caption = Some(caption);
-                    }
-                    if let Some(parse_mode) = cmd.parse_mode {
-                        req.parse_mode = Some(match parse_mode {
-                            ParseMode::HTML => TgParseMode::Html,
-                            ParseMode::Markdown => TgParseMode::MarkdownV2,
-                            ParseMode::MarkdownV2 => TgParseMode::MarkdownV2,
-                        });
-                    }
-                    if let Some(reply_id) = cmd.reply_to_message_id {
-                        req.reply_parameters =
-                            Some(teloxide::types::ReplyParameters::new(MessageId(reply_id)));
-                    }
-                    req.disable_notification = cmd.disable_notification;
-                    req.protect_content = cmd.protect_content;
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize copy message command: {}", e),
-            }
+        let stickers: Vec<teloxide::types::InputSticker> = cmd.stickers.iter()
+            .map(convert_input_sticker)
+            .collect();
+        let mut req = self.bot.create_new_sticker_set(
+            teloxide::types::UserId(cmd.user_id as u64),
+            &cmd.name,
+            &cmd.title,
+            stickers,
+        );
+        if let Some(ref kind) = cmd.sticker_type {
+            req.sticker_type = Some(convert_sticker_type(kind));
+        }
+        req.needs_repainting = cmd.needs_repainting;
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
         }
 
         Ok(())
     }
+
+    async fn handle_sticker_add_to_set(&self, cmd: AddStickerToSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_add_to_set(prefix);
+        debug!("Adding sticker to set '{}' for user {}", cmd.name, cmd.user_id);
+
+        let sticker = convert_input_sticker(&cmd.sticker);
+        if let Err(e) = self.bot.add_sticker_to_set(
+            teloxide::types::UserId(cmd.user_id as u64),
+            &cmd.name,
+            sticker,
+        ).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_position(&self, cmd: SetStickerPositionInSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_position(prefix);
+        debug!("Setting sticker position to {}", cmd.position);
+
+        if let Err(e) = self.bot.set_sticker_position_in_set(&cmd.sticker, cmd.position).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_delete_from_set(&self, cmd: DeleteStickerFromSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_delete_from_set(prefix);
+        debug!("Deleting sticker from set: {}", cmd.sticker);
+
+        if let Err(e) = self.bot.delete_sticker_from_set(&cmd.sticker).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_title(&self, cmd: SetStickerSetTitleCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_title(prefix);
+        debug!("Setting title of sticker set '{}' to '{}'", cmd.name, cmd.title);
+
+        if let Err(e) = self.bot.set_sticker_set_title(&cmd.name, &cmd.title).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_thumbnail(&self, cmd: SetStickerSetThumbnailCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_thumbnail(prefix);
+        debug!("Setting thumbnail of sticker set '{}'", cmd.name);
+
+        let format = convert_sticker_format(&cmd.format);
+        let mut req = self.bot.set_sticker_set_thumbnail(
+            &cmd.name,
+            teloxide::types::UserId(cmd.user_id as u64),
+            format,
+        );
+        if let Some(ref file_id) = cmd.thumbnail {
+            req.thumbnail = Some(teloxide::types::InputFile::file_id(file_id));
+        }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_delete_set(&self, cmd: DeleteStickerSetCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_delete_set(prefix);
+        debug!("Deleting sticker set '{}'", cmd.name);
+
+        if let Err(e) = self.bot.delete_sticker_set(&cmd.name).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_emoji_list(&self, cmd: SetStickerEmojiListCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_emoji_list(prefix);
+        debug!("Setting emoji list for sticker {}", cmd.sticker);
+
+        if let Err(e) = self.bot.set_sticker_emoji_list(&cmd.sticker, cmd.emoji_list).await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_keywords(&self, cmd: SetStickerKeywordsCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_keywords(prefix);
+        debug!("Setting keywords for sticker {}", cmd.sticker);
+
+        let mut req = self.bot.set_sticker_keywords(&cmd.sticker);
+        req.keywords = Some(cmd.keywords);
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sticker_set_mask_position(&self, cmd: SetStickerMaskPositionCommand, prefix: &str) -> Result<()> {
+        let subject = subjects::agent::sticker_set_mask_position(prefix);
+        debug!("Setting mask position for sticker {}", cmd.sticker);
+
+        let mut req = self.bot.set_sticker_mask_position(&cmd.sticker);
+        if let Some(mp) = cmd.mask_position {
+            req.mask_position = Some(convert_mask_position(mp));
+        }
+        if let Err(e) = req.await {
+            self.handle_telegram_error(&subject, e, prefix).await;
+        }
+
+        Ok(())
+    }
+
+    // ── Error handler ─────────────────────────────────────────────────────────
 
     /// Classify a Telegram API error and publish a CommandErrorEvent to NATS.
     ///
@@ -2410,7 +1977,15 @@ impl OutboundProcessor {
         }
     }
 
-    // Stream message handling moved to outbound_streaming.rs module
+    // Stream message handling in outbound_streaming.rs module
+}
+
+/// Returns true if the error is permanent (payload won't change on retry)
+fn is_permanent_error(err: &anyhow::Error) -> bool {
+    // Deserialization errors are permanent - payload won't change on retry
+    err.to_string().contains("serde")
+        || err.to_string().contains("deserialize")
+        || err.to_string().contains("invalid")
 }
 
 /// Convert our ParseMode to Teloxide's ParseMode
@@ -2435,60 +2010,6 @@ pub(crate) fn convert_chat_action(action: ChatAction) -> teloxide::types::ChatAc
         ChatAction::UploadDocument => teloxide::types::ChatAction::UploadDocument,
         ChatAction::ChooseSticker => teloxide::types::ChatAction::Typing, // no direct equivalent in this teloxide version
         ChatAction::FindLocation => teloxide::types::ChatAction::FindLocation,
-    }
-}
-
-impl OutboundProcessor {
-    /// Handle answer inline query commands
-    async fn handle_answer_inline_queries(&self, prefix: String) -> Result<()> {
-        use telegram_types::commands::AnswerInlineQueryCommand;
-
-        let subject = subjects::agent::inline_answer(&prefix);
-        info!("Subscribing to {}", subject);
-
-        let mut stream = self
-            .subscriber
-            .subscribe::<AnswerInlineQueryCommand>(&subject)
-            .await?;
-
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(cmd) => {
-                    debug!(
-                        "Received answer inline query command for query {}",
-                        cmd.inline_query_id
-                    );
-
-                    // Convert our inline results to teloxide format
-                    let results: Vec<teloxide::types::InlineQueryResult> = cmd
-                        .results
-                        .into_iter()
-                        .filter_map(convert_inline_query_result)
-                        .collect();
-
-                    let mut req = self.bot.answer_inline_query(&cmd.inline_query_id, results);
-
-                    if let Some(cache_time) = cmd.cache_time {
-                        req.cache_time = Some(cache_time as u32);
-                    }
-
-                    if let Some(is_personal) = cmd.is_personal {
-                        req.is_personal = Some(is_personal);
-                    }
-
-                    if let Some(next_offset) = cmd.next_offset {
-                        req.next_offset = Some(next_offset);
-                    }
-
-                    if let Err(e) = req.await {
-                        self.handle_telegram_error(&subject, e, &prefix).await;
-                    }
-                }
-                Err(e) => error!("Failed to deserialize answer inline query command: {}", e),
-            }
-        }
-
-        Ok(())
     }
 }
 

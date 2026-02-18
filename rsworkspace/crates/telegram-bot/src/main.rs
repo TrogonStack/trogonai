@@ -6,6 +6,7 @@
 
 mod bridge;
 mod config;
+mod dedup;
 mod errors;
 mod handlers;
 mod health;
@@ -124,7 +125,9 @@ async fn main() -> Result<()> {
     // Setup JetStream
     let js = telegram_nats::nats::jetstream(&nats_client).await;
     telegram_nats::nats::setup_event_stream(&js, &config.nats.prefix).await?;
+    telegram_nats::nats::setup_agent_stream(&js, &config.nats.prefix).await?;
     let kv = telegram_nats::nats::setup_session_kv(&js, &config.nats.prefix).await?;
+    let dedup_kv = telegram_nats::nats::setup_dedup_kv(&js, &config.nats.prefix).await?;
     info!("JetStream setup complete");
 
     // Create Telegram bot
@@ -168,11 +171,12 @@ async fn main() -> Result<()> {
         config.nats.prefix.clone(),
         config.telegram.access.clone(),
         kv,
+        crate::dedup::DedupStore::new(dedup_kv),
     );
 
     // Start outbound processor (NATS → Telegram)
     let outbound =
-        OutboundProcessor::new(bot.clone(), nats_client.clone(), config.nats.prefix.clone());
+        OutboundProcessor::new(bot.clone(), nats_client.clone(), config.nats.prefix.clone(), js);
 
     tokio::spawn(async move {
         if let Err(e) = outbound.run().await {

@@ -9,6 +9,10 @@ use crate::chat::{
     PhotoSize, ShippingAddress, SuccessfulPayment, User,
 };
 
+fn default_attempt() -> u32 {
+    1
+}
+
 /// Base event metadata shared across all events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventMetadata {
@@ -20,6 +24,15 @@ pub struct EventMetadata {
     pub timestamp: DateTime<Utc>,
     /// Update ID from Telegram
     pub update_id: i64,
+    /// event_id of the upstream event that caused this one
+    #[serde(default)]
+    pub causation_id: Option<String>,
+    /// Ties request/response pairs together
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    /// 1 on first delivery, incremented on retry
+    #[serde(default = "default_attempt")]
+    pub attempt: u32,
 }
 
 /// Text message event
@@ -260,7 +273,22 @@ impl EventMetadata {
             session_id,
             timestamp: Utc::now(),
             update_id,
+            causation_id: None,
+            correlation_id: None,
+            attempt: 1,
         }
+    }
+
+    /// Set the causation_id (event_id of the upstream event)
+    pub fn with_causation(mut self, id: &str) -> Self {
+        self.causation_id = Some(id.to_string());
+        self
+    }
+
+    /// Set the correlation_id (ties request/response pairs)
+    pub fn with_correlation(mut self, id: &str) -> Self {
+        self.correlation_id = Some(id.to_string());
+        self
     }
 }
 
@@ -677,6 +705,28 @@ mod tests {
             meta.event_id.to_string(),
             "00000000-0000-0000-0000-000000000000"
         );
+        assert_eq!(meta.attempt, 1);
+        assert!(meta.causation_id.is_none());
+        assert!(meta.correlation_id.is_none());
+    }
+
+    #[test]
+    fn test_event_metadata_builder_methods() {
+        let meta = EventMetadata::new("tg-private-99".to_string(), 42)
+            .with_causation("cause-123")
+            .with_correlation("corr-456");
+        assert_eq!(meta.causation_id.as_deref(), Some("cause-123"));
+        assert_eq!(meta.correlation_id.as_deref(), Some("corr-456"));
+    }
+
+    #[test]
+    fn test_event_metadata_backward_compat() {
+        // Old JSON without new fields should deserialize with defaults
+        let json = r#"{"event_id":"00000000-0000-0000-0000-000000000001","session_id":"s","timestamp":"2024-01-01T00:00:00Z","update_id":1}"#;
+        let meta: EventMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.attempt, 1);
+        assert!(meta.causation_id.is_none());
+        assert!(meta.correlation_id.is_none());
     }
 
     // ── StickerFormat / StickerKind serde ─────────────────────────────────────
