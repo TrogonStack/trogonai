@@ -1,5 +1,9 @@
 //! Main agent implementation
 
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;
+
 use anyhow::Result;
 use async_nats::Client;
 use telegram_nats::{DedupStore, MessagePublisher};
@@ -121,7 +125,7 @@ impl TelegramAgent {
     /// - `ChatMigrated` → logged with old subject + new chat_id for operator action
     /// - `BotBlocked` / `NotFound` / `PermissionDenied` → error log; session should be torn down
     /// - Other transient → warning log; JetStream will retry the original command
-    async fn run_error_consumer(&self) -> Result<()> {
+    pub(crate) async fn run_error_consumer(&self) -> Result<()> {
         use futures::StreamExt;
         use telegram_nats::nats::create_inbound_consumer;
         use telegram_types::errors::{CommandErrorEvent, ErrorCategory};
@@ -202,15 +206,22 @@ impl TelegramAgent {
     /// Called by the error consumer when a permanent Telegram error (bot blocked,
     /// chat not found, permission denied) or a chat migration is detected so the
     /// agent does not keep sending commands to a dead session.
-    async fn purge_session(&self, session_id: &str) {
+    pub(crate) async fn purge_session(&self, session_id: &str) {
         if let Some(ref kv) = self.conversation_kv {
-            match kv.delete(session_id).await {
+            let kv_key = session_id.replace(':', ".");
+            match kv.delete(&kv_key).await {
                 Ok(_) => info!("Purged conversation for session '{}'", session_id),
                 Err(e) => warn!("Failed to purge session '{}': {}", session_id, e),
             }
         } else {
             debug!("No conversation KV — cannot purge session '{}'", session_id);
         }
+    }
+
+    /// Dispatch a message to the appropriate processor based on its subject.
+    #[allow(dead_code)]
+    pub(crate) async fn dispatch_for_test(&self, subject: &str, payload: &[u8]) -> Result<()> {
+        self.dispatch(subject, payload).await
     }
 
     /// Dispatch a message to the appropriate processor based on its subject.
@@ -235,7 +246,7 @@ impl TelegramAgent {
             }
             serde_json::from_slice::<Envelope>(payload)
                 .ok()
-                .map(|e| format!("evt:{}", e.metadata.event_id))
+                .map(|e| format!("evt.{}", e.metadata.event_id))
         };
 
         if let (Some(ref dedup), Some(ref key)) = (&self.dedup, &event_key) {

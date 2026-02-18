@@ -35,7 +35,7 @@ mod tests {
         let js = async_nats::jetstream::new(client.clone());
         // Set up the agent stream for the test
         telegram_nats::nats::setup_agent_stream(&js, prefix).await.unwrap();
-        let processor = OutboundProcessor::new(fake_bot(), client, prefix.to_string(), js);
+        let processor = OutboundProcessor::new(fake_bot(), client, prefix.to_string(), js, None);
         tokio::spawn(async move {
             let _ = processor.run().await;
         });
@@ -1381,5 +1381,102 @@ mod tests {
             return;
         };
         assert_eq!(evt["command_subject"], cmd_subject);
+    }
+
+    // ── Issue 5: CommandErrorEvent contains required fields ───────────────────
+
+    /// Every error event published by the outbound processor must carry a
+    /// `category` string and the `command_subject` that triggered the failure.
+    #[tokio::test]
+    async fn test_outbound_error_event_has_category_and_command_subject() {
+        let prefix = format!("ob-errcat-{}", uuid::Uuid::new_v4().simple());
+        let cmd_subject = subjects::agent::message_send(&prefix);
+        let cmd = SendMessageCommand::new(99999_i64, "error fields test");
+
+        let Some(evt) = outbound_roundtrip(&prefix, cmd_subject.clone(), &cmd).await else {
+            return;
+        };
+
+        assert!(
+            evt.get("category").is_some(),
+            "error event must have a 'category' field"
+        );
+        assert!(
+            evt["category"].is_string(),
+            "'category' must be a string"
+        );
+        assert_eq!(
+            evt["command_subject"], cmd_subject,
+            "'command_subject' must reference the failing subject"
+        );
+    }
+
+    // ── Issue 2: Outbound dedup — same command_id must be processed only once ─
+
+    /// If the outbound processor has already seen a command_id (simulating a
+    /// JetStream redelivery after a crash), it must silently skip the command
+    /// without calling the Telegram API — so no error event is published.
+    #[tokio::test]
+    async fn test_outbound_dedup_pre_seeded_command_id_skipped() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("ob-dedup-{}", uuid::Uuid::new_v4().simple());
+        telegram_nats::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+
+        // Create a dedup KV and pre-seed a command_id
+        let dedup_bucket = format!("dedup-{}", uuid::Uuid::new_v4().simple());
+        let dedup_kv = js
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: dedup_bucket,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let cmd_id = uuid::Uuid::new_v4();
+        let dedup = crate::dedup::DedupStore::new(dedup_kv.clone());
+        // Simulate "already processed once" — optimistic mark before API call
+        dedup
+            .mark_seen(&format!("cmd:{}", cmd_id))
+            .await
+            .unwrap();
+
+        // Subscribe to error subject — a deduped command must NOT produce an error
+        let error_subject = subjects::bot::command_error(&prefix);
+        let mut err_sub = client.subscribe(error_subject).await.unwrap();
+
+        // Start the outbound processor with the dedup store
+        let processor = OutboundProcessor::new(
+            fake_bot(),
+            client.clone(),
+            prefix.clone(),
+            js,
+            Some(dedup_kv),
+        );
+        tokio::spawn(async move {
+            let _ = processor.run().await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // Publish command with the already-seen X-Command-Id header
+        let cmd_subject = subjects::agent::message_send(&prefix);
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Command-Id", cmd_id.to_string().as_str());
+        let cmd = SendMessageCommand::new(99999_i64, "dedup me");
+        let payload = serde_json::to_vec(&cmd).unwrap();
+        client
+            .publish_with_headers(cmd_subject, headers, payload.into())
+            .await
+            .unwrap();
+
+        // Deduped command must be silently dropped — no error event in 800 ms
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(800), err_sub.next()).await;
+        assert!(
+            result.is_err(),
+            "pre-seeded command_id must be silently skipped (no Telegram API call, no error event)"
+        );
     }
 }
