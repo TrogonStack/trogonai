@@ -34,7 +34,9 @@ mod tests {
     async fn start_processor(client: async_nats::Client, prefix: &str) {
         let js = async_nats::jetstream::new(client.clone());
         // Set up the agent stream for the test
-        telegram_nats::nats::setup_agent_stream(&js, prefix).await.unwrap();
+        telegram_nats::nats::setup_agent_stream(&js, prefix)
+            .await
+            .unwrap();
         let processor = OutboundProcessor::new(fake_bot(), client, prefix.to_string(), js, None);
         tokio::spawn(async move {
             let _ = processor.run().await;
@@ -1401,10 +1403,7 @@ mod tests {
             evt.get("category").is_some(),
             "error event must have a 'category' field"
         );
-        assert!(
-            evt["category"].is_string(),
-            "'category' must be a string"
-        );
+        assert!(evt["category"].is_string(), "'category' must be a string");
         assert_eq!(
             evt["command_subject"], cmd_subject,
             "'command_subject' must reference the failing subject"
@@ -1424,7 +1423,9 @@ mod tests {
         };
         let js = async_nats::jetstream::new(client.clone());
         let prefix = format!("ob-dedup-{}", uuid::Uuid::new_v4().simple());
-        telegram_nats::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+        telegram_nats::nats::setup_agent_stream(&js, &prefix)
+            .await
+            .unwrap();
 
         // Create a dedup KV and pre-seed a command_id
         let dedup_bucket = format!("dedup-{}", uuid::Uuid::new_v4().simple());
@@ -1438,10 +1439,7 @@ mod tests {
         let cmd_id = uuid::Uuid::new_v4();
         let dedup = crate::dedup::DedupStore::new(dedup_kv.clone());
         // Simulate "already processed once" — optimistic mark before API call
-        dedup
-            .mark_seen(&format!("cmd:{}", cmd_id))
-            .await
-            .unwrap();
+        dedup.mark_seen(&format!("cmd:{}", cmd_id)).await.unwrap();
 
         // Subscribe to error subject — a deduped command must NOT produce an error
         let error_subject = subjects::bot::command_error(&prefix);

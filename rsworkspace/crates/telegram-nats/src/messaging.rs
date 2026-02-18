@@ -151,9 +151,7 @@ impl MessagePublisher {
             self.client
                 .publish_with_headers(subject.to_string(), headers, payload.into())
                 .await
-                .map_err(|e| {
-                    Error::Publish(format!("Failed to publish to {}: {}", subject, e))
-                })?;
+                .map_err(|e| Error::Publish(format!("Failed to publish to {}: {}", subject, e)))?;
             debug!("Published command (plain NATS) to {}", subject);
         }
 
@@ -168,10 +166,7 @@ pub fn read_cmd_metadata(
     headers: &async_nats::HeaderMap,
 ) -> Option<telegram_types::commands::CommandMetadata> {
     use std::str::FromStr;
-    let command_id = uuid::Uuid::from_str(
-        headers.get("X-Command-Id")?.as_str(),
-    )
-    .ok()?;
+    let command_id = uuid::Uuid::from_str(headers.get("X-Command-Id")?.as_str()).ok()?;
 
     let produced_at = headers
         .get("X-Produced-At")
@@ -188,8 +183,12 @@ pub fn read_cmd_metadata(
         command_id,
         session_id: headers.get("X-Session-Id").map(|v| v.as_str().to_string()),
         produced_at,
-        causation_id: headers.get("X-Causation-Id").map(|v| v.as_str().to_string()),
-        correlation_id: headers.get("X-Correlation-Id").map(|v| v.as_str().to_string()),
+        causation_id: headers
+            .get("X-Causation-Id")
+            .map(|v| v.as_str().to_string()),
+        correlation_id: headers
+            .get("X-Correlation-Id")
+            .map(|v| v.as_str().to_string()),
         attempt,
     })
 }
@@ -496,10 +495,7 @@ mod tests {
             return;
         };
 
-        let subject = format!(
-            "test.metadata.headers.{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let subject = format!("test.metadata.headers.{}", uuid::Uuid::new_v4().simple());
 
         let meta = telegram_types::commands::CommandMetadata::new()
             .with_causation("session-abc", "event-xyz");
@@ -512,7 +508,14 @@ mod tests {
         let mut raw_sub = client.subscribe(subject.clone()).await.unwrap();
 
         publisher
-            .publish_command(&subject, &TestMsg { value: "cmd".into(), count: 0 }, meta)
+            .publish_command(
+                &subject,
+                &TestMsg {
+                    value: "cmd".into(),
+                    count: 0,
+                },
+                meta,
+            )
             .await
             .unwrap();
 
@@ -525,9 +528,13 @@ mod tests {
         .expect("subscriber closed");
 
         let headers = msg.headers.as_ref().expect("headers must be present");
-        let read_back = read_cmd_metadata(headers).expect("must parse CommandMetadata from headers");
+        let read_back =
+            read_cmd_metadata(headers).expect("must parse CommandMetadata from headers");
 
-        assert_eq!(read_back.command_id, expected_cmd_id, "command_id must round-trip");
+        assert_eq!(
+            read_back.command_id, expected_cmd_id,
+            "command_id must round-trip"
+        );
         assert_eq!(
             read_back.session_id.as_deref(),
             Some(expected_session.as_str()),
@@ -538,7 +545,10 @@ mod tests {
             Some(expected_causation.as_str()),
             "causation_id must round-trip"
         );
-        assert_eq!(read_back.attempt, expected_attempt, "attempt must round-trip");
+        assert_eq!(
+            read_back.attempt, expected_attempt,
+            "attempt must round-trip"
+        );
     }
 
     #[tokio::test]
@@ -602,7 +612,10 @@ mod tests {
         publisher
             .publish_command(
                 &subject,
-                &TestMsg { value: "outbound".into(), count: 1 },
+                &TestMsg {
+                    value: "outbound".into(),
+                    count: 1,
+                },
                 meta,
             )
             .await
@@ -639,8 +652,7 @@ mod tests {
 
         // CommandMetadata headers must be present
         let headers = msg.headers.as_ref().expect("headers must be present");
-        let cmd_meta =
-            read_cmd_metadata(headers).expect("X-Command-Id header must be present");
+        let cmd_meta = read_cmd_metadata(headers).expect("X-Command-Id header must be present");
         assert_eq!(
             cmd_meta.command_id, expected_cmd_id,
             "command_id must match the one used to publish"
@@ -675,7 +687,10 @@ mod tests {
         publisher
             .publish_command(
                 &subject,
-                &TestMsg { value: "survive".into(), count: 99 },
+                &TestMsg {
+                    value: "survive".into(),
+                    count: 99,
+                },
                 telegram_types::commands::CommandMetadata::new(),
             )
             .await
@@ -724,7 +739,10 @@ mod tests {
         publisher
             .publish_command(
                 &subject,
-                &TestMsg { value: "fallback".into(), count: 0 },
+                &TestMsg {
+                    value: "fallback".into(),
+                    count: 0,
+                },
                 telegram_types::commands::CommandMetadata::new(),
             )
             .await

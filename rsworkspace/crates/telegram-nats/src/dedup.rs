@@ -144,7 +144,10 @@ mod tests {
         let store = DedupStore::new(kv);
         let update_id: i64 = 100;
 
-        store.mark_update_seen("session-A", update_id).await.unwrap();
+        store
+            .mark_update_seen("session-A", update_id)
+            .await
+            .unwrap();
         assert!(store.is_update_duplicate("session-A", update_id).await);
         assert!(
             !store.is_update_duplicate("session-B", update_id).await,

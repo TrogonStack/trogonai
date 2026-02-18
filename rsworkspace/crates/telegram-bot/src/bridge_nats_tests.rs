@@ -1413,9 +1413,15 @@ mod nats_tests {
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
-        handlers::handle_chosen_inline_result(fake_bot(), fake_update(42), result, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_chosen_inline_result(
+            fake_bot(),
+            fake_update(42),
+            result,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["result_id"], "res_xyz");
@@ -1889,9 +1895,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_chosen_inline_result(fake_bot(), fake_update(42), result, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_chosen_inline_result(
+            fake_bot(),
+            fake_update(42),
+            result,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["result_id"], "result_abc");
@@ -1959,9 +1971,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.chat.my_member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_my_chat_member_updated(fake_bot(), fake_update(42), update, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_my_chat_member_updated(
+            fake_bot(),
+            fake_update(42),
+            update,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_chat_member"]["status"], "member");
@@ -2378,9 +2396,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_edited_channel_post(fake_bot(), fake_update(42), message, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_edited_channel_post(
+            fake_bot(),
+            fake_update(42),
+            message,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["new_text"], "edited channel text");
@@ -2442,9 +2466,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.created", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_created(fake_bot(), fake_update(42), message, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_forum_topic_created(
+            fake_bot(),
+            fake_update(42),
+            message,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         let event = recv(&mut sub).await;
         assert_eq!(event["forum_topic"]["name"], "Help");
@@ -2510,9 +2540,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.reopened", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_forum_topic_reopened(fake_bot(), fake_update(42), message, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_forum_topic_reopened(
+            fake_bot(),
+            fake_update(42),
+            message,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         recv(&mut sub).await;
     }
@@ -2532,9 +2568,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_hidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_hidden(fake_bot(), fake_update(42), message, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_general_forum_topic_hidden(
+            fake_bot(),
+            fake_update(42),
+            message,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         recv(&mut sub).await;
     }
@@ -2554,9 +2596,15 @@ mod nats_tests {
 
         let subject = format!("telegram.{}.bot.forum.general_unhidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
-        handlers::handle_general_forum_topic_unhidden(fake_bot(), fake_update(42), message, bridge, health())
-            .await
-            .unwrap();
+        handlers::handle_general_forum_topic_unhidden(
+            fake_bot(),
+            fake_update(42),
+            message,
+            bridge,
+            health(),
+        )
+        .await
+        .unwrap();
 
         recv(&mut sub).await;
     }
@@ -2590,8 +2638,7 @@ mod nats_tests {
         let _ = recv(&mut sub).await;
 
         // Second must NOT arrive within the timeout window
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(400), sub.next()).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(400), sub.next()).await;
         assert!(
             result.is_err(),
             "duplicate update_id must NOT produce a second NATS event"
