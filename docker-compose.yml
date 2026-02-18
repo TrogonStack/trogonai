@@ -34,7 +34,10 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - NATS_URL=nats://nats:4222
       - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
+      - HEALTH_CHECK_PORT=3001
       - RUST_LOG=${RUST_LOG:-discord_bot=info,discord_nats=info,info}
+    ports:
+      - "3001:3001"
     depends_on:
       nats:
         condition: service_healthy
