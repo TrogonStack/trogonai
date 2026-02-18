@@ -400,6 +400,8 @@ fn make_event(
         retry_after_secs,
         migrated_to_chat_id,
         is_permanent,
+        chat_id: None,
+        session_id: None,
     }
 }
 

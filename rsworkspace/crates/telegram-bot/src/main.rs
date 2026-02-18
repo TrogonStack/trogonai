@@ -174,9 +174,32 @@ async fn main() -> Result<()> {
         crate::dedup::DedupStore::new(dedup_kv),
     );
 
+    // Separate dedup bucket for outbound commands (1h TTL — commands are short-lived)
+    let cmd_dedup_kv = {
+        let bucket = format!("telegram_cmd_dedup_{}", config.nats.prefix);
+        match js.get_key_value(&bucket).await {
+            Ok(kv) => { info!("Using existing cmd dedup bucket: {}", bucket); Some(kv) }
+            Err(_) => match js.create_key_value(async_nats::jetstream::kv::Config {
+                bucket: bucket.clone(),
+                history: 1,
+                max_age: std::time::Duration::from_secs(3_600),
+                storage: async_nats::jetstream::stream::StorageType::Memory,
+                ..Default::default()
+            }).await {
+                Ok(kv) => { info!("Created cmd dedup bucket: {}", bucket); Some(kv) }
+                Err(e) => { warn!("Could not create cmd dedup bucket '{}': {}", bucket, e); None }
+            }
+        }
+    };
+
     // Start outbound processor (NATS → Telegram)
-    let outbound =
-        OutboundProcessor::new(bot.clone(), nats_client.clone(), config.nats.prefix.clone(), js);
+    let outbound = OutboundProcessor::new(
+        bot.clone(),
+        nats_client.clone(),
+        config.nats.prefix.clone(),
+        js,
+        cmd_dedup_kv,
+    );
 
     tokio::spawn(async move {
         if let Err(e) = outbound.run().await {

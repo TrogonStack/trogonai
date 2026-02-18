@@ -3,7 +3,7 @@
 use anyhow::Result;
 use telegram_nats::{subjects, MessagePublisher};
 use telegram_types::commands::{
-    AnswerCallbackCommand, ChatAction, SendChatActionCommand, SendMessageCommand,
+    AnswerCallbackCommand, ChatAction, CommandMetadata, SendChatActionCommand, SendMessageCommand,
     StreamMessageCommand,
 };
 use telegram_types::events::{
@@ -46,6 +46,13 @@ impl MessageProcessor {
         let session_id = &event.metadata.session_id;
         let message_thread_id = event.message.message_thread_id;
 
+        // Metadata factory: captures session_id and causation (triggering event_id)
+        let causation_id = event.metadata.event_id.to_string();
+        let meta = || {
+            CommandMetadata::new()
+                .with_causation(session_id.as_str(), causation_id.as_str())
+        };
+
         // Send typing indicator
         self.send_typing_indicator(chat_id, publisher).await?;
 
@@ -83,7 +90,7 @@ impl MessageProcessor {
                                     session_id: Some(session_id.clone()),
                                     message_thread_id,
                                 };
-                                publisher.publish(&stream_subject, &cmd).await?;
+                                publisher.publish_command(&stream_subject, &cmd, meta()).await?;
                             }
                             Err(e) => {
                                 warn!("Streaming chunk error for session {}: {}", session_id, e);
@@ -102,7 +109,7 @@ impl MessageProcessor {
                             session_id: Some(session_id.clone()),
                             message_thread_id,
                         };
-                        publisher.publish(&stream_subject, &cmd).await?;
+                        publisher.publish_command(&stream_subject, &cmd, meta()).await?;
 
                         self.conversation_manager
                             .add_message(session_id, "assistant", &accumulated)
@@ -144,7 +151,7 @@ impl MessageProcessor {
                 message_thread_id,
             };
             let subject = subjects::agent::message_send(publisher.prefix());
-            publisher.publish(&subject, &cmd).await?;
+            publisher.publish_command(&subject, &cmd, meta()).await?;
         }
 
         Ok(())
@@ -204,6 +211,9 @@ impl MessageProcessor {
             }
         };
 
+        let meta = CommandMetadata::new()
+            .with_causation(session_id.as_str(), event.metadata.event_id.to_string().as_str());
+
         let cmd = SendMessageCommand {
             chat_id,
             text: response_text,
@@ -214,7 +224,7 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &cmd).await?;
+        publisher.publish_command(&subject, &cmd, meta).await?;
 
         debug!("Sent response to photo in chat {}", chat_id);
         Ok(())
@@ -272,6 +282,9 @@ impl MessageProcessor {
             _ => "Unknown command. Use /help to see available commands.",
         };
 
+        let meta = CommandMetadata::new()
+            .with_causation(session_id.as_str(), event.metadata.event_id.to_string().as_str());
+
         let cmd = SendMessageCommand {
             chat_id,
             text: response_text.to_string(),
@@ -282,7 +295,7 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &cmd).await?;
+        publisher.publish_command(&subject, &cmd, meta).await?;
 
         info!("Processed command /{} for chat {}", event.command, chat_id);
         Ok(())
@@ -294,6 +307,13 @@ impl MessageProcessor {
         event: &CallbackQueryEvent,
         publisher: &MessagePublisher,
     ) -> Result<()> {
+        let meta = || {
+            CommandMetadata::new().with_causation(
+                event.metadata.session_id.as_str(),
+                event.metadata.event_id.to_string().as_str(),
+            )
+        };
+
         // Answer the callback query first
         let answer_command = AnswerCallbackCommand {
             callback_query_id: event.callback_query_id.clone(),
@@ -302,7 +322,7 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::callback_answer(publisher.prefix());
-        publisher.publish(&subject, &answer_command).await?;
+        publisher.publish_command(&subject, &answer_command, meta()).await?;
 
         // Send a message with the callback data
         let message_command = SendMessageCommand {
@@ -315,7 +335,7 @@ impl MessageProcessor {
         };
 
         let subject = subjects::agent::message_send(publisher.prefix());
-        publisher.publish(&subject, &message_command).await?;
+        publisher.publish_command(&subject, &message_command, meta()).await?;
 
         debug!("Processed callback for chat {}", event.chat.id);
         Ok(())
@@ -401,8 +421,12 @@ impl MessageProcessor {
             next_offset: None,
         };
 
+        let meta = CommandMetadata::new().with_causation(
+            event.metadata.session_id.as_str(),
+            event.metadata.event_id.to_string().as_str(),
+        );
         let subject = subjects::agent::inline_answer(publisher.prefix());
-        publisher.publish(&subject, &answer_command).await?;
+        publisher.publish_command(&subject, &answer_command, meta).await?;
 
         debug!("Answered inline query {}", event.inline_query_id);
         Ok(())
