@@ -306,7 +306,12 @@ impl MessageProcessor {
                         .add_message(session_id, "user", &question)
                         .await;
 
-                    // Send initial followup with cursor so the user sees activity
+                    // session_id used to correlate the followup message with
+                    // subsequent StreamMessageCommands
+                    let ask_session = format!("ask_{}", session_id);
+
+                    // Send initial followup with cursor; include session_id so
+                    // the bot registers the resulting message_id for streaming
                     let followup_subject =
                         subjects::agent::interaction_followup(publisher.prefix());
                     publisher
@@ -317,6 +322,7 @@ impl MessageProcessor {
                                 content: Some(STREAM_CURSOR.to_string()),
                                 embeds: vec![],
                                 ephemeral: false,
+                                session_id: Some(ask_session.clone()),
                             },
                         )
                         .await?;
@@ -338,10 +344,8 @@ impl MessageProcessor {
                             .await
                     });
 
-                    // For interactions, we use the stream subject to progressively
-                    // edit the followup message via its session_id
+                    // Stream updates edit the followup message via its session_id
                     let stream_subject = subjects::agent::message_stream(publisher.prefix());
-                    let ask_session = format!("ask_{}", session_id);
                     let mut accumulated = String::new();
                     let mut last_publish = Instant::now();
 

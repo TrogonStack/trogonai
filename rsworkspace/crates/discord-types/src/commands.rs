@@ -53,7 +53,11 @@ pub struct InteractionDeferCommand {
     pub ephemeral: bool,
 }
 
-/// Send a followup message to a deferred interaction
+/// Send a followup message to a deferred interaction.
+///
+/// If `session_id` is provided, the bot will register the resulting Discord
+/// message in its streaming-state map so that subsequent `StreamMessageCommand`s
+/// with the same `session_id` can progressively edit it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InteractionFollowupCommand {
     pub interaction_token: String,
@@ -62,6 +66,10 @@ pub struct InteractionFollowupCommand {
     #[serde(default)]
     pub embeds: Vec<Embed>,
     pub ephemeral: bool,
+    /// When set, the bot registers the created message under this session_id
+    /// so it can be progressively edited via StreamMessageCommand.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Add a reaction to a message
@@ -190,7 +198,32 @@ mod tests {
             content: Some("followup".to_string()),
             embeds: vec![],
             ephemeral: false,
+            session_id: None,
         });
+    }
+
+    #[test]
+    fn test_interaction_followup_command_with_session() {
+        roundtrip(&InteractionFollowupCommand {
+            interaction_token: "tok".to_string(),
+            content: Some("▌".to_string()),
+            embeds: vec![],
+            ephemeral: false,
+            session_id: Some("ask_guild_100_200_300".to_string()),
+        });
+        // session_id must be omitted when None
+        let cmd = InteractionFollowupCommand {
+            interaction_token: "tok".to_string(),
+            content: None,
+            embeds: vec![],
+            ephemeral: false,
+            session_id: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(
+            !json.contains("session_id"),
+            "session_id must be omitted when None"
+        );
     }
 
     #[test]

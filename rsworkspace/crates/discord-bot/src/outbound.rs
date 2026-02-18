@@ -25,7 +25,7 @@ use serenity::model::id::{ChannelId, MessageId};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-use crate::outbound_streaming::StreamingMessages;
+use crate::outbound_streaming::{StreamingMessages, StreamingState};
 
 /// Processes NATS agent commands and forwards them to Discord
 pub struct OutboundProcessor {
@@ -60,7 +60,12 @@ impl OutboundProcessor {
             Self::handle_delete_messages(http.clone(), client.clone(), prefix.clone()),
             Self::handle_interaction_respond(http.clone(), client.clone(), prefix.clone()),
             Self::handle_interaction_defer(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_interaction_followup(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_interaction_followup(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                streaming_messages.clone(),
+            ),
             Self::handle_reaction_add(http.clone(), client.clone(), prefix.clone()),
             Self::handle_reaction_remove(http.clone(), client.clone(), prefix.clone()),
             Self::handle_typing(http.clone(), client.clone(), prefix.clone()),
@@ -300,7 +305,10 @@ impl OutboundProcessor {
         http: Arc<Http>,
         client: async_nats::Client,
         prefix: String,
+        streaming_messages: StreamingMessages,
     ) -> Result<()> {
+        use tokio::time::Instant;
+
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_followup(&prefix);
         let mut stream = subscriber
@@ -320,14 +328,35 @@ impl OutboundProcessor {
                         builder = builder.ephemeral(true);
                     }
 
-                    if let Err(e) = http
+                    match http
                         .create_followup_message(&cmd.interaction_token, &builder, Vec::new())
                         .await
                     {
-                        error!(
-                            "Failed to send followup for token {}: {}",
-                            cmd.interaction_token, e
-                        );
+                        Ok(msg) => {
+                            // If a session_id was provided, register the message so that
+                            // subsequent StreamMessageCommands can edit it progressively.
+                            if let Some(session_id) = cmd.session_id {
+                                streaming_messages.write().await.insert(
+                                    session_id.clone(),
+                                    StreamingState {
+                                        channel_id: msg.channel_id.get(),
+                                        message_id: msg.id.get(),
+                                        last_edit: Instant::now(),
+                                        edit_count: 0,
+                                    },
+                                );
+                                info!(
+                                    "Registered followup message {} for streaming session {}",
+                                    msg.id, session_id
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to send followup for token {}: {}",
+                                cmd.interaction_token, e
+                            );
+                        }
                     }
                 }
                 Err(e) => {
