@@ -79,10 +79,29 @@ async fn process_stream_message(
     let session_id = &cmd.session_id;
 
     // -- look up existing tracked message -----------------------------------
+    // When reply_to_message_id is None and no state exists yet, this could be
+    // an interaction followup that is still being registered concurrently by
+    // handle_interaction_followup. Retry briefly before falling back to sending
+    // a new message.
     let existing = {
-        let map = streaming_messages.read().await;
-        map.get(session_id)
-            .map(|s| (s.channel_id, s.message_id, s.last_edit, s.edit_count))
+        let mut found = None;
+        let max_tries = if cmd.reply_to_message_id.is_none() {
+            5
+        } else {
+            1
+        };
+        for attempt in 0..max_tries {
+            let map = streaming_messages.read().await;
+            if let Some(s) = map.get(session_id) {
+                found = Some((s.channel_id, s.message_id, s.last_edit, s.edit_count));
+                break;
+            }
+            drop(map);
+            if attempt + 1 < max_tries {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+        found
     };
 
     if let Some((channel_id, message_id, last_edit, edit_count)) = existing {

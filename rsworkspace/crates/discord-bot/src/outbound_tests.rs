@@ -199,6 +199,7 @@ mod tests {
             content: Some("followup text".to_string()),
             embeds: vec![],
             ephemeral: false,
+            session_id: None,
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
