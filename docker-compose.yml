@@ -94,6 +94,9 @@ services:
       - ENABLE_LLM=true
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-6}
+      # - SYSTEM_PROMPT=${SYSTEM_PROMPT}
+      # - CLAUDE_MAX_TOKENS=${CLAUDE_MAX_TOKENS:-1024}
+      # - CLAUDE_TEMPERATURE=${CLAUDE_TEMPERATURE:-1.0}
       - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
     ports:
