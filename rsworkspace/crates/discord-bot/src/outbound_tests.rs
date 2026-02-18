@@ -36,7 +36,10 @@ mod tests {
     }
 
     async fn start_processor(client: async_nats::Client, prefix: &str) {
-        let processor = OutboundProcessor::new(fake_http(), client, prefix.to_string());
+        // TODO: ShardManager cannot be constructed outside serenity's Client builder,
+        // so we pass None here. The bot_presence handler will log a warning and skip
+        // any presence updates received during tests.
+        let processor = OutboundProcessor::new(fake_http(), client, prefix.to_string(), None);
         tokio::spawn(async move {
             let _ = processor.run().await;
         });
@@ -117,6 +120,7 @@ mod tests {
             message_id: 1,
             content: Some("Edited".to_string()),
             embeds: vec![],
+            components: vec![],
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;

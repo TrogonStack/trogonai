@@ -272,6 +272,29 @@ pub struct BotReadyEvent {
     pub guild_count: u64,
 }
 
+/// Multiple messages were bulk-deleted from a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MessageBulkDeleteEvent {
+    pub metadata: EventMetadata,
+    pub channel_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<u64>,
+    #[serde(default)]
+    pub message_ids: Vec<u64>,
+}
+
+/// A guild member's attributes were updated (nick, roles, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildMemberUpdateEvent {
+    pub metadata: EventMetadata,
+    pub guild_id: u64,
+    pub user: DiscordUser,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

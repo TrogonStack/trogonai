@@ -6,10 +6,10 @@ use discord_types::{
     events::{
         AutocompleteEvent, BotReadyEvent, ChannelCreateEvent, ChannelDeleteEvent,
         ChannelUpdateEvent, ComponentInteractionEvent, GuildCreateEvent, GuildDeleteEvent,
-        GuildMemberAddEvent, GuildMemberRemoveEvent, GuildUpdateEvent, MessageCreatedEvent,
-        MessageDeletedEvent, MessageUpdatedEvent, ModalSubmitEvent, PresenceUpdateEvent,
-        ReactionAddEvent, ReactionRemoveEvent, RoleCreateEvent, RoleDeleteEvent, RoleUpdateEvent,
-        SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
+        GuildMemberAddEvent, GuildMemberRemoveEvent, GuildMemberUpdateEvent, GuildUpdateEvent,
+        MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ModalSubmitEvent,
+        PresenceUpdateEvent, ReactionAddEvent, ReactionRemoveEvent, RoleCreateEvent,
+        RoleDeleteEvent, RoleUpdateEvent, SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
     },
     types::{Attachment, ChannelType},
     AutocompleteRespondCommand, InteractionDeferCommand, InteractionFollowupCommand,
@@ -1414,6 +1414,21 @@ impl MessageProcessor {
             event.bot_user.username, event.bot_user.id, event.guild_count
         );
         Ok(())
+    }
+
+    /// Process a command error event published by the bot.
+    pub async fn process_command_error(&self, payload: serde_json::Value) {
+        tracing::info!("command error received: {:?}", payload);
+    }
+
+    /// Process a guild member update event (nick, role changes, etc.)
+    pub async fn process_guild_member_update(&self, event: &GuildMemberUpdateEvent) {
+        debug!(
+            guild_id = event.guild_id,
+            user_id = event.user.id,
+            nick = ?event.nick,
+            "guild member update"
+        );
     }
 
     /// Respond to autocomplete with empty choices.
