@@ -20,7 +20,7 @@ use discord_types::{
         Attachment, AuditLogEntryInfo, ChannelType, CommandOption, CommandOptionValue,
         ComponentType, DiscordChannel, DiscordGuild, DiscordMember, DiscordMessage, DiscordRole,
         DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji, FetchedMember,
-        ModalInput, StickerInfo, VoiceState as BridgeVoiceState,
+        ModalInput, SoundInfo, StickerInfo, VoiceState as BridgeVoiceState,
     },
     AccessConfig,
 };
@@ -30,8 +30,16 @@ use serenity::model::application::{
 };
 use serenity::model::channel::GuildChannel;
 use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
+use serenity::gateway::ConnectionStage;
+use serenity::gateway::ShardStageUpdateEvent as SerenityShardStageUpdateEvent;
 use serenity::model::application::CommandPermissions as SerenityCommandPermissions;
 use serenity::model::event::GuildMembersChunkEvent as SerenityGuildMembersChunkEvent;
+use serenity::model::event::SoundboardSoundCreateEvent as SerenitySoundboardSoundCreateEvent;
+use serenity::model::event::SoundboardSoundDeleteEvent as SerenitySoundboardSoundDeleteEvent;
+use serenity::model::event::SoundboardSoundUpdateEvent as SerenitySoundboardSoundUpdateEvent;
+use serenity::model::event::SoundboardSoundsEvent as SerenitySoundboardSoundsEvent;
+use serenity::model::event::SoundboardSoundsUpdateEvent as SerenitySoundboardSoundsUpdateEvent;
+use serenity::model::soundboard::Soundboard as SerenitySoundboard;
 use serenity::model::event::GuildScheduledEventUserAddEvent as SerenityScheduledEventUserAddEvent;
 use serenity::model::event::GuildScheduledEventUserRemoveEvent as SerenityScheduledEventUserRemoveEvent;
 use serenity::model::event::MessagePollVoteAddEvent as SerenityPollVoteAddEvent;
@@ -1884,6 +1892,125 @@ impl DiscordBridge {
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published reaction_remove_emoji to {}", subject);
         Ok(())
+    }
+
+    pub async fn publish_presence_replace(&self, presences: &[Presence]) -> Result<()> {
+        let meta = EventMetadata::new("dc-bot-presence-replace".to_string(), self.next_sequence());
+        let ev = PresenceReplaceEvent {
+            metadata: meta,
+            count: presences.len() as u32,
+        };
+        let subject = subjects::bot::presence_replace(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published presence_replace to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_shard_stage_update(&self, event: &SerenityShardStageUpdateEvent) -> Result<()> {
+        let shard_id = event.shard_id.0 as u64;
+        let meta = EventMetadata::new(format!("dc-shard-{}", shard_id), self.next_sequence());
+        let stage_str = |s: &ConnectionStage| -> &'static str {
+            match s {
+                ConnectionStage::Connected => "connected",
+                ConnectionStage::Connecting => "connecting",
+                ConnectionStage::Disconnected => "disconnected",
+                ConnectionStage::Handshake => "handshake",
+                ConnectionStage::Identifying => "identifying",
+                ConnectionStage::Resuming => "resuming",
+                _ => "unknown",
+            }
+        };
+        let ev = ShardStageUpdateEvent {
+            metadata: meta,
+            shard_id,
+            old: stage_str(&event.old).to_string(),
+            new: stage_str(&event.new).to_string(),
+        };
+        let subject = subjects::bot::shard_stage_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published shard_stage_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_soundboard_sounds(&self, event: &SerenitySoundboardSoundsEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
+        let ev = SoundboardSoundsEvent {
+            metadata: meta,
+            guild_id: gid,
+            sounds: event.soundboard_sounds.iter().map(convert_soundboard).collect(),
+        };
+        let subject = subjects::bot::soundboard_sounds(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published soundboard_sounds to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_soundboard_sound_create(&self, event: &SerenitySoundboardSoundCreateEvent) -> Result<()> {
+        let sound = &event.soundboard;
+        let meta = EventMetadata::new(format!("dc-sound-{}", sound.id.get()), self.next_sequence());
+        let ev = SoundboardSoundCreateEvent {
+            metadata: meta,
+            sound: convert_soundboard(sound),
+        };
+        let subject = subjects::bot::soundboard_sound_create(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published soundboard_sound_create to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_soundboard_sound_update(&self, event: &SerenitySoundboardSoundUpdateEvent) -> Result<()> {
+        let sound = &event.soundboard;
+        let meta = EventMetadata::new(format!("dc-sound-{}", sound.id.get()), self.next_sequence());
+        let ev = SoundboardSoundUpdateEvent {
+            metadata: meta,
+            sound: convert_soundboard(sound),
+        };
+        let subject = subjects::bot::soundboard_sound_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published soundboard_sound_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_soundboard_sounds_update(&self, event: &SerenitySoundboardSoundsUpdateEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
+        let ev = SoundboardSoundsUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            sounds: event.soundboard_sounds.iter().map(convert_soundboard).collect(),
+        };
+        let subject = subjects::bot::soundboard_sounds_update(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published soundboard_sounds_update to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_soundboard_sound_delete(&self, event: &SerenitySoundboardSoundDeleteEvent) -> Result<()> {
+        let gid = event.guild_id.get();
+        let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
+        let ev = SoundboardSoundDeleteEvent {
+            metadata: meta,
+            guild_id: gid,
+            sound_id: event.sound_id.get(),
+        };
+        let subject = subjects::bot::soundboard_sound_delete(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published soundboard_sound_delete to {}", subject);
+        Ok(())
+    }
+
+}
+
+fn convert_soundboard(sound: &SerenitySoundboard) -> SoundInfo {
+    SoundInfo {
+        id: sound.id.get(),
+        name: sound.name.clone(),
+        volume: sound.volume,
+        emoji_id: sound.emoji_id.map(|e| e.get()),
+        emoji_name: sound.emoji_name.clone(),
+        guild_id: sound.guild_id.map(|g| g.get()),
+        available: sound.available,
     }
 }
 

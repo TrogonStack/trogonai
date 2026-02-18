@@ -5,10 +5,14 @@ use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::application::{Command, CommandOptionType, Interaction};
 use serenity::model::channel::{GuildChannel, Message};
 use serenity::model::application::CommandPermissions;
+use serenity::gateway::ShardStageUpdateEvent;
+use serenity::http::RatelimitInfo;
 use serenity::model::event::{
     ChannelPinsUpdateEvent, GuildMembersChunkEvent, GuildScheduledEventUserAddEvent,
     GuildScheduledEventUserRemoveEvent, MessagePollVoteAddEvent, MessagePollVoteRemoveEvent,
-    MessageUpdateEvent, ThreadListSyncEvent, TypingStartEvent, VoiceServerUpdateEvent,
+    MessageUpdateEvent, SoundboardSoundCreateEvent, SoundboardSoundDeleteEvent,
+    SoundboardSoundUpdateEvent, SoundboardSoundsEvent, SoundboardSoundsUpdateEvent,
+    ThreadListSyncEvent, TypingStartEvent, VoiceServerUpdateEvent,
 };
 use serenity::model::gateway::{Presence, Ready};
 use serenity::model::guild::{
@@ -1444,5 +1448,77 @@ impl EventHandler for Handler {
         if let Err(e) = bridge.publish_reaction_remove_emoji(&removed_reactions).await {
             error!("Failed to publish reaction_remove_emoji: {}", e);
         }
+    }
+
+    async fn presence_replace(&self, ctx: Context, presences: Vec<Presence>) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_presence_replace(&presences).await {
+                error!("Failed to publish presence_replace: {}", e);
+            }
+        }
+    }
+
+    async fn shard_stage_update(&self, ctx: Context, event: ShardStageUpdateEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_shard_stage_update(&event).await {
+                error!("Failed to publish shard_stage_update: {}", e);
+            }
+        }
+    }
+
+    async fn soundboard_sounds(&self, ctx: Context, event: SoundboardSoundsEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_soundboard_sounds(&event).await {
+                error!("Failed to publish soundboard_sounds: {}", e);
+            }
+        }
+    }
+
+    async fn soundboard_sound_create(&self, ctx: Context, event: SoundboardSoundCreateEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_soundboard_sound_create(&event).await {
+                error!("Failed to publish soundboard_sound_create: {}", e);
+            }
+        }
+    }
+
+    async fn soundboard_sound_update(&self, ctx: Context, event: SoundboardSoundUpdateEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_soundboard_sound_update(&event).await {
+                error!("Failed to publish soundboard_sound_update: {}", e);
+            }
+        }
+    }
+
+    async fn soundboard_sounds_update(&self, ctx: Context, event: SoundboardSoundsUpdateEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_soundboard_sounds_update(&event).await {
+                error!("Failed to publish soundboard_sounds_update: {}", e);
+            }
+        }
+    }
+
+    async fn soundboard_sound_delete(&self, ctx: Context, event: SoundboardSoundDeleteEvent) {
+        let data = ctx.data.read().await;
+        if let Some(bridge) = data.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_soundboard_sound_delete(&event).await {
+                error!("Failed to publish soundboard_sound_delete: {}", e);
+            }
+        }
+    }
+
+    async fn ratelimit(&self, data: RatelimitInfo) {
+        warn!(
+            path = %data.path,
+            timeout_ms = data.timeout.as_millis(),
+            global = data.global,
+            "Discord HTTP rate limit hit"
+        );
     }
 }
