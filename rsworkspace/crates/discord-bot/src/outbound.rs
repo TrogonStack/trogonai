@@ -25,6 +25,8 @@ use serenity::model::id::{ChannelId, MessageId};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use crate::errors::log_error;
+
 use crate::outbound_streaming::{StreamingMessages, StreamingState};
 
 /// Processes NATS agent commands and forwards them to Discord
@@ -120,9 +122,10 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = channel.send_message(&*http, builder).await {
-                        error!(
-                            "Failed to send message to channel {}: {}",
-                            cmd.channel_id, e
+                        log_error(
+                            &subject,
+                            &format!("Failed to send message to channel {}", cmd.channel_id),
+                            &e,
                         );
                     }
                 }
@@ -158,9 +161,13 @@ impl OutboundProcessor {
                     }
 
                     if let Err(e) = channel.edit_message(&*http, message_id, builder).await {
-                        error!(
-                            "Failed to edit message {} in channel {}: {}",
-                            cmd.message_id, cmd.channel_id, e
+                        log_error(
+                            &subject,
+                            &format!(
+                                "Failed to edit message {} in channel {}",
+                                cmd.message_id, cmd.channel_id
+                            ),
+                            &e,
                         );
                     }
                 }
@@ -193,9 +200,13 @@ impl OutboundProcessor {
                     let message_id = MessageId::new(cmd.message_id);
 
                     if let Err(e) = channel.delete_message(&*http, message_id).await {
-                        error!(
-                            "Failed to delete message {} in channel {}: {}",
-                            cmd.message_id, cmd.channel_id, e
+                        log_error(
+                            &subject,
+                            &format!(
+                                "Failed to delete message {} in channel {}",
+                                cmd.message_id, cmd.channel_id
+                            ),
+                            &e,
                         );
                     }
                 }
@@ -243,9 +254,10 @@ impl OutboundProcessor {
                         )
                         .await
                     {
-                        error!(
-                            "Failed to respond to interaction {}: {}",
-                            cmd.interaction_id, e
+                        log_error(
+                            &subject,
+                            &format!("Failed to respond to interaction {}", cmd.interaction_id),
+                            &e,
                         );
                     }
                 }
@@ -289,7 +301,11 @@ impl OutboundProcessor {
                         )
                         .await
                     {
-                        error!("Failed to defer interaction {}: {}", cmd.interaction_id, e);
+                        log_error(
+                            &subject,
+                            &format!("Failed to defer interaction {}", cmd.interaction_id),
+                            &e,
+                        );
                     }
                 }
                 Err(e) => {
@@ -352,9 +368,13 @@ impl OutboundProcessor {
                             }
                         }
                         Err(e) => {
-                            error!(
-                                "Failed to send followup for token {}: {}",
-                                cmd.interaction_token, e
+                            log_error(
+                                &subject,
+                                &format!(
+                                    "Failed to send followup for token {}",
+                                    cmd.interaction_token
+                                ),
+                                &e,
                             );
                         }
                     }
@@ -387,9 +407,13 @@ impl OutboundProcessor {
                     let reaction = parse_reaction_type(&cmd.emoji);
 
                     if let Err(e) = http.create_reaction(channel, message_id, &reaction).await {
-                        error!(
-                            "Failed to add reaction '{}' to message {}: {}",
-                            cmd.emoji, cmd.message_id, e
+                        log_error(
+                            &subject,
+                            &format!(
+                                "Failed to add reaction '{}' to message {}",
+                                cmd.emoji, cmd.message_id
+                            ),
+                            &e,
                         );
                     }
                 }
@@ -426,9 +450,13 @@ impl OutboundProcessor {
                         .delete_reaction_me(channel, message_id, &reaction)
                         .await
                     {
-                        error!(
-                            "Failed to remove reaction '{}' from message {}: {}",
-                            cmd.emoji, cmd.message_id, e
+                        log_error(
+                            &subject,
+                            &format!(
+                                "Failed to remove reaction '{}' from message {}",
+                                cmd.emoji, cmd.message_id
+                            ),
+                            &e,
                         );
                     }
                 }
@@ -456,9 +484,10 @@ impl OutboundProcessor {
             match result {
                 Ok(cmd) => {
                     if let Err(e) = http.broadcast_typing(cmd.channel_id.into()).await {
-                        error!(
-                            "Failed to broadcast typing in channel {}: {}",
-                            cmd.channel_id, e
+                        log_error(
+                            &subject,
+                            &format!("Failed to broadcast typing in channel {}", cmd.channel_id),
+                            &e,
                         );
                     }
                 }

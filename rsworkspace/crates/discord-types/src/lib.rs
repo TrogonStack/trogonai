@@ -1,6 +1,7 @@
 //! Shared types for Discord integration with NATS
 
 pub mod commands;
+pub mod errors;
 pub mod events;
 pub mod policies;
 pub mod session;

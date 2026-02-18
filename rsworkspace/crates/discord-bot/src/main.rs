@@ -5,6 +5,7 @@
 
 mod bridge;
 mod config;
+mod errors;
 mod handlers;
 mod health;
 mod outbound;
