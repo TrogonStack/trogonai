@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Claude API configuration
 #[derive(Debug, Clone)]
@@ -28,6 +28,7 @@ impl Default for ClaudeConfig {
 }
 
 /// Claude API client
+#[derive(Clone)]
 pub struct ClaudeClient {
     client: Client,
     config: ClaudeConfig,
@@ -42,12 +43,16 @@ impl ClaudeClient {
         }
     }
 
-    /// Generate a response from Claude (non-streaming)
-    pub async fn generate_response(
+    /// Generate a response from Claude with streaming.
+    ///
+    /// Sends each text delta through `chunk_tx` as it arrives and returns the
+    /// full accumulated response when the stream is complete.
+    pub async fn generate_response_streaming(
         &self,
         system_prompt: &str,
         user_message: &str,
         conversation_history: &[Message],
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Result<String> {
         let mut messages = conversation_history.to_vec();
         messages.push(Message {
@@ -61,10 +66,10 @@ impl ClaudeClient {
             temperature: self.config.temperature,
             system: system_prompt.to_string(),
             messages,
-            stream: false,
+            stream: true,
         };
 
-        debug!("Sending request to Claude API");
+        debug!("Sending streaming request to Claude API");
 
         let response = self
             .client
@@ -75,39 +80,56 @@ impl ClaudeClient {
             .json(&request)
             .send()
             .await
-            .context("Failed to send request to Claude API")?;
+            .context("Failed to send streaming request to Claude API")?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            warn!("Claude API error: {} - {}", status, error_text);
-            anyhow::bail!("Claude API error: {}", status);
+            anyhow::bail!("Claude API streaming error: {} - {}", status, error_text);
         }
 
-        let claude_response: ClaudeResponse = response
-            .json()
-            .await
-            .context("Failed to parse Claude API response")?;
+        let mut accumulated = String::new();
+        let mut line_buf = String::new();
+        let mut response = response;
 
-        let response_text = claude_response
-            .content
-            .iter()
-            .filter_map(|block| {
-                if block.block_type == "text" {
-                    Some(block.text.clone())
-                } else {
-                    None
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .context("Failed to read streaming chunk")?
+        {
+            line_buf.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process all complete lines in the buffer
+            while let Some(pos) = line_buf.find('\n') {
+                let line = line_buf[..pos].trim().to_string();
+                line_buf = line_buf[pos + 1..].to_string();
+
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(event) = serde_json::from_str::<SseEvent>(data) {
+                        if event.event_type == "content_block_delta" {
+                            if let Some(delta) = event.delta {
+                                if delta.delta_type == "text_delta" {
+                                    if let Some(text) = delta.text {
+                                        accumulated.push_str(&text);
+                                        // Best-effort send; ignore if receiver is gone
+                                        let _ = chunk_tx.try_send(text);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            }
+        }
 
         debug!(
-            "Received response from Claude: {} tokens",
-            claude_response.usage.output_tokens
+            "Streaming complete: {} chars accumulated",
+            accumulated.len()
         );
-
-        Ok(response_text)
+        Ok(accumulated)
     }
 }
 
@@ -126,39 +148,24 @@ struct ClaudeRequest {
     temperature: f32,
     system: String,
     messages: Vec<Message>,
+    /// Always true: we only support streaming mode
     stream: bool,
 }
 
-/// Claude API response (non-streaming)
+// ── SSE streaming types ────────────────────────────────────────────────────
+
+/// Top-level SSE event from the Anthropic streaming API
 #[derive(Debug, Deserialize)]
-struct ClaudeResponse {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
+struct SseEvent {
     #[serde(rename = "type")]
-    response_type: String,
-    #[allow(dead_code)]
-    role: String,
-    content: Vec<ContentBlock>,
-    #[allow(dead_code)]
-    model: String,
-    #[allow(dead_code)]
-    stop_reason: Option<String>,
-    usage: Usage,
+    event_type: String,
+    delta: Option<SseDelta>,
 }
 
-/// Content block in response
+/// Delta payload inside a `content_block_delta` event
 #[derive(Debug, Deserialize)]
-struct ContentBlock {
+struct SseDelta {
     #[serde(rename = "type")]
-    block_type: String,
-    text: String,
-}
-
-/// Token usage information
-#[derive(Debug, Deserialize)]
-struct Usage {
-    #[allow(dead_code)]
-    input_tokens: u32,
-    output_tokens: u32,
+    delta_type: String,
+    text: Option<String>,
 }

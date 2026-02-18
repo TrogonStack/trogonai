@@ -5,12 +5,19 @@ use discord_nats::{subjects, MessagePublisher};
 use discord_types::{
     events::{ComponentInteractionEvent, MessageCreatedEvent, SlashCommandEvent},
     InteractionDeferCommand, InteractionFollowupCommand, InteractionRespondCommand,
-    SendMessageCommand, TypingCommand,
+    SendMessageCommand, StreamMessageCommand, TypingCommand,
 };
+use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::conversation::ConversationManager;
 use crate::llm::{ClaudeClient, ClaudeConfig};
+
+/// Minimum interval between stream-update publishes to avoid flooding NATS.
+const STREAM_PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Cursor appended to in-progress streaming messages.
+const STREAM_CURSOR: &str = "▌";
 
 /// Message processor
 pub struct MessageProcessor {
@@ -64,33 +71,101 @@ impl MessageProcessor {
                 .add_message(session_id, "user", content)
                 .await;
 
-            match llm_client
-                .generate_response(system_prompt, content, &history)
-                .await
-            {
-                Ok(response) => {
+            // Stream the response progressively
+            let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+            let stream_subject = subjects::agent::message_stream(publisher.prefix());
+
+            // Send placeholder to create the message immediately
+            publisher
+                .publish(
+                    &stream_subject,
+                    &StreamMessageCommand {
+                        channel_id,
+                        content: STREAM_CURSOR.to_string(),
+                        is_final: false,
+                        session_id: session_id.clone(),
+                        reply_to_message_id: Some(message_id),
+                    },
+                )
+                .await?;
+
+            // Clone owned data for the spawned task (tokio::spawn requires 'static)
+            let llm_client = llm_client.clone();
+            let history = history.clone();
+            let content_owned = content.to_string();
+
+            let llm_handle = tokio::spawn(async move {
+                llm_client
+                    .generate_response_streaming(system_prompt, &content_owned, &history, chunk_tx)
+                    .await
+            });
+
+            let mut accumulated = String::new();
+            let mut last_publish = Instant::now();
+
+            // Consume chunks and publish throttled updates
+
+            while let Some(chunk) = chunk_rx.recv().await {
+                accumulated.push_str(&chunk);
+                if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                is_final: false,
+                                session_id: session_id.clone(),
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+                    last_publish = Instant::now();
+                }
+            }
+
+            match llm_handle.await? {
+                Ok(full_response) => {
                     self.conversation_manager
-                        .add_message(session_id, "assistant", &response)
+                        .add_message(session_id, "assistant", &full_response)
                         .await;
 
-                    let cmd = SendMessageCommand {
-                        channel_id,
-                        content: response,
-                        embeds: vec![],
-                        reply_to_message_id: Some(message_id),
-                    };
-                    let subject = subjects::agent::message_send(publisher.prefix());
-                    publisher.publish(&subject, &cmd).await?;
-                    debug!("Sent LLM response to channel {}", channel_id);
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: full_response,
+                                is_final: true,
+                                session_id: session_id.clone(),
+                                reply_to_message_id: None,
+                            },
+                        )
+                        .await?;
+
+                    debug!("Streamed LLM response to channel {}", channel_id);
                 }
                 Err(e) => {
-                    warn!("LLM generation failed for session {}: {}", session_id, e);
-                    self.send_error_reply(channel_id, Some(message_id), publisher)
+                    warn!("LLM streaming failed for session {}: {}", session_id, e);
+                    // Replace the placeholder with an error message
+                    publisher
+                        .publish(
+                            &stream_subject,
+                            &StreamMessageCommand {
+                                channel_id,
+                                content: "Sorry, I encountered an error generating a response. \
+                                    Please try again."
+                                    .to_string(),
+                                is_final: true,
+                                session_id: session_id.clone(),
+                                reply_to_message_id: None,
+                            },
+                        )
                         .await?;
                 }
             }
         } else {
-            // Echo mode
+            // Echo mode (no LLM)
             let cmd = SendMessageCommand {
                 channel_id,
                 content: format!("You said: {}", content),
@@ -214,7 +289,7 @@ impl MessageProcessor {
                 }
 
                 if let Some(ref llm_client) = self.llm_client {
-                    // Defer first — LLM calls take time
+                    // Defer first so Discord doesn't time out while we stream
                     self.interaction_defer(
                         event.interaction_id,
                         &event.interaction_token,
@@ -231,36 +306,101 @@ impl MessageProcessor {
                         .add_message(session_id, "user", &question)
                         .await;
 
-                    match llm_client
-                        .generate_response(system_prompt, &question, &history)
-                        .await
-                    {
-                        Ok(response) => {
-                            self.conversation_manager
-                                .add_message(session_id, "assistant", &response)
-                                .await;
-
-                            let cmd = InteractionFollowupCommand {
+                    // Send initial followup with cursor so the user sees activity
+                    let followup_subject =
+                        subjects::agent::interaction_followup(publisher.prefix());
+                    publisher
+                        .publish(
+                            &followup_subject,
+                            &InteractionFollowupCommand {
                                 interaction_token: event.interaction_token.clone(),
-                                content: Some(response),
+                                content: Some(STREAM_CURSOR.to_string()),
                                 embeds: vec![],
                                 ephemeral: false,
-                            };
-                            let subject = subjects::agent::interaction_followup(publisher.prefix());
-                            publisher.publish(&subject, &cmd).await?;
+                            },
+                        )
+                        .await?;
+
+                    // Clone owned data for the spawned task (tokio::spawn requires 'static)
+                    let llm_client = llm_client.clone();
+                    let history = history.clone();
+                    let question_owned = question.clone();
+
+                    let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+                    let llm_handle = tokio::spawn(async move {
+                        llm_client
+                            .generate_response_streaming(
+                                system_prompt,
+                                &question_owned,
+                                &history,
+                                chunk_tx,
+                            )
+                            .await
+                    });
+
+                    // For interactions, we use the stream subject to progressively
+                    // edit the followup message via its session_id
+                    let stream_subject = subjects::agent::message_stream(publisher.prefix());
+                    let ask_session = format!("ask_{}", session_id);
+                    let mut accumulated = String::new();
+                    let mut last_publish = Instant::now();
+
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        accumulated.push_str(&chunk);
+                        if last_publish.elapsed() >= STREAM_PUBLISH_INTERVAL {
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: format!("{}{}", accumulated, STREAM_CURSOR),
+                                        is_final: false,
+                                        session_id: ask_session.clone(),
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
+                            last_publish = Instant::now();
+                        }
+                    }
+
+                    match llm_handle.await? {
+                        Ok(full_response) => {
+                            self.conversation_manager
+                                .add_message(session_id, "assistant", &full_response)
+                                .await;
+
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: full_response,
+                                        is_final: true,
+                                        session_id: ask_session,
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
                         }
                         Err(e) => {
-                            warn!("LLM failed for /ask in session {}: {}", session_id, e);
-                            let cmd = InteractionFollowupCommand {
-                                interaction_token: event.interaction_token.clone(),
-                                content: Some(
-                                    "Sorry, I encountered an error. Please try again.".to_string(),
-                                ),
-                                embeds: vec![],
-                                ephemeral: true,
-                            };
-                            let subject = subjects::agent::interaction_followup(publisher.prefix());
-                            publisher.publish(&subject, &cmd).await?;
+                            warn!(
+                                "LLM streaming failed for /ask in session {}: {}",
+                                session_id, e
+                            );
+                            publisher
+                                .publish(
+                                    &stream_subject,
+                                    &StreamMessageCommand {
+                                        channel_id: event.channel_id,
+                                        content: "Sorry, I encountered an error. Please try again."
+                                            .to_string(),
+                                        is_final: true,
+                                        session_id: ask_session,
+                                        reply_to_message_id: None,
+                                    },
+                                )
+                                .await?;
                         }
                     }
                 } else {
@@ -358,24 +498,6 @@ impl MessageProcessor {
             ephemeral,
         };
         let subject = subjects::agent::interaction_defer(publisher.prefix());
-        publisher.publish(&subject, &cmd).await?;
-        Ok(())
-    }
-
-    async fn send_error_reply(
-        &self,
-        channel_id: u64,
-        reply_to_message_id: Option<u64>,
-        publisher: &MessagePublisher,
-    ) -> Result<()> {
-        let cmd = SendMessageCommand {
-            channel_id,
-            content: "Sorry, I encountered an error generating a response. Please try again."
-                .to_string(),
-            embeds: vec![],
-            reply_to_message_id,
-        };
-        let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
         Ok(())
     }

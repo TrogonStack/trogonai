@@ -124,6 +124,11 @@ pub mod agent {
         format!("discord.{}.agent.channel.typing", prefix)
     }
 
+    /// Stream message command subject (progressive LLM responses)
+    pub fn message_stream(prefix: &str) -> String {
+        format!("discord.{}.agent.message.stream", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)
@@ -209,6 +214,10 @@ mod tests {
         assert_eq!(
             agent::channel_typing("prod"),
             "discord.prod.agent.channel.typing"
+        );
+        assert_eq!(
+            agent::message_stream("prod"),
+            "discord.prod.agent.message.stream"
         );
         assert_eq!(agent::all("prod"), "discord.prod.agent.>");
     }
