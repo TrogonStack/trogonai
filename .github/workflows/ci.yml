@@ -109,20 +109,6 @@ jobs:
       - name: Build all packages
         run: cd rsworkspace && cargo build --release --all-features
 
-      - name: Upload telegram-bot binary
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-bot-linux
-          path: rsworkspace/target/release/telegram-bot
-
-      - name: Upload telegram-agent binary
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-agent-linux
-          path: rsworkspace/target/release/telegram-agent
-
       - name: Upload discord-bot binary
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
@@ -172,29 +158,11 @@ jobs:
       - name: Build binaries
         run: |
           cd rsworkspace
-          cargo build --release --package telegram-bot
-          cargo build --release --package telegram-agent
           cargo build --release --package discord-bot
           cargo build --release --package discord-agent
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Build telegram-bot image
-        uses: docker/build-push-action@v5
-        with:
-          context: rsworkspace
-          file: ./Dockerfile.bot
-          push: false
-          tags: trogonai/telegram-bot:test
-
-      - name: Build telegram-agent image
-        uses: docker/build-push-action@v5
-        with:
-          context: rsworkspace
-          file: ./Dockerfile.agent
-          push: false
-          tags: trogonai/telegram-agent:test
 
       - name: Build discord-bot image
         uses: docker/build-push-action@v5
