@@ -260,11 +260,11 @@ impl EventHandler for Handler {
     }
 
     async fn reaction_add(&self, ctx: Context, add_reaction: serenity::model::channel::Reaction) {
-        // Skip bot reactions
+        // Skip reactions from bot accounts (check cache; uncached users pass through).
         if let Some(user_id) = add_reaction.user_id {
-            // We can't easily check if it's a bot here without an API call.
-            // The bridge will handle this gracefully.
-            let _ = user_id;
+            if ctx.cache.user(user_id).map(|u| u.bot).unwrap_or(false) {
+                return;
+            }
         }
 
         let bridge = {
@@ -292,6 +292,13 @@ impl EventHandler for Handler {
         ctx: Context,
         removed_reaction: serenity::model::channel::Reaction,
     ) {
+        // Skip reactions from bot accounts (check cache; uncached users pass through).
+        if let Some(user_id) = removed_reaction.user_id {
+            if ctx.cache.user(user_id).map(|u| u.bot).unwrap_or(false) {
+                return;
+            }
+        }
+
         let bridge = {
             let data = ctx.data.read().await;
             match data.get::<DiscordBridge>() {

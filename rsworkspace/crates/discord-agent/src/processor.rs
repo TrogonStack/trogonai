@@ -931,9 +931,12 @@ impl MessageProcessor {
 
     /// Process a message deletion event
     ///
-    /// Finds the deleted turn by Discord message ID when available; falls back
-    /// to removing the most recent user turn for history without IDs.
-    /// The assistant reply that immediately follows the deleted turn is also removed.
+    /// Uses a 3-step lookup strategy:
+    ///   1. Exact match — find a user message with this Discord message ID.
+    ///   2. Heuristic — if the last pair is user+assistant, assume the bot's
+    ///      reply was deleted and remove both (assistant messages have no ID).
+    ///   3. Legacy fallback — remove the last user message (and any immediately
+    ///      following assistant reply) for history created before ID tracking.
     pub async fn process_message_deleted(&self, event: &MessageDeletedEvent) -> Result<()> {
         let session_id = &event.metadata.session_id;
         let mut history = self.conversation_manager.get_history(session_id).await;
@@ -942,19 +945,61 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        // Prefer exact ID match; fall back to last user message for old history.
-        let pos = history
+        // Step 1: Exact match — find a user message with this Discord message ID.
+        if let Some(pos) = history
             .iter()
             .position(|m| m.role == "user" && m.message_id == Some(event.message_id))
-            .or_else(|| history.iter().rposition(|m| m.role == "user"));
-
-        if let Some(pos) = pos {
+        {
             debug!(
-                "Removing deleted message {} from session {} history",
+                "Removing deleted user message {} from session {} history (exact match)",
                 event.message_id, session_id
             );
             history.remove(pos);
-            // Also remove the assistant reply that immediately followed it, if any
+            // Also remove the assistant reply that immediately followed it, if any.
+            if pos < history.len() && history[pos].role == "assistant" {
+                history.remove(pos);
+            }
+            self.conversation_manager
+                .save_history(session_id, history)
+                .await;
+            return Ok(());
+        }
+
+        // Step 2: Heuristic for assistant message deletion.
+        //
+        // Assistant messages are never stored with a Discord message ID (the agent
+        // does not receive the ID of the messages it sends). When the bot's latest
+        // reply is deleted from Discord, we fall back to removing the last
+        // user+assistant pair so history stays balanced.
+        //
+        // This covers the most common case: the user deletes the bot's most recent
+        // message to request a fresh response.
+        let len = history.len();
+        if len >= 2
+            && history[len - 1].role == "assistant"
+            && history[len - 2].role == "user"
+        {
+            debug!(
+                "Removing last user+assistant pair from session {} (heuristic: assistant message deleted)",
+                session_id
+            );
+            history.pop(); // assistant (highest index first)
+            history.pop(); // user
+            self.conversation_manager
+                .save_history(session_id, history)
+                .await;
+            return Ok(());
+        }
+
+        // Step 3: Backward-compat fallback for history entries created before
+        // message_id tracking was added. Remove the last user message and any
+        // immediately following assistant reply.
+        if let Some(pos) = history.iter().rposition(|m| m.role == "user") {
+            debug!(
+                "Removing last user message from session {} history (legacy fallback)",
+                session_id
+            );
+            history.remove(pos);
             if pos < history.len() && history[pos].role == "assistant" {
                 history.remove(pos);
             }
