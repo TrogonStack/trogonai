@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{CommandOption, ComponentType, DiscordMember, DiscordMessage, DiscordUser, Embed, Emoji};
+use crate::types::{
+    CommandOption, ComponentType, DiscordMember, DiscordMessage, DiscordUser, Embed, Emoji,
+};
 
 /// Base event metadata shared across all Discord events
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -150,7 +152,9 @@ mod tests {
         }
     }
 
-    fn roundtrip<T: serde::Serialize + for<'de> serde::Deserialize<'de> + PartialEq + std::fmt::Debug>(
+    fn roundtrip<
+        T: serde::Serialize + for<'de> serde::Deserialize<'de> + PartialEq + std::fmt::Debug,
+    >(
         val: &T,
     ) {
         let json = serde_json::to_string(val).expect("serialize");

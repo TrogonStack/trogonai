@@ -62,8 +62,7 @@ async fn main() -> Result<()> {
     info!("NATS prefix: {}", args.prefix);
 
     // Connect to NATS
-    let nats_config =
-        discord_nats::NatsConfig::from_url(&args.nats_url, args.prefix.clone());
+    let nats_config = discord_nats::NatsConfig::from_url(&args.nats_url, args.prefix.clone());
     let nats_client = discord_nats::connect(&nats_config).await?;
     info!("Connected to NATS successfully");
 

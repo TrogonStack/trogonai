@@ -12,17 +12,23 @@ use serenity::prelude::*;
 use tracing::{error, info};
 
 use crate::bridge::DiscordBridge;
+use crate::health::AppState;
 
 pub struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _ctx: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         info!(
             "Discord bot connected as {}#{:04}",
             ready.user.name,
             ready.user.discriminator.map_or(0, |d| d.get())
         );
+
+        let data = ctx.data.read().await;
+        if let Some(health_state) = data.get::<AppState>() {
+            health_state.set_bot_username(ready.user.name.clone()).await;
+        }
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
@@ -42,9 +48,9 @@ impl EventHandler for Handler {
             }
         };
 
-        // Access control: check guild or DM
+        // Access control: check guild or DM; admins bypass guild restrictions
         if let Some(guild_id) = msg.guild_id {
-            if !bridge.check_guild_access(guild_id.get()) {
+            if !bridge.check_guild_access(guild_id.get()) && !bridge.is_admin(msg.author.id.get()) {
                 return;
             }
         } else {
@@ -127,9 +133,11 @@ impl EventHandler for Handler {
 
         match interaction {
             Interaction::Command(cmd) => {
-                // Access control
+                // Access control; admins bypass guild restrictions
                 if let Some(guild_id) = cmd.guild_id {
-                    if !bridge.check_guild_access(guild_id.get()) {
+                    if !bridge.check_guild_access(guild_id.get())
+                        && !bridge.is_admin(cmd.user.id.get())
+                    {
                         return;
                     }
                 } else if !bridge.check_dm_access(cmd.user.id.get()) {
@@ -141,9 +149,11 @@ impl EventHandler for Handler {
                 }
             }
             Interaction::Component(comp) => {
-                // Access control
+                // Access control; admins bypass guild restrictions
                 if let Some(guild_id) = comp.guild_id {
-                    if !bridge.check_guild_access(guild_id.get()) {
+                    if !bridge.check_guild_access(guild_id.get())
+                        && !bridge.is_admin(comp.user.id.get())
+                    {
                         return;
                     }
                 } else if !bridge.check_dm_access(comp.user.id.get()) {

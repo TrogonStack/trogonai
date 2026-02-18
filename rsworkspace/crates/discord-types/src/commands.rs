@@ -92,7 +92,9 @@ pub struct TypingCommand {
 mod tests {
     use super::*;
 
-    fn roundtrip<T: serde::Serialize + for<'de> serde::Deserialize<'de> + PartialEq + std::fmt::Debug>(
+    fn roundtrip<
+        T: serde::Serialize + for<'de> serde::Deserialize<'de> + PartialEq + std::fmt::Debug,
+    >(
         val: &T,
     ) {
         let json = serde_json::to_string(val).expect("serialize");

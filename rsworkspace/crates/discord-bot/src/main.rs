@@ -130,14 +130,15 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create Discord client: {}", e))?;
 
-    // Insert bridge into client data
+    // Set up health check state before inserting into client data
+    let health_state = AppState::new();
+
+    // Insert bridge and health state into client data
     {
         let mut data = client.data.write().await;
         data.insert::<DiscordBridge>(bridge);
+        data.insert::<AppState>(health_state.clone());
     }
-
-    // Set up health check state
-    let health_state = AppState::new();
 
     // Start health check server
     let health_state_clone = health_state.clone();

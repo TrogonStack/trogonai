@@ -246,8 +246,7 @@ impl MessageProcessor {
                                 embeds: vec![],
                                 ephemeral: false,
                             };
-                            let subject =
-                                subjects::agent::interaction_followup(publisher.prefix());
+                            let subject = subjects::agent::interaction_followup(publisher.prefix());
                             publisher.publish(&subject, &cmd).await?;
                         }
                         Err(e) => {
@@ -260,8 +259,7 @@ impl MessageProcessor {
                                 embeds: vec![],
                                 ephemeral: true,
                             };
-                            let subject =
-                                subjects::agent::interaction_followup(publisher.prefix());
+                            let subject = subjects::agent::interaction_followup(publisher.prefix());
                             publisher.publish(&subject, &cmd).await?;
                         }
                     }

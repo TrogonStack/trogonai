@@ -197,7 +197,10 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!("test.dc.messaging.roundtrip.{}", uuid::Uuid::new_v4().simple());
+        let subject = format!(
+            "test.dc.messaging.roundtrip.{}",
+            uuid::Uuid::new_v4().simple()
+        );
 
         let publisher = MessagePublisher::new(client.clone(), "test");
         let subscriber = MessageSubscriber::new(client.clone(), "test");
@@ -240,7 +243,10 @@ mod tests {
             eprintln!("SKIP: NATS not available");
             return;
         };
-        let subject = format!("test.dc.messaging.invalid.{}", uuid::Uuid::new_v4().simple());
+        let subject = format!(
+            "test.dc.messaging.invalid.{}",
+            uuid::Uuid::new_v4().simple()
+        );
 
         let subscriber = MessageSubscriber::new(client.clone(), "test");
         let mut stream = subscriber.subscribe::<TestMsg>(&subject).await.unwrap();

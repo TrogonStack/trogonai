@@ -136,36 +136,93 @@ mod tests {
 
     #[test]
     fn test_bot_subjects() {
-        assert_eq!(bot::message_created("prod"), "discord.prod.bot.message.created");
-        assert_eq!(bot::message_updated("prod"), "discord.prod.bot.message.updated");
-        assert_eq!(bot::message_deleted("prod"), "discord.prod.bot.message.deleted");
-        assert_eq!(bot::interaction_command("prod"), "discord.prod.bot.interaction.command");
-        assert_eq!(bot::interaction_component("prod"), "discord.prod.bot.interaction.component");
+        assert_eq!(
+            bot::message_created("prod"),
+            "discord.prod.bot.message.created"
+        );
+        assert_eq!(
+            bot::message_updated("prod"),
+            "discord.prod.bot.message.updated"
+        );
+        assert_eq!(
+            bot::message_deleted("prod"),
+            "discord.prod.bot.message.deleted"
+        );
+        assert_eq!(
+            bot::interaction_command("prod"),
+            "discord.prod.bot.interaction.command"
+        );
+        assert_eq!(
+            bot::interaction_component("prod"),
+            "discord.prod.bot.interaction.component"
+        );
         assert_eq!(bot::reaction_add("prod"), "discord.prod.bot.reaction.add");
-        assert_eq!(bot::reaction_remove("prod"), "discord.prod.bot.reaction.remove");
-        assert_eq!(bot::guild_member_add("prod"), "discord.prod.bot.guild.member_add");
-        assert_eq!(bot::guild_member_remove("prod"), "discord.prod.bot.guild.member_remove");
+        assert_eq!(
+            bot::reaction_remove("prod"),
+            "discord.prod.bot.reaction.remove"
+        );
+        assert_eq!(
+            bot::guild_member_add("prod"),
+            "discord.prod.bot.guild.member_add"
+        );
+        assert_eq!(
+            bot::guild_member_remove("prod"),
+            "discord.prod.bot.guild.member_remove"
+        );
         assert_eq!(bot::all("prod"), "discord.prod.bot.>");
     }
 
     #[test]
     fn test_agent_subjects() {
-        assert_eq!(agent::message_send("prod"), "discord.prod.agent.message.send");
-        assert_eq!(agent::message_edit("prod"), "discord.prod.agent.message.edit");
-        assert_eq!(agent::message_delete("prod"), "discord.prod.agent.message.delete");
-        assert_eq!(agent::interaction_respond("prod"), "discord.prod.agent.interaction.respond");
-        assert_eq!(agent::interaction_defer("prod"), "discord.prod.agent.interaction.defer");
-        assert_eq!(agent::interaction_followup("prod"), "discord.prod.agent.interaction.followup");
-        assert_eq!(agent::reaction_add("prod"), "discord.prod.agent.reaction.add");
-        assert_eq!(agent::reaction_remove("prod"), "discord.prod.agent.reaction.remove");
-        assert_eq!(agent::channel_typing("prod"), "discord.prod.agent.channel.typing");
+        assert_eq!(
+            agent::message_send("prod"),
+            "discord.prod.agent.message.send"
+        );
+        assert_eq!(
+            agent::message_edit("prod"),
+            "discord.prod.agent.message.edit"
+        );
+        assert_eq!(
+            agent::message_delete("prod"),
+            "discord.prod.agent.message.delete"
+        );
+        assert_eq!(
+            agent::interaction_respond("prod"),
+            "discord.prod.agent.interaction.respond"
+        );
+        assert_eq!(
+            agent::interaction_defer("prod"),
+            "discord.prod.agent.interaction.defer"
+        );
+        assert_eq!(
+            agent::interaction_followup("prod"),
+            "discord.prod.agent.interaction.followup"
+        );
+        assert_eq!(
+            agent::reaction_add("prod"),
+            "discord.prod.agent.reaction.add"
+        );
+        assert_eq!(
+            agent::reaction_remove("prod"),
+            "discord.prod.agent.reaction.remove"
+        );
+        assert_eq!(
+            agent::channel_typing("prod"),
+            "discord.prod.agent.channel.typing"
+        );
         assert_eq!(agent::all("prod"), "discord.prod.agent.>");
     }
 
     #[test]
     fn test_prefix_substitution() {
-        assert_eq!(bot::message_created("dev"), "discord.dev.bot.message.created");
-        assert_eq!(agent::message_send("staging"), "discord.staging.agent.message.send");
+        assert_eq!(
+            bot::message_created("dev"),
+            "discord.dev.bot.message.created"
+        );
+        assert_eq!(
+            agent::message_send("staging"),
+            "discord.staging.agent.message.send"
+        );
     }
 
     #[test]
@@ -176,7 +233,11 @@ mod tests {
             agent::message_send("prod"),
             agent::channel_typing("prod"),
         ] {
-            assert!(s.starts_with("discord."), "Subject should start with 'discord.': {}", s);
+            assert!(
+                s.starts_with("discord."),
+                "Subject should start with 'discord.': {}",
+                s
+            );
         }
     }
 
@@ -187,7 +248,11 @@ mod tests {
             bot::reaction_add("prod"),
             bot::guild_member_add("prod"),
         ] {
-            assert!(s.contains(".bot."), "Bot subject should contain '.bot.': {}", s);
+            assert!(
+                s.contains(".bot."),
+                "Bot subject should contain '.bot.': {}",
+                s
+            );
         }
     }
 
@@ -198,7 +263,11 @@ mod tests {
             agent::interaction_respond("prod"),
             agent::channel_typing("prod"),
         ] {
-            assert!(s.contains(".agent."), "Agent subject should contain '.agent.': {}", s);
+            assert!(
+                s.contains(".agent."),
+                "Agent subject should contain '.agent.': {}",
+                s
+            );
         }
     }
 }
