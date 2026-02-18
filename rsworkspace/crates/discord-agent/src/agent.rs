@@ -34,6 +34,7 @@ impl DiscordAgent {
         metrics: Option<AgentMetrics>,
         max_history: usize,
         stream_timeout_secs: u64,
+        ack_emoji: Option<String>,
     ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
@@ -47,6 +48,7 @@ impl DiscordAgent {
             metrics,
             max_history,
             Duration::from_secs(stream_timeout_secs),
+            ack_emoji,
         );
 
         Self {

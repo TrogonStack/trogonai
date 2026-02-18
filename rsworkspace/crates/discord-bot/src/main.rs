@@ -121,6 +121,10 @@ async fn main() -> Result<()> {
         config.discord.guild_commands_guild_id,
     ));
 
+    // Extract pairing_state before bridge is moved into TypeMap so it can be
+    // shared with the outbound processor.
+    let pairing_state = bridge.pairing_state.clone();
+
     // Build the outbound processor (NATS → Discord)
     // We need the HTTP client from serenity for this, so we set it up after the client is built.
     let prefix = config.nats.prefix.clone();
@@ -176,6 +180,7 @@ async fn main() -> Result<()> {
             nats_client_for_outbound,
             prefix_for_outbound,
             Some(shard_manager_for_outbound),
+            pairing_state,
         );
         if let Err(e) = processor.run().await {
             error!("Outbound processor error: {}", e);

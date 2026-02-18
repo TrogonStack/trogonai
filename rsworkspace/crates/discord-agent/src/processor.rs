@@ -12,7 +12,7 @@ use discord_types::{
         RoleDeleteEvent, RoleUpdateEvent, SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
     },
     types::{Attachment, ChannelType},
-    AutocompleteChoice, AutocompleteRespondCommand, InteractionDeferCommand,
+    AddReactionCommand, AutocompleteChoice, AutocompleteRespondCommand, InteractionDeferCommand,
     InteractionFollowupCommand, InteractionRespondCommand, SendMessageCommand, StreamMessageCommand,
     TypingCommand,
 };
@@ -58,6 +58,8 @@ pub struct MessageProcessor {
     metrics: Option<AgentMetrics>,
     /// Maximum wall-clock time allowed for a single LLM streaming response.
     stream_timeout: Duration,
+    /// If set, this emoji is reacted to the triggering message while the LLM processes the response.
+    ack_emoji: Option<String>,
 }
 
 impl MessageProcessor {
@@ -73,6 +75,7 @@ impl MessageProcessor {
         metrics: Option<AgentMetrics>,
         max_history: usize,
         stream_timeout: Duration,
+        ack_emoji: Option<String>,
     ) -> Self {
         let conversation_manager = match conversation_kv {
             Some(kv) => ConversationManager::with_kv_and_max_history(kv, max_history),
@@ -89,6 +92,7 @@ impl MessageProcessor {
             farewell,
             metrics,
             stream_timeout,
+            ack_emoji,
         }
     }
 
@@ -106,6 +110,19 @@ impl MessageProcessor {
         // Skip empty messages
         if content.is_empty() {
             return Ok(());
+        }
+
+        // React with ack emoji so the user knows the bot received the message.
+        if let Some(ref emoji) = self.ack_emoji {
+            let reaction_subject = subjects::agent::reaction_add(publisher.prefix());
+            let cmd = AddReactionCommand {
+                channel_id,
+                message_id,
+                emoji: emoji.clone(),
+            };
+            if let Err(e) = publisher.publish(&reaction_subject, &cmd).await {
+                warn!("Failed to publish ack reaction: {}", e);
+            }
         }
 
         // Send typing indicator
@@ -1887,6 +1904,7 @@ impl Default for MessageProcessor {
             None,
             20,
             Duration::from_secs(120),
+            None,
         )
     }
 }

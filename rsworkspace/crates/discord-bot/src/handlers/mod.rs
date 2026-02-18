@@ -148,10 +148,39 @@ impl EventHandler for Handler {
         } else {
             // DM
             if !bridge.check_dm_access(msg.author.id.get()) {
-                debug!(
-                    user = msg.author.id.get(),
-                    "Message dropped: DM not allowed for this user"
-                );
+                // If the pairing policy is active, try to start a pairing flow.
+                if bridge.access_config.dm_policy == discord_types::DmPolicy::Pairing
+                    && !bridge.is_admin(msg.author.id.get())
+                {
+                    if let Some((code, _expires_at)) = bridge
+                        .try_start_pairing(msg.author.id.get(), msg.channel_id.get())
+                    {
+                        let reply = format!(
+                            "To pair your account, share this code with an admin: **{}**\n\
+                             *(expires in 5 minutes)*",
+                            code
+                        );
+                        if let Err(e) = msg.channel_id.say(&ctx.http, &reply).await {
+                            error!("Failed to send pairing code DM: {}", e);
+                        }
+                        if let Err(e) = bridge
+                            .publish_pairing_requested(
+                                msg.author.id.get(),
+                                &msg.author.name,
+                                &code,
+                                _expires_at,
+                            )
+                            .await
+                        {
+                            error!("Failed to publish pairing_requested: {}", e);
+                        }
+                    }
+                } else {
+                    debug!(
+                        user = msg.author.id.get(),
+                        "Message dropped: DM not allowed for this user"
+                    );
+                }
                 return;
             }
         }

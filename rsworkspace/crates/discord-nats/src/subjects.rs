@@ -436,6 +436,21 @@ pub mod bot {
         format!("discord.{}.bot.ratelimit", prefix)
     }
 
+    /// User requested DM pairing and is awaiting admin approval
+    pub fn pairing_requested(prefix: &str) -> String {
+        format!("discord.{}.bot.pairing.requested", prefix)
+    }
+
+    /// Admin approved a DM pairing request
+    pub fn pairing_approved(prefix: &str) -> String {
+        format!("discord.{}.bot.pairing.approved", prefix)
+    }
+
+    /// Admin rejected a DM pairing request
+    pub fn pairing_rejected(prefix: &str) -> String {
+        format!("discord.{}.bot.pairing.rejected", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -817,6 +832,16 @@ pub mod agent {
     /// Fetch application info (request-reply)
     pub fn fetch_application_info(prefix: &str) -> String {
         format!("discord.{}.agent.fetch.application_info", prefix)
+    }
+
+    /// Approve a DM pairing request (admin → bot)
+    pub fn pairing_approve(prefix: &str) -> String {
+        format!("discord.{}.agent.pairing.approve", prefix)
+    }
+
+    /// Reject a DM pairing request (admin → bot)
+    pub fn pairing_reject(prefix: &str) -> String {
+        format!("discord.{}.agent.pairing.reject", prefix)
     }
 
     /// Wildcard for all agent commands

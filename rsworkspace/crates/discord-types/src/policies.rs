@@ -10,6 +10,8 @@ pub enum DmPolicy {
     Open,
     /// Only specific users can interact
     Allowlist,
+    /// Users must pair their account first (requires admin approval via pairing code)
+    Pairing,
     /// DMs disabled
     Disabled,
 }
@@ -70,6 +72,8 @@ impl AccessConfig {
         match self.dm_policy {
             DmPolicy::Open => true,
             DmPolicy::Allowlist => self.user_allowlist.contains(&user_id),
+            // Pairing runtime state is checked at the bridge layer, not here
+            DmPolicy::Pairing => false,
             DmPolicy::Disabled => false,
         }
     }
@@ -112,6 +116,7 @@ impl AccessConfig {
                     .to_string(),
             );
         }
+        // DmPolicy::Pairing with empty allowlist is fine — pairing is dynamic
         ws
     }
 }
@@ -235,6 +240,7 @@ mod tests {
         for (v, expected) in [
             (DmPolicy::Open, "\"open\""),
             (DmPolicy::Allowlist, "\"allowlist\""),
+            (DmPolicy::Pairing, "\"pairing\""),
             (DmPolicy::Disabled, "\"disabled\""),
         ] {
             let json = serde_json::to_string(&v).unwrap();

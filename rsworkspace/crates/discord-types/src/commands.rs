@@ -727,6 +727,20 @@ pub struct FetchVoiceRegionsCommand {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FetchApplicationInfoCommand {}
 
+/// Approve a DM pairing request by its code (admin → bot)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PairingApproveCommand {
+    /// The 6-character pairing code shared by the user
+    pub code: String,
+}
+
+/// Reject a DM pairing request by its code (admin → bot)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PairingRejectCommand {
+    /// The 6-character pairing code shared by the user
+    pub code: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
