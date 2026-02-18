@@ -150,37 +150,7 @@ impl DiscordBridge {
             })
             .collect();
 
-        let embeds = msg
-            .embeds
-            .iter()
-            .map(|e| Embed {
-                title: e.title.clone(),
-                description: e.description.clone(),
-                url: e.url.clone(),
-                fields: e
-                    .fields
-                    .iter()
-                    .map(|f| EmbedField {
-                        name: f.name.clone(),
-                        value: f.value.clone(),
-                        inline: f.inline,
-                    })
-                    .collect(),
-                color: e.colour.map(|c| c.0),
-                author: e.author.as_ref().map(|a| EmbedAuthor {
-                    name: a.name.clone(),
-                    url: a.url.clone(),
-                    icon_url: a.icon_url.clone(),
-                }),
-                footer: e.footer.as_ref().map(|f| EmbedFooter {
-                    text: f.text.clone(),
-                    icon_url: f.icon_url.clone(),
-                }),
-                image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
-                thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
-                timestamp: e.timestamp.map(|ts| ts.to_string()),
-            })
-            .collect();
+        let embeds = msg.embeds.iter().map(Self::convert_embed).collect();
 
         DiscordMessage {
             id: msg.id.get(),
@@ -198,6 +168,36 @@ impl DiscordBridge {
                 .as_ref()
                 .map(|r| r.content.clone())
                 .filter(|c| !c.is_empty()),
+        }
+    }
+
+    fn convert_embed(e: &serenity::model::channel::Embed) -> Embed {
+        Embed {
+            title: e.title.clone(),
+            description: e.description.clone(),
+            url: e.url.clone(),
+            color: e.colour.map(|c| c.0),
+            fields: e
+                .fields
+                .iter()
+                .map(|f| EmbedField {
+                    name: f.name.clone(),
+                    value: f.value.clone(),
+                    inline: f.inline,
+                })
+                .collect(),
+            author: e.author.as_ref().map(|a| EmbedAuthor {
+                name: a.name.clone(),
+                url: a.url.clone(),
+                icon_url: a.icon_url.clone(),
+            }),
+            footer: e.footer.as_ref().map(|f| EmbedFooter {
+                text: f.text.clone(),
+                icon_url: f.icon_url.clone(),
+            }),
+            image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
+            thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
+            timestamp: e.timestamp.map(|ts| ts.to_string()),
         }
     }
 
@@ -254,38 +254,7 @@ impl DiscordBridge {
             new_embeds: event_data
                 .embeds
                 .as_ref()
-                .map(|embeds| {
-                    embeds
-                        .iter()
-                        .map(|e| Embed {
-                            title: e.title.clone(),
-                            description: e.description.clone(),
-                            url: e.url.clone(),
-                            fields: e
-                                .fields
-                                .iter()
-                                .map(|f| EmbedField {
-                                    name: f.name.clone(),
-                                    value: f.value.clone(),
-                                    inline: f.inline,
-                                })
-                                .collect(),
-                            color: e.colour.map(|c| c.0),
-                            author: e.author.as_ref().map(|a| EmbedAuthor {
-                                name: a.name.clone(),
-                                url: a.url.clone(),
-                                icon_url: a.icon_url.clone(),
-                            }),
-                            footer: e.footer.as_ref().map(|f| EmbedFooter {
-                                text: f.text.clone(),
-                                icon_url: f.icon_url.clone(),
-                            }),
-                            image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
-                            thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
-                            timestamp: e.timestamp.map(|ts| ts.to_string()),
-                        })
-                        .collect()
-                })
+                .map(|embeds| embeds.iter().map(Self::convert_embed).collect())
                 .unwrap_or_default(),
         };
 
@@ -344,7 +313,7 @@ impl DiscordBridge {
             .data
             .options()
             .iter()
-            .map(|opt| {
+            .filter_map(|opt| {
                 let value = match &opt.value {
                     ResolvedValue::Boolean(b) => CommandOptionValue::Boolean(*b),
                     ResolvedValue::Integer(i) => CommandOptionValue::Integer(*i),
@@ -353,12 +322,27 @@ impl DiscordBridge {
                     ResolvedValue::User(u, _) => CommandOptionValue::User(u.id.get()),
                     ResolvedValue::Channel(c) => CommandOptionValue::Channel(c.id.get()),
                     ResolvedValue::Role(r) => CommandOptionValue::Role(r.id.get()),
-                    _ => CommandOptionValue::String(String::new()),
+                    ResolvedValue::Attachment(a) => CommandOptionValue::String(a.url.clone()),
+                    ResolvedValue::SubCommand(_) | ResolvedValue::SubCommandGroup(_) => {
+                        // Sub-commands are structural, not values — skip
+                        return None;
+                    }
+                    ResolvedValue::Autocomplete { value, .. } => {
+                        CommandOptionValue::String(value.to_string())
+                    }
+                    ResolvedValue::Unresolved(_) => {
+                        // Could not be resolved (e.g. missing from resolved map) — skip
+                        return None;
+                    }
+                    _ => {
+                        // Future serenity variants: preserve as empty string rather than panicking
+                        CommandOptionValue::String(String::new())
+                    }
                 };
-                CommandOption {
+                Some(CommandOption {
                     name: opt.name.to_string(),
                     value,
-                }
+                })
             })
             .collect();
 
