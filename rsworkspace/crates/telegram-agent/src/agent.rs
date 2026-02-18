@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use async_nats::Client;
-use telegram_nats::MessagePublisher;
+use telegram_nats::{DedupStore, MessagePublisher};
 use tracing::{debug, error, info, warn};
 
 use crate::llm::ClaudeConfig;
@@ -12,12 +12,18 @@ use crate::processor::MessageProcessor;
 ///
 /// All inbound events are consumed from the `telegram_events_{prefix}` stream
 /// with at-least-once delivery: each message is ack'd after processing.
+///
+/// A `DedupStore` (when provided) prevents double-processing the same event in
+/// the rare case where JetStream redelivers a message that was already handled
+/// (e.g. crash between LLM response and ACK).  The event_id UUID from
+/// `EventMetadata` is used as the stable dedup key, with a 24h TTL.
 pub struct TelegramAgent {
     publisher: MessagePublisher,
     processor: MessageProcessor,
     agent_name: String,
     js: async_nats::jetstream::Context,
     prefix: String,
+    dedup: Option<DedupStore>,
 }
 
 impl TelegramAgent {
@@ -29,9 +35,11 @@ impl TelegramAgent {
         agent_name: String,
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
+        dedup_kv: Option<async_nats::jetstream::kv::Store>,
     ) -> Self {
         let publisher = MessagePublisher::new(client, prefix.clone());
         let processor = MessageProcessor::new(llm_config, conversation_kv);
+        let dedup = dedup_kv.map(DedupStore::new);
 
         Self {
             publisher,
@@ -39,6 +47,7 @@ impl TelegramAgent {
             agent_name,
             js,
             prefix,
+            dedup,
         }
     }
 
@@ -175,12 +184,44 @@ impl TelegramAgent {
         Ok(())
     }
 
-    /// Dispatch a message to the appropriate processor based on its subject
+    /// Dispatch a message to the appropriate processor based on its subject.
+    ///
+    /// Before processing, the `event_id` from `EventMetadata` is checked against
+    /// the dedup store.  If already seen, the event is skipped silently.  On first
+    /// occurrence the key is marked **before** calling the processor (optimistic
+    /// locking) so that a concurrent redeliver from JetStream cannot race through.
     async fn dispatch(&self, subject: &str, payload: &[u8]) -> Result<()> {
         use telegram_nats::subjects::bot;
 
         let prefix = &self.prefix;
         let command_prefix = format!("telegram.{}.bot.command.", prefix);
+
+        // ── Dedup guard ────────────────────────────────────────────────────────
+        // Extract event_id from the shared EventMetadata envelope.  Any event
+        // that doesn't have this field passes through (shouldn't happen in practice).
+        let event_key: Option<String> = {
+            #[derive(serde::Deserialize)]
+            struct Envelope {
+                metadata: telegram_types::events::EventMetadata,
+            }
+            serde_json::from_slice::<Envelope>(payload)
+                .ok()
+                .map(|e| format!("evt:{}", e.metadata.event_id))
+        };
+
+        if let (Some(ref dedup), Some(ref key)) = (&self.dedup, &event_key) {
+            if dedup.is_seen(key).await {
+                debug!("Skipping duplicate event (key={})", key);
+                return Ok(());
+            }
+            // Mark optimistically before processing — prevents a racing redeliver
+            // from triggering a second LLM call even if this one is slow.
+            if let Err(e) = dedup.mark_seen(key).await {
+                warn!("Failed to mark event as seen (key={}): {}", key, e);
+                // Non-fatal: continue processing; at worst we get a duplicate
+            }
+        }
+        // ── End dedup guard ────────────────────────────────────────────────────
 
         if subject == bot::message_text(prefix) {
             let event: telegram_types::events::MessageTextEvent =
