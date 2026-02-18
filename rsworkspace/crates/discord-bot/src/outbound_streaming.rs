@@ -29,6 +29,13 @@ const MIN_EDIT_INTERVAL: Duration = Duration::from_millis(400);
 /// Maximum retry attempts for a failed API call.
 const MAX_RETRIES: u32 = 3;
 
+/// Sessions inactive longer than this are purged to prevent memory leaks
+/// when an agent crashes before sending `is_final = true`.
+const SESSION_TTL: Duration = Duration::from_secs(300);
+
+/// How often the cleanup task scans for stale sessions.
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+
 /// Tracking state for an in-progress streamed message.
 pub(crate) struct StreamingState {
     pub channel_id: u64,
@@ -56,6 +63,22 @@ pub(crate) async fn handle_stream_messages(
         .await?;
 
     info!("Listening for stream_message commands on {}", subject);
+
+    // Background task: purge sessions that never received `is_final = true`
+    // (e.g. agent crash), preventing unbounded memory growth.
+    let cleanup_map = streaming_messages.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(CLEANUP_INTERVAL).await;
+            let mut map = cleanup_map.write().await;
+            let before = map.len();
+            map.retain(|_, s| s.last_edit.elapsed() < SESSION_TTL);
+            let removed = before - map.len();
+            if removed > 0 {
+                warn!("Purged {} stale streaming session(s)", removed);
+            }
+        }
+    });
 
     while let Some(result) = stream.next().await {
         match result {
