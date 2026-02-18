@@ -5,6 +5,7 @@ use async_nats::Client;
 use discord_nats::{MessagePublisher, MessageSubscriber};
 use tracing::{error, info};
 
+use crate::health::AgentMetrics;
 use crate::llm::ClaudeConfig;
 use crate::processor::{MessageProcessor, WelcomeConfig};
 use tokio::time::Duration;
@@ -30,6 +31,7 @@ impl DiscordAgent {
         welcome: Option<WelcomeConfig>,
         farewell: Option<WelcomeConfig>,
         conversation_ttl: Option<Duration>,
+        metrics: Option<AgentMetrics>,
     ) -> Self {
         let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
         let publisher = MessagePublisher::new(client, prefix);
@@ -40,6 +42,7 @@ impl DiscordAgent {
             welcome,
             farewell,
             conversation_ttl,
+            metrics,
         );
 
         Self {
@@ -316,7 +319,11 @@ impl DiscordAgent {
                 Some(result) = add_stream.next() => {
                     match result {
                         Ok(event) => {
-                            if let Err(e) = self.processor.process_reaction_add(&event).await {
+                            if let Err(e) = self
+                                .processor
+                                .process_reaction_add(&event, &self.publisher)
+                                .await
+                            {
                                 error!("Failed to process reaction add: {}", e);
                             }
                         }
@@ -326,7 +333,11 @@ impl DiscordAgent {
                 Some(result) = remove_stream.next() => {
                     match result {
                         Ok(event) => {
-                            if let Err(e) = self.processor.process_reaction_remove(&event).await {
+                            if let Err(e) = self
+                                .processor
+                                .process_reaction_remove(&event, &self.publisher)
+                                .await
+                            {
                                 error!("Failed to process reaction remove: {}", e);
                             }
                         }

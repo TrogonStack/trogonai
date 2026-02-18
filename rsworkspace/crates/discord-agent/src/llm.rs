@@ -54,8 +54,15 @@ impl ClaudeClient {
         conversation_history: &[Message],
         chunk_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Result<String> {
-        let mut messages = conversation_history.to_vec();
-        messages.push(Message {
+        // Convert to API messages, stripping internal fields like message_id
+        let mut messages: Vec<ApiMessage> = conversation_history
+            .iter()
+            .map(|m| ApiMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            })
+            .collect();
+        messages.push(ApiMessage {
             role: "user".to_string(),
             content: user_message.to_string(),
         });
@@ -133,11 +140,29 @@ impl ClaudeClient {
     }
 }
 
-/// Message in conversation history
+/// Message in conversation history (stored in KV and in-memory).
+///
+/// `message_id` holds the Discord message ID for user turns so that
+/// edit and delete events can be matched precisely instead of by position.
+/// It is omitted from serialization when absent to keep storage compact
+/// and to stay backward-compatible with existing history without IDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
     pub content: String,
+    /// Discord message ID — only present for messages sent via the gateway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<u64>,
+}
+
+/// Minimal message shape sent to the Claude API.
+///
+/// The Claude API is strict about unknown fields, so we convert from
+/// `Message` to `ApiMessage` before building the HTTP request.
+#[derive(Debug, Serialize)]
+struct ApiMessage {
+    role: String,
+    content: String,
 }
 
 /// Claude API request
@@ -147,7 +172,7 @@ struct ClaudeRequest {
     max_tokens: u32,
     temperature: f32,
     system: String,
-    messages: Vec<Message>,
+    messages: Vec<ApiMessage>,
     /// Always true: we only support streaming mode
     stream: bool,
 }

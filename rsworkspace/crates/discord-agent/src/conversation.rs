@@ -83,13 +83,35 @@ impl ConversationManager {
         });
     }
 
-    /// Add a message to conversation history
+    /// Add a message to conversation history.
     pub async fn add_message(&self, session_id: &str, role: &str, content: &str) {
+        self.add_message_with_id(session_id, role, content, None)
+            .await;
+    }
+
+    /// Add a user message and record its Discord message ID.
+    ///
+    /// Storing the ID allows `process_message_updated` and
+    /// `process_message_deleted` to match the exact turn instead of
+    /// falling back to positional (last-message) heuristics.
+    pub async fn add_user_message(&self, session_id: &str, content: &str, discord_message_id: u64) {
+        self.add_message_with_id(session_id, "user", content, Some(discord_message_id))
+            .await;
+    }
+
+    async fn add_message_with_id(
+        &self,
+        session_id: &str,
+        role: &str,
+        content: &str,
+        message_id: Option<u64>,
+    ) {
         let mut history = self.get_history(session_id).await;
 
         history.push(Message {
             role: role.to_string(),
             content: content.to_string(),
+            message_id,
         });
 
         // Trim history if too long
