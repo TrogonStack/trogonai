@@ -71,6 +71,16 @@ pub mod bot {
         format!("discord.{}.bot.guild.member_remove", prefix)
     }
 
+    /// Message bulk delete event subject
+    pub fn message_bulk_delete(prefix: &str) -> String {
+        format!("discord.{}.bot.message.bulk_delete", prefix)
+    }
+
+    /// Guild member update event subject
+    pub fn guild_member_update(prefix: &str) -> String {
+        format!("discord.{}.bot.member.update", prefix)
+    }
+
     /// Permanent Discord API command failures (published by the bot, consumed by agents/monitoring)
     pub fn command_error(prefix: &str) -> String {
         format!("discord.{}.bot.errors.command", prefix)
@@ -307,6 +317,16 @@ pub mod agent {
     /// Fetch a single guild member (request-reply)
     pub fn fetch_member(prefix: &str) -> String {
         format!("discord.{}.agent.fetch.member", prefix)
+    }
+
+    /// Unban user command subject
+    pub fn guild_unban(prefix: &str) -> String {
+        format!("discord.{}.agent.guild.unban", prefix)
+    }
+
+    /// Set guild member nickname command subject
+    pub fn guild_member_nick(prefix: &str) -> String {
+        format!("discord.{}.agent.member.nick", prefix)
     }
 
     /// Wildcard for all agent commands

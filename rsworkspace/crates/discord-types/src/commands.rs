@@ -30,6 +30,8 @@ pub struct EditMessageCommand {
     pub content: Option<String>,
     #[serde(default)]
     pub embeds: Vec<Embed>,
+    #[serde(default)]
+    pub components: Vec<ActionRow>,
 }
 
 /// Delete a message
@@ -329,6 +331,24 @@ pub struct FetchMemberCommand {
     pub user_id: u64,
 }
 
+/// Unban a user from a guild
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnbanUserCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Set or clear a guild member's nickname
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuildMemberNickCommand {
+    pub guild_id: u64,
+    pub user_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +395,7 @@ mod tests {
             message_id: 1,
             content: Some("Updated".to_string()),
             embeds: vec![],
+            components: vec![],
         });
     }
 

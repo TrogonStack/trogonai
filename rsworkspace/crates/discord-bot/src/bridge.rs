@@ -18,8 +18,8 @@ use discord_types::{
     session::{member_session_id, session_id},
     types::{
         Attachment, ChannelType, CommandOption, CommandOptionValue, ComponentType, DiscordChannel,
-        DiscordGuild, DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, EmbedField,
-        Emoji, ModalInput, VoiceState as BridgeVoiceState,
+        DiscordGuild, DiscordMember, DiscordMessage, DiscordRole, DiscordUser, Embed, EmbedAuthor,
+        EmbedField, EmbedFooter, EmbedMedia, Emoji, ModalInput, VoiceState as BridgeVoiceState,
     },
     AccessConfig,
 };
@@ -167,11 +167,18 @@ impl DiscordBridge {
                     })
                     .collect(),
                 color: e.colour.map(|c| c.0),
-                author: None,
-                footer: None,
-                image: None,
-                thumbnail: None,
-                timestamp: None,
+                author: e.author.as_ref().map(|a| EmbedAuthor {
+                    name: a.name.clone(),
+                    url: a.url.clone(),
+                    icon_url: a.icon_url.clone(),
+                }),
+                footer: e.footer.as_ref().map(|f| EmbedFooter {
+                    text: f.text.clone(),
+                    icon_url: f.icon_url.clone(),
+                }),
+                image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
+                thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
+                timestamp: e.timestamp.map(|ts| ts.to_string()),
             })
             .collect();
 
@@ -264,11 +271,18 @@ impl DiscordBridge {
                                 })
                                 .collect(),
                             color: e.colour.map(|c| c.0),
-                            author: None,
-                            footer: None,
-                            image: None,
-                            thumbnail: None,
-                            timestamp: None,
+                            author: e.author.as_ref().map(|a| EmbedAuthor {
+                                name: a.name.clone(),
+                                url: a.url.clone(),
+                                icon_url: a.icon_url.clone(),
+                            }),
+                            footer: e.footer.as_ref().map(|f| EmbedFooter {
+                                text: f.text.clone(),
+                                icon_url: f.icon_url.clone(),
+                            }),
+                            image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
+                            thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
+                            timestamp: e.timestamp.map(|ts| ts.to_string()),
                         })
                         .collect()
                 })
@@ -876,22 +890,11 @@ impl DiscordBridge {
         );
         let meta = EventMetadata::new(sid, self.next_sequence());
 
-        // Find the focused option: in serenity 0.12, CommandDataOption has no `focused` field.
-        // For autocomplete, the partial string value is in the options; take the first string one.
-        use serenity::model::application::CommandDataOptionValue;
-        let (focused_option, current_value) = interaction
-            .data
-            .options
-            .iter()
-            .filter_map(|o| {
-                if let CommandDataOptionValue::String(s) = &o.value {
-                    Some((o.name.clone(), s.clone()))
-                } else {
-                    None
-                }
-            })
-            .next()
-            .unwrap_or_default();
+        // Use CommandData::autocomplete() which finds the option with the Autocomplete variant,
+        // i.e. the one the user is currently typing into.
+        let focused = interaction.data.autocomplete();
+        let focused_option = focused.as_ref().map(|o| o.name.to_string()).unwrap_or_default();
+        let current_value = focused.as_ref().map(|o| o.value.to_string()).unwrap_or_default();
 
         let ev = AutocompleteEvent {
             metadata: meta,
@@ -908,6 +911,56 @@ impl DiscordBridge {
         let subject = subjects::bot::interaction_autocomplete(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published interaction_autocomplete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_message_bulk_deleted(
+        &self,
+        channel_id: ChannelId,
+        guild_id: Option<GuildId>,
+        message_ids: Vec<MessageId>,
+    ) -> Result<()> {
+        let sid = if let Some(gid) = guild_id {
+            member_session_id(gid.get())
+        } else {
+            format!("dc-dm-{}", channel_id.get())
+        };
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let event = MessageBulkDeleteEvent {
+            metadata: meta,
+            channel_id: channel_id.get(),
+            guild_id: guild_id.map(|g| g.get()),
+            message_ids: message_ids.iter().map(|m| m.get()).collect(),
+        };
+
+        let subject = subjects::bot::message_bulk_delete(self.prefix());
+        self.publisher.publish(&subject, &event).await?;
+        debug!("Published message_bulk_delete to {}", subject);
+        Ok(())
+    }
+
+    pub async fn publish_guild_member_updated(
+        &self,
+        guild_id: GuildId,
+        user: &SerenityUser,
+        nick: Option<String>,
+        roles: Vec<u64>,
+    ) -> Result<()> {
+        let sid = member_session_id(guild_id.get());
+        let meta = EventMetadata::new(sid, self.next_sequence());
+
+        let event = GuildMemberUpdateEvent {
+            metadata: meta,
+            guild_id: guild_id.get(),
+            user: Self::convert_user(user),
+            nick,
+            roles,
+        };
+
+        let subject = subjects::bot::guild_member_update(self.prefix());
+        self.publisher.publish(&subject, &event).await?;
+        debug!("Published guild_member_update to {}", subject);
         Ok(())
     }
 

@@ -77,6 +77,8 @@ impl DiscordAgent {
             self.handle_bot_ready(),
             self.handle_autocomplete(),
             self.handle_modal_submit(),
+            self.handle_command_errors(),
+            self.handle_guild_member_update(),
         )?;
 
         Ok(())
@@ -209,7 +211,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = add_stream.next() => {
+                result = add_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: guild_member_add");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             info!(
@@ -227,7 +233,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize member add event: {}", e),
                     }
                 }
-                Some(result) = remove_stream.next() => {
+                result = remove_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: guild_member_remove");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             info!(
@@ -245,7 +255,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize member remove event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 
@@ -278,7 +287,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = updated_stream.next() => {
+                result = updated_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: message_updated");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_message_updated(&event).await {
@@ -288,7 +301,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize message updated event: {}", e),
                     }
                 }
-                Some(result) = deleted_stream.next() => {
+                result = deleted_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: message_deleted");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_message_deleted(&event).await {
@@ -298,7 +315,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize message deleted event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 
@@ -382,7 +398,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = create_stream.next() => {
+                result = create_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: guild_create");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_guild_create(&event).await {
@@ -392,7 +412,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize guild_create event: {}", e),
                     }
                 }
-                Some(result) = update_stream.next() => {
+                result = update_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: guild_update");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_guild_update(&event).await {
@@ -402,7 +426,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize guild_update event: {}", e),
                     }
                 }
-                Some(result) = delete_stream.next() => {
+                result = delete_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: guild_delete");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_guild_delete(&event).await {
@@ -412,7 +440,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize guild_delete event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 
@@ -444,7 +471,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = create_stream.next() => {
+                result = create_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: channel_create");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_channel_create(&event).await {
@@ -454,7 +485,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize channel_create event: {}", e),
                     }
                 }
-                Some(result) = update_stream.next() => {
+                result = update_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: channel_update");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_channel_update(&event).await {
@@ -464,7 +499,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize channel_update event: {}", e),
                     }
                 }
-                Some(result) = delete_stream.next() => {
+                result = delete_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: channel_delete");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_channel_delete(&event).await {
@@ -474,7 +513,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize channel_delete event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 
@@ -506,7 +544,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = create_stream.next() => {
+                result = create_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: role_create");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_role_create(&event).await {
@@ -516,7 +558,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize role_create event: {}", e),
                     }
                 }
-                Some(result) = update_stream.next() => {
+                result = update_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: role_update");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_role_update(&event).await {
@@ -526,7 +572,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize role_update event: {}", e),
                     }
                 }
-                Some(result) = delete_stream.next() => {
+                result = delete_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: role_delete");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self.processor.process_role_delete(&event).await {
@@ -536,7 +586,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize role_delete event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 
@@ -655,6 +704,54 @@ impl DiscordAgent {
         Ok(())
     }
 
+    /// Handle command error events published by the bot
+    async fn handle_command_errors(&self) -> Result<()> {
+        let subject = discord_nats::subjects::bot::command_error(self.subscriber.prefix());
+        info!("Subscribing to command errors: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<serde_json::Value>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(payload) => {
+                    self.processor.process_command_error(payload).await;
+                }
+                Err(e) => {
+                    tracing::warn!("bad command_error payload: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle guild member update events
+    async fn handle_guild_member_update(&self) -> Result<()> {
+        use discord_types::events::GuildMemberUpdateEvent;
+
+        let subject = discord_nats::subjects::bot::guild_member_update(self.subscriber.prefix());
+        info!("Subscribing to guild member update: {}", subject);
+
+        let mut stream = self
+            .subscriber
+            .queue_subscribe::<GuildMemberUpdateEvent>(&subject, "discord-agents")
+            .await?;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(event) => {
+                    self.processor.process_guild_member_update(&event).await;
+                }
+                Err(e) => error!("Failed to deserialize guild_member_update event: {}", e),
+            }
+        }
+
+        Ok(())
+    }
+
     /// Handle emoji reaction add and remove events
     async fn handle_reactions(&self) -> Result<()> {
         use discord_types::events::{ReactionAddEvent, ReactionRemoveEvent};
@@ -679,7 +776,11 @@ impl DiscordAgent {
 
         loop {
             tokio::select! {
-                Some(result) = add_stream.next() => {
+                result = add_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: reaction_add");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self
@@ -693,7 +794,11 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize reaction add event: {}", e),
                     }
                 }
-                Some(result) = remove_stream.next() => {
+                result = remove_stream.next() => {
+                    let Some(result) = result else {
+                        tracing::warn!("subscription closed: reaction_remove");
+                        break;
+                    };
                     match result {
                         Ok(event) => {
                             if let Err(e) = self
@@ -707,7 +812,6 @@ impl DiscordAgent {
                         Err(e) => error!("Failed to deserialize reaction remove event: {}", e),
                     }
                 }
-                else => break,
             }
         }
 

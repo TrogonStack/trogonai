@@ -168,9 +168,15 @@ async fn main() -> Result<()> {
     let http = client.http.clone();
     let nats_client_for_outbound = nats_client.clone();
     let prefix_for_outbound = prefix.clone();
+    let shard_manager_for_outbound = client.shard_manager.clone();
 
     tokio::spawn(async move {
-        let processor = OutboundProcessor::new(http, nats_client_for_outbound, prefix_for_outbound);
+        let processor = OutboundProcessor::new(
+            http,
+            nats_client_for_outbound,
+            prefix_for_outbound,
+            Some(shard_manager_for_outbound),
+        );
         if let Err(e) = processor.run().await {
             error!("Outbound processor error: {}", e);
         }

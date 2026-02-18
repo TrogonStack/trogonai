@@ -562,4 +562,53 @@ impl EventHandler for Handler {
             debug!("Failed to publish presence_update: {}", e);
         }
     }
+
+    async fn message_delete_bulk(
+        &self,
+        ctx: Context,
+        channel_id: ChannelId,
+        message_ids: Vec<MessageId>,
+        guild_id: Option<GuildId>,
+    ) {
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+
+        if let Err(e) = bridge
+            .publish_message_bulk_deleted(channel_id, guild_id, message_ids)
+            .await
+        {
+            error!("failed to publish message_delete_bulk: {e}");
+        }
+    }
+
+    async fn guild_member_update(
+        &self,
+        ctx: Context,
+        _old: Option<Member>,
+        new: Option<Member>,
+        _event: serenity::model::event::GuildMemberUpdateEvent,
+    ) {
+        let Some(member) = new else { return };
+        let bridge = {
+            let data = ctx.data.read().await;
+            match data.get::<DiscordBridge>() {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        };
+
+        let nick = member.nick.clone();
+        let roles: Vec<u64> = member.roles.iter().map(|r| r.get()).collect();
+        if let Err(e) = bridge
+            .publish_guild_member_updated(member.guild_id, &member.user, nick, roles)
+            .await
+        {
+            error!("failed to publish guild_member_update: {e}");
+        }
+    }
 }
