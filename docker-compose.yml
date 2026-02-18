@@ -63,13 +63,21 @@ services:
       - DISCORD_PREFIX=${DISCORD_PREFIX:-prod}
       - AGENT_NAME=discord-agent-echo
       - ENABLE_LLM=false
+      - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+    ports:
+      - "3002:3002"
     depends_on:
       nats:
         condition: service_healthy
     networks:
       - trogonai-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     profiles:
       - echo
 
@@ -86,13 +94,21 @@ services:
       - ENABLE_LLM=true
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-6}
+      - HEALTH_CHECK_PORT=3002
       - RUST_LOG=${RUST_LOG:-discord_agent=info,discord_nats=info,info}
+    ports:
+      - "3003:3002"
     depends_on:
       nats:
         condition: service_healthy
     networks:
       - trogonai-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     profiles:
       - llm
 

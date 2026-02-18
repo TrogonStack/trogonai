@@ -71,6 +71,11 @@ pub mod bot {
         format!("discord.{}.bot.guild.member_remove", prefix)
     }
 
+    /// Permanent Discord API command failures (published by the bot, consumed by agents/monitoring)
+    pub fn command_error(prefix: &str) -> String {
+        format!("discord.{}.bot.errors.command", prefix)
+    }
+
     /// Wildcard for all bot events
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.bot.>", prefix)
@@ -173,6 +178,10 @@ mod tests {
         assert_eq!(
             bot::guild_member_remove("prod"),
             "discord.prod.bot.guild.member_remove"
+        );
+        assert_eq!(
+            bot::command_error("prod"),
+            "discord.prod.bot.errors.command"
         );
         assert_eq!(bot::all("prod"), "discord.prod.bot.>");
     }

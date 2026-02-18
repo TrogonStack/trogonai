@@ -13,6 +13,7 @@ discord-nats = { path = "../discord-nats" }
 
 tokio = { version = "1", features = ["full"] }
 async-nats = "0.45"
+axum = "0.7"
 anyhow = "1.0"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
