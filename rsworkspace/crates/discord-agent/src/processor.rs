@@ -22,7 +22,7 @@ const STREAM_CURSOR: &str = "▌";
 /// Message processor
 pub struct MessageProcessor {
     llm_client: Option<ClaudeClient>,
-    conversation_manager: ConversationManager,
+    pub(crate) conversation_manager: ConversationManager,
 }
 
 impl MessageProcessor {

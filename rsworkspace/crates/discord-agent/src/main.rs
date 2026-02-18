@@ -4,8 +4,10 @@
 
 mod agent;
 mod conversation;
+mod conversation_tests;
 mod llm;
 mod processor;
+mod processor_tests;
 
 use anyhow::Result;
 use clap::Parser;
