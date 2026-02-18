@@ -185,6 +185,14 @@ impl EventHandler for Handler {
             }
         }
 
+        // Send ack reaction if configured
+        if let Some(ref emoji) = bridge.ack_reaction {
+            let reaction = serenity::model::channel::ReactionType::Unicode(emoji.clone());
+            if let Err(e) = msg.react(&ctx.http, reaction).await {
+                debug!("Failed to send ack reaction: {}", e);
+            }
+        }
+
         if let Err(e) = bridge.publish_message_created(&msg).await {
             error!("Failed to publish message_created: {}", e);
         }
@@ -326,6 +334,14 @@ impl EventHandler for Handler {
             }
         }
 
+        // Reaction mode filtering
+        let is_bot_msg = add_reaction.message_author_id
+            .map(|author| author.get() == bridge.bot_user_id())
+            .unwrap_or(false);
+        if !bridge.should_publish_reaction(is_bot_msg) {
+            return;
+        }
+
         if let Err(e) = bridge.publish_reaction_add(&add_reaction).await {
             error!("Failed to publish reaction_add: {}", e);
         }
@@ -356,6 +372,14 @@ impl EventHandler for Handler {
             if !bridge.check_guild_access(guild_id.get()) {
                 return;
             }
+        }
+
+        // Reaction mode filtering
+        let is_bot_msg = removed_reaction.message_author_id
+            .map(|author| author.get() == bridge.bot_user_id())
+            .unwrap_or(false);
+        if !bridge.should_publish_reaction(is_bot_msg) {
+            return;
         }
 
         if let Err(e) = bridge.publish_reaction_remove(&removed_reaction).await {

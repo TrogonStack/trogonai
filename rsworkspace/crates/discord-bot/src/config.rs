@@ -36,6 +36,24 @@ pub struct Config {
     pub nats: NatsConfig,
 }
 
+/// Controls which reaction events are forwarded to NATS.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReactionMode {
+    /// Publish no reaction events
+    Off,
+    /// Only publish reactions to messages sent by the bot itself
+    Own,
+    /// Publish all reaction events (default)
+    All,
+}
+
+impl Default for ReactionMode {
+    fn default() -> Self {
+        ReactionMode::All
+    }
+}
+
 /// Discord bot specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordBotConfig {
@@ -52,6 +70,13 @@ pub struct DiscordBotConfig {
     /// Access control configuration
     #[serde(default)]
     pub access: AccessConfig,
+    /// Controls which reaction events are forwarded to NATS
+    #[serde(default)]
+    pub reaction_mode: ReactionMode,
+    /// Optional emoji to react with when a message is received and will be processed.
+    /// Use a unicode emoji (e.g. "👀") or omit to disable.
+    #[serde(default)]
+    pub ack_reaction: Option<String>,
 }
 
 impl Config {
@@ -123,11 +148,25 @@ impl Config {
             .var("DISCORD_GUILD_COMMANDS_GUILD_ID")
             .and_then(|s| s.parse::<u64>().ok());
 
+        let reaction_mode = match env
+            .var_or("DISCORD_REACTION_MODE", "all")
+            .to_lowercase()
+            .as_str()
+        {
+            "off" => ReactionMode::Off,
+            "own" => ReactionMode::Own,
+            _ => ReactionMode::All,
+        };
+
+        let ack_reaction = env.var("DISCORD_ACK_REACTION").filter(|s| !s.is_empty());
+
         Ok(Config {
             discord: DiscordBotConfig {
                 bot_token,
                 presence_enabled,
                 guild_commands_guild_id,
+                reaction_mode,
+                ack_reaction,
                 access: AccessConfig {
                     dm_policy,
                     guild_policy,

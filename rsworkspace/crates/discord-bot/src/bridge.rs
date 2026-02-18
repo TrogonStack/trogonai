@@ -179,6 +179,10 @@ pub struct DiscordBridge {
     pub guild_commands_guild_id: Option<u64>,
     /// Runtime state for the DM pairing flow (shared with OutboundProcessor).
     pub pairing_state: Arc<PairingState>,
+    /// Controls which reaction events are forwarded to NATS.
+    pub reaction_mode: crate::config::ReactionMode,
+    /// Optional emoji to react with when a message is received and will be processed.
+    pub ack_reaction: Option<String>,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -193,6 +197,8 @@ impl DiscordBridge {
         access_config: AccessConfig,
         presence_enabled: bool,
         guild_commands_guild_id: Option<u64>,
+        reaction_mode: crate::config::ReactionMode,
+        ack_reaction: Option<String>,
     ) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
@@ -202,6 +208,24 @@ impl DiscordBridge {
             presence_enabled,
             guild_commands_guild_id,
             pairing_state: Arc::new(PairingState::new()),
+            reaction_mode,
+            ack_reaction,
+        }
+    }
+
+    /// Returns the bot's own user ID (0 if not yet set).
+    pub fn bot_user_id(&self) -> u64 {
+        self.bot_user_id.load(Ordering::Relaxed)
+    }
+
+    /// Returns true if reaction events should be forwarded based on the configured mode.
+    ///
+    /// `is_bot_message` — whether the message the reaction was added to was sent by this bot.
+    pub fn should_publish_reaction(&self, is_bot_message: bool) -> bool {
+        match self.reaction_mode {
+            crate::config::ReactionMode::Off => false,
+            crate::config::ReactionMode::Own => is_bot_message,
+            crate::config::ReactionMode::All => true,
         }
     }
 

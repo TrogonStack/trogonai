@@ -292,6 +292,7 @@ impl MessageProcessor {
                 reply_to_message_id: Some(message_id),
                 files: vec![],
                 components: vec![],
+                as_voice: false,
             };
             let subject = subjects::agent::message_send(publisher.prefix());
             publisher.publish(&subject, &cmd).await?;
@@ -866,6 +867,7 @@ impl MessageProcessor {
             reply_to_message_id: None,
             files: vec![],
             components: vec![],
+            as_voice: false,
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -902,6 +904,7 @@ impl MessageProcessor {
             reply_to_message_id: None,
             files: vec![],
             components: vec![],
+            as_voice: false,
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;
@@ -1255,6 +1258,7 @@ impl MessageProcessor {
             reply_to_message_id: None,
             files: vec![],
             components: vec![],
+            as_voice: false,
         };
         let subject = subjects::agent::message_send(publisher.prefix());
         publisher.publish(&subject, &cmd).await?;

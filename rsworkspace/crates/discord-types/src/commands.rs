@@ -19,6 +19,9 @@ pub struct SendMessageCommand {
     /// Interactive action rows (buttons / select menus)
     #[serde(default)]
     pub components: Vec<ActionRow>,
+    /// Send the first file attachment as a Discord voice message (OGG/Opus audio)
+    #[serde(default)]
+    pub as_voice: bool,
 }
 
 /// Edit an existing message
@@ -726,6 +729,38 @@ pub struct FetchVoiceRegionsCommand {}
 /// Fetch the bot's application info (request-reply: returns `Option<AppInfo>`)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FetchApplicationInfoCommand {}
+
+/// Create a native Discord poll in a channel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreatePollCommand {
+    pub channel_id: u64,
+    pub question: String,
+    /// Answer options (max 10)
+    pub answers: Vec<String>,
+    /// Duration in hours (1–168, i.e. up to 7 days)
+    pub duration_hours: u8,
+    /// Whether users can select multiple answers
+    #[serde(default)]
+    pub allow_multiselect: bool,
+}
+
+/// Create a new guild sticker
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateStickerCommand {
+    pub guild_id: u64,
+    pub name: String,
+    pub description: String,
+    /// Related emoji tag (e.g. "thinking")
+    pub tags: String,
+    /// Local file path to the sticker image (PNG, APNG, or Lottie JSON)
+    pub file_path: String,
+}
+
+/// Fetch all custom emojis for a guild (request-reply: returns `Vec<Emoji>` serialized as JSON)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchEmojisCommand {
+    pub guild_id: u64,
+}
 
 /// Approve a DM pairing request by its code (admin → bot)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
