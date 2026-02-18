@@ -1,7 +1,8 @@
 //! Serenity event handler implementation
 
 use serenity::async_trait;
-use serenity::model::application::Interaction;
+use serenity::builder::{CreateCommand, CreateCommandOption};
+use serenity::model::application::{Command, CommandOptionType, Interaction};
 use serenity::model::channel::Message;
 use serenity::model::event::MessageUpdateEvent;
 use serenity::model::gateway::Ready;
@@ -9,7 +10,7 @@ use serenity::model::guild::Member;
 use serenity::model::id::{ChannelId, GuildId, MessageId};
 use serenity::model::user::User;
 use serenity::prelude::*;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::bridge::DiscordBridge;
 use crate::health::AppState;
@@ -25,9 +26,34 @@ impl EventHandler for Handler {
             ready.user.discriminator.map_or(0, |d| d.get())
         );
 
-        let data = ctx.data.read().await;
-        if let Some(health_state) = data.get::<AppState>() {
-            health_state.set_bot_username(ready.user.name.clone()).await;
+        {
+            let data = ctx.data.read().await;
+            if let Some(health_state) = data.get::<AppState>() {
+                health_state.set_bot_username(ready.user.name.clone()).await;
+            }
+        }
+
+        // Register slash commands globally (takes ~1 hour to propagate after first deploy)
+        let commands = vec![
+            CreateCommand::new("ping").description("Check if the bot is alive"),
+            CreateCommand::new("help").description("Show available commands"),
+            CreateCommand::new("status").description("Show agent status"),
+            CreateCommand::new("clear").description("Clear your conversation history"),
+            CreateCommand::new("ask")
+                .description("Ask the AI a question")
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "question",
+                        "The question to ask",
+                    )
+                    .required(true),
+                ),
+        ];
+
+        match Command::set_global_commands(&ctx.http, commands).await {
+            Ok(cmds) => info!("Registered {} slash commands globally", cmds.len()),
+            Err(e) => warn!("Failed to register slash commands: {}", e),
         }
     }
 
