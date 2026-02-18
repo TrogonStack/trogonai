@@ -3,22 +3,47 @@
 use async_nats::Client;
 use futures::StreamExt;
 use serde::{de::DeserializeOwned, Serialize};
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::error::{Error, Result};
 
-/// Message publisher for sending events and commands
+/// Message publisher for sending events and commands.
+///
+/// When a JetStream context is provided (via [`MessagePublisher::with_jetstream`]),
+/// [`publish_command`] uses `js.publish_with_headers()` and awaits the `PubAck`
+/// to confirm the message was durably stored in the stream before returning.
+/// Without a JetStream context it falls back to a plain core-NATS publish.
 #[derive(Clone)]
 pub struct MessagePublisher {
     client: Client,
+    js: Option<async_nats::jetstream::Context>,
     prefix: String,
 }
 
 impl MessagePublisher {
-    /// Create a new message publisher
+    /// Create a new message publisher (plain NATS publish, no PubAck).
     pub fn new(client: Client, prefix: impl Into<String>) -> Self {
         Self {
             client,
+            js: None,
+            prefix: prefix.into(),
+        }
+    }
+
+    /// Create a publisher backed by a JetStream context.
+    ///
+    /// [`publish_command`] will use `js.publish_with_headers()` and await the
+    /// `PubAck`, guaranteeing the command was persisted in the stream before
+    /// the call returns.  All other `publish*` helpers continue to use the
+    /// plain NATS client (fire-and-forget, adequate for ephemeral events).
+    pub fn with_jetstream(
+        client: Client,
+        js: async_nats::jetstream::Context,
+        prefix: impl Into<String>,
+    ) -> Self {
+        Self {
+            client,
+            js: Some(js),
             prefix: prefix.into(),
         }
     }
@@ -75,12 +100,19 @@ impl MessagePublisher {
     /// `X-Session-Id`, `X-Produced-At`, `X-Causation-Id`, `X-Correlation-Id`,
     /// `X-Attempt`) so every consumer can extract it without touching the
     /// command payload struct.
+    ///
+    /// When this publisher was created with [`with_jetstream`], the publish goes
+    /// through the JetStream context and the call blocks until a `PubAck` is
+    /// received from the server, guaranteeing the command was durably stored in
+    /// the stream.  Otherwise it falls back to a plain core-NATS publish.
     pub async fn publish_command<T: Serialize>(
         &self,
         subject: impl AsRef<str>,
         command: &T,
         metadata: telegram_types::commands::CommandMetadata,
     ) -> Result<()> {
+        let subject = subject.as_ref();
+
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("X-Command-Id", metadata.command_id.to_string().as_str());
         headers.insert("X-Produced-At", metadata.produced_at.to_rfc3339().as_str());
@@ -94,7 +126,38 @@ impl MessagePublisher {
         if let Some(ref rid) = metadata.correlation_id {
             headers.insert("X-Correlation-Id", rid.as_str());
         }
-        self.publish_with_headers(subject, command, headers).await
+
+        let payload = serde_json::to_vec(command).map_err(Error::Serialization)?;
+
+        if let Some(ref js) = self.js {
+            // JetStream publish: await PubAck to confirm durable persistence.
+            trace!("JetStream publish_command to subject: {}", subject);
+            let ack_future = js
+                .publish_with_headers(subject.to_string(), headers, payload.into())
+                .await
+                .map_err(|e| {
+                    Error::Publish(format!("JetStream publish to {} failed: {}", subject, e))
+                })?;
+            ack_future.await.map_err(|e| {
+                Error::Publish(format!("JetStream PubAck for {} failed: {}", subject, e))
+            })?;
+            debug!("JetStream publish_command acked on {}", subject);
+        } else {
+            // Plain NATS fallback (fire-and-forget, no PubAck).
+            warn!(
+                "publish_command on '{}' using plain NATS (no JetStream context — PubAck unavailable)",
+                subject
+            );
+            self.client
+                .publish_with_headers(subject.to_string(), headers, payload.into())
+                .await
+                .map_err(|e| {
+                    Error::Publish(format!("Failed to publish to {}: {}", subject, e))
+                })?;
+            debug!("Published command (plain NATS) to {}", subject);
+        }
+
+        Ok(())
     }
 }
 
@@ -507,5 +570,176 @@ mod tests {
             let msg = stream.next().await.unwrap().unwrap();
             assert_eq!(msg.count, i);
         }
+    }
+
+    // ── Issue: outbound at-least-once + PubAck ───────────────────────────────
+
+    /// `publish_command` with a JetStream context must await a PubAck and store
+    /// the message durably in the `telegram_commands_{prefix}` stream.
+    ///
+    /// This verifies the fix: `MessagePublisher::with_jetstream().publish_command()`
+    /// uses `js.publish_with_headers()` instead of plain `client.publish_with_headers()`.
+    #[tokio::test]
+    async fn test_publish_command_jetstream_persists_in_stream() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("cmdstream-{}", uuid::Uuid::new_v4().simple());
+
+        // Create the outbound command stream (agent startup would do this)
+        crate::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+
+        let publisher = MessagePublisher::with_jetstream(client.clone(), js.clone(), &prefix);
+        let subject = crate::subjects::agent::message_send(&prefix);
+
+        let meta = telegram_types::commands::CommandMetadata::new()
+            .with_causation("session:42", "event:abc");
+        let expected_cmd_id = meta.command_id;
+
+        // publish_command must block until PubAck is received
+        publisher
+            .publish_command(
+                &subject,
+                &TestMsg { value: "outbound".into(), count: 1 },
+                meta,
+            )
+            .await
+            .expect("publish_command with JetStream must succeed and return PubAck");
+
+        // The message must be durably stored — retrieve it via a pull consumer
+        let stream_name = format!("telegram_commands_{}", prefix);
+        let stream = js.get_stream(&stream_name).await.unwrap();
+        let consumer = stream
+            .get_or_create_consumer(
+                "verify",
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some("verify".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — command was not persisted in JetStream stream")
+        .unwrap()
+        .unwrap();
+
+        // Payload must round-trip correctly
+        let received: TestMsg = serde_json::from_slice(&msg.payload).unwrap();
+        assert_eq!(received.value, "outbound");
+        assert_eq!(received.count, 1);
+
+        // CommandMetadata headers must be present
+        let headers = msg.headers.as_ref().expect("headers must be present");
+        let cmd_meta =
+            read_cmd_metadata(headers).expect("X-Command-Id header must be present");
+        assert_eq!(
+            cmd_meta.command_id, expected_cmd_id,
+            "command_id must match the one used to publish"
+        );
+        assert_eq!(
+            cmd_meta.session_id.as_deref(),
+            Some("session:42"),
+            "session_id header must round-trip"
+        );
+
+        msg.ack().await.unwrap();
+    }
+
+    /// Outbound at-least-once: a command published via JetStream before any bot
+    /// consumer exists must still be retrievable when the consumer connects later.
+    ///
+    /// This is the core at-least-once guarantee for the agent→bot direction.
+    #[tokio::test]
+    async fn test_outbound_command_survives_before_consumer_exists() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let js = async_nats::jetstream::new(client.clone());
+        let prefix = format!("cmdsurvive-{}", uuid::Uuid::new_v4().simple());
+
+        crate::nats::setup_agent_stream(&js, &prefix).await.unwrap();
+
+        // Publish command — NO consumer exists yet (bot not started)
+        let publisher = MessagePublisher::with_jetstream(client.clone(), js.clone(), &prefix);
+        let subject = crate::subjects::agent::message_send(&prefix);
+        publisher
+            .publish_command(
+                &subject,
+                &TestMsg { value: "survive".into(), count: 99 },
+                telegram_types::commands::CommandMetadata::new(),
+            )
+            .await
+            .unwrap();
+
+        // Simulate bot starting up later
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Bot creates its durable outbound consumer
+        let consumer = crate::nats::create_outbound_consumer(&js, &prefix)
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            futures::StreamExt::next(&mut messages),
+        )
+        .await
+        .expect("timed out — outbound command was not retained in JetStream stream")
+        .unwrap()
+        .unwrap();
+
+        let received: TestMsg = serde_json::from_slice(&msg.payload).unwrap();
+        assert_eq!(
+            received.value, "survive",
+            "command published before consumer must be delivered to the bot"
+        );
+        msg.ack().await.unwrap();
+    }
+
+    /// `publish_command` without a JetStream context (plain NATS fallback) must
+    /// still succeed without panicking; it emits a warning but does not error.
+    #[tokio::test]
+    async fn test_publish_command_plain_nats_fallback_does_not_error() {
+        let Some(client) = try_connect().await else {
+            eprintln!("SKIP: NATS not available");
+            return;
+        };
+        let subject = format!("test.fallback.{}", uuid::Uuid::new_v4().simple());
+
+        // No JetStream context — uses plain publish fallback
+        let publisher = MessagePublisher::new(client.clone(), "test");
+        let mut raw_sub = client.subscribe(subject.clone()).await.unwrap();
+
+        publisher
+            .publish_command(
+                &subject,
+                &TestMsg { value: "fallback".into(), count: 0 },
+                telegram_types::commands::CommandMetadata::new(),
+            )
+            .await
+            .expect("plain NATS fallback must not return an error");
+
+        // Message is received via plain NATS (no JetStream retention)
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            futures::StreamExt::next(&mut raw_sub),
+        )
+        .await
+        .expect("timed out — fallback publish not received")
+        .unwrap();
+
+        let received: TestMsg = serde_json::from_slice(&msg.payload).unwrap();
+        assert_eq!(received.value, "fallback");
     }
 }

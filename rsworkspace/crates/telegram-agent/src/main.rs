@@ -85,8 +85,12 @@ async fn main() -> Result<()> {
     // Setup JetStream (needed for durable pull consumer)
     let js = async_nats::jetstream::new(nats_client.clone());
 
-    // Ensure the inbound event stream exists (bot may not have started first)
+    // Ensure both streams exist regardless of which side starts first.
     telegram_nats::nats::setup_event_stream(&js, &args.prefix).await?;
+    // The agent publishes outbound commands to this stream; the bot consumes them.
+    // Creating it here guarantees no commands are dropped when the agent starts
+    // before the bot.
+    telegram_nats::nats::setup_agent_stream(&js, &args.prefix).await?;
 
     // Helper: get-or-create a JetStream KV bucket
     async fn get_or_create_kv(
