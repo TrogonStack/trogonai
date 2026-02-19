@@ -52,7 +52,25 @@ pub enum ReactionMode {
 
 impl Default for ReactionMode {
     fn default() -> Self {
-        ReactionMode::All
+        ReactionMode::Own
+    }
+}
+
+/// Controls when reply references are added to outbound messages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplyToMode {
+    /// Never add a reply reference
+    Off,
+    /// Add a reply reference only to the first chunk (default)
+    First,
+    /// Add a reply reference to every chunk
+    All,
+}
+
+impl Default for ReplyToMode {
+    fn default() -> Self {
+        ReplyToMode::First
     }
 }
 
@@ -88,6 +106,24 @@ pub struct DiscordBotConfig {
     /// Optional string prepended to every outbound message sent by the bot
     #[serde(default)]
     pub response_prefix: Option<String>,
+    /// Controls when reply references are added to outbound messages
+    #[serde(default)]
+    pub reply_to_mode: ReplyToMode,
+    /// Maximum number of lines per outbound message chunk (None = unlimited)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_lines_per_message: Option<usize>,
+    /// Enable PluralKit member identity resolution for proxied messages
+    #[serde(default)]
+    pub pluralkit_enabled: bool,
+    /// PluralKit API token (optional, improves rate limits)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pluralkit_token: Option<String>,
+    /// Allow messages from explicitly listed group DM channels
+    #[serde(default)]
+    pub dm_group_enabled: bool,
+    /// Group DM channel IDs the bot should respond in (empty = all group DMs)
+    #[serde(default)]
+    pub dm_group_channels: Vec<u64>,
 }
 
 impl Config {
@@ -160,14 +196,14 @@ impl Config {
             .and_then(|s| s.parse::<u64>().ok());
 
         let reaction_mode = match env
-            .var_or("DISCORD_REACTION_MODE", "all")
+            .var_or("DISCORD_REACTION_MODE", "own")
             .to_lowercase()
             .as_str()
         {
             "off" => ReactionMode::Off,
-            "own" => ReactionMode::Own,
+            "all" => ReactionMode::All,
             "allowlist" => ReactionMode::Allowlist,
-            _ => ReactionMode::All,
+            _ => ReactionMode::Own,
         };
 
         let reaction_allowlist =
@@ -182,6 +218,35 @@ impl Config {
 
         let response_prefix = env.var("DISCORD_RESPONSE_PREFIX").filter(|s| !s.is_empty());
 
+        let reply_to_mode = match env
+            .var_or("DISCORD_REPLY_TO_MODE", "first")
+            .to_lowercase()
+            .as_str()
+        {
+            "off" => ReplyToMode::Off,
+            "all" => ReplyToMode::All,
+            _ => ReplyToMode::First,
+        };
+
+        let max_lines_per_message = env
+            .var("DISCORD_MAX_LINES_PER_MESSAGE")
+            .and_then(|s| s.parse::<usize>().ok());
+
+        let pluralkit_enabled = env
+            .var_or("DISCORD_PLURALKIT_ENABLED", "false")
+            .to_lowercase()
+            == "true";
+
+        let pluralkit_token = env.var("DISCORD_PLURALKIT_TOKEN").filter(|s| !s.is_empty());
+
+        let dm_group_enabled = env
+            .var_or("DISCORD_DM_GROUP_ENABLED", "false")
+            .to_lowercase()
+            == "true";
+
+        let dm_group_channels =
+            parse_id_list(&env.var("DISCORD_DM_GROUP_CHANNELS").unwrap_or_default());
+
         Ok(Config {
             discord: DiscordBotConfig {
                 bot_token,
@@ -192,6 +257,12 @@ impl Config {
                 ack_reaction,
                 allow_bots,
                 response_prefix,
+                reply_to_mode,
+                max_lines_per_message,
+                pluralkit_enabled,
+                pluralkit_token,
+                dm_group_enabled,
+                dm_group_channels,
                 access: AccessConfig {
                     dm_policy,
                     guild_policy,

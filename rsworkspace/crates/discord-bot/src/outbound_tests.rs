@@ -48,6 +48,8 @@ mod tests {
             None,
             pairing_state,
             None,
+            crate::config::ReplyToMode::First,
+            None,
         );
         tokio::spawn(async move {
             let _ = processor.run().await;

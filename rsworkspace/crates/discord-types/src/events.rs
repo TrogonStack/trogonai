@@ -40,6 +40,12 @@ impl EventMetadata {
 pub struct MessageCreatedEvent {
     pub metadata: EventMetadata,
     pub message: DiscordMessage,
+    /// PluralKit member ID if this message was proxied through PluralKit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pluralkit_member_id: Option<String>,
+    /// PluralKit member display name if proxied
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pluralkit_member_name: Option<String>,
 }
 
 /// A message was edited

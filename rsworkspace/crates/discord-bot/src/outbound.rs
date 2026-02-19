@@ -80,40 +80,91 @@ fn truncate(s: &str) -> &str {
     }
 }
 
-/// Split text into chunks no longer than `max_len` characters.
+/// Split text into chunks no longer than `max_len` characters and optionally no more
+/// than `max_lines` newlines per chunk.
 /// Breaks preferably at newlines, then spaces; falls back to a hard character boundary.
-fn chunk_text(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
-        return vec![text.to_string()];
-    }
+fn chunk_text(text: &str, max_len: usize, max_lines: Option<usize>) -> Vec<String> {
+    // First split by line limit if requested
+    let line_chunks: Vec<String> = if let Some(limit) = max_lines {
+        let lines: Vec<&str> = text.split('\n').collect();
+        let mut result = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            let end = (i + limit).min(lines.len());
+            result.push(lines[i..end].join("\n"));
+            i = end;
+        }
+        result
+    } else {
+        vec![text.to_string()]
+    };
+
+    // Then split each line-chunk by character limit
     let mut chunks = Vec::new();
-    let mut remaining = text;
-    while !remaining.is_empty() {
-        if remaining.len() <= max_len {
-            chunks.push(remaining.to_string());
-            break;
+    for segment in &line_chunks {
+        if segment.len() <= max_len {
+            if !segment.is_empty() {
+                chunks.push(segment.clone());
+            }
+            continue;
         }
-        // Find the last valid char boundary within max_len
-        let mut boundary = max_len;
-        while !remaining.is_char_boundary(boundary) {
-            boundary -= 1;
+        let mut remaining: &str = segment;
+        while !remaining.is_empty() {
+            if remaining.len() <= max_len {
+                chunks.push(remaining.to_string());
+                break;
+            }
+            // Find the last valid char boundary within max_len
+            let mut boundary = max_len;
+            while !remaining.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            let slice = &remaining[..boundary];
+            let break_pos = slice
+                .rfind('\n')
+                .or_else(|| slice.rfind(' '))
+                .unwrap_or(boundary);
+            let mut bp = break_pos;
+            while bp > 0 && !remaining.is_char_boundary(bp) {
+                bp -= 1;
+            }
+            if bp == 0 {
+                bp = boundary; // hard break if no whitespace found
+            }
+            chunks.push(remaining[..bp].to_string());
+            remaining = remaining[bp..].trim_start_matches(|c: char| c == '\n' || c == ' ');
         }
-        let slice = &remaining[..boundary];
-        let break_pos = slice
-            .rfind('\n')
-            .or_else(|| slice.rfind(' '))
-            .unwrap_or(boundary);
-        let mut bp = break_pos;
-        while bp > 0 && !remaining.is_char_boundary(bp) {
-            bp -= 1;
-        }
-        if bp == 0 {
-            bp = boundary; // hard break if no whitespace found
-        }
-        chunks.push(remaining[..bp].to_string());
-        remaining = remaining[bp..].trim_start_matches(|c: char| c == '\n' || c == ' ');
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
     }
     chunks
+}
+
+/// Extract a `[[reply_to:<id>]]` tag from message content.
+/// Returns the cleaned content (with the tag removed) and the optional message ID.
+/// `[[reply_to_current]]` is stripped but ignored (the agent concern).
+fn extract_reply_tag(content: &str) -> (String, Option<u64>) {
+    // Match [[reply_to:<numeric_id>]] and strip it from content
+    if let Some(start) = content.find("[[reply_to:") {
+        let rest = &content[start + "[[reply_to:".len()..];
+        if let Some(end) = rest.find("]]") {
+            let id_str = &rest[..end];
+            let reply_id = id_str.parse::<u64>().ok();
+            let tag = format!("[[reply_to:{}]]", id_str);
+            let cleaned = content.replacen(&tag, "", 1).trim_start().to_string();
+            return (cleaned, reply_id);
+        }
+    }
+    // Strip [[reply_to_current]] if present (not actionable at bot level)
+    if content.contains("[[reply_to_current]]") {
+        let cleaned = content
+            .replacen("[[reply_to_current]]", "", 1)
+            .trim_start()
+            .to_string();
+        return (cleaned, None);
+    }
+    (content.to_string(), None)
 }
 
 /// Convert a discord-types `Embed` into a serenity `CreateEmbed`.
@@ -360,6 +411,8 @@ pub struct OutboundProcessor {
     pub(crate) shard_manager: Option<Arc<serenity::all::ShardManager>>,
     pub(crate) pairing_state: Arc<PairingState>,
     pub(crate) response_prefix: Option<String>,
+    pub(crate) reply_to_mode: crate::config::ReplyToMode,
+    pub(crate) max_lines_per_message: Option<usize>,
 }
 
 impl OutboundProcessor {
@@ -370,6 +423,8 @@ impl OutboundProcessor {
         shard_manager: Option<Arc<serenity::all::ShardManager>>,
         pairing_state: Arc<PairingState>,
         response_prefix: Option<String>,
+        reply_to_mode: crate::config::ReplyToMode,
+        max_lines_per_message: Option<usize>,
     ) -> Self {
         Self {
             http,
@@ -379,6 +434,8 @@ impl OutboundProcessor {
             shard_manager,
             pairing_state,
             response_prefix,
+            reply_to_mode,
+            max_lines_per_message,
         }
     }
 
@@ -391,6 +448,8 @@ impl OutboundProcessor {
         let shard_manager = self.shard_manager;
         let pairing_state = self.pairing_state;
         let response_prefix = self.response_prefix;
+        let reply_to_mode = self.reply_to_mode;
+        let max_lines_per_message = self.max_lines_per_message;
         let publisher = MessagePublisher::new(client.clone(), prefix.clone());
 
         info!("Starting outbound processor for prefix: {}", prefix);
@@ -415,6 +474,8 @@ impl OutboundProcessor {
                 prefix.clone(),
                 publisher.clone(),
                 response_prefix,
+                reply_to_mode,
+                max_lines_per_message,
             ),
             Self::handle_edit_messages(
                 http.clone(),
@@ -626,6 +687,8 @@ impl OutboundProcessor {
         prefix: String,
         publisher: MessagePublisher,
         response_prefix: Option<String>,
+        reply_to_mode: crate::config::ReplyToMode,
+        max_lines_per_message: Option<usize>,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_send(&prefix);
@@ -665,12 +728,21 @@ impl OutboundProcessor {
                             }
                         }
                     } else {
+                        // Parse [[reply_to:<id>]] tag from content if present.
+                        // Strip the tag and use it as reply_to_message_id if not already set.
+                        let (content_clean, tag_reply_id) = extract_reply_tag(&cmd.content);
+
                         // Text message: prepend response_prefix then chunk if needed
                         let full_content = match &response_prefix {
-                            Some(rp) => format!("{}{}", rp, cmd.content),
-                            None => cmd.content.clone(),
+                            Some(rp) => format!("{}{}", rp, content_clean),
+                            None => content_clean,
                         };
-                        let chunks = chunk_text(&full_content, MAX_DISCORD_LEN);
+
+                        // Determine effective reply_to_message_id: cmd field takes priority,
+                        // then the [[reply_to:<id>]] tag.
+                        let effective_reply_id = cmd.reply_to_message_id.or(tag_reply_id);
+
+                        let chunks = chunk_text(&full_content, MAX_DISCORD_LEN, max_lines_per_message);
                         let n = chunks.len();
 
                         for (i, chunk) in chunks.iter().enumerate() {
@@ -678,11 +750,19 @@ impl OutboundProcessor {
                             let is_last = i == n - 1;
 
                             let mut b = CreateMessage::new().content(chunk.as_str());
-                            if is_first {
-                                if let Some(reply_id) = cmd.reply_to_message_id {
+
+                            // Apply reply reference according to reply_to_mode
+                            let should_reply = match reply_to_mode {
+                                crate::config::ReplyToMode::Off => false,
+                                crate::config::ReplyToMode::First => is_first,
+                                crate::config::ReplyToMode::All => true,
+                            };
+                            if should_reply {
+                                if let Some(reply_id) = effective_reply_id {
                                     b = b.reference_message((channel, MessageId::new(reply_id)));
                                 }
                             }
+
                             if is_last {
                                 if !cmd.embeds.is_empty() {
                                     let embeds: Vec<CreateEmbed> =

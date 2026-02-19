@@ -123,6 +123,10 @@ async fn main() -> Result<()> {
         config.discord.reaction_allowlist.clone(),
         config.discord.ack_reaction.clone(),
         config.discord.allow_bots,
+        config.discord.pluralkit_enabled,
+        config.discord.pluralkit_token.clone(),
+        config.discord.dm_group_enabled,
+        config.discord.dm_group_channels.clone(),
     ));
 
     // Extract pairing_state before bridge is moved into TypeMap so it can be
@@ -186,6 +190,8 @@ async fn main() -> Result<()> {
             Some(shard_manager_for_outbound),
             pairing_state,
             config.discord.response_prefix.clone(),
+            config.discord.reply_to_mode.clone(),
+            config.discord.max_lines_per_message,
         );
         if let Err(e) = processor.run().await {
             error!("Outbound processor error: {}", e);

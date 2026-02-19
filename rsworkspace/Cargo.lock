@@ -505,6 +505,7 @@ dependencies = [
  "discord-nats",
  "discord-types",
  "futures",
+ "reqwest",
  "serde",
  "serde_json",
  "serenity",
