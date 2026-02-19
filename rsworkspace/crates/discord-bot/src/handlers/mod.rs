@@ -100,8 +100,27 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
-        // Skip bot messages unless allow_bots is enabled
-        if msg.author.bot {
+        // PluralKit detection: webhook messages may be PK-proxied user messages.
+        // Check before the allow_bots gate so PK messages can pass through even
+        // when allow_bots is false.
+        let (pk_member_id, pk_member_name) = {
+            let bridge_ref = {
+                let data = ctx.data.read().await;
+                data.get::<DiscordBridge>().cloned()
+            };
+            if let Some(ref bridge) = bridge_ref {
+                if bridge.pluralkit_enabled && msg.author.bot && msg.webhook_id.is_some() {
+                    lookup_pk_member(msg.id.get(), bridge.pluralkit_token.as_deref()).await
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            }
+        };
+
+        // Skip bot messages unless allow_bots is enabled OR this is a PK-proxied message
+        if msg.author.bot && pk_member_id.is_none() {
             let data = ctx.data.read().await;
             let allow = data.get::<DiscordBridge>().map(|b| b.allow_bots).unwrap_or(false);
             if !allow {
@@ -150,8 +169,13 @@ impl EventHandler for Handler {
                 return;
             }
         } else {
-            // DM
-            if !bridge.check_dm_access(msg.author.id.get()) {
+            // DM / Group DM
+            let channel_id = msg.channel_id.get();
+            let is_allowed_group_dm = bridge.dm_group_enabled
+                && (bridge.dm_group_channels.is_empty()
+                    || bridge.dm_group_channels.contains(&channel_id));
+
+            if !is_allowed_group_dm && !bridge.check_dm_access(msg.author.id.get()) {
                 // If the pairing policy is active, try to start a pairing flow.
                 if bridge.access_config.dm_policy == discord_types::DmPolicy::Pairing
                     && !bridge.is_admin(msg.author.id.get())
@@ -197,7 +221,7 @@ impl EventHandler for Handler {
             }
         }
 
-        if let Err(e) = bridge.publish_message_created(&msg).await {
+        if let Err(e) = bridge.publish_message_created(&msg, pk_member_id, pk_member_name).await {
             error!("Failed to publish message_created: {}", e);
         }
     }
@@ -1580,4 +1604,35 @@ impl EventHandler for Handler {
             "Discord HTTP rate limit hit"
         );
     }
+}
+
+/// Query the PluralKit API to check if a message was sent by a PluralKit member.
+/// Returns (member_id, member_display_name) on success, or (None, None) on failure/not-PK.
+async fn lookup_pk_member(
+    message_id: u64,
+    token: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let url = format!("https://api.pluralkit.me/v2/messages/{}", message_id);
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(t) = token {
+        req = req.header("Authorization", t);
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(_) => return (None, None),
+    };
+    if !resp.status().is_success() {
+        return (None, None);
+    }
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(_) => return (None, None),
+    };
+    let member_id = json["member"]["id"].as_str().map(String::from);
+    let member_name = json["member"]["display_name"]
+        .as_str()
+        .or_else(|| json["member"]["name"].as_str())
+        .map(String::from);
+    (member_id, member_name)
 }

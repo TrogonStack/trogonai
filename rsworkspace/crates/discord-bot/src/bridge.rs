@@ -187,6 +187,14 @@ pub struct DiscordBridge {
     pub ack_reaction: Option<String>,
     /// Whether to process messages sent by other bots.
     pub allow_bots: bool,
+    /// Enable PluralKit member identity resolution for proxied messages.
+    pub pluralkit_enabled: bool,
+    /// PluralKit API token for improved rate limits.
+    pub pluralkit_token: Option<String>,
+    /// Allow messages from explicitly listed group DM channels.
+    pub dm_group_enabled: bool,
+    /// Group DM channel IDs the bot should respond in (empty = all group DMs when enabled).
+    pub dm_group_channels: Vec<u64>,
 }
 
 impl TypeMapKey for DiscordBridge {
@@ -205,6 +213,10 @@ impl DiscordBridge {
         reaction_allowlist: Vec<u64>,
         ack_reaction: Option<String>,
         allow_bots: bool,
+        pluralkit_enabled: bool,
+        pluralkit_token: Option<String>,
+        dm_group_enabled: bool,
+        dm_group_channels: Vec<u64>,
     ) -> Self {
         Self {
             publisher: MessagePublisher::new(client, prefix),
@@ -218,6 +230,10 @@ impl DiscordBridge {
             reaction_allowlist,
             ack_reaction,
             allow_bots,
+            pluralkit_enabled,
+            pluralkit_token,
+            dm_group_enabled,
+            dm_group_channels,
         }
     }
 
@@ -426,12 +442,19 @@ impl DiscordBridge {
 
     // ── Publish methods ────────────────────────────────────────────────────
 
-    pub async fn publish_message_created(&self, msg: &SerenityMessage) -> Result<()> {
+    pub async fn publish_message_created(
+        &self,
+        msg: &SerenityMessage,
+        pluralkit_member_id: Option<String>,
+        pluralkit_member_name: Option<String>,
+    ) -> Result<()> {
         let sid = Self::session_id_for_message(msg);
         let meta = EventMetadata::new(sid, self.next_sequence());
         let event = MessageCreatedEvent {
             metadata: meta,
             message: Self::convert_message(msg),
+            pluralkit_member_id,
+            pluralkit_member_name,
         };
         let subject = subjects::bot::message_created(self.prefix());
         self.publisher.publish(&subject, &event).await?;
