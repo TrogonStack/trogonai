@@ -1596,13 +1596,20 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ratelimit(&self, data: RatelimitInfo) {
+    async fn ratelimit(&self, ctx: Context, data: RatelimitInfo) {
+        let timeout_ms = data.timeout.as_millis() as u64;
         warn!(
             path = %data.path,
-            timeout_ms = data.timeout.as_millis(),
+            timeout_ms = timeout_ms,
             global = data.global,
             "Discord HTTP rate limit hit"
         );
+        let data_read = ctx.data.read().await;
+        if let Some(bridge) = data_read.get::<DiscordBridge>() {
+            if let Err(e) = bridge.publish_ratelimit(data.path.clone(), timeout_ms, data.global).await {
+                error!("Failed to publish ratelimit: {}", e);
+            }
+        }
     }
 }
 
