@@ -47,90 +47,69 @@ impl StateDir for SystemDirs {
 }
 
 fn non_empty_var(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
+    std::env::var_os(name)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 fn home_dir_impl() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
+    if cfg!(target_os = "windows") {
         non_empty_var("USERPROFILE")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
+    } else {
         non_empty_var("HOME")
     }
 }
 
 fn config_dir_impl() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         home_dir_impl().map(|h| h.join("Library").join("Application Support"))
-    }
-    #[cfg(target_os = "windows")]
-    {
+    } else if cfg!(target_os = "windows") {
         non_empty_var("APPDATA")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
+    } else {
         non_empty_var("XDG_CONFIG_HOME").or_else(|| home_dir_impl().map(|h| h.join(".config")))
     }
 }
 
 fn cache_dir_impl() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         home_dir_impl().map(|h| h.join("Library").join("Caches"))
-    }
-    #[cfg(target_os = "windows")]
-    {
+    } else if cfg!(target_os = "windows") {
         non_empty_var("LOCALAPPDATA")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
+    } else {
         non_empty_var("XDG_CACHE_HOME").or_else(|| home_dir_impl().map(|h| h.join(".cache")))
     }
 }
 
 fn data_dir_impl() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         home_dir_impl().map(|h| h.join("Library").join("Application Support"))
-    }
-    #[cfg(target_os = "windows")]
-    {
+    } else if cfg!(target_os = "windows") {
         non_empty_var("APPDATA")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        non_empty_var("XDG_DATA_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
+    } else {
+        non_empty_var("XDG_DATA_HOME")
+            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
     }
 }
 
 fn data_local_dir_impl() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         home_dir_impl().map(|h| h.join("Library").join("Application Support"))
-    }
-    #[cfg(target_os = "windows")]
-    {
+    } else if cfg!(target_os = "windows") {
         non_empty_var("LOCALAPPDATA")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        non_empty_var("XDG_DATA_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
+    } else {
+        non_empty_var("XDG_DATA_HOME")
+            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
     }
 }
 
 // macOS and Windows have no native state directory concept — returning None
 // avoids silently aliasing ~/Library/Application Support or LOCALAPPDATA.
 fn state_dir_impl() -> Option<PathBuf> {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
+    if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
         None
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        non_empty_var("XDG_STATE_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("state")))
+    } else {
+        non_empty_var("XDG_STATE_HOME")
+            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("state")))
     }
 }
 
@@ -169,17 +148,13 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    fn state_dir_is_none_on_this_platform() {
+    fn state_dir_depends_on_platform() {
         let dirs = SystemDirs;
-        assert!(dirs.state_dir().is_none());
-    }
-
-    #[test]
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    fn state_dir_is_some_on_this_platform() {
-        let dirs = SystemDirs;
-        assert!(dirs.state_dir().is_some());
+        if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+            assert!(dirs.state_dir().is_none());
+        } else {
+            assert!(dirs.state_dir().is_some());
+        }
     }
 
     #[test]
