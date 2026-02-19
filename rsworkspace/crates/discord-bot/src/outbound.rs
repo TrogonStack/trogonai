@@ -132,7 +132,7 @@ fn chunk_text(text: &str, max_len: usize, max_lines: Option<usize>) -> Vec<Strin
                 bp = boundary; // hard break if no whitespace found
             }
             chunks.push(remaining[..bp].to_string());
-            remaining = remaining[bp..].trim_start_matches(|c: char| c == '\n' || c == ' ');
+            remaining = remaining[bp..].trim_start_matches(['\n', ' ']);
         }
     }
     if chunks.is_empty() {
@@ -424,6 +424,7 @@ impl<N> OutboundProcessor<N>
 where
     N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         http: Arc<Http>,
         client: N,
@@ -2996,13 +2997,11 @@ where
                             }
                             Err(e) => warn!("Failed to parse emoji '{}': {}", emoji_str, e),
                         }
-                    } else {
-                        if let Err(e) = http.delete_message_reactions(channel, msg).await {
-                            warn!(
-                                "Failed to remove all reactions from {}/{}: {}",
-                                cmd.channel_id, cmd.message_id, e
-                            );
-                        }
+                    } else if let Err(e) = http.delete_message_reactions(channel, msg).await {
+                        warn!(
+                            "Failed to remove all reactions from {}/{}: {}",
+                            cmd.channel_id, cmd.message_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize reaction_remove_all command: {}", e),

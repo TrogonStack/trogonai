@@ -18,12 +18,13 @@ pub struct Config {
 }
 
 /// Controls which reaction events are forwarded to NATS.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReactionMode {
     /// Publish no reaction events
     Off,
     /// Only publish reactions to messages sent by the bot itself
+    #[default]
     Own,
     /// Publish all reaction events (default)
     All,
@@ -31,28 +32,17 @@ pub enum ReactionMode {
     Allowlist,
 }
 
-impl Default for ReactionMode {
-    fn default() -> Self {
-        ReactionMode::Own
-    }
-}
-
 /// Controls when reply references are added to outbound messages.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReplyToMode {
     /// Never add a reply reference
     Off,
     /// Add a reply reference only to the first chunk (default)
+    #[default]
     First,
     /// Add a reply reference to every chunk
     All,
-}
-
-impl Default for ReplyToMode {
-    fn default() -> Self {
-        ReplyToMode::First
-    }
 }
 
 /// Discord bot specific configuration

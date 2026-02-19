@@ -209,6 +209,7 @@ impl TypeMapKey for DiscordBridge<MessagePublisher> {
 
 impl DiscordBridge<MessagePublisher> {
     /// Create a new bridge backed by a real NATS connection.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: async_nats::Client,
         prefix: String,
@@ -243,6 +244,7 @@ impl DiscordBridge<MessagePublisher> {
 
 impl<P: Publish> DiscordBridge<P> {
     /// Create a new bridge with any publisher (useful for testing with `MockPublisher`).
+    #[allow(clippy::too_many_arguments)]
     pub fn with_publisher(
         publisher: P,
         access_config: AccessConfig,
