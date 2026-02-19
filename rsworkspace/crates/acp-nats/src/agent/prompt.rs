@@ -41,6 +41,22 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
         .pending_session_prompt_responses
         .register_waiter(args.session_id.clone());
 
+    // Re-check after registration to close the race window where a cancel
+    // arrives between the initial check and waiter registration.
+    if bridge.cancelled_sessions.is_cancelled(&args.session_id) {
+        bridge
+            .pending_session_prompt_responses
+            .remove_waiter(&args.session_id);
+        bridge
+            .cancelled_sessions
+            .clear_cancellation(&args.session_id);
+        info!(session_id = %args.session_id, "Prompt cancelled before publish");
+        bridge
+            .metrics
+            .record_request("prompt", start.elapsed().as_secs_f64(), true);
+        return Ok(PromptResponse::new(StopReason::Cancelled));
+    }
+
     if let Err(e) = nats::publish(nats, &subject, &args, nats::PublishOptions::simple()).await {
         bridge
             .pending_session_prompt_responses
