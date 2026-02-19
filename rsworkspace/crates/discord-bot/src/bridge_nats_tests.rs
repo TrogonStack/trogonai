@@ -240,4 +240,363 @@ mod tests {
         assert!(bridge.check_dm_access(1));
         assert!(bridge.check_dm_access(99999));
     }
+
+    // ── PairingState ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_pairing_start_returns_code_and_expiry() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let result = ps.start_pairing(42, 100);
+        assert!(result.is_some());
+        let (code, expires_at) = result.unwrap();
+        assert_eq!(code.len(), 6);
+        assert!(expires_at > 0);
+    }
+
+    #[test]
+    fn test_pairing_start_reuses_existing_code() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let (code1, _) = ps.start_pairing(42, 100).unwrap();
+        let (code2, _) = ps.start_pairing(42, 100).unwrap();
+        assert_eq!(code1, code2, "second call must reuse same code");
+    }
+
+    #[test]
+    fn test_pairing_start_returns_none_when_already_approved() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let (code, _) = ps.start_pairing(42, 100).unwrap();
+        ps.approve_by_code(&code);
+        assert!(ps.start_pairing(42, 100).is_none(), "approved user must return None");
+    }
+
+    #[test]
+    fn test_pairing_approve_by_code_succeeds() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let (code, _) = ps.start_pairing(42, 100).unwrap();
+        let result = ps.approve_by_code(&code);
+        assert_eq!(result, Some((42, 100)));
+        assert!(ps.is_paired(42));
+    }
+
+    #[test]
+    fn test_pairing_approve_unknown_code_returns_none() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        assert!(ps.approve_by_code("XXXXXX").is_none());
+    }
+
+    #[test]
+    fn test_pairing_reject_by_code_succeeds() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let (code, _) = ps.start_pairing(42, 100).unwrap();
+        let result = ps.reject_by_code(&code);
+        assert_eq!(result, Some((42, 100)));
+        assert!(!ps.is_paired(42), "rejected user must not be paired");
+    }
+
+    #[test]
+    fn test_pairing_reject_unknown_code_returns_none() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        assert!(ps.reject_by_code("ZZZZZZ").is_none());
+    }
+
+    #[test]
+    fn test_pairing_is_not_paired_initially() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        assert!(!ps.is_paired(99));
+    }
+
+    #[test]
+    fn test_pairing_approve_removes_from_pending() {
+        use crate::bridge::PairingState;
+        let ps = PairingState::new();
+        let (code, _) = ps.start_pairing(42, 100).unwrap();
+        ps.approve_by_code(&code);
+        // Trying to approve same code again must fail
+        assert!(ps.approve_by_code(&code).is_none());
+    }
+
+    // ── should_publish_reaction ───────────────────────────────────────────────
+
+    fn make_bridge_with_reaction(
+        prefix: &str,
+        mode: crate::config::ReactionMode,
+        allowlist: Vec<u64>,
+    ) -> DiscordBridge<MockPublisher> {
+        let mock = MockPublisher::new(prefix);
+        DiscordBridge::with_publisher(
+            mock,
+            discord_types::AccessConfig::default(),
+            false,
+            None,
+            mode,
+            allowlist,
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
+        )
+    }
+
+    #[test]
+    fn test_reaction_mode_off_always_false() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::Off, vec![]);
+        assert!(!b.should_publish_reaction(true, Some(1)));
+        assert!(!b.should_publish_reaction(false, Some(1)));
+        assert!(!b.should_publish_reaction(true, None));
+    }
+
+    #[test]
+    fn test_reaction_mode_own_only_bot_messages() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::Own, vec![]);
+        assert!(b.should_publish_reaction(true, Some(1)));
+        assert!(!b.should_publish_reaction(false, Some(1)));
+        assert!(b.should_publish_reaction(true, None));
+    }
+
+    #[test]
+    fn test_reaction_mode_all_always_true() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::All, vec![]);
+        assert!(b.should_publish_reaction(false, Some(999)));
+        assert!(b.should_publish_reaction(true, None));
+    }
+
+    #[test]
+    fn test_reaction_mode_allowlist_in_list() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::Allowlist, vec![42]);
+        assert!(b.should_publish_reaction(false, Some(42)));
+    }
+
+    #[test]
+    fn test_reaction_mode_allowlist_not_in_list() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::Allowlist, vec![42]);
+        assert!(!b.should_publish_reaction(false, Some(99)));
+    }
+
+    #[test]
+    fn test_reaction_mode_allowlist_no_user_id() {
+        let b = make_bridge_with_reaction("t", crate::config::ReactionMode::Allowlist, vec![42]);
+        assert!(!b.should_publish_reaction(false, None));
+    }
+
+    // ── check_require_mention ─────────────────────────────────────────────────
+
+    fn make_bridge_require_mention(require: bool) -> DiscordBridge<MockPublisher> {
+        let mock = MockPublisher::new("t");
+        DiscordBridge::with_publisher(
+            mock,
+            discord_types::AccessConfig {
+                require_mention: require,
+                ..Default::default()
+            },
+            false, None,
+            crate::config::ReactionMode::Off, vec![],
+            None, false, false, None, false, vec![],
+        )
+    }
+
+    #[test]
+    fn test_require_mention_disabled_always_passes() {
+        let b = make_bridge_require_mention(false);
+        assert!(b.check_require_mention(&[]));
+    }
+
+    #[test]
+    fn test_require_mention_bot_id_zero_passes() {
+        // bot_user_id = 0 (not set yet) → skip check
+        let b = make_bridge_require_mention(true);
+        assert_eq!(b.bot_user_id(), 0);
+        assert!(b.check_require_mention(&[]));
+    }
+
+    #[test]
+    fn test_require_mention_with_matching_mention() {
+        let b = make_bridge_require_mention(true);
+        b.set_bot_user_id(42);
+        let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
+            "id": "42", "username": "bot", "global_name": null,
+            "avatar": null, "bot": true
+        })).unwrap();
+        assert!(b.check_require_mention(&[user]));
+    }
+
+    #[test]
+    fn test_require_mention_without_matching_mention() {
+        let b = make_bridge_require_mention(true);
+        b.set_bot_user_id(42);
+        let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
+            "id": "99", "username": "other", "global_name": null,
+            "avatar": null, "bot": false
+        })).unwrap();
+        assert!(!b.check_require_mention(&[user]));
+    }
+
+    // ── set_bot_user_id / bot_user_id ─────────────────────────────────────────
+
+    #[test]
+    fn test_set_and_get_bot_user_id() {
+        let (bridge, _) = make_bridge("t-bot-id");
+        assert_eq!(bridge.bot_user_id(), 0);
+        bridge.set_bot_user_id(12345);
+        assert_eq!(bridge.bot_user_id(), 12345);
+    }
+
+    // ── check_dm_access with pairing policy ───────────────────────────────────
+
+    #[test]
+    fn test_dm_access_pairing_policy_not_paired() {
+        use discord_types::{AccessConfig, DmPolicy};
+        let mock = MockPublisher::new("t");
+        let bridge = DiscordBridge::with_publisher(
+            mock,
+            AccessConfig { dm_policy: DmPolicy::Pairing, ..Default::default() },
+            false, None,
+            crate::config::ReactionMode::Off, vec![],
+            None, false, false, None, false, vec![],
+        );
+        assert!(!bridge.check_dm_access(42));
+    }
+
+    #[test]
+    fn test_dm_access_pairing_policy_after_approve() {
+        use discord_types::{AccessConfig, DmPolicy};
+        let mock = MockPublisher::new("t");
+        let bridge = DiscordBridge::with_publisher(
+            mock,
+            AccessConfig { dm_policy: DmPolicy::Pairing, ..Default::default() },
+            false, None,
+            crate::config::ReactionMode::Off, vec![],
+            None, false, false, None, false, vec![],
+        );
+        let (code, _) = bridge.try_start_pairing(42, 100).unwrap();
+        bridge.pairing_state.approve_by_code(&code);
+        assert!(bridge.check_dm_access(42));
+    }
+
+    #[test]
+    fn test_dm_access_pairing_admin_bypasses_pairing() {
+        use discord_types::{AccessConfig, DmPolicy};
+        let mock = MockPublisher::new("t");
+        let bridge = DiscordBridge::with_publisher(
+            mock,
+            AccessConfig {
+                dm_policy: DmPolicy::Pairing,
+                admin_users: vec![42],
+                ..Default::default()
+            },
+            false, None,
+            crate::config::ReactionMode::Off, vec![],
+            None, false, false, None, false, vec![],
+        );
+        assert!(bridge.check_dm_access(42), "admin must bypass pairing");
+    }
+
+    // ── check_channel_access ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_channel_access_open_by_default() {
+        let (bridge, _) = make_bridge("t-ch");
+        // default config has no channel allowlist → all channels allowed
+        assert!(bridge.check_channel_access(999));
+    }
+
+    #[test]
+    fn test_channel_access_allowlist_blocks_unlisted() {
+        use discord_types::AccessConfig;
+        let mock = MockPublisher::new("t");
+        let bridge = DiscordBridge::with_publisher(
+            mock,
+            AccessConfig { channel_allowlist: vec![50], ..Default::default() },
+            false, None,
+            crate::config::ReactionMode::Off, vec![],
+            None, false, false, None, false, vec![],
+        );
+        assert!(bridge.check_channel_access(50));
+        assert!(!bridge.check_channel_access(51));
+    }
+
+    // ── publish_guild_member_add / remove ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_publish_guild_member_add() {
+        use discord_types::events::GuildMemberAddEvent;
+        use discord_nats::subjects;
+
+        let prefix = "t-member-add";
+        let (bridge, mock) = make_bridge(prefix);
+
+        let member: serenity::model::guild::Member = serde_json::from_value(serde_json::json!({
+            "guild_id": "200",
+            "user": {"id": "42", "username": "alice", "global_name": null, "avatar": null, "bot": false},
+            "nick": null,
+            "roles": [],
+            "deaf": false,
+            "mute": false,
+            "flags": 0
+        })).unwrap();
+
+        bridge.publish_guild_member_add(200, &member).await.unwrap();
+
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::guild_member_add(prefix));
+        let event: GuildMemberAddEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
+        assert_eq!(event.guild_id, 200);
+        assert_eq!(event.member.user.id, 42);
+        assert_eq!(event.member.user.username, "alice");
+    }
+
+    #[tokio::test]
+    async fn test_publish_guild_member_remove() {
+        use discord_types::events::GuildMemberRemoveEvent;
+        use discord_nats::subjects;
+
+        let prefix = "t-member-remove";
+        let (bridge, mock) = make_bridge(prefix);
+
+        let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
+            "id": "42", "username": "alice", "global_name": null,
+            "avatar": null, "bot": false
+        })).unwrap();
+
+        bridge.publish_guild_member_remove(200, &user).await.unwrap();
+
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::guild_member_remove(prefix));
+        let event: GuildMemberRemoveEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
+        assert_eq!(event.guild_id, 200);
+        assert_eq!(event.user.id, 42);
+    }
+
+    // ── publish_pairing_requested ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_publish_pairing_requested() {
+        use discord_types::events::PairingRequestedEvent;
+        use discord_nats::subjects;
+
+        let prefix = "t-pair";
+        let (bridge, mock) = make_bridge(prefix);
+
+        bridge.publish_pairing_requested(42, "alice", "ABC123", 9999).await.unwrap();
+
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::pairing_requested(prefix));
+        let event: PairingRequestedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
+        assert_eq!(event.user_id, 42);
+        assert_eq!(event.username, "alice");
+        assert_eq!(event.code, "ABC123");
+        assert_eq!(event.expires_at, 9999);
+    }
 }

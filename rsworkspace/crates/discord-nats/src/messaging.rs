@@ -1,5 +1,6 @@
 //! Message publishing and subscription helpers
 
+use async_nats::subject::ToSubject;
 use async_nats::Client;
 use futures::StreamExt;
 use serde::{de::DeserializeOwned, Serialize};
@@ -18,6 +19,31 @@ pub trait Publish {
         subject: impl AsRef<str>,
         message: &T,
     ) -> crate::error::Result<()>;
+}
+
+/// Trait for subscribing to NATS subjects with queue-group support.
+///
+/// Extends [`trogon_nats::SubscribeClient`] with queue-group subscribe so that
+/// code depending on this capability can be made generic and unit-tested with a
+/// mock that implements this trait.
+pub trait QueueSubscribeClient: trogon_nats::SubscribeClient {
+    fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> impl std::future::Future<
+        Output = std::result::Result<async_nats::Subscriber, Self::SubscribeError>,
+    > + Send;
+}
+
+impl QueueSubscribeClient for Client {
+    async fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> std::result::Result<async_nats::Subscriber, Self::SubscribeError> {
+        self.queue_subscribe(subject, queue_group).await
+    }
 }
 
 /// Message publisher for sending events and commands
@@ -98,14 +124,14 @@ impl Publish for MessagePublisher {
 }
 
 /// Message subscriber for receiving events and commands
-pub struct MessageSubscriber {
-    client: Client,
+pub struct MessageSubscriber<N: trogon_nats::SubscribeClient + Clone = Client> {
+    client: N,
     prefix: String,
 }
 
-impl MessageSubscriber {
+impl<N: trogon_nats::SubscribeClient + Clone> MessageSubscriber<N> {
     /// Create a new message subscriber
-    pub fn new(client: Client, prefix: impl Into<String>) -> Self {
+    pub fn new(client: N, prefix: impl Into<String>) -> Self {
         Self {
             client,
             prefix: prefix.into(),
@@ -115,11 +141,6 @@ impl MessageSubscriber {
     /// Get the prefix
     pub fn prefix(&self) -> &str {
         &self.prefix
-    }
-
-    /// Get a reference to the NATS client
-    pub fn client(&self) -> &Client {
-        &self.client
     }
 
     /// Subscribe to a subject and deserialize messages
@@ -141,7 +162,16 @@ impl MessageSubscriber {
             _phantom: std::marker::PhantomData,
         })
     }
+}
 
+impl MessageSubscriber<Client> {
+    /// Get a reference to the NATS client
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl<N: QueueSubscribeClient + Clone> MessageSubscriber<N> {
     /// Subscribe with a queue group for load-balanced consumption
     pub async fn queue_subscribe<T: DeserializeOwned>(
         &self,

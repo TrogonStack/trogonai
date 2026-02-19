@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use discord_nats::connect;
+use discord_nats::{connect, MessagePublisher};
 use serenity::model::gateway::GatewayIntents;
 use serenity::prelude::*;
 use tracing::{error, info, warn};
@@ -183,9 +183,11 @@ async fn main() -> Result<()> {
     let shard_manager_for_outbound = client.shard_manager.clone();
 
     tokio::spawn(async move {
+        let publisher = MessagePublisher::new(nats_client_for_outbound.clone(), prefix_for_outbound.clone());
         let processor = OutboundProcessor::new(
             http,
             nats_client_for_outbound,
+            publisher,
             prefix_for_outbound,
             Some(shard_manager_for_outbound),
             pairing_state,

@@ -35,6 +35,8 @@ mod tests {
                 referenced_message_id: None,
                 referenced_message_content: None,
             },
+            pluralkit_member_id: None,
+            pluralkit_member_name: None,
         }
     }
 
@@ -847,5 +849,504 @@ mod tests {
             "unknown command must mention /help, got: {}",
             content
         );
+    }
+
+    // ── /help ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_help_slash_command_echo_mode() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_slash_command_event("dc-dm-123", "help", 100);
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("echo mode"), "echo mode help must mention echo mode, got: {}", content);
+        assert!(!cmd.ephemeral, "/help must not be ephemeral");
+    }
+
+    // ── /status ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_status_slash_command_echo_mode() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_slash_command_event("dc-dm-123", "status", 100);
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("Echo mode"), "status must show mode, got: {}", content);
+        assert!(content.contains("Ready"), "status must show Ready");
+    }
+
+    // ── /ask ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ask_slash_command_echo_mode() {
+        use discord_types::types::{CommandOption, CommandOptionValue};
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+
+        let mut event = make_slash_command_event("dc-dm-123", "ask", 100);
+        event.options.push(CommandOption {
+            name: "question".to_string(),
+            value: CommandOptionValue::String("What is 2+2?".to_string()),
+        });
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("What is 2+2?"), "echo /ask must include question, got: {}", content);
+    }
+
+    #[tokio::test]
+    async fn test_ask_slash_command_empty_question() {
+        use discord_types::types::{CommandOption, CommandOptionValue};
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+
+        let mut event = make_slash_command_event("dc-dm-123", "ask", 100);
+        event.options.push(CommandOption {
+            name: "question".to_string(),
+            value: CommandOptionValue::String(String::new()),
+        });
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert!(cmd.ephemeral, "empty question must be ephemeral");
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("question"), "must prompt for question, got: {}", content);
+    }
+
+    #[tokio::test]
+    async fn test_ask_slash_command_no_options() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        // No options at all — question defaults to empty
+        let event = make_slash_command_event("dc-dm-123", "ask", 100);
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert!(cmd.ephemeral);
+    }
+
+    // ── /summarize ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_summarize_requires_llm_in_echo_mode() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        // Add some history so it doesn't hit "empty history" first
+        let session_id = "dc-dm-sum-1";
+        processor.conversation_manager.add_message(session_id, "user", "hi").await;
+
+        let event = make_slash_command_event(session_id, "summarize", 100);
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(
+            content.contains("LLM mode"),
+            "summarize without LLM must say LLM mode required, got: {}",
+            content
+        );
+        assert!(cmd.ephemeral);
+    }
+
+    #[tokio::test]
+    async fn test_summarize_empty_history_responds_ephemeral() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_slash_command_event("dc-dm-sum-empty", "summarize", 100);
+
+        processor.process_slash_command(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("No conversation history"), "got: {}", content);
+        assert!(cmd.ephemeral);
+    }
+
+    // ── welcome / farewell (member add / remove) ───────────────────────────
+
+    fn make_member_add_event(
+        session_id: &str,
+        user_id: u64,
+        username: &str,
+        guild_id: u64,
+        nick: Option<&str>,
+        global_name: Option<&str>,
+    ) -> discord_types::events::GuildMemberAddEvent {
+        use discord_types::events::{EventMetadata, GuildMemberAddEvent};
+        use discord_types::types::{DiscordMember, DiscordUser};
+        GuildMemberAddEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id,
+            member: DiscordMember {
+                user: DiscordUser {
+                    id: user_id,
+                    username: username.to_string(),
+                    global_name: global_name.map(|s| s.to_string()),
+                    bot: false,
+                },
+                guild_id,
+                nick: nick.map(|s| s.to_string()),
+                roles: vec![],
+            },
+        }
+    }
+
+    fn make_member_remove_event(
+        session_id: &str,
+        user_id: u64,
+        username: &str,
+        guild_id: u64,
+        global_name: Option<&str>,
+    ) -> discord_types::events::GuildMemberRemoveEvent {
+        use discord_types::events::{EventMetadata, GuildMemberRemoveEvent};
+        use discord_types::types::DiscordUser;
+        GuildMemberRemoveEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            guild_id,
+            user: DiscordUser {
+                id: user_id,
+                username: username.to_string(),
+                global_name: global_name.map(|s| s.to_string()),
+                bot: false,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_member_add_no_welcome_config_is_noop() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default(); // no welcome config
+        let event = make_member_add_event("dc-guild-200-100", 42, "alice", 200, None, None);
+
+        processor.process_member_add(&event, &mock).await.unwrap();
+        assert!(mock.is_empty(), "no welcome config must publish nothing");
+    }
+
+    #[tokio::test]
+    async fn test_member_add_sends_welcome_with_mention() {
+        use crate::processor::WelcomeConfig;
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::new(
+            None, None, None,
+            Some(WelcomeConfig { channel_id: 500, template: "Welcome {user}!".to_string() }),
+            None, None, None, 20,
+            tokio::time::Duration::from_secs(120), None,
+        );
+        let event = make_member_add_event("dc-guild-200-100", 42, "alice", 200, None, None);
+
+        processor.process_member_add(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert_eq!(cmd.channel_id, 500);
+        assert!(cmd.content.contains("<@42>"), "must mention user, got: {}", cmd.content);
+    }
+
+    #[tokio::test]
+    async fn test_member_add_uses_nick_when_present() {
+        use crate::processor::WelcomeConfig;
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::new(
+            None, None, None,
+            Some(WelcomeConfig { channel_id: 500, template: "Hey {username}!".to_string() }),
+            None, None, None, 20,
+            tokio::time::Duration::from_secs(120), None,
+        );
+        let event = make_member_add_event("dc-guild-200-100", 42, "alice", 200, Some("Ally"), None);
+
+        processor.process_member_add(&event, &mock).await.unwrap();
+
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(mock.published_messages()[0].1.clone()).unwrap();
+        assert!(cmd.content.contains("Ally"), "must use nick, got: {}", cmd.content);
+    }
+
+    #[tokio::test]
+    async fn test_member_add_uses_global_name_without_nick() {
+        use crate::processor::WelcomeConfig;
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::new(
+            None, None, None,
+            Some(WelcomeConfig { channel_id: 500, template: "Hey {username}!".to_string() }),
+            None, None, None, 20,
+            tokio::time::Duration::from_secs(120), None,
+        );
+        let event = make_member_add_event("dc-guild-200-100", 42, "alice", 200, None, Some("Alice Global"));
+
+        processor.process_member_add(&event, &mock).await.unwrap();
+
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(mock.published_messages()[0].1.clone()).unwrap();
+        assert!(cmd.content.contains("Alice Global"), "must use global_name, got: {}", cmd.content);
+    }
+
+    #[tokio::test]
+    async fn test_member_remove_no_farewell_config_is_noop() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_member_remove_event("dc-guild-200-100", 42, "alice", 200, None);
+
+        processor.process_member_remove(&event, &mock).await.unwrap();
+        assert!(mock.is_empty(), "no farewell config must publish nothing");
+    }
+
+    #[tokio::test]
+    async fn test_member_remove_sends_farewell() {
+        use crate::processor::WelcomeConfig;
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::new(
+            None, None, None, None,
+            Some(WelcomeConfig { channel_id: 600, template: "Goodbye {username}!".to_string() }),
+            None, None, 20,
+            tokio::time::Duration::from_secs(120), None,
+        );
+        let event = make_member_remove_event("dc-guild-200-100", 42, "alice", 200, Some("Alice"));
+
+        processor.process_member_remove(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert_eq!(cmd.channel_id, 600);
+        assert!(cmd.content.contains("Alice"), "must use display name, got: {}", cmd.content);
+    }
+
+    // ── reaction_add: edge cases ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_reaction_add_unknown_emoji_is_noop() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_reaction_add_event("dc-dm-100", 42, 100, 77, "👍");
+
+        processor.process_reaction_add(&event, &mock).await.unwrap();
+        assert!(mock.is_empty(), "unknown emoji must publish nothing");
+    }
+
+    #[tokio::test]
+    async fn test_reaction_add_regenerate_echo_mode_is_noop() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default(); // echo mode = no LLM
+        let event = make_reaction_add_event("dc-dm-100", 42, 100, 77, "🔁");
+
+        processor.process_reaction_add(&event, &mock).await.unwrap();
+        assert!(mock.is_empty(), "🔁 in echo mode must publish nothing");
+    }
+
+    #[tokio::test]
+    async fn test_reaction_add_rotate_echo_mode_is_noop() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_reaction_add_event("dc-dm-100", 42, 100, 77, "🔄");
+
+        processor.process_reaction_add(&event, &mock).await.unwrap();
+        assert!(mock.is_empty(), "🔄 in echo mode must publish nothing");
+    }
+
+    // ── reaction_remove ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_reaction_remove_is_noop() {
+        use discord_types::events::{EventMetadata, ReactionRemoveEvent};
+        use discord_types::types::Emoji;
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = ReactionRemoveEvent {
+            metadata: EventMetadata::new("dc-dm-100", 1),
+            user_id: 42,
+            channel_id: 100,
+            message_id: 77,
+            guild_id: None,
+            emoji: Emoji { id: None, name: "👍".to_string(), animated: false },
+        };
+        processor.process_reaction_remove(&event, &mock).await.unwrap();
+        assert!(mock.is_empty());
+    }
+
+    // ── component_interaction (echo mode) ─────────────────────────────────
+
+    fn make_component_event(
+        session_id: &str,
+        custom_id: &str,
+        values: Vec<String>,
+    ) -> discord_types::events::ComponentInteractionEvent {
+        use discord_types::events::{ComponentInteractionEvent, EventMetadata};
+        use discord_types::types::{ComponentType, DiscordUser};
+        ComponentInteractionEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            interaction_id: 8888,
+            interaction_token: "comp-tok".to_string(),
+            guild_id: None,
+            channel_id: 100,
+            user: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+            message_id: 77,
+            custom_id: custom_id.to_string(),
+            component_type: if values.is_empty() { ComponentType::Button } else { ComponentType::StringSelect },
+            values,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_component_button_click_echo_mode() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_component_event("dc-dm-100", "my_button", vec![]);
+
+        processor.process_component_interaction(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert!(cmd.ephemeral, "component echo must be ephemeral");
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("my_button"), "must include custom_id, got: {}", content);
+    }
+
+    #[tokio::test]
+    async fn test_component_select_menu_echo_mode() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default();
+        let event = make_component_event(
+            "dc-dm-100", "my_select",
+            vec!["option_a".to_string(), "option_b".to_string()],
+        );
+
+        processor.process_component_interaction(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        assert!(!messages.is_empty());
+        let cmd: discord_types::InteractionRespondCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        let content = cmd.content.unwrap_or_default();
+        assert!(content.contains("option_a"), "must include selected values, got: {}", content);
+    }
+
+    // ── process_message_deleted: heuristic and legacy paths ────────────────
+
+    #[tokio::test]
+    async fn test_process_message_delete_heuristic_removes_last_pair() {
+        // Step 2: last pair is user+assistant (no ID match) → remove both
+        let processor = MessageProcessor::default();
+        let session_id = "dc-dm-del-heuristic";
+
+        // Add user msg without message_id (simulates old history without ID tracking)
+        processor.conversation_manager.add_message(session_id, "user", "old user msg").await;
+        processor.conversation_manager.add_message(session_id, "assistant", "old assistant reply").await;
+
+        // Delete event with an ID that doesn't match (no message stored with this ID)
+        let event = make_delete_event(session_id, 9999, 100);
+        processor.process_message_deleted(&event).await.unwrap();
+
+        let history = processor.conversation_manager.get_history(session_id).await;
+        assert!(history.is_empty(), "heuristic step must remove last user+assistant pair");
+    }
+
+    #[tokio::test]
+    async fn test_process_message_delete_legacy_fallback_user_only() {
+        // Step 3: only a user message remains (no assistant after it)
+        let processor = MessageProcessor::default();
+        let session_id = "dc-dm-del-legacy";
+
+        processor.conversation_manager.add_message(session_id, "user", "lone user msg").await;
+
+        let event = make_delete_event(session_id, 9999, 100);
+        processor.process_message_deleted(&event).await.unwrap();
+
+        let history = processor.conversation_manager.get_history(session_id).await;
+        assert!(history.is_empty(), "legacy fallback must remove last user message");
+    }
+
+    // ── ack_emoji ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ack_emoji_published_before_typing() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::new(
+            None, None, None, None, None, None, None, 20,
+            tokio::time::Duration::from_secs(120),
+            Some("⏳".to_string()),
+        );
+        let event = make_message_event("dc-dm-123", "hello", 100, 50);
+
+        processor.process_message(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        // ack_reaction + typing + message_send = 3
+        assert!(messages.len() >= 3, "must have ack reaction, typing, and send message");
+        // First publish must be the reaction
+        let reaction: discord_types::AddReactionCommand =
+            serde_json::from_value(messages[0].1.clone()).unwrap();
+        assert_eq!(reaction.emoji, "⏳");
+        assert_eq!(reaction.message_id, 50);
+    }
+
+    // ── guild_member_update ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_guild_member_update_is_noop() {
+        use discord_types::events::{EventMetadata, GuildMemberUpdateEvent};
+        use discord_types::types::DiscordUser;
+        let processor = MessageProcessor::default();
+        let event = GuildMemberUpdateEvent {
+            metadata: EventMetadata::new("dc-guild-200-100", 1),
+            guild_id: 200,
+            user: DiscordUser { id: 42, username: "alice".to_string(), global_name: None, bot: false },
+            nick: Some("Ally".to_string()),
+            roles: vec![111],
+        };
+        // Must not panic
+        processor.process_guild_member_update(&event).await;
+    }
+
+    // ── message with ack_emoji = None (default) ────────────────────────────
+
+    #[tokio::test]
+    async fn test_no_ack_emoji_only_typing_and_send() {
+        let mock = MockPublisher::new("test");
+        let processor = MessageProcessor::default(); // ack_emoji = None
+        let event = make_message_event("dc-dm-456", "test msg", 200, 99);
+
+        processor.process_message(&event, &mock).await.unwrap();
+
+        let messages = mock.published_messages();
+        // typing + message_send = 2 (no reaction)
+        assert_eq!(messages.len(), 2, "without ack_emoji must publish exactly 2 messages");
     }
 }

@@ -967,6 +967,8 @@ mod tests {
                 referenced_message_id: None,
                 referenced_message_content: None,
             },
+            pluralkit_member_id: None,
+            pluralkit_member_name: None,
         };
         roundtrip(&event);
     }

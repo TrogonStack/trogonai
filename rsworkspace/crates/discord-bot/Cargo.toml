@@ -32,8 +32,11 @@ axum = "0.7"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 trogon-std = { path = "../trogon-std" }
+trogon-nats = { path = "../trogon-nats" }
 
 [dev-dependencies]
 tempfile = "3"
 futures = "0.3"
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
+discord-nats = { path = "../discord-nats", features = ["test-support"] }
+wiremock = "0.6"

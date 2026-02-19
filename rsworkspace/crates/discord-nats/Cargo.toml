@@ -12,6 +12,10 @@ serde_json = "1.0"
 tracing = "0.1"
 thiserror = "2.0"
 anyhow = "1.0"
+trogon-nats = { path = "../trogon-nats" }
+
+[features]
+test-support = ["trogon-nats/test-support"]
 
 [dev-dependencies]
 uuid = { version = "1", features = ["v4"] }

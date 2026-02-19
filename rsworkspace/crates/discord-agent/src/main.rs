@@ -262,9 +262,11 @@ async fn main() -> Result<()> {
         args.stream_timeout_secs
     };
 
+    let publisher = discord_nats::MessagePublisher::new(nats_client.clone(), args.prefix.clone());
     let agent = DiscordAgent::new(
         nats_client,
         args.prefix,
+        publisher,
         args.agent_name.clone(),
         llm_config,
         conversation_kv,

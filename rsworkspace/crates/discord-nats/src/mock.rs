@@ -56,6 +56,20 @@ impl MockPublisher {
     }
 }
 
+/// `MockNatsClient` implements `QueueSubscribeClient` for testing.
+/// `queue_subscribe` delegates to `subscribe`, which records the subject
+/// and returns `Err` — the same behavior as the base mock.
+#[cfg(feature = "test-support")]
+impl crate::messaging::QueueSubscribeClient for trogon_nats::MockNatsClient {
+    async fn queue_subscribe<S: async_nats::subject::ToSubject + Send>(
+        &self,
+        subject: S,
+        _queue_group: String,
+    ) -> std::result::Result<async_nats::Subscriber, Self::SubscribeError> {
+        trogon_nats::SubscribeClient::subscribe(self, subject).await
+    }
+}
+
 impl Publish for MockPublisher {
     fn prefix(&self) -> &str {
         &self.prefix
