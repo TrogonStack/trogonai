@@ -1,0 +1,87 @@
+version: "3.9"
+
+# Slack integration stack
+# Required env vars (copy .env.example → .env):
+#   SLACK_BOT_TOKEN   xoxb-...
+#   SLACK_APP_TOKEN   xapp-...
+# Optional:
+#   SLACK_BOT_USER_ID         UXXXXXXXX  (filters bot's own messages)
+#   SLACK_MENTION_GATING      false      (respond to all channel messages; default: true)
+#   SLACK_REPLY_TO_MODE       off | first | all  (default: off)
+#   SLACK_ACK_REACTION        eyes       (emoji added while processing; default: none)
+#   ANTHROPIC_API_KEY         sk-ant-... (enables Claude; without it the agent echoes)
+#   CLAUDE_MODEL              claude-sonnet-4-6  (default)
+#   CLAUDE_MAX_TOKENS         8192       (default)
+#   CLAUDE_SYSTEM_PROMPT      "You are a helpful assistant."
+#   CLAUDE_MAX_HISTORY        40         (messages kept in KV; default)
+#   RUST_LOG                  info | debug | trace
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "--store_dir=/data"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"   # monitoring HTTP endpoint
+    volumes:
+      - nats-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  slack-bot:
+    build:
+      context: .
+      dockerfile: crates/slack-bot/Dockerfile
+    environment:
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      SLACK_BOT_USER_ID: ${SLACK_BOT_USER_ID:-}
+      SLACK_MENTION_GATING: ${SLACK_MENTION_GATING:-true}
+      HEALTH_PORT: 8080
+      NATS_URL: nats://nats:4222
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "8080:8080"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  slack-agent:
+    build:
+      context: .
+      dockerfile: crates/slack-agent/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      SLACK_REPLY_TO_MODE: ${SLACK_REPLY_TO_MODE:-off}
+      SLACK_ACK_REACTION: ${SLACK_ACK_REACTION:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}
+      CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-8192}
+      CLAUDE_SYSTEM_PROMPT: ${CLAUDE_SYSTEM_PROMPT:-}
+      CLAUDE_MAX_HISTORY: ${CLAUDE_MAX_HISTORY:-40}
+      HEALTH_PORT: 8081
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "8081:8081"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  nats-data:
