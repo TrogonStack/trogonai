@@ -1,5 +1,5 @@
 use tokio::signal;
-use tracing::warn;
+use tracing::info;
 
 pub async fn shutdown_signal() {
     let ctrl_c = async {
@@ -21,10 +21,10 @@ pub async fn shutdown_signal() {
 
     tokio::select! {
         _ = ctrl_c => {
-            warn!("Received SIGINT (Ctrl+C)");
+            info!("Received SIGINT (Ctrl+C)");
         }
         _ = terminate => {
-            warn!("Received SIGTERM");
+            info!("Received SIGTERM");
         }
     }
 }
