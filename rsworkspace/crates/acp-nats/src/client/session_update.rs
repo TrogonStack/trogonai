@@ -1,5 +1,5 @@
 use agent_client_protocol::{Client, SessionNotification};
-use tracing::{error, instrument};
+use tracing::{error, instrument, warn};
 
 #[instrument(name = "acp.client.session.update", skip(payload, client))]
 pub async fn handle<C: Client>(payload: &[u8], client: &C) {
@@ -10,7 +10,7 @@ pub async fn handle<C: Client>(payload: &[u8], client: &C) {
             }
         }
         Err(e) => {
-            error!(error = %e, "Failed to parse session notification");
+            warn!(error = %e, "Failed to parse session notification");
         }
     }
 }

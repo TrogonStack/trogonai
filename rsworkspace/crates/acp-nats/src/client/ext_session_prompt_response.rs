@@ -1,7 +1,7 @@
 use super::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use agent_client_protocol::{PromptResponse, SessionId};
-use tracing::{error, instrument, warn};
+use tracing::{instrument, warn};
 
 #[instrument(
     name = "acp.client.ext.session.prompt_response",
@@ -24,7 +24,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
             }
         }
         Err(e) => {
-            error!(error = %e, session_id = %session_id, "Failed to parse prompt response");
+            warn!(error = %e, session_id = %session_id, "Failed to parse prompt response");
         }
     }
 }
