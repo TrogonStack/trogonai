@@ -14,11 +14,15 @@ COPY crates/discord-types/Cargo.toml    crates/discord-types/Cargo.toml
 COPY crates/discord-nats/Cargo.toml     crates/discord-nats/Cargo.toml
 COPY crates/discord-bot/Cargo.toml      crates/discord-bot/Cargo.toml
 COPY crates/discord-agent/Cargo.toml    crates/discord-agent/Cargo.toml
+COPY crates/trogon-std/Cargo.toml       crates/trogon-std/Cargo.toml
+COPY crates/trogon-nats/Cargo.toml      crates/trogon-nats/Cargo.toml
 
 # Create stub sources so Cargo can resolve the dependency graph and
 # download/compile all crate dependencies before we copy the real source.
 RUN mkdir -p crates/discord-types/src  && echo "pub fn _stub() {}" > crates/discord-types/src/lib.rs && \
     mkdir -p crates/discord-nats/src   && echo "pub fn _stub() {}" > crates/discord-nats/src/lib.rs  && \
+    mkdir -p crates/trogon-std/src     && echo "pub fn _stub() {}" > crates/trogon-std/src/lib.rs    && \
+    mkdir -p crates/trogon-nats/src    && echo "pub fn _stub() {}" > crates/trogon-nats/src/lib.rs   && \
     mkdir -p crates/discord-agent/src  && echo "fn main() {}"      > crates/discord-agent/src/main.rs && \
     mkdir -p crates/discord-bot/src    && echo "fn main() {}"      > crates/discord-bot/src/main.rs
 
