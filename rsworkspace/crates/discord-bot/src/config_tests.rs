@@ -1,23 +1,18 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, ReadEnv};
+    use crate::config::Config;
     use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
-    use std::collections::HashMap;
     use std::io::Write;
     use tempfile::NamedTempFile;
+    use trogon_std::env::InMemoryEnv;
 
-    struct InMemoryEnv(HashMap<&'static str, &'static str>);
-
-    impl InMemoryEnv {
-        fn new(pairs: &[(&'static str, &'static str)]) -> Self {
-            Self(pairs.iter().cloned().collect())
+    /// Build a `trogon_std::env::InMemoryEnv` from a slice of key-value pairs.
+    fn make_env(pairs: &[(&str, &str)]) -> InMemoryEnv {
+        let env = InMemoryEnv::new();
+        for (k, v) in pairs {
+            env.set(*k, *v);
         }
-    }
-
-    impl ReadEnv for InMemoryEnv {
-        fn var(&self, key: &str) -> Option<String> {
-            self.0.get(key).map(|v| v.to_string())
-        }
+        env
     }
 
     fn write_toml(content: &str) -> NamedTempFile {
@@ -128,14 +123,14 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_missing_token_returns_error() {
-        let env = InMemoryEnv::new(&[]);
+        let env = make_env(&[]);
         let result = Config::from_env_impl(&env);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_from_env_reads_token() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "env-token-abc"),
             ("NATS_URL", "nats://nats-env:4222"),
             ("DISCORD_PREFIX", "staging"),
@@ -147,7 +142,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_defaults_nats_url() {
-        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let env = make_env(&[("DISCORD_BOT_TOKEN", "tok")]);
         let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.nats.prefix, "prod");
         assert!(!cfg.nats.servers.is_empty());
@@ -155,7 +150,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_guild_policy_open() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_GUILD_POLICY", "open"),
         ]);
@@ -165,7 +160,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_guild_allowlist_parsed() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_GUILD_POLICY", "allowlist"),
             ("DISCORD_GUILD_ALLOWLIST", "111, 222, 333"),
@@ -177,7 +172,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_dm_policy_disabled() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_DM_POLICY", "disabled"),
         ]);
@@ -187,7 +182,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_user_and_admin_lists() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_USER_ALLOWLIST", "10,20,30"),
             ("DISCORD_ADMIN_USERS", "999"),
@@ -199,7 +194,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_require_mention_true() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_REQUIRE_MENTION", "true"),
         ]);
@@ -209,14 +204,14 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_require_mention_default_false() {
-        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let env = make_env(&[("DISCORD_BOT_TOKEN", "tok")]);
         let cfg = Config::from_env_impl(&env).unwrap();
         assert!(!cfg.discord.access.require_mention);
     }
 
     #[test]
     fn test_from_env_defaults_all_policies() {
-        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let env = make_env(&[("DISCORD_BOT_TOKEN", "tok")]);
         let cfg = Config::from_env_impl(&env).unwrap();
         assert_eq!(cfg.discord.access.guild_policy, GuildPolicy::Allowlist);
         assert_eq!(cfg.discord.access.dm_policy, DmPolicy::Allowlist);
@@ -227,7 +222,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_channel_allowlist_parsed() {
-        let env = InMemoryEnv::new(&[
+        let env = make_env(&[
             ("DISCORD_BOT_TOKEN", "tok"),
             ("DISCORD_CHANNEL_ALLOWLIST", "701, 702, 703"),
         ]);
@@ -237,7 +232,7 @@ prefix = "prod"
 
     #[test]
     fn test_from_env_channel_allowlist_default_empty() {
-        let env = InMemoryEnv::new(&[("DISCORD_BOT_TOKEN", "tok")]);
+        let env = make_env(&[("DISCORD_BOT_TOKEN", "tok")]);
         let cfg = Config::from_env_impl(&env).unwrap();
         assert!(cfg.discord.access.channel_allowlist.is_empty());
     }

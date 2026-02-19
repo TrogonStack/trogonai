@@ -85,6 +85,7 @@ mod tests {
             reply_to_message_id: None,
             files: vec![],
             components: vec![],
+            as_voice: false,
         };
         publish(&client, &subject, &cmd).await;
 
@@ -109,6 +110,7 @@ mod tests {
             reply_to_message_id: Some(50),
             files: vec![],
             components: vec![],
+            as_voice: false,
         };
         publish(&client, &subject, &cmd).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -570,6 +572,7 @@ mod tests {
                 reply_to_message_id: None,
                 files: vec![],
                 components: vec![],
+                as_voice: false,
             };
             publish(&client, &subjects::agent::message_send(&prefix), &cmd).await;
         }

@@ -15,3 +15,4 @@ anyhow = "1.0"
 
 [dev-dependencies]
 uuid = { version = "1", features = ["v4"] }
+trogon-std = { path = "../trogon-std", features = ["test-support"] }

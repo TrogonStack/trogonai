@@ -8,26 +8,7 @@ use discord_nats::NatsConfig;
 use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
 use serde::{Deserialize, Serialize};
 use std::fs;
-
-/// Abstraction over environment variable reading.
-/// `SystemEnv` delegates to `std::env::var`; `InMemoryEnv` is used in tests.
-pub trait ReadEnv {
-    fn var(&self, key: &str) -> Option<String>;
-
-    /// Return the value of `key`, or `default` if unset.
-    fn var_or(&self, key: &str, default: &str) -> String {
-        self.var(key).unwrap_or_else(|| default.to_string())
-    }
-}
-
-/// Live implementation: delegates to `std::env::var`.
-pub struct SystemEnv;
-
-impl ReadEnv for SystemEnv {
-    fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
-    }
-}
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 /// Complete bot configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,12 +128,13 @@ impl Config {
     pub fn from_env_impl<E: ReadEnv>(env: &E) -> Result<Self> {
         let bot_token = env.var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
 
-        let nats_url = env.var_or("NATS_URL", "localhost:4222");
+        let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
 
-        let prefix = env.var_or("DISCORD_PREFIX", "prod");
+        let prefix = env.var("DISCORD_PREFIX").unwrap_or_else(|_| "prod".to_string());
 
         let guild_policy = match env
-            .var_or("DISCORD_GUILD_POLICY", "allowlist")
+            .var("DISCORD_GUILD_POLICY")
+            .unwrap_or_else(|_| "allowlist".to_string())
             .to_lowercase()
             .as_str()
         {
@@ -164,7 +146,8 @@ impl Config {
         let guild_allowlist = parse_id_list(&env.var("DISCORD_GUILD_ALLOWLIST").unwrap_or_default());
 
         let dm_policy = match env
-            .var_or("DISCORD_DM_POLICY", "allowlist")
+            .var("DISCORD_DM_POLICY")
+            .unwrap_or_else(|_| "allowlist".to_string())
             .to_lowercase()
             .as_str()
         {
@@ -182,21 +165,25 @@ impl Config {
             parse_id_list(&env.var("DISCORD_CHANNEL_ALLOWLIST").unwrap_or_default());
 
         let require_mention = env
-            .var_or("DISCORD_REQUIRE_MENTION", "false")
+            .var("DISCORD_REQUIRE_MENTION")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
 
         let presence_enabled = env
-            .var_or("DISCORD_BRIDGE_PRESENCE", "false")
+            .var("DISCORD_BRIDGE_PRESENCE")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
 
         let guild_commands_guild_id = env
             .var("DISCORD_GUILD_COMMANDS_GUILD_ID")
+            .ok()
             .and_then(|s| s.parse::<u64>().ok());
 
         let reaction_mode = match env
-            .var_or("DISCORD_REACTION_MODE", "own")
+            .var("DISCORD_REACTION_MODE")
+            .unwrap_or_else(|_| "own".to_string())
             .to_lowercase()
             .as_str()
         {
@@ -209,17 +196,19 @@ impl Config {
         let reaction_allowlist =
             parse_id_list(&env.var("DISCORD_REACTION_ALLOWLIST").unwrap_or_default());
 
-        let ack_reaction = env.var("DISCORD_ACK_REACTION").filter(|s| !s.is_empty());
+        let ack_reaction = env.var("DISCORD_ACK_REACTION").ok().filter(|s| !s.is_empty());
 
         let allow_bots = env
-            .var_or("DISCORD_ALLOW_BOTS", "false")
+            .var("DISCORD_ALLOW_BOTS")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
 
-        let response_prefix = env.var("DISCORD_RESPONSE_PREFIX").filter(|s| !s.is_empty());
+        let response_prefix = env.var("DISCORD_RESPONSE_PREFIX").ok().filter(|s| !s.is_empty());
 
         let reply_to_mode = match env
-            .var_or("DISCORD_REPLY_TO_MODE", "first")
+            .var("DISCORD_REPLY_TO_MODE")
+            .unwrap_or_else(|_| "first".to_string())
             .to_lowercase()
             .as_str()
         {
@@ -230,17 +219,20 @@ impl Config {
 
         let max_lines_per_message = env
             .var("DISCORD_MAX_LINES_PER_MESSAGE")
+            .ok()
             .and_then(|s| s.parse::<usize>().ok());
 
         let pluralkit_enabled = env
-            .var_or("DISCORD_PLURALKIT_ENABLED", "false")
+            .var("DISCORD_PLURALKIT_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
 
-        let pluralkit_token = env.var("DISCORD_PLURALKIT_TOKEN").filter(|s| !s.is_empty());
+        let pluralkit_token = env.var("DISCORD_PLURALKIT_TOKEN").ok().filter(|s| !s.is_empty());
 
         let dm_group_enabled = env
-            .var_or("DISCORD_DM_GROUP_ENABLED", "false")
+            .var("DISCORD_DM_GROUP_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
 

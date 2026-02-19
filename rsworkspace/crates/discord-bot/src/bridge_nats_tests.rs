@@ -1,33 +1,23 @@
-//! NATS integration tests for DiscordBridge — require a live NATS server.
+//! Unit tests for DiscordBridge publish methods — no real NATS connection required.
 //!
-//! Run with: NATS_URL=nats://localhost:14222 cargo test bridge_nats
-//!
-//! Tests are skipped automatically when NATS is unreachable.
+//! Uses `MockPublisher` to capture published messages and verify their contents.
 
 #[cfg(test)]
-mod nats_tests {
+mod tests {
     use crate::bridge::DiscordBridge;
-    use discord_nats::subjects;
+    use discord_nats::{subjects, MockPublisher};
     use discord_types::{
         events::{MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent},
         AccessConfig, DmPolicy, GuildPolicy,
     };
-    use futures::StreamExt;
     use serenity::model::channel::Message as SerenityMessage;
     use serenity::model::event::MessageUpdateEvent;
     use serenity::model::id::{ChannelId, GuildId, MessageId};
 
-    const DEFAULT_NATS_URL: &str = "nats://localhost:14222";
-
-    async fn try_connect() -> Option<async_nats::Client> {
-        let url = std::env::var("NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
-        async_nats::connect(&url).await.ok()
-    }
-
-    fn make_bridge(client: async_nats::Client, prefix: &str) -> DiscordBridge {
-        DiscordBridge::new(
-            client,
-            prefix.to_string(),
+    fn make_bridge(prefix: &str) -> (DiscordBridge<MockPublisher>, MockPublisher) {
+        let mock = MockPublisher::new(prefix);
+        let bridge = DiscordBridge::with_publisher(
+            mock.clone(),
             AccessConfig {
                 dm_policy: DmPolicy::Open,
                 guild_policy: GuildPolicy::Allowlist,
@@ -36,7 +26,16 @@ mod nats_tests {
             },
             false,
             None,
-        )
+            crate::config::ReactionMode::Own,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
+        );
+        (bridge, mock)
     }
 
     fn user_json(id: u64) -> serde_json::Value {
@@ -101,32 +100,21 @@ mod nats_tests {
         .expect("construct guild SerenityMessage")
     }
 
-    async fn recv<T: for<'de> serde::Deserialize<'de>>(sub: &mut async_nats::Subscriber) -> T {
-        let raw = tokio::time::timeout(std::time::Duration::from_secs(3), sub.next())
-            .await
-            .expect("timed out waiting for NATS message")
-            .expect("subscriber closed");
-        serde_json::from_slice(&raw.payload).expect("deserialize event")
-    }
-
     // ── message_created ───────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_publish_dm_message_created() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-dm-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_created(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let prefix = "test-dc-dm";
+        let (bridge, mock) = make_bridge(prefix);
 
         let msg = dm_message(1, 100, 42, "Hello NATS");
-        bridge.publish_message_created(&msg).await.unwrap();
+        bridge.publish_message_created(&msg, None, None).await.unwrap();
 
-        let event: MessageCreatedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::message_created(prefix));
+
+        let event: MessageCreatedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
         assert_eq!(event.message.id, 1);
         assert_eq!(event.message.channel_id, 100);
         assert_eq!(event.message.guild_id, None);
@@ -137,20 +125,15 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_publish_guild_message_created() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-guild-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_created(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let prefix = "test-dc-guild";
+        let (bridge, mock) = make_bridge(prefix);
 
         let msg = guild_message(5, 100, 200, 42, "Guild hello");
-        bridge.publish_message_created(&msg).await.unwrap();
+        bridge.publish_message_created(&msg, None, None).await.unwrap();
 
-        let event: MessageCreatedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        let event: MessageCreatedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
         assert_eq!(event.message.id, 5);
         assert_eq!(event.message.guild_id, Some(200));
         assert_eq!(event.message.content, "Guild hello");
@@ -159,24 +142,18 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_sequence_increments_per_event() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-seq-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_created(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let (bridge, mock) = make_bridge("test-dc-seq");
 
         for i in 1u64..=3 {
             let msg = dm_message(i, 100, 42, "seq");
-            bridge.publish_message_created(&msg).await.unwrap();
+            bridge.publish_message_created(&msg, None, None).await.unwrap();
         }
 
-        let e1: MessageCreatedEvent = recv(&mut sub).await;
-        let e2: MessageCreatedEvent = recv(&mut sub).await;
-        let e3: MessageCreatedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 3);
+        let e1: MessageCreatedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
+        let e2: MessageCreatedEvent = serde_json::from_value(msgs[1].1.clone()).unwrap();
+        let e3: MessageCreatedEvent = serde_json::from_value(msgs[2].1.clone()).unwrap();
         assert!(e1.metadata.sequence < e2.metadata.sequence);
         assert!(e2.metadata.sequence < e3.metadata.sequence);
     }
@@ -185,22 +162,18 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_publish_message_deleted_dm() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-del-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_deleted(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let prefix = "test-dc-del";
+        let (bridge, mock) = make_bridge(prefix);
 
         bridge
             .publish_message_deleted(ChannelId::new(100), None, MessageId::new(99))
             .await
             .unwrap();
 
-        let event: MessageDeletedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::message_deleted(prefix));
+        let event: MessageDeletedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
         assert_eq!(event.message_id, 99);
         assert_eq!(event.channel_id, 100);
         assert_eq!(event.guild_id, None);
@@ -208,15 +181,8 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_publish_message_deleted_guild() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-delg-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_deleted(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let prefix = "test-dc-delg";
+        let (bridge, mock) = make_bridge(prefix);
 
         bridge
             .publish_message_deleted(
@@ -227,7 +193,9 @@ mod nats_tests {
             .await
             .unwrap();
 
-        let event: MessageDeletedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        let event: MessageDeletedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
         assert_eq!(event.message_id, 77);
         assert_eq!(event.guild_id, Some(200));
     }
@@ -236,15 +204,8 @@ mod nats_tests {
 
     #[tokio::test]
     async fn test_publish_message_updated() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-upd-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        let subject = subjects::bot::message_updated(&prefix);
-        let mut sub = client.subscribe(subject).await.unwrap();
+        let prefix = "test-dc-upd";
+        let (bridge, mock) = make_bridge(prefix);
 
         let update: MessageUpdateEvent = serde_json::from_value(serde_json::json!({
             "id": "10",
@@ -255,7 +216,10 @@ mod nats_tests {
 
         bridge.publish_message_updated(&update).await.unwrap();
 
-        let event: MessageUpdatedEvent = recv(&mut sub).await;
+        let msgs = mock.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].0, subjects::bot::message_updated(prefix));
+        let event: MessageUpdatedEvent = serde_json::from_value(msgs[0].1.clone()).unwrap();
         assert_eq!(event.message_id, 10);
         assert_eq!(event.channel_id, 100);
         assert_eq!(event.new_content, Some("edited content".to_string()));
@@ -263,30 +227,16 @@ mod nats_tests {
 
     // ── access control ────────────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_guild_access_check_allows_listed_guild() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-ac-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        // guild 200 is in the allowlist
+    #[test]
+    fn test_guild_access_check_allows_listed_guild() {
+        let (bridge, _) = make_bridge("test-dc-ac");
         assert!(bridge.check_guild_access(200));
         assert!(!bridge.check_guild_access(999));
     }
 
-    #[tokio::test]
-    async fn test_dm_access_check_open_policy() {
-        let Some(client) = try_connect().await else {
-            eprintln!("SKIP: NATS not available");
-            return;
-        };
-        let prefix = format!("test-dc-dm-ac-{}", uuid::Uuid::new_v4().simple());
-        let bridge = make_bridge(client.clone(), &prefix);
-
-        // dm_policy is Open
+    #[test]
+    fn test_dm_access_check_open_policy() {
+        let (bridge, _) = make_bridge("test-dc-dm-ac");
         assert!(bridge.check_dm_access(1));
         assert!(bridge.check_dm_access(99999));
     }
