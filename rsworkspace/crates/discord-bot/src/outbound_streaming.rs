@@ -51,12 +51,15 @@ pub(crate) struct StreamingState {
 pub(crate) type StreamingMessages = Arc<RwLock<HashMap<String, StreamingState>>>;
 
 /// Subscribe to stream commands and apply them to Discord messages.
-pub(crate) async fn handle_stream_messages(
+pub(crate) async fn handle_stream_messages<N>(
     http: Arc<Http>,
-    client: async_nats::Client,
+    client: N,
     prefix: String,
     streaming_messages: StreamingMessages,
-) -> Result<()> {
+) -> Result<()>
+where
+    N: trogon_nats::SubscribeClient + Clone,
+{
     use discord_nats::MessageSubscriber;
 
     let subscriber = MessageSubscriber::new(client, &prefix);
@@ -262,5 +265,124 @@ async fn edit_message_with_retry(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_short_string_unchanged() {
+        let s = "hello";
+        let result = truncate(s);
+        assert_eq!(result, "hello");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_exactly_2000_chars_unchanged() {
+        let s = "a".repeat(MAX_DISCORD_LEN);
+        let result = truncate(&s);
+        assert_eq!(result.len(), MAX_DISCORD_LEN);
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_over_2000_chars_gets_ellipsis() {
+        let s = "a".repeat(MAX_DISCORD_LEN + 100);
+        let result = truncate(&s);
+        assert!(result.ends_with('…'));
+        // UTF-8 length must be <= 2000
+        assert!(result.len() <= MAX_DISCORD_LEN);
+    }
+
+    #[test]
+    fn test_truncate_2001_chars_truncated() {
+        let s = "b".repeat(MAX_DISCORD_LEN + 1);
+        let result = truncate(&s);
+        assert!(result.ends_with('…'));
+        assert!(result.len() <= MAX_DISCORD_LEN);
+    }
+
+    #[test]
+    fn test_truncate_multibyte_char_boundary() {
+        // Fill to just over limit with multi-byte chars (€ = 3 bytes)
+        // so the naive byte split would land mid-char
+        let base = "€".repeat(700); // 700 × 3 = 2100 bytes
+        let result = truncate(&base);
+        // Must be valid UTF-8 (would panic if not)
+        assert!(std::str::from_utf8(result.as_bytes()).is_ok());
+        assert!(result.len() <= MAX_DISCORD_LEN);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn test_truncate_empty_string() {
+        let result = truncate("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_streaming_state_insert_lookup_remove() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        let map: StreamingMessages = Arc::new(RwLock::new(HashMap::new()));
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            {
+                let mut m = map.write().await;
+                m.insert(
+                    "sess-1".to_string(),
+                    StreamingState {
+                        channel_id: 100,
+                        message_id: 42,
+                        last_edit: Instant::now(),
+                        edit_count: 0,
+                    },
+                );
+            }
+            {
+                let m = map.read().await;
+                let s = m.get("sess-1").unwrap();
+                assert_eq!(s.channel_id, 100);
+                assert_eq!(s.message_id, 42);
+                assert_eq!(s.edit_count, 0);
+            }
+            {
+                let mut m = map.write().await;
+                m.remove("sess-1");
+            }
+            assert!(map.read().await.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_streaming_state_edit_count_update() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        let map: StreamingMessages = Arc::new(RwLock::new(HashMap::new()));
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            map.write().await.insert(
+                "sess-2".to_string(),
+                StreamingState {
+                    channel_id: 200,
+                    message_id: 99,
+                    last_edit: Instant::now(),
+                    edit_count: 5,
+                },
+            );
+            if let Some(s) = map.write().await.get_mut("sess-2") {
+                s.edit_count += 1;
+            }
+            assert_eq!(map.read().await.get("sess-2").unwrap().edit_count, 6);
+        });
     }
 }

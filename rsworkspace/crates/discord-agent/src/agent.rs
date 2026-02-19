@@ -1,8 +1,7 @@
 //! Main agent implementation
 
 use anyhow::Result;
-use async_nats::Client;
-use discord_nats::{MessagePublisher, MessageSubscriber};
+use discord_nats::{MessagePublisher, MessageSubscriber, Publish, QueueSubscribeClient};
 use tracing::{error, info};
 
 use crate::health::AgentMetrics;
@@ -11,19 +10,23 @@ use crate::processor::{MessageProcessor, WelcomeConfig};
 use tokio::time::Duration;
 
 /// Discord agent that processes messages
-pub struct DiscordAgent {
-    subscriber: MessageSubscriber,
-    publisher: MessagePublisher,
+pub struct DiscordAgent<
+    N: QueueSubscribeClient + Clone = async_nats::Client,
+    P: Publish = MessagePublisher,
+> {
+    subscriber: MessageSubscriber<N>,
+    publisher: P,
     processor: MessageProcessor,
     agent_name: String,
 }
 
-impl DiscordAgent {
+impl<N: QueueSubscribeClient + Clone, P: Publish> DiscordAgent<N, P> {
     /// Create a new Discord agent
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client: Client,
+        client: N,
         prefix: String,
+        publisher: P,
         agent_name: String,
         llm_config: Option<ClaudeConfig>,
         conversation_kv: Option<async_nats::jetstream::kv::Store>,
@@ -36,8 +39,7 @@ impl DiscordAgent {
         stream_timeout_secs: u64,
         ack_emoji: Option<String>,
     ) -> Self {
-        let subscriber = MessageSubscriber::new(client.clone(), prefix.clone());
-        let publisher = MessagePublisher::new(client, prefix);
+        let subscriber = MessageSubscriber::new(client, prefix);
         let processor = MessageProcessor::new(
             llm_config,
             conversation_kv,
@@ -818,5 +820,131 @@ impl DiscordAgent {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use discord_nats::{MockNatsClient, MockPublisher};
+
+    fn make_agent() -> DiscordAgent<MockNatsClient, MockPublisher> {
+        let client = MockNatsClient::new();
+        let publisher = MockPublisher::new("test");
+        DiscordAgent::new(
+            client, "test".to_string(), publisher, "test-agent".to_string(),
+            None, None, None, None, None, None, None, 20, 120, None,
+        )
+    }
+
+    fn make_message_event(
+        session_id: &str,
+        content: &str,
+        channel_id: u64,
+        message_id: u64,
+    ) -> discord_types::events::MessageCreatedEvent {
+        use discord_types::events::{EventMetadata, MessageCreatedEvent};
+        use discord_types::types::{DiscordMessage, DiscordUser};
+        MessageCreatedEvent {
+            metadata: EventMetadata::new(session_id, 1),
+            message: DiscordMessage {
+                id: message_id,
+                channel_id,
+                guild_id: None,
+                author: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+                content: content.to_string(),
+                timestamp: "2024-01-01T00:00:00Z".to_string(),
+                edited_timestamp: None,
+                attachments: vec![],
+                embeds: vec![],
+                referenced_message_id: None,
+                referenced_message_content: None,
+            },
+            pluralkit_member_id: None,
+            pluralkit_member_name: None,
+        }
+    }
+
+    /// Verify the agent forwards prefix and name correctly.
+    #[test]
+    fn test_agent_constructs_with_mock() {
+        let agent = make_agent();
+        assert_eq!(agent.agent_name, "test-agent");
+        assert_eq!(agent.subscriber.prefix(), "test");
+    }
+
+    /// run() must propagate the subscribe error immediately when the NATS client is a mock.
+    #[tokio::test]
+    async fn test_agent_run_returns_err_when_subscribe_fails() {
+        let agent = make_agent();
+        let result = agent.run().await;
+        assert!(result.is_err(), "run() must return Err when subscribe fails");
+        let msg = result.unwrap_err().to_string();
+        assert!(!msg.is_empty(), "error must have a message");
+    }
+
+    /// Without ack_emoji: process_message publishes exactly typing + send_message (2 commands)
+    /// and the send_message carries the original content and channel_id.
+    #[tokio::test]
+    async fn test_agent_echo_mode_publishes_typing_and_send() {
+        let agent = make_agent();
+        let pub_ref = MockPublisher::new("test");
+        let event = make_message_event("sess-1", "hello world", 100, 50);
+
+        agent.processor.process_message(&event, &pub_ref).await.unwrap();
+
+        let msgs = pub_ref.published_messages();
+        assert_eq!(msgs.len(), 2, "echo mode must publish typing + send_message");
+        let cmd: discord_types::SendMessageCommand =
+            serde_json::from_value(msgs[1].1.clone()).unwrap();
+        assert_eq!(cmd.channel_id, 100, "send must target the right channel");
+        assert!(cmd.content.contains("hello world"), "send must echo the content");
+        assert_eq!(cmd.reply_to_message_id, Some(50), "send must reply to the original message");
+    }
+
+    /// With ack_emoji: process_message publishes ack_reaction first, then typing, then send_message.
+    /// The ack reaction must carry the configured emoji and target the original message.
+    #[tokio::test]
+    async fn test_agent_with_ack_emoji_publishes_ack_reaction_first() {
+        let client = MockNatsClient::new();
+        let publisher = MockPublisher::new("test");
+        let agent = DiscordAgent::new(
+            client, "test".to_string(), publisher, "ack-agent".to_string(),
+            None, None, None, None, None, None, None, 20, 120, Some("⏳".to_string()),
+        );
+        let pub_ref = MockPublisher::new("test");
+        let event = make_message_event("sess-2", "help me", 200, 99);
+
+        agent.processor.process_message(&event, &pub_ref).await.unwrap();
+
+        let msgs = pub_ref.published_messages();
+        assert!(msgs.len() >= 3, "with ack_emoji: must publish ack_reaction + typing + send_message");
+        let reaction: discord_types::AddReactionCommand =
+            serde_json::from_value(msgs[0].1.clone()).unwrap();
+        assert_eq!(reaction.emoji, "⏳", "ack reaction must use the configured emoji");
+        assert_eq!(reaction.message_id, 99, "ack reaction must target the original message");
+        assert_eq!(reaction.channel_id, 200, "ack reaction must be in the right channel");
+    }
+
+    /// Two agents with different prefixes must not share publisher state.
+    #[tokio::test]
+    async fn test_agent_publishers_are_independent() {
+        let pub_a = MockPublisher::new("pfx-a");
+        let pub_b = MockPublisher::new("pfx-b");
+        let agent_a = DiscordAgent::new(
+            MockNatsClient::new(), "pfx-a".to_string(), pub_a.clone(), "agent-a".to_string(),
+            None, None, None, None, None, None, None, 20, 120, None,
+        );
+        let agent_b = DiscordAgent::new(
+            MockNatsClient::new(), "pfx-b".to_string(), pub_b.clone(), "agent-b".to_string(),
+            None, None, None, None, None, None, None, 20, 120, None,
+        );
+
+        let event = make_message_event("sess-a", "ping", 100, 1);
+        agent_a.processor.process_message(&event, &pub_a).await.unwrap();
+
+        assert!(!pub_a.is_empty(), "agent_a's publisher must have messages");
+        assert!(pub_b.is_empty(), "agent_b's publisher must be unaffected");
+        assert_ne!(agent_a.subscriber.prefix(), agent_b.subscriber.prefix());
     }
 }

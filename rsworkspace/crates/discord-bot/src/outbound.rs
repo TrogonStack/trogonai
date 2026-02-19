@@ -403,9 +403,13 @@ fn to_fetched_message(m: &serenity::model::channel::Message) -> FetchedMessage {
 }
 
 /// Processes NATS agent commands and forwards them to Discord
-pub struct OutboundProcessor {
+pub struct OutboundProcessor<N>
+where
+    N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
+{
     pub(crate) http: Arc<Http>,
-    pub(crate) client: async_nats::Client,
+    pub(crate) client: N,
+    pub(crate) publisher: MessagePublisher,
     pub(crate) prefix: String,
     pub(crate) streaming_messages: StreamingMessages,
     pub(crate) shard_manager: Option<Arc<serenity::all::ShardManager>>,
@@ -415,10 +419,14 @@ pub struct OutboundProcessor {
     pub(crate) max_lines_per_message: Option<usize>,
 }
 
-impl OutboundProcessor {
+impl<N> OutboundProcessor<N>
+where
+    N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
+{
     pub fn new(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
+        publisher: MessagePublisher,
         prefix: String,
         shard_manager: Option<Arc<serenity::all::ShardManager>>,
         pairing_state: Arc<PairingState>,
@@ -429,6 +437,7 @@ impl OutboundProcessor {
         Self {
             http,
             client,
+            publisher,
             prefix,
             streaming_messages: Arc::new(RwLock::new(HashMap::new())),
             shard_manager,
@@ -450,7 +459,7 @@ impl OutboundProcessor {
         let response_prefix = self.response_prefix;
         let reply_to_mode = self.reply_to_mode;
         let max_lines_per_message = self.max_lines_per_message;
-        let publisher = MessagePublisher::new(client.clone(), prefix.clone());
+        let publisher = self.publisher;
 
         info!("Starting outbound processor for prefix: {}", prefix);
 
@@ -683,7 +692,7 @@ impl OutboundProcessor {
 
     async fn handle_send_messages(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
         response_prefix: Option<String>,
@@ -811,7 +820,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_messages(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -870,7 +879,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_messages(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -920,7 +929,7 @@ impl OutboundProcessor {
 
     async fn handle_interaction_respond(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -978,7 +987,7 @@ impl OutboundProcessor {
 
     async fn handle_interaction_defer(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -1025,7 +1034,7 @@ impl OutboundProcessor {
 
     async fn handle_interaction_followup(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         streaming_messages: StreamingMessages,
     ) -> Result<()> {
@@ -1104,7 +1113,7 @@ impl OutboundProcessor {
 
     async fn handle_reaction_add(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1153,7 +1162,7 @@ impl OutboundProcessor {
 
     async fn handle_reaction_remove(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1207,7 +1216,7 @@ impl OutboundProcessor {
 
     async fn handle_typing(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -1238,7 +1247,7 @@ impl OutboundProcessor {
 
     async fn handle_modal_respond(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::builder::{CreateActionRow, CreateInputText};
@@ -1302,7 +1311,7 @@ impl OutboundProcessor {
 
     async fn handle_autocomplete_respond(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -1349,7 +1358,7 @@ impl OutboundProcessor {
 
     async fn handle_ban(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1394,7 +1403,7 @@ impl OutboundProcessor {
 
     async fn handle_kick(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1437,7 +1446,7 @@ impl OutboundProcessor {
 
     async fn handle_timeout(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1494,7 +1503,7 @@ impl OutboundProcessor {
 
     async fn handle_create_channel(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use discord_types::types::ChannelType as DcChannelType;
@@ -1538,7 +1547,7 @@ impl OutboundProcessor {
                     Ok(created_channel) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish(reply, created_channel.id.get().to_string().into())
+                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_channel.id.get().to_string().into())
                                 .await;
                         }
                         break;
@@ -1561,7 +1570,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_channel(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1609,7 +1618,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_channel(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1650,7 +1659,7 @@ impl OutboundProcessor {
 
     async fn handle_create_role(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -1684,7 +1693,7 @@ impl OutboundProcessor {
                     Ok(created_role) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish(reply, created_role.id.get().to_string().into())
+                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_role.id.get().to_string().into())
                                 .await;
                         }
                         break;
@@ -1707,7 +1716,7 @@ impl OutboundProcessor {
 
     async fn handle_assign_role(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1755,7 +1764,7 @@ impl OutboundProcessor {
 
     async fn handle_remove_role(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1803,7 +1812,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_role(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1845,7 +1854,7 @@ impl OutboundProcessor {
 
     async fn handle_pin(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1887,7 +1896,7 @@ impl OutboundProcessor {
 
     async fn handle_unpin(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1929,7 +1938,7 @@ impl OutboundProcessor {
 
     async fn handle_bulk_delete(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -1977,7 +1986,7 @@ impl OutboundProcessor {
 
     async fn handle_create_thread(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -2024,7 +2033,7 @@ impl OutboundProcessor {
                     Ok(created_thread) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish(reply, created_thread.id.get().to_string().into())
+                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_thread.id.get().to_string().into())
                                 .await;
                         }
                         break;
@@ -2047,7 +2056,7 @@ impl OutboundProcessor {
 
     async fn handle_archive_thread(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -2094,7 +2103,7 @@ impl OutboundProcessor {
     /// When `shard_manager` is provided, broadcasts the new presence to all shards.
     /// When it is `None` (e.g. in tests), logs a warning and skips the update.
     async fn handle_bot_presence(
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         shard_manager: Option<Arc<serenity::all::ShardManager>>,
     ) -> Result<()> {
@@ -2163,7 +2172,7 @@ impl OutboundProcessor {
     /// `Vec<FetchedMessage>` JSON to the NATS reply inbox.
     async fn handle_fetch_messages(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -2211,7 +2220,7 @@ impl OutboundProcessor {
                 }
             };
 
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_messages: failed to send reply: {}", e);
             }
         }
@@ -2226,7 +2235,7 @@ impl OutboundProcessor {
     /// `Option<FetchedMember>` JSON to the NATS reply inbox (`null` on error).
     async fn handle_fetch_member(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -2285,7 +2294,7 @@ impl OutboundProcessor {
                     }
                 };
 
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_member: failed to send reply: {}", e);
             }
         }
@@ -2295,7 +2304,7 @@ impl OutboundProcessor {
 
     async fn handle_unban(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -2337,7 +2346,7 @@ impl OutboundProcessor {
 
     async fn handle_guild_member_nick(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -2386,7 +2395,7 @@ impl OutboundProcessor {
 
     async fn handle_webhook_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2410,7 +2419,7 @@ impl OutboundProcessor {
 
     async fn handle_webhook_execute(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2443,7 +2452,7 @@ impl OutboundProcessor {
 
     async fn handle_webhook_delete(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2468,7 +2477,7 @@ impl OutboundProcessor {
 
     async fn handle_voice_move(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -2512,7 +2521,7 @@ impl OutboundProcessor {
 
     async fn handle_voice_disconnect(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         publisher: MessagePublisher,
     ) -> Result<()> {
@@ -2556,7 +2565,7 @@ impl OutboundProcessor {
 
     async fn handle_invite_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2584,7 +2593,7 @@ impl OutboundProcessor {
 
     async fn handle_invite_revoke(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2607,7 +2616,7 @@ impl OutboundProcessor {
 
     async fn handle_emoji_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2630,7 +2639,7 @@ impl OutboundProcessor {
 
     async fn handle_emoji_delete(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2654,7 +2663,7 @@ impl OutboundProcessor {
 
     async fn handle_scheduled_event_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::builder::CreateScheduledEvent;
@@ -2708,7 +2717,7 @@ impl OutboundProcessor {
 
     async fn handle_scheduled_event_delete(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2732,7 +2741,7 @@ impl OutboundProcessor {
 
     async fn handle_reaction_remove_all(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2768,7 +2777,7 @@ impl OutboundProcessor {
 
     async fn handle_message_crosspost(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2792,7 +2801,7 @@ impl OutboundProcessor {
 
     async fn handle_forum_post_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::builder::{CreateForumPost, CreateMessage};
@@ -2826,7 +2835,7 @@ impl OutboundProcessor {
 
     async fn handle_thread_member_add(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2850,7 +2859,7 @@ impl OutboundProcessor {
 
     async fn handle_thread_member_remove(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2874,7 +2883,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_role(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2903,7 +2912,7 @@ impl OutboundProcessor {
 
     async fn handle_stage_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::builder::Builder;
@@ -2928,7 +2937,7 @@ impl OutboundProcessor {
 
     async fn handle_stage_delete(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2951,7 +2960,7 @@ impl OutboundProcessor {
 
     async fn handle_webhook_edit(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -2979,7 +2988,7 @@ impl OutboundProcessor {
 
     async fn handle_dm_create(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3009,7 +3018,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Option<u64>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("dm_create: failed to send reply: {}", e);
             }
         }
@@ -3018,7 +3027,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_guild(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3054,7 +3063,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Option<FetchedGuild>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_guild: failed to send reply: {}", e);
             }
         }
@@ -3063,7 +3072,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_channel(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3127,7 +3136,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Option<FetchedChannel>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_channel: failed to send reply: {}", e);
             }
         }
@@ -3136,7 +3145,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_invites(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3180,7 +3189,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedInvite>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_invites: failed to send reply: {}", e);
             }
         }
@@ -3189,7 +3198,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_scheduled_event(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3225,7 +3234,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_emoji(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::model::id::EmojiId;
@@ -3251,7 +3260,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_guild_members(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3298,7 +3307,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedMember>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_guild_members: failed to send reply: {}", e);
             }
         }
@@ -3307,7 +3316,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_guild_channels(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3358,7 +3367,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedChannel>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_guild_channels: failed to send reply: {}", e);
             }
         }
@@ -3367,7 +3376,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_pinned(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3400,7 +3409,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedMessage>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_pinned: failed to send reply: {}", e);
             }
         }
@@ -3409,7 +3418,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_roles(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3452,7 +3461,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedRole>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_roles: failed to send reply: {}", e);
             }
         }
@@ -3461,7 +3470,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_interaction_response(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3491,7 +3500,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_interaction_response(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3513,7 +3522,7 @@ impl OutboundProcessor {
 
     async fn handle_set_channel_permissions(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3547,7 +3556,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_channel_permissions(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3571,7 +3580,7 @@ impl OutboundProcessor {
 
     async fn handle_prune_members(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
@@ -3594,7 +3603,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_audit_log(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3635,7 +3644,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<AuditLogEntryInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_audit_log: failed to send reply: {}", e);
             }
         }
@@ -3644,7 +3653,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_scheduled_event_users(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3686,7 +3695,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<ScheduledEventUserInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_scheduled_event_users: failed to send reply: {}", e);
             }
         }
@@ -3695,7 +3704,7 @@ impl OutboundProcessor {
 
     async fn handle_edit_sticker(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::model::id::StickerId;
@@ -3728,7 +3737,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_sticker(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::model::id::StickerId;
@@ -3753,7 +3762,7 @@ impl OutboundProcessor {
 
     async fn handle_delete_integration(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::model::id::IntegrationId;
@@ -3778,7 +3787,7 @@ impl OutboundProcessor {
 
     async fn handle_sync_integration(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::model::id::IntegrationId;
@@ -3803,7 +3812,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_voice_regions(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3833,7 +3842,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<VoiceRegionInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_voice_regions: failed to send reply: {}", e);
             }
         }
@@ -3842,7 +3851,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_application_info(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -3872,7 +3881,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Option<AppInfo>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_application_info: failed to send reply: {}", e);
             }
         }
@@ -3881,7 +3890,7 @@ impl OutboundProcessor {
 
     async fn handle_pairing_approve(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         pairing_state: Arc<PairingState>,
         publisher: MessagePublisher,
@@ -3939,7 +3948,7 @@ impl OutboundProcessor {
 
     async fn handle_pairing_reject(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
         pairing_state: Arc<PairingState>,
         publisher: MessagePublisher,
@@ -3997,7 +4006,7 @@ impl OutboundProcessor {
 
     async fn handle_create_poll(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -4037,7 +4046,7 @@ impl OutboundProcessor {
 
     async fn handle_create_sticker(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -4076,7 +4085,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_emojis(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -4115,7 +4124,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<Emoji>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_emojis: failed to publish reply: {}", e);
             }
         }
@@ -4125,7 +4134,7 @@ impl OutboundProcessor {
 
     async fn handle_fetch_bans(
         http: Arc<Http>,
-        client: async_nats::Client,
+        client: N,
         prefix: String,
     ) -> Result<()> {
         use serenity::futures::StreamExt as _;
@@ -4167,7 +4176,7 @@ impl OutboundProcessor {
                     serde_json::to_vec::<Vec<FetchedBan>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
                 error!("fetch_bans: failed to publish reply: {}", e);
             }
         }
@@ -4223,4 +4232,227 @@ fn parse_reaction_type(emoji: &str) -> serenity::model::channel::ReactionType {
         _ => {}
     }
     serenity::model::channel::ReactionType::Unicode(emoji.to_string())
+}
+
+#[cfg(test)]
+mod pure_fn_tests {
+    use super::*;
+
+    // ── truncate ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_truncate_short_is_unchanged() {
+        assert_eq!(truncate("hello"), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exactly_max_is_unchanged() {
+        let s = "a".repeat(MAX_DISCORD_LEN);
+        assert_eq!(truncate(&s).len(), MAX_DISCORD_LEN);
+    }
+
+    #[test]
+    fn test_truncate_over_max_is_cut() {
+        let s = "b".repeat(MAX_DISCORD_LEN + 50);
+        let t = truncate(&s);
+        assert!(t.len() <= MAX_DISCORD_LEN);
+    }
+
+    #[test]
+    fn test_truncate_multibyte_respects_char_boundary() {
+        let s = "€".repeat(700); // 700 × 3 bytes = 2100 bytes
+        let t = truncate(&s);
+        assert!(std::str::from_utf8(t.as_bytes()).is_ok());
+        assert!(t.len() <= MAX_DISCORD_LEN);
+    }
+
+    // ── chunk_text ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chunk_text_short_text_is_one_chunk() {
+        let chunks = chunk_text("hello world", 2000, None);
+        assert_eq!(chunks, vec!["hello world"]);
+    }
+
+    #[test]
+    fn test_chunk_text_empty_gives_empty_chunk() {
+        let chunks = chunk_text("", 2000, None);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "");
+    }
+
+    #[test]
+    fn test_chunk_text_splits_on_line_limit() {
+        let text = "line1\nline2\nline3\nline4";
+        let chunks = chunk_text(text, 2000, Some(2));
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "line1\nline2");
+        assert_eq!(chunks[1], "line3\nline4");
+    }
+
+    #[test]
+    fn test_chunk_text_no_line_limit_all_in_one() {
+        let text = "a\nb\nc\nd\ne";
+        let chunks = chunk_text(text, 2000, None);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], text);
+    }
+
+    #[test]
+    fn test_chunk_text_line_limit_exact_multiple() {
+        let chunks = chunk_text("a\nb\nc\nd", 2000, Some(2));
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "a\nb");
+        assert_eq!(chunks[1], "c\nd");
+    }
+
+    #[test]
+    fn test_chunk_text_splits_at_char_limit() {
+        let text = "hello world foo bar baz!!";
+        let chunks = chunk_text(text, 10, None);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 10, "chunk too long: {:?}", chunk);
+        }
+    }
+
+    #[test]
+    fn test_chunk_text_hard_break_when_no_whitespace() {
+        let text = "a".repeat(50);
+        let chunks = chunk_text(&text, 20, None);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 20);
+        }
+        assert_eq!(chunks.join(""), text);
+    }
+
+    #[test]
+    fn test_chunk_text_single_long_line_multiple_chunks() {
+        let text = "word ".repeat(500); // 2500 chars
+        let chunks = chunk_text(text.trim(), 100, None);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 100, "chunk too long: {}", chunk.len());
+        }
+    }
+
+    // ── extract_reply_tag ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_no_tag_returns_original() {
+        let (content, id) = extract_reply_tag("hello world");
+        assert_eq!(content, "hello world");
+        assert_eq!(id, None);
+    }
+
+    #[test]
+    fn test_extract_reply_tag_at_start() {
+        let (content, id) = extract_reply_tag("[[reply_to:123]] hello");
+        assert_eq!(id, Some(123));
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_extract_reply_tag_in_middle() {
+        let (content, id) = extract_reply_tag("hi [[reply_to:456]] there");
+        assert_eq!(id, Some(456));
+        assert!(!content.contains("[[reply_to:"), "tag must be stripped");
+    }
+
+    #[test]
+    fn test_extract_reply_tag_invalid_id_strips_tag() {
+        let (content, id) = extract_reply_tag("[[reply_to:abc]] hello");
+        assert_eq!(id, None);
+        assert!(!content.contains("[[reply_to:abc]]"), "tag must be stripped");
+    }
+
+    #[test]
+    fn test_extract_reply_to_current_stripped() {
+        let (content, id) = extract_reply_tag("[[reply_to_current]] hello");
+        assert_eq!(id, None);
+        assert!(!content.contains("[[reply_to_current]]"));
+        assert!(content.contains("hello"));
+    }
+
+    #[test]
+    fn test_extract_reply_tag_zero_id() {
+        let (_, id) = extract_reply_tag("[[reply_to:0]] msg");
+        assert_eq!(id, Some(0));
+    }
+
+    #[test]
+    fn test_extract_reply_tag_large_id() {
+        let (_, id) = extract_reply_tag("[[reply_to:1234567890123456789]] msg");
+        assert_eq!(id, Some(1234567890123456789));
+    }
+
+    #[test]
+    fn test_extract_no_tag_no_mutation() {
+        let input = "just a plain message with no tags at all";
+        let (content, id) = extract_reply_tag(input);
+        assert_eq!(content, input);
+        assert_eq!(id, None);
+    }
+
+    // ── parse_reaction_type ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_unicode_emoji() {
+        let rt = parse_reaction_type("👍");
+        assert!(matches!(rt, serenity::model::channel::ReactionType::Unicode(s) if s == "👍"));
+    }
+
+    #[test]
+    fn test_parse_custom_emoji_static() {
+        let rt = parse_reaction_type("wave:123456789");
+        match rt {
+            serenity::model::channel::ReactionType::Custom { animated, id, name } => {
+                assert!(!animated);
+                assert_eq!(id.get(), 123456789);
+                assert_eq!(name.as_deref(), Some("wave"));
+            }
+            _ => panic!("expected Custom reaction"),
+        }
+    }
+
+    #[test]
+    fn test_parse_custom_emoji_animated_flag_1() {
+        let rt = parse_reaction_type("dance:987654321:1");
+        match rt {
+            serenity::model::channel::ReactionType::Custom { animated, id, name } => {
+                assert!(animated);
+                assert_eq!(id.get(), 987654321);
+                assert_eq!(name.as_deref(), Some("dance"));
+            }
+            _ => panic!("expected Custom reaction"),
+        }
+    }
+
+    #[test]
+    fn test_parse_custom_emoji_animated_flag_word() {
+        let rt = parse_reaction_type("spin:111222333:animated");
+        match rt {
+            serenity::model::channel::ReactionType::Custom { animated, .. } => assert!(animated),
+            _ => panic!("expected Custom reaction"),
+        }
+    }
+
+    #[test]
+    fn test_parse_custom_emoji_not_animated_other_flag() {
+        let rt = parse_reaction_type("icon:555:false");
+        match rt {
+            serenity::model::channel::ReactionType::Custom { animated, .. } => assert!(!animated),
+            _ => panic!("expected Custom reaction"),
+        }
+    }
+
+    #[test]
+    fn test_parse_custom_emoji_invalid_id_falls_back_to_unicode() {
+        let rt = parse_reaction_type("wave:notanumber");
+        assert!(matches!(rt, serenity::model::channel::ReactionType::Unicode(_)));
+    }
+
+    #[test]
+    fn test_parse_plain_text_is_unicode() {
+        let rt = parse_reaction_type(":thumbsup:");
+        assert!(matches!(rt, serenity::model::channel::ReactionType::Unicode(_)));
+    }
 }
