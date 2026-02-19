@@ -4,9 +4,9 @@ use slack_nats::publisher::{
     publish_outbound, publish_reaction_action, publish_stream_append, publish_stream_stop,
 };
 use slack_types::events::{
-    SlackBlockActionEvent, SlackInboundMessage, SlackMessageChangedEvent, SlackMessageDeletedEvent,
-    SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
-    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackBlockActionEvent, SlackFile, SlackInboundMessage, SlackMessageChangedEvent,
+    SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent, SlackReactionAction,
+    SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
     SlackStreamStartRequest, SlackStreamStartResponse, SlackThreadBroadcastEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
@@ -141,7 +141,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     let mut history = ctx.memory.load(&session_key).await;
     history.push(ConversationMessage {
         role: "user".to_string(),
-        content: msg.text.clone(),
+        content: build_message_content(&msg.text, &msg.files),
     });
 
     // 4. Determine the response text (streaming or fallback).
@@ -324,7 +324,19 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         "Received slash command"
     );
 
-    let text = ev.text.as_deref().unwrap_or("").to_string();
+    let text = ev.text.as_deref().unwrap_or("").trim().to_string();
+
+    // Special built-in: /command clear — wipe conversation history for this channel.
+    if text.eq_ignore_ascii_case("clear") {
+        let session_key = format!("slack:channel:{}", ev.channel_id);
+        ctx.memory.clear(&session_key).await;
+        // Also evict the per-session lock so memory is fully reset.
+        ctx.session_locks.lock().unwrap().remove(&session_key);
+        tracing::info!(channel = %ev.channel_id, "Conversation history cleared via slash command");
+        post_response_url(&ev.response_url, "Conversation history cleared.").await;
+        return;
+    }
+
     let prompt = format!("{} {}", ev.command, text).trim().to_string();
 
     let response_text = if let Some(claude) = &ctx.claude {
@@ -437,4 +449,26 @@ pub async fn handle_block_action(ev: SlackBlockActionEvent) {
         value = ?ev.value,
         "Received block action"
     );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Build the content string sent to Claude, appending file metadata when present.
+///
+/// Even though we can't download private Slack files from the agent, giving
+/// Claude the file names and MIME types lets it acknowledge attachments and
+/// ask the user for context if needed.
+fn build_message_content(text: &str, files: &[SlackFile]) -> String {
+    if files.is_empty() {
+        return text.to_string();
+    }
+    let mut content = text.to_string();
+    content.push_str("\n\n[Attached files:");
+    for f in files {
+        let name = f.name.as_deref().unwrap_or("unknown");
+        let mime = f.mimetype.as_deref().unwrap_or("unknown type");
+        content.push_str(&format!("\n- {} ({})", name, mime));
+    }
+    content.push(']');
+    content
 }

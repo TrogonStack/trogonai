@@ -67,6 +67,14 @@ impl ConversationMemory {
             }
         }
     }
+
+    /// Delete all conversation history for `session_key`.
+    pub async fn clear(&self, session_key: &str) {
+        let key = sanitize_key(session_key);
+        if let Err(e) = self.store.delete(&key).await {
+            tracing::warn!(error = %e, session_key, "Failed to clear conversation history");
+        }
+    }
 }
 
 /// NATS KV keys allow `[-\w.]` — replace `:` with `.`.

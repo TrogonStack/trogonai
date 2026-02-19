@@ -189,12 +189,14 @@ pub async fn handle_push_event(
                         .map(|c| c.0.clone())
                         .unwrap_or_default();
 
-                    let text = msg
+                    let raw_text = msg
                         .content
                         .as_ref()
                         .and_then(|c| c.text.as_deref())
                         .unwrap_or("")
                         .to_string();
+                    let text =
+                        strip_bot_mention(&raw_text, state.bot_user_id.as_deref());
 
                     if text.is_empty() {
                         return Ok(());
@@ -273,12 +275,13 @@ pub async fn handle_push_event(
         SlackEventCallbackBody::AppMention(mention) => {
             let channel_id = mention.channel.0.clone();
             let user = mention.user.0.clone();
-            let text = mention
+            let raw_text = mention
                 .content
                 .text
                 .as_deref()
                 .unwrap_or("")
                 .to_string();
+            let text = strip_bot_mention(&raw_text, state.bot_user_id.as_deref());
 
             if text.is_empty() {
                 return Ok(());
@@ -629,6 +632,14 @@ fn compute_session_key(
         },
     };
     Some(key)
+}
+
+/// Remove any `<@BOT_USER_ID>` mention from text and trim whitespace.
+fn strip_bot_mention(text: &str, bot_user_id: Option<&str>) -> String {
+    match bot_user_id {
+        Some(uid) => text.replace(&format!("<@{}>", uid), "").trim().to_string(),
+        None => text.trim().to_string(),
+    }
 }
 
 pub fn error_handler(

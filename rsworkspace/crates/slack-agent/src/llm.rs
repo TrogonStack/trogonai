@@ -13,6 +13,8 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const MAX_RETRIES: u32 = 3;
 /// Initial backoff delay; doubles on each attempt.
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Total time budget for a single Claude request (connection + full stream).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Async client for the Anthropic Messages API with SSE streaming support.
 #[derive(Clone)]
@@ -59,8 +61,12 @@ impl ClaudeClient {
         max_tokens: u32,
         system_prompt: Option<String>,
     ) -> Self {
+        let client = Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .expect("Failed to build reqwest client");
         Self {
-            client: Client::new(),
+            client,
             api_key,
             model,
             max_tokens,

@@ -162,7 +162,8 @@ pub async fn run_stream_append_loop(
                 let session = slack_client.open_session(&token);
                 let channel: SlackChannelId = append.channel.into();
                 let ts: SlackTs = append.ts.into();
-                let content = SlackMessageContent::new().with_text(append.text.into());
+                let converted = format::markdown_to_mrkdwn(&append.text);
+                let content = SlackMessageContent::new().with_text(converted.into());
                 let request = SlackApiChatUpdateRequest::new(channel, content, ts);
                 if let Err(e) = session.chat_update(&request).await {
                     tracing::error!(error = %e, "Failed to update streaming message (append)");
@@ -217,8 +218,9 @@ pub async fn run_stream_stop_loop(
                         .ok()
                 });
 
+                let converted_final = format::markdown_to_mrkdwn(&stop.final_text);
                 let mut content =
-                    SlackMessageContent::new().with_text(stop.final_text.into());
+                    SlackMessageContent::new().with_text(converted_final.into());
                 if let Some(blks) = blocks {
                     content = content.with_blocks(blks);
                 }
