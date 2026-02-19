@@ -9,17 +9,17 @@ const DEFAULT_ACP_PREFIX: &str = "acp";
 #[command(name = "acp-nats-stdio")]
 #[command(about = "ACP stdio to NATS bridge for agent-client protocol", long_about = None)]
 pub struct Args {
-    #[arg(long = "acp-prefix", env = ENV_ACP_PREFIX)]
+    #[arg(long = "acp-prefix")]
     pub acp_prefix: Option<String>,
 }
 
 pub fn from_env_with_provider<E: ReadEnv>(env_provider: &E) -> Config {
     let args = Args::parse();
-    Config::new(
-        args.acp_prefix
-            .unwrap_or_else(|| DEFAULT_ACP_PREFIX.to_string()),
-        NatsConfig::from_env(env_provider),
-    )
+    let acp_prefix = args
+        .acp_prefix
+        .or_else(|| env_provider.var(ENV_ACP_PREFIX).ok())
+        .unwrap_or_else(|| DEFAULT_ACP_PREFIX.to_string());
+    Config::new(acp_prefix, NatsConfig::from_env(env_provider))
 }
 
 #[cfg(test)]
@@ -34,6 +34,14 @@ mod tests {
         assert_eq!(config.acp_prefix, DEFAULT_ACP_PREFIX);
         assert_eq!(config.nats.servers, vec!["localhost:4222"]);
         assert!(matches!(config.nats.auth, acp_nats::NatsAuth::None));
+    }
+
+    #[test]
+    fn test_acp_prefix_from_env_provider() {
+        let env = InMemoryEnv::new();
+        env.set("ACP_PREFIX", "custom-prefix");
+        let config = from_env_with_provider(&env);
+        assert_eq!(config.acp_prefix, "custom-prefix");
     }
 
     #[test]

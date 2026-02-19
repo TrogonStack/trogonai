@@ -6,7 +6,7 @@ use acp_nats::{agent::Bridge, client, nats};
 use agent_client_protocol::AgentSideConnection;
 use async_nats::Client as NatsAsyncClient;
 use std::rc::Rc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use trogon_std::env::SystemEnv;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_client = match nats::connect(&config.nats).await {
         Ok(client) => Some(client),
         Err(e) => {
-            error!(error = %e, "Failed to connect to NATS");
+            warn!(error = %e, "Failed to connect to NATS");
             None
         }
     };
