@@ -225,7 +225,9 @@ pub async fn handle_push_event(
                         if thread_ts.is_none() {
                             match &state.bot_user_id {
                                 Some(bot_uid) => {
-                                    if !text.contains(&format!("<@{}>", bot_uid)) {
+                                    // Gate on raw_text: the stripped `text` no longer
+                                    // contains the mention so we must check the original.
+                                    if !raw_text.contains(&format!("<@{}>", bot_uid)) {
                                         return Ok(());
                                     }
                                 }
