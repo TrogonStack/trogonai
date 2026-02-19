@@ -8,8 +8,8 @@ mod new_session;
 mod prompt;
 mod set_session_mode;
 
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::metrics::Metrics;
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
@@ -18,16 +18,16 @@ use agent_client_protocol::{
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::rc::Rc;
 use tokio::sync::oneshot;
 
 /// Pre-flight checks to avoid sending prompt requests for cancelled sessions.
 #[derive(Clone)]
-pub(crate) struct CancelledSessions(Arc<RefCell<HashSet<SessionId>>>);
+pub(crate) struct CancelledSessions(Rc<RefCell<HashSet<SessionId>>>);
 
 impl CancelledSessions {
     pub fn new() -> Self {
-        Self(Arc::new(RefCell::new(HashSet::new())))
+        Self(Rc::new(RefCell::new(HashSet::new())))
     }
 
     pub fn is_cancelled(&self, session_id: &SessionId) -> bool {
@@ -48,12 +48,12 @@ impl CancelledSessions {
 /// `client.ext.session.prompt_response` notification.
 #[derive(Clone)]
 pub(crate) struct PendingSessionPromptResponseWaiters(
-    Arc<RefCell<HashMap<SessionId, oneshot::Sender<PromptResponse>>>>,
+    Rc<RefCell<HashMap<SessionId, oneshot::Sender<PromptResponse>>>>,
 );
 
 impl PendingSessionPromptResponseWaiters {
     pub fn new() -> Self {
-        Self(Arc::new(RefCell::new(HashMap::new())))
+        Self(Rc::new(RefCell::new(HashMap::new())))
     }
 
     pub fn register_waiter(&self, session_id: SessionId) -> oneshot::Receiver<PromptResponse> {

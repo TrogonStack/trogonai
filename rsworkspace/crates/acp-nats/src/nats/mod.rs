@@ -4,11 +4,11 @@ mod subjects;
 
 // Re-export from trogon-nats
 pub use trogon_nats::{
-    connect, headers_with_trace_context, publish, request, FlushClient, FlushPolicy,
-    PublishClient, PublishOptions, RequestClient, RetryPolicy, SubscribeClient,
+    FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
+    SubscribeClient, connect, headers_with_trace_context, publish, request,
 };
 
 // ACP-specific exports
 pub use extensions::SessionReady;
-pub use parsing::{parse_client_subject, ClientMethod};
+pub use parsing::{ClientMethod, parse_client_subject};
 pub use subjects::{agent, client};

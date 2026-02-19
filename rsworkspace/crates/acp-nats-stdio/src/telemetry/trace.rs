@@ -21,9 +21,9 @@ pub(super) fn init_provider(
 }
 
 pub(super) fn shutdown() {
-    if let Some(provider) = TRACER_PROVIDER.get() {
-        if let Err(e) = provider.shutdown() {
-            eprintln!("Failed to shutdown tracer provider: {e}");
-        }
+    if let Some(provider) = TRACER_PROVIDER.get()
+        && let Err(e) = provider.shutdown()
+    {
+        eprintln!("Failed to shutdown tracer provider: {e}");
     }
 }

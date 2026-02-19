@@ -1,5 +1,7 @@
 use super::Bridge;
-use crate::nats::{self, agent, FlushClient, PublishClient, RequestClient, SessionReady, SubscribeClient};
+use crate::nats::{
+    self, FlushClient, PublishClient, RequestClient, SessionReady, SubscribeClient, agent,
+};
 use agent_client_protocol::{Error, LoadSessionRequest, LoadSessionResponse, Result};
 use std::time::Instant;
 use tracing::{info, instrument, warn};

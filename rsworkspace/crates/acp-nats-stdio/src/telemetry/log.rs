@@ -20,10 +20,10 @@ pub(super) fn init_provider(
 }
 
 pub(super) fn shutdown() {
-    if let Some(provider) = LOGGER_PROVIDER.get() {
-        if let Err(e) = provider.shutdown() {
-            eprintln!("Failed to shutdown logger provider: {e}");
-        }
+    if let Some(provider) = LOGGER_PROVIDER.get()
+        && let Err(e) = provider.shutdown()
+    {
+        eprintln!("Failed to shutdown logger provider: {e}");
     }
 }
 
@@ -43,9 +43,7 @@ fn platform_log_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     use trogon_std::dirs::{HomeDir, StateDir, SystemDirs};
 
     if cfg!(target_os = "macos") {
-        let home = SystemDirs
-            .home_dir()
-            .ok_or("HOME not set")?;
+        let home = SystemDirs.home_dir().ok_or("HOME not set")?;
         Ok(home.join("Library").join("Logs").join("acp-nats-stdio"))
     } else {
         let base = SystemDirs

@@ -17,13 +17,16 @@ use crate::nats::{
 use agent_client_protocol::Client;
 use bytes::Bytes;
 use futures::StreamExt;
-use std::sync::Arc;
+use std::rc::Rc;
 use tracing::{Span, error, info, instrument, warn};
 
-pub async fn run<N: SubscribeClient + RequestClient + PublishClient + FlushClient, C: Client + Send + Sync + 'static>(
+pub async fn run<
+    N: SubscribeClient + RequestClient + PublishClient + FlushClient,
+    C: Client + 'static,
+>(
     nats: N,
-    client: Arc<C>,
-    bridge: Arc<Bridge<N>>,
+    client: Rc<C>,
+    bridge: Rc<Bridge<N>>,
 ) {
     let wildcard = client::wildcards::all(&bridge.acp_prefix);
     info!("Starting client proxy - subscribing to {}", wildcard);
@@ -63,7 +66,10 @@ pub async fn run<N: SubscribeClient + RequestClient + PublishClient + FlushClien
 }
 
 #[instrument(skip(payload, reply, nats, client, bridge), fields(subject = %subject, session_id = tracing::field::Empty))]
-async fn handle_client_request<N: SubscribeClient + RequestClient + PublishClient + FlushClient, C: Client>(
+async fn handle_client_request<
+    N: SubscribeClient + RequestClient + PublishClient + FlushClient,
+    C: Client,
+>(
     subject: &str,
     payload: Bytes,
     reply: Option<async_nats::Subject>,

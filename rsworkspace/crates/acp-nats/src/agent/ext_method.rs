@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, agent, FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, ExtRequest, ExtResponse, Result};
 use std::time::Instant;
 use tracing::{info, instrument};
@@ -9,7 +9,10 @@ use tracing::{info, instrument};
     skip(bridge, args),
     fields(method = %args.method)
 )]
-pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(bridge: &Bridge<N>, args: ExtRequest) -> Result<ExtResponse> {
+pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(
+    bridge: &Bridge<N>,
+    args: ExtRequest,
+) -> Result<ExtResponse> {
     let start = Instant::now();
 
     info!(method = %args.method, "Extension method request");

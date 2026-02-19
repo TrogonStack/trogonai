@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, agent, FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{CancelNotification, Result};
 use std::time::Instant;
 use tracing::{info, instrument, warn};
@@ -9,7 +9,10 @@ use tracing::{info, instrument, warn};
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(bridge: &Bridge<N>, args: CancelNotification) -> Result<()> {
+pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(
+    bridge: &Bridge<N>,
+    args: CancelNotification,
+) -> Result<()> {
     let start = Instant::now();
 
     info!(session_id = %args.session_id, "Cancel notification");

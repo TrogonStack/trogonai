@@ -8,7 +8,11 @@ use tracing::{error, instrument, warn};
     skip(payload, bridge),
     fields(session_id = %session_id)
 )]
-pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(session_id: &str, payload: &[u8], bridge: &Bridge<N>) {
+pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushClient>(
+    session_id: &str,
+    payload: &[u8],
+    bridge: &Bridge<N>,
+) {
     match serde_json::from_slice::<PromptResponse>(payload) {
         Ok(response) => {
             let session_id_typed: SessionId = session_id.to_string().into();

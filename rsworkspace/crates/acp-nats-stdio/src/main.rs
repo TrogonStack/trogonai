@@ -1,11 +1,11 @@
 mod config;
-mod telemetry;
 mod signal;
+mod telemetry;
 
 use acp_nats::{agent::Bridge, client, nats};
 use agent_client_protocol::AgentSideConnection;
 use async_nats::Client as NatsAsyncClient;
-use std::sync::Arc;
+use std::rc::Rc;
 use tracing::{error, info};
 use trogon_std::env::SystemEnv;
 
@@ -38,28 +38,23 @@ async fn run_bridge(nats_client: Option<NatsAsyncClient>, config: &acp_nats::Con
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
-    let bridge = Arc::new(Bridge::<NatsAsyncClient>::new(
+    let bridge = Rc::new(Bridge::<NatsAsyncClient>::new(
         nats_client.clone(),
         config.acp_prefix.clone(),
     ));
 
-    let (connection, io_task) =
-        AgentSideConnection::new(bridge.clone(), stdout, stdin, |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), stdout, stdin, |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
-    let connection = Arc::new(connection);
+    let connection = Rc::new(connection);
 
     if let Some(nats_instance) = nats_client {
         let client_connection = connection.clone();
         let bridge_for_client = bridge.clone();
         tokio::task::spawn_local(async move {
-            client::run::<NatsAsyncClient, _>(
-                nats_instance,
-                client_connection,
-                bridge_for_client,
-            )
-            .await;
+            client::run::<NatsAsyncClient, _>(nats_instance, client_connection, bridge_for_client)
+                .await;
         });
         info!("ACP bridge running on stdio with NATS client proxy");
     } else {

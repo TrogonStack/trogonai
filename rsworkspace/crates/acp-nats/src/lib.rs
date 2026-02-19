@@ -1,8 +1,8 @@
 pub mod agent;
 pub mod client;
 pub mod config;
-pub mod nats;
 pub(crate) mod metrics;
+pub mod nats;
 
 #[cfg(test)]
 mod tests;

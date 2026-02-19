@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, agent, FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, PromptRequest, PromptResponse, Result, StopReason};
 use std::time::Duration;
 use std::time::Instant;

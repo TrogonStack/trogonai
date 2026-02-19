@@ -4,8 +4,8 @@
 /// ACP protocol flow, including initialization, session management, and
 /// streaming responses.
 use super::*;
-use crate::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::agent::Bridge;
+use crate::{FlushClient, PublishClient, RequestClient};
 
 #[tokio::test]
 async fn test_bridge_with_mock_nats() {
