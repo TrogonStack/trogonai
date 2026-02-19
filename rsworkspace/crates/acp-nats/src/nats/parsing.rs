@@ -44,8 +44,9 @@ pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
         return None;
     }
 
-    // Find "client" marker - it should appear after prefix and session_id
-    let client_index = parts.iter().position(|&p| p == "client")?;
+    // Find "client" marker scanning from the end so that a prefix
+    // containing "client" as a token (e.g. "org.client.app") is skipped.
+    let client_index = parts.iter().rposition(|&p| p == "client")?;
 
     // Need at least prefix and session_id before "client"
     if client_index < 2 {
@@ -221,6 +222,14 @@ mod tests {
             let parsed = parse_client_subject(subject).unwrap();
             assert_eq!(parsed.session_id, expected_session_id);
         }
+    }
+
+    #[test]
+    fn test_parse_with_client_in_prefix() {
+        let subject = "org.client.app.sess123.client.fs.read_text_file";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id, "sess123");
+        assert_eq!(parsed.method, ClientMethod::FsReadTextFile);
     }
 
     #[test]
