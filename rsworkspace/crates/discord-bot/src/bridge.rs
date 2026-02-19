@@ -79,7 +79,11 @@ impl PairingState {
             + 300; // 5 minutes
         pending.insert(
             user_id,
-            PendingPairing { code: code.clone(), channel_id, expires_at },
+            PendingPairing {
+                code: code.clone(),
+                channel_id,
+                expires_at,
+            },
         );
         Some((code, expires_at))
     }
@@ -126,44 +130,46 @@ fn generate_pairing_code() -> String {
     }
     code
 }
-use serenity::model::application::{
-    CommandInteraction, ComponentInteraction, ComponentInteractionDataKind,
-    ModalInteraction, ResolvedValue,
-};
-use serenity::model::channel::GuildChannel;
-use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
 use serenity::gateway::ConnectionStage;
 use serenity::gateway::ShardStageUpdateEvent as SerenityShardStageUpdateEvent;
 use serenity::model::application::CommandPermissions as SerenityCommandPermissions;
+use serenity::model::application::{
+    CommandInteraction, ComponentInteraction, ComponentInteractionDataKind, ModalInteraction,
+    ResolvedValue,
+};
+use serenity::model::channel::GuildChannel;
+use serenity::model::channel::Message as SerenityMessage;
+use serenity::model::channel::ReactionType;
+use serenity::model::event::ChannelPinsUpdateEvent as SerenityChannelPinsUpdateEvent;
 use serenity::model::event::GuildMembersChunkEvent as SerenityGuildMembersChunkEvent;
+use serenity::model::event::GuildScheduledEventUserAddEvent as SerenityScheduledEventUserAddEvent;
+use serenity::model::event::GuildScheduledEventUserRemoveEvent as SerenityScheduledEventUserRemoveEvent;
+use serenity::model::event::MessagePollVoteAddEvent as SerenityPollVoteAddEvent;
+use serenity::model::event::MessagePollVoteRemoveEvent as SerenityPollVoteRemoveEvent;
+use serenity::model::event::MessageUpdateEvent;
 use serenity::model::event::SoundboardSoundCreateEvent as SerenitySoundboardSoundCreateEvent;
 use serenity::model::event::SoundboardSoundDeleteEvent as SerenitySoundboardSoundDeleteEvent;
 use serenity::model::event::SoundboardSoundUpdateEvent as SerenitySoundboardSoundUpdateEvent;
 use serenity::model::event::SoundboardSoundsEvent as SerenitySoundboardSoundsEvent;
 use serenity::model::event::SoundboardSoundsUpdateEvent as SerenitySoundboardSoundsUpdateEvent;
-use serenity::model::soundboard::Soundboard as SerenitySoundboard;
-use serenity::model::event::GuildScheduledEventUserAddEvent as SerenityScheduledEventUserAddEvent;
-use serenity::model::event::GuildScheduledEventUserRemoveEvent as SerenityScheduledEventUserRemoveEvent;
-use serenity::model::event::MessagePollVoteAddEvent as SerenityPollVoteAddEvent;
-use serenity::model::event::MessagePollVoteRemoveEvent as SerenityPollVoteRemoveEvent;
 use serenity::model::event::ThreadListSyncEvent as SerenityThreadListSyncEvent;
 use serenity::model::event::TypingStartEvent as SerenityTypingStartEvent;
 use serenity::model::event::VoiceServerUpdateEvent as SerenityVoiceServerUpdateEvent;
-use serenity::model::guild::automod::{ActionExecution as SerenityActionExecution, Rule as SerenityAutoModRule};
-use serenity::model::guild::Integration as SerenityIntegration;
-use serenity::model::id::{ApplicationId, IntegrationId};
-use serenity::model::monetization::Entitlement as SerenityEntitlement;
-use serenity::model::user::CurrentUser;
-use serenity::model::guild::ScheduledEvent;
 use serenity::model::gateway::{Presence, Ready};
-use serenity::model::guild::{PartialGuild, Role, UnavailableGuild};
-use serenity::model::voice::VoiceState as SerenityVoiceState;
-use serenity::model::channel::Message as SerenityMessage;
-use serenity::model::channel::ReactionType;
-use serenity::model::event::MessageUpdateEvent;
+use serenity::model::guild::automod::{
+    ActionExecution as SerenityActionExecution, Rule as SerenityAutoModRule,
+};
+use serenity::model::guild::Integration as SerenityIntegration;
 use serenity::model::guild::Member;
+use serenity::model::guild::ScheduledEvent;
+use serenity::model::guild::{PartialGuild, Role, UnavailableGuild};
+use serenity::model::id::{ApplicationId, IntegrationId};
 use serenity::model::id::{ChannelId, GuildId, MessageId};
+use serenity::model::monetization::Entitlement as SerenityEntitlement;
+use serenity::model::soundboard::Soundboard as SerenitySoundboard;
+use serenity::model::user::CurrentUser;
 use serenity::model::user::User as SerenityUser;
+use serenity::model::voice::VoiceState as SerenityVoiceState;
 use serenity::prelude::TypeMapKey;
 use tracing::{debug, warn};
 
@@ -279,7 +285,11 @@ impl<P: Publish> DiscordBridge<P> {
     ///
     /// `is_bot_message` — whether the message was sent by this bot.
     /// `reactor_user_id` — the user who added/removed the reaction.
-    pub fn should_publish_reaction(&self, is_bot_message: bool, reactor_user_id: Option<u64>) -> bool {
+    pub fn should_publish_reaction(
+        &self,
+        is_bot_message: bool,
+        reactor_user_id: Option<u64>,
+    ) -> bool {
         match self.reaction_mode {
             crate::config::ReactionMode::Off => false,
             crate::config::ReactionMode::Own => is_bot_message,
@@ -450,7 +460,10 @@ impl<P: Publish> DiscordBridge<P> {
                 icon_url: f.icon_url.clone(),
             }),
             image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
-            thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
+            thumbnail: e
+                .thumbnail
+                .as_ref()
+                .map(|t| EmbedMedia { url: t.url.clone() }),
             timestamp: e.timestamp.map(|ts| ts.to_string()),
         }
     }
@@ -645,10 +658,9 @@ impl<P: Publish> DiscordBridge<P> {
 
         let (component_type, values) = match interaction.data.kind {
             ComponentInteractionDataKind::Button => (ComponentType::Button, vec![]),
-            ComponentInteractionDataKind::StringSelect { ref values } => (
-                ComponentType::StringSelect,
-                values.clone(),
-            ),
+            ComponentInteractionDataKind::StringSelect { ref values } => {
+                (ComponentType::StringSelect, values.clone())
+            }
             ComponentInteractionDataKind::UserSelect { ref values } => (
                 ComponentType::UserSelect,
                 values.iter().map(|id| id.get().to_string()).collect(),
@@ -977,11 +989,7 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_channel_delete(
-        &self,
-        channel_id: u64,
-        guild_id: u64,
-    ) -> Result<()> {
+    pub async fn publish_channel_delete(&self, channel_id: u64, guild_id: u64) -> Result<()> {
         let sid = member_session_id(guild_id);
         let meta = EventMetadata::new(sid, self.next_sequence());
 
@@ -1029,11 +1037,7 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_role_delete(
-        &self,
-        guild_id: u64,
-        role_id: u64,
-    ) -> Result<()> {
+    pub async fn publish_role_delete(&self, guild_id: u64, role_id: u64) -> Result<()> {
         let sid = member_session_id(guild_id);
         let meta = EventMetadata::new(sid, self.next_sequence());
 
@@ -1152,8 +1156,14 @@ impl<P: Publish> DiscordBridge<P> {
         // Use CommandData::autocomplete() which finds the option with the Autocomplete variant,
         // i.e. the one the user is currently typing into.
         let focused = interaction.data.autocomplete();
-        let focused_option = focused.as_ref().map(|o| o.name.to_string()).unwrap_or_default();
-        let current_value = focused.as_ref().map(|o| o.value.to_string()).unwrap_or_default();
+        let focused_option = focused
+            .as_ref()
+            .map(|o| o.name.to_string())
+            .unwrap_or_default();
+        let current_value = focused
+            .as_ref()
+            .map(|o| o.value.to_string())
+            .unwrap_or_default();
 
         let ev = AutocompleteEvent {
             metadata: meta,
@@ -1336,10 +1346,7 @@ impl<P: Publish> DiscordBridge<P> {
         guild_id: u64,
         parent_id: Option<u64>,
     ) -> Result<()> {
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = ThreadDeletedEvent {
             metadata: meta,
             thread_id,
@@ -1358,10 +1365,7 @@ impl<P: Publish> DiscordBridge<P> {
         guild_id: u64,
         user_ids: Vec<u64>,
     ) -> Result<()> {
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = ThreadMemberAddEvent {
             metadata: meta,
             thread_id,
@@ -1380,10 +1384,7 @@ impl<P: Publish> DiscordBridge<P> {
         guild_id: u64,
         user_ids: Vec<u64>,
     ) -> Result<()> {
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = ThreadMemberRemoveEvent {
             metadata: meta,
             thread_id,
@@ -1401,10 +1402,7 @@ impl<P: Publish> DiscordBridge<P> {
         stage: &serenity::model::channel::StageInstance,
     ) -> Result<()> {
         let guild_id = stage.guild_id.get();
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = StageInstanceCreateEvent {
             metadata: meta,
             stage_id: stage.id.get(),
@@ -1423,10 +1421,7 @@ impl<P: Publish> DiscordBridge<P> {
         stage: &serenity::model::channel::StageInstance,
     ) -> Result<()> {
         let guild_id = stage.guild_id.get();
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = StageInstanceUpdateEvent {
             metadata: meta,
             stage_id: stage.id.get(),
@@ -1445,10 +1440,7 @@ impl<P: Publish> DiscordBridge<P> {
         stage: &serenity::model::channel::StageInstance,
     ) -> Result<()> {
         let guild_id = stage.guild_id.get();
-        let meta = EventMetadata::new(
-            format!("dc-guild-{}", guild_id),
-            self.next_sequence(),
-        );
+        let meta = EventMetadata::new(format!("dc-guild-{}", guild_id), self.next_sequence());
         let ev = StageInstanceDeleteEvent {
             metadata: meta,
             stage_id: stage.id.get(),
@@ -1506,9 +1498,17 @@ impl<P: Publish> DiscordBridge<P> {
         let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
         let emojis: Vec<_> = current_state
             .values()
-            .map(|e| Emoji { id: Some(e.id.get()), name: e.name.clone(), animated: e.animated })
+            .map(|e| Emoji {
+                id: Some(e.id.get()),
+                name: e.name.clone(),
+                animated: e.animated,
+            })
             .collect();
-        let ev = GuildEmojisUpdateEvent { metadata: meta, guild_id: gid, emojis };
+        let ev = GuildEmojisUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            emojis,
+        };
         let subject = subjects::bot::guild_emojis_update(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published guild_emojis_update to {}", subject);
@@ -1634,9 +1634,16 @@ impl<P: Publish> DiscordBridge<P> {
         let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
         let stickers: Vec<StickerInfo> = current_state
             .values()
-            .map(|s| StickerInfo { id: s.id.get(), name: s.name.clone() })
+            .map(|s| StickerInfo {
+                id: s.id.get(),
+                name: s.name.clone(),
+            })
             .collect();
-        let ev = GuildStickersUpdateEvent { metadata: meta, guild_id: gid, stickers };
+        let ev = GuildStickersUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+            stickers,
+        };
         let subject = subjects::bot::guild_stickers_update(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published guild_stickers_update to {}", subject);
@@ -1646,7 +1653,10 @@ impl<P: Publish> DiscordBridge<P> {
     pub async fn publish_guild_integrations_update(&self, guild_id: GuildId) -> Result<()> {
         let gid = guild_id.get();
         let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
-        let ev = GuildIntegrationsUpdateEvent { metadata: meta, guild_id: gid };
+        let ev = GuildIntegrationsUpdateEvent {
+            metadata: meta,
+            guild_id: gid,
+        };
         let subject = subjects::bot::guild_integrations_update(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published guild_integrations_update to {}", subject);
@@ -1743,18 +1753,22 @@ impl<P: Publish> DiscordBridge<P> {
     ) -> Result<()> {
         let gid = chunk.guild_id.get();
         let meta = EventMetadata::new(format!("dc-guild-{}", gid), self.next_sequence());
-        let members: Vec<FetchedMember> = chunk.members.values().map(|m| FetchedMember {
-            user: DiscordUser {
-                id: m.user.id.get(),
-                username: m.user.name.clone(),
-                global_name: m.user.global_name.as_deref().map(String::from),
-                bot: m.user.bot,
-            },
-            guild_id: gid,
-            nick: m.nick.clone(),
-            roles: m.roles.iter().map(|r| r.get()).collect(),
-            joined_at: m.joined_at.and_then(|t| t.to_rfc3339()),
-        }).collect();
+        let members: Vec<FetchedMember> = chunk
+            .members
+            .values()
+            .map(|m| FetchedMember {
+                user: DiscordUser {
+                    id: m.user.id.get(),
+                    username: m.user.name.clone(),
+                    global_name: m.user.global_name.as_deref().map(String::from),
+                    bot: m.user.bot,
+                },
+                guild_id: gid,
+                nick: m.nick.clone(),
+                roles: m.roles.iter().map(|r| r.get()).collect(),
+                joined_at: m.joined_at.and_then(|t| t.to_rfc3339()),
+            })
+            .collect();
         let ev = GuildMembersChunkEvent {
             metadata: meta,
             guild_id: gid,
@@ -1799,7 +1813,11 @@ impl<P: Publish> DiscordBridge<P> {
             action_type: entry.action.num() as u32,
             reason: entry.reason.clone(),
         };
-        let ev = GuildAuditLogEntryEvent { metadata: meta, guild_id: gid, entry: info };
+        let ev = GuildAuditLogEntryEvent {
+            metadata: meta,
+            guild_id: gid,
+            entry: info,
+        };
         let subject = subjects::bot::guild_audit_log_entry(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published guild_audit_log_entry to {}", subject);
@@ -1815,7 +1833,10 @@ impl<P: Publish> DiscordBridge<P> {
         let ev = ThreadListSyncEvent {
             metadata: meta,
             guild_id: gid,
-            channel_ids: event.channel_ids.as_ref().map(|ids| ids.iter().map(|c| c.get()).collect()),
+            channel_ids: event
+                .channel_ids
+                .as_ref()
+                .map(|ids| ids.iter().map(|c| c.get()).collect()),
             thread_count: event.threads.len() as u32,
         };
         let subject = subjects::bot::thread_list_sync(self.prefix());
@@ -2014,7 +2035,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_entitlement_create(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+    pub async fn publish_entitlement_create(
+        &self,
+        entitlement: &SerenityEntitlement,
+    ) -> Result<()> {
         let meta = EventMetadata::new(
             format!("dc-entitlement-{}", entitlement.id.get()),
             self.next_sequence(),
@@ -2033,7 +2057,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_entitlement_update(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+    pub async fn publish_entitlement_update(
+        &self,
+        entitlement: &SerenityEntitlement,
+    ) -> Result<()> {
         let meta = EventMetadata::new(
             format!("dc-entitlement-{}", entitlement.id.get()),
             self.next_sequence(),
@@ -2052,7 +2079,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_entitlement_delete(&self, entitlement: &SerenityEntitlement) -> Result<()> {
+    pub async fn publish_entitlement_delete(
+        &self,
+        entitlement: &SerenityEntitlement,
+    ) -> Result<()> {
         let meta = EventMetadata::new(
             format!("dc-entitlement-{}", entitlement.id.get()),
             self.next_sequence(),
@@ -2090,7 +2120,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_poll_vote_remove(&self, event: &SerenityPollVoteRemoveEvent) -> Result<()> {
+    pub async fn publish_poll_vote_remove(
+        &self,
+        event: &SerenityPollVoteRemoveEvent,
+    ) -> Result<()> {
         let meta = EventMetadata::new(
             format!("dc-msg-{}", event.message_id.get()),
             self.next_sequence(),
@@ -2121,7 +2154,11 @@ impl<P: Publish> DiscordBridge<P> {
             channel_id: cid,
             message_id: reaction.message_id.get(),
             guild_id: reaction.guild_id.map(|g| g.get()),
-            emoji_name: if emoji.name.is_empty() { None } else { Some(emoji.name) },
+            emoji_name: if emoji.name.is_empty() {
+                None
+            } else {
+                Some(emoji.name)
+            },
             emoji_id: emoji.id,
         };
         let subject = subjects::bot::reaction_remove_emoji(self.prefix());
@@ -2142,7 +2179,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_shard_stage_update(&self, event: &SerenityShardStageUpdateEvent) -> Result<()> {
+    pub async fn publish_shard_stage_update(
+        &self,
+        event: &SerenityShardStageUpdateEvent,
+    ) -> Result<()> {
         let shard_id = event.shard_id.0 as u64;
         let meta = EventMetadata::new(format!("dc-shard-{}", shard_id), self.next_sequence());
         let stage_str = |s: &ConnectionStage| -> &'static str {
@@ -2168,13 +2208,20 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_soundboard_sounds(&self, event: &SerenitySoundboardSoundsEvent) -> Result<()> {
+    pub async fn publish_soundboard_sounds(
+        &self,
+        event: &SerenitySoundboardSoundsEvent,
+    ) -> Result<()> {
         let gid = event.guild_id.get();
         let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
         let ev = SoundboardSoundsEvent {
             metadata: meta,
             guild_id: gid,
-            sounds: event.soundboard_sounds.iter().map(convert_soundboard).collect(),
+            sounds: event
+                .soundboard_sounds
+                .iter()
+                .map(convert_soundboard)
+                .collect(),
         };
         let subject = subjects::bot::soundboard_sounds(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
@@ -2182,7 +2229,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_soundboard_sound_create(&self, event: &SerenitySoundboardSoundCreateEvent) -> Result<()> {
+    pub async fn publish_soundboard_sound_create(
+        &self,
+        event: &SerenitySoundboardSoundCreateEvent,
+    ) -> Result<()> {
         let sound = &event.soundboard;
         let meta = EventMetadata::new(format!("dc-sound-{}", sound.id.get()), self.next_sequence());
         let ev = SoundboardSoundCreateEvent {
@@ -2195,7 +2245,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_soundboard_sound_update(&self, event: &SerenitySoundboardSoundUpdateEvent) -> Result<()> {
+    pub async fn publish_soundboard_sound_update(
+        &self,
+        event: &SerenitySoundboardSoundUpdateEvent,
+    ) -> Result<()> {
         let sound = &event.soundboard;
         let meta = EventMetadata::new(format!("dc-sound-{}", sound.id.get()), self.next_sequence());
         let ev = SoundboardSoundUpdateEvent {
@@ -2208,13 +2261,20 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_soundboard_sounds_update(&self, event: &SerenitySoundboardSoundsUpdateEvent) -> Result<()> {
+    pub async fn publish_soundboard_sounds_update(
+        &self,
+        event: &SerenitySoundboardSoundsUpdateEvent,
+    ) -> Result<()> {
         let gid = event.guild_id.get();
         let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
         let ev = SoundboardSoundsUpdateEvent {
             metadata: meta,
             guild_id: gid,
-            sounds: event.soundboard_sounds.iter().map(convert_soundboard).collect(),
+            sounds: event
+                .soundboard_sounds
+                .iter()
+                .map(convert_soundboard)
+                .collect(),
         };
         let subject = subjects::bot::soundboard_sounds_update(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
@@ -2222,7 +2282,10 @@ impl<P: Publish> DiscordBridge<P> {
         Ok(())
     }
 
-    pub async fn publish_soundboard_sound_delete(&self, event: &SerenitySoundboardSoundDeleteEvent) -> Result<()> {
+    pub async fn publish_soundboard_sound_delete(
+        &self,
+        event: &SerenitySoundboardSoundDeleteEvent,
+    ) -> Result<()> {
         let gid = event.guild_id.get();
         let meta = EventMetadata::new(member_session_id(gid), self.next_sequence());
         let ev = SoundboardSoundDeleteEvent {
@@ -2235,7 +2298,6 @@ impl<P: Publish> DiscordBridge<P> {
         debug!("Published soundboard_sound_delete to {}", subject);
         Ok(())
     }
-
 }
 
 fn convert_soundboard(sound: &SerenitySoundboard) -> SoundInfo {

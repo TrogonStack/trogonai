@@ -385,7 +385,10 @@ impl<N: QueueSubscribeClient + Clone, P: Publish> DiscordAgent<N, P> {
         let update_subject = discord_nats::subjects::bot::guild_update(self.subscriber.prefix());
         let delete_subject = discord_nats::subjects::bot::guild_delete(self.subscriber.prefix());
 
-        info!("Subscribing to guild lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+        info!(
+            "Subscribing to guild lifecycle: {}, {}, {}",
+            create_subject, update_subject, delete_subject
+        );
 
         let mut create_stream = self
             .subscriber
@@ -458,7 +461,10 @@ impl<N: QueueSubscribeClient + Clone, P: Publish> DiscordAgent<N, P> {
         let update_subject = discord_nats::subjects::bot::channel_update(self.subscriber.prefix());
         let delete_subject = discord_nats::subjects::bot::channel_delete(self.subscriber.prefix());
 
-        info!("Subscribing to channel lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+        info!(
+            "Subscribing to channel lifecycle: {}, {}, {}",
+            create_subject, update_subject, delete_subject
+        );
 
         let mut create_stream = self
             .subscriber
@@ -531,7 +537,10 @@ impl<N: QueueSubscribeClient + Clone, P: Publish> DiscordAgent<N, P> {
         let update_subject = discord_nats::subjects::bot::role_update(self.subscriber.prefix());
         let delete_subject = discord_nats::subjects::bot::role_delete(self.subscriber.prefix());
 
-        info!("Subscribing to role lifecycle: {}, {}, {}", create_subject, update_subject, delete_subject);
+        info!(
+            "Subscribing to role lifecycle: {}, {}, {}",
+            create_subject, update_subject, delete_subject
+        );
 
         let mut create_stream = self
             .subscriber
@@ -652,7 +661,8 @@ impl<N: QueueSubscribeClient + Clone, P: Publish> DiscordAgent<N, P> {
     async fn handle_autocomplete(&self) -> Result<()> {
         use discord_types::events::AutocompleteEvent;
 
-        let subject = discord_nats::subjects::bot::interaction_autocomplete(self.subscriber.prefix());
+        let subject =
+            discord_nats::subjects::bot::interaction_autocomplete(self.subscriber.prefix());
         info!("Subscribing to autocomplete: {}", subject);
 
         let mut stream = self
@@ -832,8 +842,20 @@ mod tests {
         let client = MockNatsClient::new();
         let publisher = MockPublisher::new("test");
         DiscordAgent::new(
-            client, "test".to_string(), publisher, "test-agent".to_string(),
-            None, None, None, None, None, None, None, 20, 120, None,
+            client,
+            "test".to_string(),
+            publisher,
+            "test-agent".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            20,
+            120,
+            None,
         )
     }
 
@@ -851,7 +873,12 @@ mod tests {
                 id: message_id,
                 channel_id,
                 guild_id: None,
-                author: DiscordUser { id: 42, username: "tester".to_string(), global_name: None, bot: false },
+                author: DiscordUser {
+                    id: 42,
+                    username: "tester".to_string(),
+                    global_name: None,
+                    bot: false,
+                },
                 content: content.to_string(),
                 timestamp: "2024-01-01T00:00:00Z".to_string(),
                 edited_timestamp: None,
@@ -878,7 +905,10 @@ mod tests {
     async fn test_agent_run_returns_err_when_subscribe_fails() {
         let agent = make_agent();
         let result = agent.run().await;
-        assert!(result.is_err(), "run() must return Err when subscribe fails");
+        assert!(
+            result.is_err(),
+            "run() must return Err when subscribe fails"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(!msg.is_empty(), "error must have a message");
     }
@@ -891,15 +921,30 @@ mod tests {
         let pub_ref = MockPublisher::new("test");
         let event = make_message_event("sess-1", "hello world", 100, 50);
 
-        agent.processor.process_message(&event, &pub_ref).await.unwrap();
+        agent
+            .processor
+            .process_message(&event, &pub_ref)
+            .await
+            .unwrap();
 
         let msgs = pub_ref.published_messages();
-        assert_eq!(msgs.len(), 2, "echo mode must publish typing + send_message");
+        assert_eq!(
+            msgs.len(),
+            2,
+            "echo mode must publish typing + send_message"
+        );
         let cmd: discord_types::SendMessageCommand =
             serde_json::from_value(msgs[1].1.clone()).unwrap();
         assert_eq!(cmd.channel_id, 100, "send must target the right channel");
-        assert!(cmd.content.contains("hello world"), "send must echo the content");
-        assert_eq!(cmd.reply_to_message_id, Some(50), "send must reply to the original message");
+        assert!(
+            cmd.content.contains("hello world"),
+            "send must echo the content"
+        );
+        assert_eq!(
+            cmd.reply_to_message_id,
+            Some(50),
+            "send must reply to the original message"
+        );
     }
 
     /// With ack_emoji: process_message publishes ack_reaction first, then typing, then send_message.
@@ -909,21 +954,49 @@ mod tests {
         let client = MockNatsClient::new();
         let publisher = MockPublisher::new("test");
         let agent = DiscordAgent::new(
-            client, "test".to_string(), publisher, "ack-agent".to_string(),
-            None, None, None, None, None, None, None, 20, 120, Some("⏳".to_string()),
+            client,
+            "test".to_string(),
+            publisher,
+            "ack-agent".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            20,
+            120,
+            Some("⏳".to_string()),
         );
         let pub_ref = MockPublisher::new("test");
         let event = make_message_event("sess-2", "help me", 200, 99);
 
-        agent.processor.process_message(&event, &pub_ref).await.unwrap();
+        agent
+            .processor
+            .process_message(&event, &pub_ref)
+            .await
+            .unwrap();
 
         let msgs = pub_ref.published_messages();
-        assert!(msgs.len() >= 3, "with ack_emoji: must publish ack_reaction + typing + send_message");
+        assert!(
+            msgs.len() >= 3,
+            "with ack_emoji: must publish ack_reaction + typing + send_message"
+        );
         let reaction: discord_types::AddReactionCommand =
             serde_json::from_value(msgs[0].1.clone()).unwrap();
-        assert_eq!(reaction.emoji, "⏳", "ack reaction must use the configured emoji");
-        assert_eq!(reaction.message_id, 99, "ack reaction must target the original message");
-        assert_eq!(reaction.channel_id, 200, "ack reaction must be in the right channel");
+        assert_eq!(
+            reaction.emoji, "⏳",
+            "ack reaction must use the configured emoji"
+        );
+        assert_eq!(
+            reaction.message_id, 99,
+            "ack reaction must target the original message"
+        );
+        assert_eq!(
+            reaction.channel_id, 200,
+            "ack reaction must be in the right channel"
+        );
     }
 
     /// Two agents with different prefixes must not share publisher state.
@@ -932,16 +1005,44 @@ mod tests {
         let pub_a = MockPublisher::new("pfx-a");
         let pub_b = MockPublisher::new("pfx-b");
         let agent_a = DiscordAgent::new(
-            MockNatsClient::new(), "pfx-a".to_string(), pub_a.clone(), "agent-a".to_string(),
-            None, None, None, None, None, None, None, 20, 120, None,
+            MockNatsClient::new(),
+            "pfx-a".to_string(),
+            pub_a.clone(),
+            "agent-a".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            20,
+            120,
+            None,
         );
         let agent_b = DiscordAgent::new(
-            MockNatsClient::new(), "pfx-b".to_string(), pub_b.clone(), "agent-b".to_string(),
-            None, None, None, None, None, None, None, 20, 120, None,
+            MockNatsClient::new(),
+            "pfx-b".to_string(),
+            pub_b.clone(),
+            "agent-b".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            20,
+            120,
+            None,
         );
 
         let event = make_message_event("sess-a", "ping", 100, 1);
-        agent_a.processor.process_message(&event, &pub_a).await.unwrap();
+        agent_a
+            .processor
+            .process_message(&event, &pub_a)
+            .await
+            .unwrap();
 
         assert!(!pub_a.is_empty(), "agent_a's publisher must have messages");
         assert!(pub_b.is_empty(), "agent_b's publisher must be unaffected");

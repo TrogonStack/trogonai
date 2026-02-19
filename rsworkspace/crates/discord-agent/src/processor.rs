@@ -9,12 +9,13 @@ use discord_types::{
         GuildMemberAddEvent, GuildMemberRemoveEvent, GuildMemberUpdateEvent, GuildUpdateEvent,
         MessageCreatedEvent, MessageDeletedEvent, MessageUpdatedEvent, ModalSubmitEvent,
         PresenceUpdateEvent, ReactionAddEvent, ReactionRemoveEvent, RoleCreateEvent,
-        RoleDeleteEvent, RoleUpdateEvent, SlashCommandEvent, TypingStartEvent, VoiceStateUpdateEvent,
+        RoleDeleteEvent, RoleUpdateEvent, SlashCommandEvent, TypingStartEvent,
+        VoiceStateUpdateEvent,
     },
     types::{Attachment, ChannelType},
     AddReactionCommand, AutocompleteChoice, AutocompleteRespondCommand, InteractionDeferCommand,
-    InteractionFollowupCommand, InteractionRespondCommand, SendMessageCommand, StreamMessageCommand,
-    TypingCommand,
+    InteractionFollowupCommand, InteractionRespondCommand, SendMessageCommand,
+    StreamMessageCommand, TypingCommand,
 };
 use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -995,10 +996,7 @@ impl MessageProcessor {
         // This covers the most common case: the user deletes the bot's most recent
         // message to request a fresh response.
         let len = history.len();
-        if len >= 2
-            && history[len - 1].role == "assistant"
-            && history[len - 2].role == "user"
-        {
+        if len >= 2 && history[len - 1].role == "assistant" && history[len - 2].role == "user" {
             debug!(
                 "Removing last user+assistant pair from session {} (heuristic: assistant message deleted)",
                 session_id
@@ -1578,7 +1576,10 @@ impl MessageProcessor {
     }
 
     pub async fn process_guild_update(&self, event: &GuildUpdateEvent) -> Result<()> {
-        debug!("Guild '{}' updated (id: {})", event.guild.name, event.guild.id);
+        debug!(
+            "Guild '{}' updated (id: {})",
+            event.guild.name, event.guild.id
+        );
         Ok(())
     }
 

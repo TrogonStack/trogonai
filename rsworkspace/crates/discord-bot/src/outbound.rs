@@ -11,45 +11,45 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use discord_nats::{subjects, MessagePublisher, MessageSubscriber};
-use discord_types::{
-    AddReactionCommand, AddThreadMemberCommand, ArchiveThreadCommand, AssignRoleCommand,
-    AutocompleteRespondCommand, BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand,
-    CreateDmChannelCommand, CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand,
-    CreatePollCommand, CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand,
-    CreateStickerCommand, CreateThreadCommand,
-    CreateWebhookCommand, CrosspostMessageCommand, DeleteChannelCommand, DeleteChannelPermissionsCommand,
-    DeleteEmojiCommand, DeleteIntegrationCommand, DeleteInteractionResponseCommand,
-    DeleteMessageCommand, DeleteRoleCommand, DeleteScheduledEventCommand, DeleteStickerCommand,
-    DeleteStageInstanceCommand, DeleteWebhookCommand, EditChannelCommand,
-    EditEmojiCommand, EditInteractionResponseCommand, EditMessageCommand, EditRoleCommand,
-    EditScheduledEventCommand, EditStickerCommand, EditWebhookCommand, ExecuteWebhookCommand,
-    FetchAuditLogCommand, FetchBansCommand, FetchChannelCommand, FetchEmojisCommand,
-    FetchGuildChannelsCommand, FetchGuildCommand, FetchGuildMembersCommand, FetchInvitesCommand,
-    FetchMemberCommand, FetchMessagesCommand, FetchPinnedMessagesCommand, FetchRolesCommand,
-    FetchScheduledEventUsersCommand,
-    GuildMemberNickCommand, InteractionDeferCommand, InteractionFollowupCommand,
-    InteractionRespondCommand, KickUserCommand, ModalRespondCommand, PinMessageCommand,
-    PruneMembersCommand, RemoveAllReactionsCommand, RemoveReactionCommand, RemoveRoleCommand,
-    RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand, SetBotPresenceCommand,
-    SetChannelPermissionsCommand, SyncIntegrationCommand, TimeoutUserCommand, TypingCommand,
-    UnbanUserCommand, UnpinMessageCommand, VoiceDisconnectCommand, VoiceMoveCommand,
-};
 use discord_types::types::{
     ActionRowComponent, AppInfo, AttachedFile, AuditLogEntryInfo, ButtonStyle as DcButtonStyle,
     ChannelType, DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji,
     FetchedBan, FetchedChannel, FetchedGuild, FetchedInvite, FetchedMember, FetchedMessage,
     FetchedRole, ScheduledEventUserInfo, VoiceRegionInfo,
 };
+use discord_types::{
+    AddReactionCommand, AddThreadMemberCommand, ArchiveThreadCommand, AssignRoleCommand,
+    AutocompleteRespondCommand, BanUserCommand, BulkDeleteMessagesCommand, CreateChannelCommand,
+    CreateDmChannelCommand, CreateEmojiCommand, CreateForumPostCommand, CreateInviteCommand,
+    CreatePollCommand, CreateRoleCommand, CreateScheduledEventCommand, CreateStageInstanceCommand,
+    CreateStickerCommand, CreateThreadCommand, CreateWebhookCommand, CrosspostMessageCommand,
+    DeleteChannelCommand, DeleteChannelPermissionsCommand, DeleteEmojiCommand,
+    DeleteIntegrationCommand, DeleteInteractionResponseCommand, DeleteMessageCommand,
+    DeleteRoleCommand, DeleteScheduledEventCommand, DeleteStageInstanceCommand,
+    DeleteStickerCommand, DeleteWebhookCommand, EditChannelCommand, EditEmojiCommand,
+    EditInteractionResponseCommand, EditMessageCommand, EditRoleCommand, EditScheduledEventCommand,
+    EditStickerCommand, EditWebhookCommand, ExecuteWebhookCommand, FetchAuditLogCommand,
+    FetchBansCommand, FetchChannelCommand, FetchEmojisCommand, FetchGuildChannelsCommand,
+    FetchGuildCommand, FetchGuildMembersCommand, FetchInvitesCommand, FetchMemberCommand,
+    FetchMessagesCommand, FetchPinnedMessagesCommand, FetchRolesCommand,
+    FetchScheduledEventUsersCommand, GuildMemberNickCommand, InteractionDeferCommand,
+    InteractionFollowupCommand, InteractionRespondCommand, KickUserCommand, ModalRespondCommand,
+    PinMessageCommand, PruneMembersCommand, RemoveAllReactionsCommand, RemoveReactionCommand,
+    RemoveRoleCommand, RemoveThreadMemberCommand, RevokeInviteCommand, SendMessageCommand,
+    SetBotPresenceCommand, SetChannelPermissionsCommand, SyncIntegrationCommand,
+    TimeoutUserCommand, TypingCommand, UnbanUserCommand, UnpinMessageCommand,
+    VoiceDisconnectCommand, VoiceMoveCommand,
+};
 use serenity::builder::{
     CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
     CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, CreateInteractionResponse,
-    CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
-    CreatePoll, CreatePollAnswer, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption,
+    CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage, CreatePoll,
+    CreatePollAnswer, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption,
     CreateStageInstance, CreateSticker, CreateThread, EditChannel, EditInteractionResponse,
     EditMember, EditMessage, EditRole, EditScheduledEvent, EditThread, EditWebhook, GetMessages,
 };
-use serenity::model::application::ButtonStyle as SerenityButtonStyle;
 use serenity::http::Http;
+use serenity::model::application::ButtonStyle as SerenityButtonStyle;
 use serenity::model::channel::{PermissionOverwrite, PermissionOverwriteType};
 use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, TargetId, UserId, WebhookId};
 use serenity::model::permissions::Permissions;
@@ -224,16 +224,15 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                 .components
                 .iter()
                 .any(|c| matches!(c, ActionRowComponent::Button(_)));
-            let has_select = row
-                .components
-                .iter()
-                .any(|c| matches!(
+            let has_select = row.components.iter().any(|c| {
+                matches!(
                     c,
                     ActionRowComponent::StringSelect(_)
                         | ActionRowComponent::UserSelect(_)
                         | ActionRowComponent::RoleSelect(_)
                         | ActionRowComponent::ChannelSelect(_)
-                ));
+                )
+            });
 
             if has_buttons && !has_select {
                 let buttons: Vec<CreateButton> = row
@@ -243,23 +242,17 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                         if let ActionRowComponent::Button(btn) = c {
                             let mut b = match btn.style {
                                 DcButtonStyle::Link => {
-                                    CreateButton::new_link(
-                                        btn.url.as_deref().unwrap_or(""),
-                                    )
+                                    CreateButton::new_link(btn.url.as_deref().unwrap_or(""))
                                 }
                                 _ => {
                                     let style = match btn.style {
-                                        DcButtonStyle::Secondary => {
-                                            SerenityButtonStyle::Secondary
-                                        }
+                                        DcButtonStyle::Secondary => SerenityButtonStyle::Secondary,
                                         DcButtonStyle::Success => SerenityButtonStyle::Success,
                                         DcButtonStyle::Danger => SerenityButtonStyle::Danger,
                                         _ => SerenityButtonStyle::Primary,
                                     };
-                                    CreateButton::new(
-                                        btn.custom_id.as_deref().unwrap_or(""),
-                                    )
-                                    .style(style)
+                                    CreateButton::new(btn.custom_id.as_deref().unwrap_or(""))
+                                        .style(style)
                                 }
                             };
                             if let Some(ref label) = btn.label {
@@ -282,8 +275,7 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                             .options
                             .iter()
                             .map(|opt| {
-                                let mut o =
-                                    CreateSelectMenuOption::new(&opt.label, &opt.value);
+                                let mut o = CreateSelectMenuOption::new(&opt.label, &opt.value);
                                 if let Some(ref desc) = opt.description {
                                     o = o.description(desc);
                                 }
@@ -295,12 +287,18 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                             .collect();
                         Some((m, CreateSelectMenuKind::String { options: opts }))
                     }
-                    ActionRowComponent::UserSelect(m) => {
-                        Some((m, CreateSelectMenuKind::User { default_users: None }))
-                    }
-                    ActionRowComponent::RoleSelect(m) => {
-                        Some((m, CreateSelectMenuKind::Role { default_roles: None }))
-                    }
+                    ActionRowComponent::UserSelect(m) => Some((
+                        m,
+                        CreateSelectMenuKind::User {
+                            default_users: None,
+                        },
+                    )),
+                    ActionRowComponent::RoleSelect(m) => Some((
+                        m,
+                        CreateSelectMenuKind::Role {
+                            default_roles: None,
+                        },
+                    )),
                     ActionRowComponent::ChannelSelect(m) => Some((
                         m,
                         CreateSelectMenuKind::Channel {
@@ -311,9 +309,9 @@ fn build_action_rows(rows: &[discord_types::types::ActionRow]) -> Vec<CreateActi
                     _ => None,
                 })?;
                 let mut select = CreateSelectMenu::new(&menu.custom_id, kind)
-                .min_values(menu.min_values)
-                .max_values(menu.max_values)
-                .disabled(menu.disabled);
+                    .min_values(menu.min_values)
+                    .max_values(menu.max_values)
+                    .disabled(menu.disabled);
                 if let Some(ref placeholder) = menu.placeholder {
                     select = select.placeholder(placeholder);
                 }
@@ -395,7 +393,10 @@ fn to_fetched_message(m: &serenity::model::channel::Message) -> FetchedMessage {
                     icon_url: f.icon_url.clone(),
                 }),
                 image: e.image.as_ref().map(|i| EmbedMedia { url: i.url.clone() }),
-                thumbnail: e.thumbnail.as_ref().map(|t| EmbedMedia { url: t.url.clone() }),
+                thumbnail: e
+                    .thumbnail
+                    .as_ref()
+                    .map(|t| EmbedMedia { url: t.url.clone() }),
                 timestamp: e.timestamp.map(|t| t.to_string()),
             })
             .collect(),
@@ -464,17 +465,86 @@ where
         info!("Starting outbound processor for prefix: {}", prefix);
 
         let (
-            r1, r2, r3, r4, r5, r6, r7, r8, r9, r10,
-            r11, r12, r13, r14, r15, r16, r17, r18, r19, r20,
-            r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
-            r31, r32, r33, r34, r35, r36, r37,
-            r38, r39, r40, r41, r42, r43,
-            r44, r45, r46, r47, r48,
-            r49, r50, r51, r52, r53, r54, r55, r56,
-            r57, r58, r59, r60, r61, r62, r63, r64, r65, r66,
-            r67, r68, r69, r70, r71, r72, r73, r74, r75,
-            r76, r77,
-            r78, r79, r80,
+            r1,
+            r2,
+            r3,
+            r4,
+            r5,
+            r6,
+            r7,
+            r8,
+            r9,
+            r10,
+            r11,
+            r12,
+            r13,
+            r14,
+            r15,
+            r16,
+            r17,
+            r18,
+            r19,
+            r20,
+            r21,
+            r22,
+            r23,
+            r24,
+            r25,
+            r26,
+            r27,
+            r28,
+            r29,
+            r30,
+            r31,
+            r32,
+            r33,
+            r34,
+            r35,
+            r36,
+            r37,
+            r38,
+            r39,
+            r40,
+            r41,
+            r42,
+            r43,
+            r44,
+            r45,
+            r46,
+            r47,
+            r48,
+            r49,
+            r50,
+            r51,
+            r52,
+            r53,
+            r54,
+            r55,
+            r56,
+            r57,
+            r58,
+            r59,
+            r60,
+            r61,
+            r62,
+            r63,
+            r64,
+            r65,
+            r66,
+            r67,
+            r68,
+            r69,
+            r70,
+            r71,
+            r72,
+            r73,
+            r74,
+            r75,
+            r76,
+            r77,
+            r78,
+            r79,
+            r80,
             r81,
         ) = tokio::join!(
             Self::handle_send_messages(
@@ -527,31 +597,111 @@ where
             ),
             Self::handle_modal_respond(http.clone(), client.clone(), prefix.clone()),
             Self::handle_autocomplete_respond(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_ban(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_kick(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_timeout(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_ban(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_kick(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_timeout(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_create_channel(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_edit_channel(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_delete_channel(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_edit_channel(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_delete_channel(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_create_role(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_assign_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_remove_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_delete_role(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_pin(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_unpin(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_bulk_delete(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_assign_role(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_remove_role(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_delete_role(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_pin(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_unpin(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_bulk_delete(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_create_thread(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_archive_thread(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_archive_thread(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_bot_presence(client.clone(), prefix.clone(), shard_manager),
             Self::handle_fetch_messages(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_member(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_unban(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_guild_member_nick(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_unban(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_guild_member_nick(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_webhook_create(http.clone(), client.clone(), prefix.clone()),
             Self::handle_webhook_execute(http.clone(), client.clone(), prefix.clone()),
             Self::handle_webhook_delete(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_voice_move(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
-            Self::handle_voice_disconnect(http.clone(), client.clone(), prefix.clone(), publisher.clone()),
+            Self::handle_voice_move(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
+            Self::handle_voice_disconnect(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                publisher.clone()
+            ),
             Self::handle_invite_create(http.clone(), client.clone(), prefix.clone()),
             Self::handle_invite_revoke(http.clone(), client.clone(), prefix.clone()),
             Self::handle_emoji_create(http.clone(), client.clone(), prefix.clone()),
@@ -590,8 +740,20 @@ where
             Self::handle_sync_integration(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_voice_regions(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_application_info(http.clone(), client.clone(), prefix.clone()),
-            Self::handle_pairing_approve(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
-            Self::handle_pairing_reject(http.clone(), client.clone(), prefix.clone(), pairing_state.clone(), publisher.clone()),
+            Self::handle_pairing_approve(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                pairing_state.clone(),
+                publisher.clone()
+            ),
+            Self::handle_pairing_reject(
+                http.clone(),
+                client.clone(),
+                prefix.clone(),
+                pairing_state.clone(),
+                publisher.clone()
+            ),
             Self::handle_create_poll(http.clone(), client.clone(), prefix.clone()),
             Self::handle_create_sticker(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_emojis(http.clone(), client.clone(), prefix.clone()),
@@ -718,7 +880,9 @@ where
                         // Voice messages: empty content + IS_VOICE_MESSAGE flag (bit 13)
                         let builder = CreateMessage::new()
                             .content("")
-                            .flags(serenity::model::channel::MessageFlags::from_bits_truncate(1 << 13))
+                            .flags(serenity::model::channel::MessageFlags::from_bits_truncate(
+                                1 << 13,
+                            ))
                             .add_files(attachments);
                         for attempt in 0..=MAX_RETRIES {
                             match channel.send_message(&*http, builder.clone()).await {
@@ -751,7 +915,8 @@ where
                         // then the [[reply_to:<id>]] tag.
                         let effective_reply_id = cmd.reply_to_message_id.or(tag_reply_id);
 
-                        let chunks = chunk_text(&full_content, MAX_DISCORD_LEN, max_lines_per_message);
+                        let chunks =
+                            chunk_text(&full_content, MAX_DISCORD_LEN, max_lines_per_message);
                         let n = chunks.len();
 
                         for (i, chunk) in chunks.iter().enumerate() {
@@ -846,7 +1011,8 @@ where
                             builder = builder.content(truncate(content));
                         }
                         if !cmd.embeds.is_empty() {
-                            let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
+                            let embeds: Vec<CreateEmbed> =
+                                cmd.embeds.iter().map(build_embed).collect();
                             builder = builder.embeds(embeds);
                         }
                         if !cmd.components.is_empty() {
@@ -927,11 +1093,7 @@ where
         Ok(())
     }
 
-    async fn handle_interaction_respond(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_interaction_respond(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_respond(&prefix);
         let mut stream = subscriber
@@ -985,11 +1147,7 @@ where
         Ok(())
     }
 
-    async fn handle_interaction_defer(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_interaction_defer(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_defer(&prefix);
         let mut stream = subscriber
@@ -1214,11 +1372,7 @@ where
         Ok(())
     }
 
-    async fn handle_typing(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_typing(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::channel_typing(&prefix);
         let mut stream = subscriber.subscribe::<TypingCommand>(&subject).await?;
@@ -1245,13 +1399,9 @@ where
         Ok(())
     }
 
-    async fn handle_modal_respond(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
-        use serenity::builder::{CreateActionRow, CreateInputText};
+    async fn handle_modal_respond(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::all::InputTextStyle;
+        use serenity::builder::{CreateActionRow, CreateInputText};
 
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_modal_respond(&prefix);
@@ -1280,8 +1430,7 @@ where
                         .collect();
 
                     use serenity::builder::CreateModal;
-                    let modal = CreateModal::new(&cmd.custom_id, &cmd.title)
-                        .components(components);
+                    let modal = CreateModal::new(&cmd.custom_id, &cmd.title).components(components);
                     let response = CreateInteractionResponse::Modal(modal);
 
                     if let Err(e) = http
@@ -1309,11 +1458,7 @@ where
         Ok(())
     }
 
-    async fn handle_autocomplete_respond(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_autocomplete_respond(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_autocomplete_respond(&prefix);
         let mut stream = subscriber
@@ -1374,19 +1519,26 @@ where
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let user = UserId::new(cmd.user_id);
-                    let context = format!("Failed to ban user {} in guild {}", cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to ban user {} in guild {}",
+                        cmd.user_id, cmd.guild_id
+                    );
                     // dmd = delete message days (max 7), API expects u8
                     let delete_days = (cmd.delete_message_seconds / 86400).min(7) as u8;
                     let reason = cmd.reason.as_deref().unwrap_or("No reason provided");
                     for attempt in 0..=MAX_RETRIES {
-                        match guild.ban_with_reason(http.as_ref(), user, delete_days, reason).await {
+                        match guild
+                            .ban_with_reason(http.as_ref(), user, delete_days, reason)
+                            .await
+                        {
                             Ok(_) => break,
                             Err(e) => match classify(&subject, &e) {
                                 ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1420,7 +1572,10 @@ where
                     let guild = GuildId::new(cmd.guild_id);
                     let user = UserId::new(cmd.user_id);
                     let reason = cmd.reason.as_deref().unwrap_or("");
-                    let context = format!("Failed to kick user {} from guild {}", cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to kick user {} from guild {}",
+                        cmd.user_id, cmd.guild_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match guild.kick_with_reason(http.as_ref(), user, reason).await {
                             Ok(_) => break,
@@ -1429,7 +1584,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1462,7 +1618,10 @@ where
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let user = UserId::new(cmd.user_id);
-                    let context = format!("Failed to timeout user {} in guild {}", cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to timeout user {} in guild {}",
+                        cmd.user_id, cmd.guild_id
+                    );
 
                     let edit = if cmd.duration_secs == 0 {
                         EditMember::new().enable_communication()
@@ -1472,9 +1631,8 @@ where
                             .map(|d| d.as_secs())
                             .unwrap_or(0);
                         let until_secs = (now_secs + cmd.duration_secs) as i64;
-                        let timestamp =
-                            serenity::model::Timestamp::from_unix_timestamp(until_secs)
-                                .unwrap_or_else(|_| serenity::model::Timestamp::now());
+                        let timestamp = serenity::model::Timestamp::from_unix_timestamp(until_secs)
+                            .unwrap_or_else(|_| serenity::model::Timestamp::now());
                         EditMember::new().disable_communication_until_datetime(timestamp)
                     };
 
@@ -1486,7 +1644,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1501,11 +1660,7 @@ where
         Ok(())
     }
 
-    async fn handle_create_channel(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_create_channel(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use discord_types::types::ChannelType as DcChannelType;
         use serenity::futures::StreamExt as _;
         use serenity::model::channel::ChannelType as SerenityChannelType;
@@ -1526,7 +1681,10 @@ where
 
             let reply_inbox = msg.reply.clone();
             let guild = GuildId::new(cmd.guild_id);
-            let context = format!("Failed to create channel '{}' in guild {}", cmd.name, cmd.guild_id);
+            let context = format!(
+                "Failed to create channel '{}' in guild {}",
+                cmd.name, cmd.guild_id
+            );
             let kind = match cmd.channel_type {
                 DcChannelType::GuildVoice => SerenityChannelType::Voice,
                 DcChannelType::GuildCategory => SerenityChannelType::Category,
@@ -1547,7 +1705,11 @@ where
                     Ok(created_channel) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_channel.id.get().to_string().into())
+                                .publish_with_headers(
+                                    reply,
+                                    async_nats::HeaderMap::new(),
+                                    created_channel.id.get().to_string().into(),
+                                )
                                 .await;
                         }
                         break;
@@ -1601,7 +1763,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1625,7 +1788,9 @@ where
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::channel_delete(&prefix);
         let error_subject = subjects::bot::command_error(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteChannelCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteChannelCommand>(&subject)
+            .await?;
 
         info!("Listening for delete_channel commands on {}", subject);
 
@@ -1642,7 +1807,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1657,11 +1823,7 @@ where
         Ok(())
     }
 
-    async fn handle_create_role(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_create_role(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
 
         let subject = subjects::agent::role_create(&prefix);
@@ -1680,7 +1842,10 @@ where
 
             let reply_inbox = msg.reply.clone();
             let guild = GuildId::new(cmd.guild_id);
-            let context = format!("Failed to create role '{}' in guild {}", cmd.name, cmd.guild_id);
+            let context = format!(
+                "Failed to create role '{}' in guild {}",
+                cmd.name, cmd.guild_id
+            );
             let mut builder = EditRole::new()
                 .name(&cmd.name)
                 .hoist(cmd.hoist)
@@ -1693,7 +1858,11 @@ where
                     Ok(created_role) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_role.id.get().to_string().into())
+                                .publish_with_headers(
+                                    reply,
+                                    async_nats::HeaderMap::new(),
+                                    created_role.id.get().to_string().into(),
+                                )
                                 .await;
                         }
                         break;
@@ -1730,7 +1899,10 @@ where
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    let context = format!("Failed to assign role {} to user {} in guild {}", cmd.role_id, cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to assign role {} to user {} in guild {}",
+                        cmd.role_id, cmd.user_id, cmd.guild_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match http
                             .add_member_role(
@@ -1747,7 +1919,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1778,7 +1951,10 @@ where
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    let context = format!("Failed to remove role {} from user {} in guild {}", cmd.role_id, cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to remove role {} from user {} in guild {}",
+                        cmd.role_id, cmd.user_id, cmd.guild_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match http
                             .remove_member_role(
@@ -1795,7 +1971,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1828,7 +2005,10 @@ where
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let role = RoleId::new(cmd.role_id);
-                    let context = format!("Failed to delete role {} in guild {}", cmd.role_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to delete role {} in guild {}",
+                        cmd.role_id, cmd.guild_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match guild.delete_role(http.as_ref(), role).await {
                             Ok(_) => break,
@@ -1837,7 +2017,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1870,7 +2051,10 @@ where
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message = MessageId::new(cmd.message_id);
-                    let context = format!("Failed to pin message {} in channel {}", cmd.message_id, cmd.channel_id);
+                    let context = format!(
+                        "Failed to pin message {} in channel {}",
+                        cmd.message_id, cmd.channel_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match channel.pin(http.as_ref(), message).await {
                             Ok(_) => break,
@@ -1879,7 +2063,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1903,7 +2088,9 @@ where
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_unpin(&prefix);
         let error_subject = subjects::bot::command_error(&prefix);
-        let mut stream = subscriber.subscribe::<UnpinMessageCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<UnpinMessageCommand>(&subject)
+            .await?;
 
         info!("Listening for unpin commands on {}", subject);
 
@@ -1912,7 +2099,10 @@ where
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let message = MessageId::new(cmd.message_id);
-                    let context = format!("Failed to unpin message {} in channel {}", cmd.message_id, cmd.channel_id);
+                    let context = format!(
+                        "Failed to unpin message {} in channel {}",
+                        cmd.message_id, cmd.channel_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match channel.unpin(http.as_ref(), message).await {
                             Ok(_) => break,
@@ -1921,7 +2111,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1960,7 +2151,11 @@ where
                         .iter()
                         .map(|&id| MessageId::new(id))
                         .collect();
-                    let context = format!("Failed to bulk delete {} messages in channel {}", message_ids.len(), cmd.channel_id);
+                    let context = format!(
+                        "Failed to bulk delete {} messages in channel {}",
+                        message_ids.len(),
+                        cmd.channel_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match channel.delete_messages(http.as_ref(), &message_ids).await {
                             Ok(_) => break,
@@ -1969,7 +2164,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -1984,11 +2180,7 @@ where
         Ok(())
     }
 
-    async fn handle_create_thread(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_create_thread(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         use serenity::model::channel::AutoArchiveDuration;
 
@@ -2008,15 +2200,17 @@ where
 
             let reply_inbox = msg.reply.clone();
             let channel = ChannelId::new(cmd.channel_id);
-            let context = format!("Failed to create thread '{}' in channel {}", cmd.name, cmd.channel_id);
+            let context = format!(
+                "Failed to create thread '{}' in channel {}",
+                cmd.name, cmd.channel_id
+            );
             let archive_dur = match cmd.auto_archive_mins {
                 60 => AutoArchiveDuration::OneHour,
                 4320 => AutoArchiveDuration::ThreeDays,
                 10080 => AutoArchiveDuration::OneWeek,
                 _ => AutoArchiveDuration::OneDay,
             };
-            let builder = CreateThread::new(&cmd.name)
-                .auto_archive_duration(archive_dur);
+            let builder = CreateThread::new(&cmd.name).auto_archive_duration(archive_dur);
             for attempt in 0..=MAX_RETRIES {
                 let thread_result = if let Some(msg_id) = cmd.message_id {
                     channel
@@ -2033,7 +2227,11 @@ where
                     Ok(created_thread) => {
                         if let Some(reply) = reply_inbox {
                             let _ = client
-                                .publish_with_headers(reply, async_nats::HeaderMap::new(), created_thread.id.get().to_string().into())
+                                .publish_with_headers(
+                                    reply,
+                                    async_nats::HeaderMap::new(),
+                                    created_thread.id.get().to_string().into(),
+                                )
                                 .await;
                         }
                         break;
@@ -2083,7 +2281,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -2148,7 +2347,8 @@ where
                 ActivityType::Competing => ActivityData::competing(a.name),
                 ActivityType::Streaming => {
                     if let Some(url) = a.url {
-                        ActivityData::streaming(a.name.clone(), url).unwrap_or_else(|_| ActivityData::playing(a.name))
+                        ActivityData::streaming(a.name.clone(), url)
+                            .unwrap_or_else(|_| ActivityData::playing(a.name))
                     } else {
                         ActivityData::playing(a.name)
                     }
@@ -2170,11 +2370,7 @@ where
     /// The agent sends a `FetchMessagesCommand` via `client.request()`. This
     /// handler fetches the messages from Discord and publishes the result as
     /// `Vec<FetchedMessage>` JSON to the NATS reply inbox.
-    async fn handle_fetch_messages(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_messages(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_messages(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -2220,7 +2416,10 @@ where
                 }
             };
 
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_messages: failed to send reply: {}", e);
             }
         }
@@ -2233,11 +2432,7 @@ where
     /// The agent sends a `FetchMemberCommand` via `client.request()`. This
     /// handler fetches the guild member from Discord and publishes the result as
     /// `Option<FetchedMember>` JSON to the NATS reply inbox (`null` on error).
-    async fn handle_fetch_member(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_member(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_member(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -2264,37 +2459,35 @@ where
             let guild = GuildId::new(cmd.guild_id);
             let user = UserId::new(cmd.user_id);
 
-            let response_bytes =
-                match guild.member(http.as_ref(), user).await {
-                    Ok(member) => {
-                        let fetched = FetchedMember {
-                            user: DiscordUser {
-                                id: member.user.id.get(),
-                                username: member.user.name.clone(),
-                                global_name: member
-                                    .user
-                                    .global_name
-                                    .as_deref()
-                                    .map(String::from),
-                                bot: member.user.bot,
-                            },
-                            guild_id: cmd.guild_id,
-                            nick: member.nick.clone(),
-                            roles: member.roles.iter().map(|r| r.get()).collect(),
-                            joined_at: member.joined_at.and_then(|t| t.to_rfc3339()),
-                        };
-                        serde_json::to_vec(&fetched).unwrap_or_default()
-                    }
-                    Err(e) => {
-                        error!(
-                            "fetch_member: Discord API error for user {} in guild {}: {}",
-                            cmd.user_id, cmd.guild_id, e
-                        );
-                        b"null".to_vec()
-                    }
-                };
+            let response_bytes = match guild.member(http.as_ref(), user).await {
+                Ok(member) => {
+                    let fetched = FetchedMember {
+                        user: DiscordUser {
+                            id: member.user.id.get(),
+                            username: member.user.name.clone(),
+                            global_name: member.user.global_name.as_deref().map(String::from),
+                            bot: member.user.bot,
+                        },
+                        guild_id: cmd.guild_id,
+                        nick: member.nick.clone(),
+                        roles: member.roles.iter().map(|r| r.get()).collect(),
+                        joined_at: member.joined_at.and_then(|t| t.to_rfc3339()),
+                    };
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!(
+                        "fetch_member: Discord API error for user {} in guild {}: {}",
+                        cmd.user_id, cmd.guild_id, e
+                    );
+                    b"null".to_vec()
+                }
+            };
 
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_member: failed to send reply: {}", e);
             }
         }
@@ -2320,7 +2513,10 @@ where
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let user = UserId::new(cmd.user_id);
-                    let context = format!("Failed to unban user {} in guild {}", cmd.user_id, cmd.guild_id);
+                    let context = format!(
+                        "Failed to unban user {} in guild {}",
+                        cmd.user_id, cmd.guild_id
+                    );
                     for attempt in 0..=MAX_RETRIES {
                         match http.remove_ban(guild, user, None).await {
                             Ok(_) => break,
@@ -2329,7 +2525,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -2353,7 +2550,9 @@ where
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::guild_member_nick(&prefix);
         let error_subject = subjects::bot::command_error(&prefix);
-        let mut stream = subscriber.subscribe::<GuildMemberNickCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<GuildMemberNickCommand>(&subject)
+            .await?;
 
         info!("Listening for guild_member_nick commands on {}", subject);
 
@@ -2378,7 +2577,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -2393,14 +2593,12 @@ where
         Ok(())
     }
 
-    async fn handle_webhook_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_webhook_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::webhook_create(&prefix);
-        let mut stream = subscriber.subscribe::<CreateWebhookCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<CreateWebhookCommand>(&subject)
+            .await?;
         info!("Listening for webhook_create commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2417,20 +2615,17 @@ where
         Ok(())
     }
 
-    async fn handle_webhook_execute(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_webhook_execute(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::webhook_execute(&prefix);
-        let mut stream = subscriber.subscribe::<ExecuteWebhookCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<ExecuteWebhookCommand>(&subject)
+            .await?;
         info!("Listening for webhook_execute commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    let mut builder = serenity::builder::ExecuteWebhook::new()
-                        .content(cmd.content);
+                    let mut builder = serenity::builder::ExecuteWebhook::new().content(cmd.content);
                     if let Some(ref name) = cmd.username {
                         builder = builder.username(name);
                     }
@@ -2438,7 +2633,14 @@ where
                         builder = builder.avatar_url(url);
                     }
                     if let Err(e) = http
-                        .execute_webhook(cmd.webhook_id.into(), None, &cmd.webhook_token, false, Vec::new(), &builder)
+                        .execute_webhook(
+                            cmd.webhook_id.into(),
+                            None,
+                            &cmd.webhook_token,
+                            false,
+                            Vec::new(),
+                            &builder,
+                        )
                         .await
                     {
                         warn!("Failed to execute webhook {}: {}", cmd.webhook_id, e);
@@ -2450,14 +2652,12 @@ where
         Ok(())
     }
 
-    async fn handle_webhook_delete(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_webhook_delete(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::webhook_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteWebhookCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteWebhookCommand>(&subject)
+            .await?;
         info!("Listening for webhook_delete commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2505,7 +2705,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -2528,7 +2729,9 @@ where
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::voice_disconnect(&prefix);
         let error_subject = subjects::bot::command_error(&prefix);
-        let mut stream = subscriber.subscribe::<VoiceDisconnectCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<VoiceDisconnectCommand>(&subject)
+            .await?;
         info!("Listening for voice_disconnect commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2549,7 +2752,8 @@ where
                                     tokio::time::sleep(dur).await;
                                 }
                                 outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome).await;
+                                    publish_if_permanent(&publisher, &error_subject, &outcome)
+                                        .await;
                                     log_outcome(&subject, &context, outcome);
                                     break;
                                 }
@@ -2563,14 +2767,12 @@ where
         Ok(())
     }
 
-    async fn handle_invite_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_invite_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::invite_create(&prefix);
-        let mut stream = subscriber.subscribe::<CreateInviteCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<CreateInviteCommand>(&subject)
+            .await?;
         info!("Listening for invite_create commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2582,7 +2784,10 @@ where
                         .temporary(cmd.temporary)
                         .unique(cmd.unique);
                     if let Err(e) = channel.create_invite(&*http, builder).await {
-                        warn!("Failed to create invite for channel {}: {}", cmd.channel_id, e);
+                        warn!(
+                            "Failed to create invite for channel {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize invite_create command: {}", e),
@@ -2591,14 +2796,12 @@ where
         Ok(())
     }
 
-    async fn handle_invite_revoke(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_invite_revoke(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::invite_revoke(&prefix);
-        let mut stream = subscriber.subscribe::<RevokeInviteCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<RevokeInviteCommand>(&subject)
+            .await?;
         info!("Listening for invite_revoke commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2614,11 +2817,7 @@ where
         Ok(())
     }
 
-    async fn handle_emoji_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_emoji_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::emoji_create(&prefix);
         let mut stream = subscriber.subscribe::<CreateEmojiCommand>(&subject).await?;
@@ -2628,7 +2827,10 @@ where
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     if let Err(e) = guild.create_emoji(&*http, &cmd.name, &cmd.image_data).await {
-                        warn!("Failed to create emoji '{}' in guild {}: {}", cmd.name, cmd.guild_id, e);
+                        warn!(
+                            "Failed to create emoji '{}' in guild {}: {}",
+                            cmd.name, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize emoji_create command: {}", e),
@@ -2637,11 +2839,7 @@ where
         Ok(())
     }
 
-    async fn handle_emoji_delete(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_emoji_delete(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::emoji_delete(&prefix);
         let mut stream = subscriber.subscribe::<DeleteEmojiCommand>(&subject).await?;
@@ -2652,7 +2850,10 @@ where
                     let guild = GuildId::new(cmd.guild_id);
                     let emoji_id = serenity::model::id::EmojiId::new(cmd.emoji_id);
                     if let Err(e) = guild.delete_emoji(&*http, emoji_id).await {
-                        warn!("Failed to delete emoji {} from guild {}: {}", cmd.emoji_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to delete emoji {} from guild {}: {}",
+                            cmd.emoji_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize emoji_delete command: {}", e),
@@ -2671,8 +2872,13 @@ where
 
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::scheduled_event_create(&prefix);
-        let mut stream = subscriber.subscribe::<CreateScheduledEventCommand>(&subject).await?;
-        info!("Listening for scheduled_event_create commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<CreateScheduledEventCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for scheduled_event_create commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
@@ -2686,15 +2892,22 @@ where
                     };
 
                     let (kind, mut builder) = if let Some(channel_id) = cmd.channel_id {
-                        let b = CreateScheduledEvent::new(ScheduledEventType::Voice, &cmd.name, start)
-                            .channel_id(ChannelId::new(channel_id));
+                        let b =
+                            CreateScheduledEvent::new(ScheduledEventType::Voice, &cmd.name, start)
+                                .channel_id(ChannelId::new(channel_id));
                         (ScheduledEventType::Voice, b)
                     } else {
                         let location = cmd.external_location.unwrap_or_default();
-                        let end = cmd.end_time.as_deref()
+                        let end = cmd
+                            .end_time
+                            .as_deref()
                             .and_then(|s| s.parse::<serenity::model::Timestamp>().ok());
-                        let mut b = CreateScheduledEvent::new(ScheduledEventType::External, &cmd.name, start)
-                            .location(&location);
+                        let mut b = CreateScheduledEvent::new(
+                            ScheduledEventType::External,
+                            &cmd.name,
+                            start,
+                        )
+                        .location(&location);
                         if let Some(end_ts) = end {
                             b = b.end_time(end_ts);
                         }
@@ -2706,10 +2919,16 @@ where
                     }
 
                     if let Err(e) = guild.create_scheduled_event(&*http, builder).await {
-                        warn!("Failed to create scheduled event '{}' in guild {}: {}", cmd.name, cmd.guild_id, e);
+                        warn!(
+                            "Failed to create scheduled event '{}' in guild {}: {}",
+                            cmd.name, cmd.guild_id, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize scheduled_event_create command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize scheduled_event_create command: {}",
+                    e
+                ),
             }
         }
         Ok(())
@@ -2722,31 +2941,40 @@ where
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::scheduled_event_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteScheduledEventCommand>(&subject).await?;
-        info!("Listening for scheduled_event_delete commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<DeleteScheduledEventCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for scheduled_event_delete commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let event_id = serenity::model::id::ScheduledEventId::new(cmd.event_id);
                     if let Err(e) = guild.delete_scheduled_event(&*http, event_id).await {
-                        warn!("Failed to delete scheduled event {} from guild {}: {}", cmd.event_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to delete scheduled event {} from guild {}: {}",
+                            cmd.event_id, cmd.guild_id, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize scheduled_event_delete command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize scheduled_event_delete command: {}",
+                    e
+                ),
             }
         }
         Ok(())
     }
 
-    async fn handle_reaction_remove_all(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_reaction_remove_all(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::reaction_remove_all(&prefix);
-        let mut stream = subscriber.subscribe::<RemoveAllReactionsCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<RemoveAllReactionsCommand>(&subject)
+            .await?;
         info!("Listening for reaction_remove_all commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2757,15 +2985,23 @@ where
                         // Parse as ReactionType and remove only that emoji
                         match emoji_str.parse::<serenity::model::channel::ReactionType>() {
                             Ok(rt) => {
-                                if let Err(e) = http.delete_message_reaction_emoji(channel, msg, &rt).await {
-                                    warn!("Failed to remove emoji reactions {} from {}/{}: {}", emoji_str, cmd.channel_id, cmd.message_id, e);
+                                if let Err(e) =
+                                    http.delete_message_reaction_emoji(channel, msg, &rt).await
+                                {
+                                    warn!(
+                                        "Failed to remove emoji reactions {} from {}/{}: {}",
+                                        emoji_str, cmd.channel_id, cmd.message_id, e
+                                    );
                                 }
                             }
                             Err(e) => warn!("Failed to parse emoji '{}': {}", emoji_str, e),
                         }
                     } else {
                         if let Err(e) = http.delete_message_reactions(channel, msg).await {
-                            warn!("Failed to remove all reactions from {}/{}: {}", cmd.channel_id, cmd.message_id, e);
+                            warn!(
+                                "Failed to remove all reactions from {}/{}: {}",
+                                cmd.channel_id, cmd.message_id, e
+                            );
                         }
                     }
                 }
@@ -2775,14 +3011,12 @@ where
         Ok(())
     }
 
-    async fn handle_message_crosspost(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_message_crosspost(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_crosspost(&prefix);
-        let mut stream = subscriber.subscribe::<CrosspostMessageCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<CrosspostMessageCommand>(&subject)
+            .await?;
         info!("Listening for message_crosspost commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2790,7 +3024,10 @@ where
                     let channel = ChannelId::new(cmd.channel_id);
                     let msg = MessageId::new(cmd.message_id);
                     if let Err(e) = http.crosspost_message(channel, msg).await {
-                        warn!("Failed to crosspost message {}/{}: {}", cmd.channel_id, cmd.message_id, e);
+                        warn!(
+                            "Failed to crosspost message {}/{}: {}",
+                            cmd.channel_id, cmd.message_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize message_crosspost command: {}", e),
@@ -2799,16 +3036,14 @@ where
         Ok(())
     }
 
-    async fn handle_forum_post_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_forum_post_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::builder::{CreateForumPost, CreateMessage};
 
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::forum_post_create(&prefix);
-        let mut stream = subscriber.subscribe::<CreateForumPostCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<CreateForumPostCommand>(&subject)
+            .await?;
         info!("Listening for forum_post_create commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2817,14 +3052,18 @@ where
                     let msg = CreateMessage::new().content(truncate(&cmd.content));
                     let mut builder = CreateForumPost::new(&cmd.name, msg);
                     if !cmd.tags.is_empty() {
-                        let tag_ids: Vec<serenity::model::id::ForumTagId> = cmd.tags
+                        let tag_ids: Vec<serenity::model::id::ForumTagId> = cmd
+                            .tags
                             .iter()
                             .map(|&id| serenity::model::id::ForumTagId::new(id))
                             .collect();
                         builder = builder.set_applied_tags(tag_ids);
                     }
                     if let Err(e) = channel.create_forum_post(&*http, builder).await {
-                        warn!("Failed to create forum post '{}' in {}: {}", cmd.name, cmd.channel_id, e);
+                        warn!(
+                            "Failed to create forum post '{}' in {}: {}",
+                            cmd.name, cmd.channel_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize forum_post_create command: {}", e),
@@ -2833,14 +3072,12 @@ where
         Ok(())
     }
 
-    async fn handle_thread_member_add(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_thread_member_add(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::thread_member_add(&prefix);
-        let mut stream = subscriber.subscribe::<AddThreadMemberCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<AddThreadMemberCommand>(&subject)
+            .await?;
         info!("Listening for thread_member_add commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2848,7 +3085,10 @@ where
                     let thread = ChannelId::new(cmd.thread_id);
                     let user = UserId::new(cmd.user_id);
                     if let Err(e) = http.add_thread_channel_member(thread, user).await {
-                        warn!("Failed to add user {} to thread {}: {}", cmd.user_id, cmd.thread_id, e);
+                        warn!(
+                            "Failed to add user {} to thread {}: {}",
+                            cmd.user_id, cmd.thread_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize thread_member_add command: {}", e),
@@ -2857,14 +3097,12 @@ where
         Ok(())
     }
 
-    async fn handle_thread_member_remove(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_thread_member_remove(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::thread_member_remove(&prefix);
-        let mut stream = subscriber.subscribe::<RemoveThreadMemberCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<RemoveThreadMemberCommand>(&subject)
+            .await?;
         info!("Listening for thread_member_remove commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2872,7 +3110,10 @@ where
                     let thread = ChannelId::new(cmd.thread_id);
                     let user = UserId::new(cmd.user_id);
                     if let Err(e) = http.remove_thread_channel_member(thread, user).await {
-                        warn!("Failed to remove user {} from thread {}: {}", cmd.user_id, cmd.thread_id, e);
+                        warn!(
+                            "Failed to remove user {} from thread {}: {}",
+                            cmd.user_id, cmd.thread_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize thread_member_remove command: {}", e),
@@ -2881,11 +3122,7 @@ where
         Ok(())
     }
 
-    async fn handle_edit_role(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_edit_role(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::role_edit(&prefix);
         let mut stream = subscriber.subscribe::<EditRoleCommand>(&subject).await?;
@@ -2896,12 +3133,23 @@ where
                     let guild = GuildId::new(cmd.guild_id);
                     let role = RoleId::new(cmd.role_id);
                     let mut builder = EditRole::new();
-                    if let Some(ref name) = cmd.name { builder = builder.name(name); }
-                    if let Some(color) = cmd.color { builder = builder.colour(color); }
-                    if let Some(hoist) = cmd.hoist { builder = builder.hoist(hoist); }
-                    if let Some(mentionable) = cmd.mentionable { builder = builder.mentionable(mentionable); }
+                    if let Some(ref name) = cmd.name {
+                        builder = builder.name(name);
+                    }
+                    if let Some(color) = cmd.color {
+                        builder = builder.colour(color);
+                    }
+                    if let Some(hoist) = cmd.hoist {
+                        builder = builder.hoist(hoist);
+                    }
+                    if let Some(mentionable) = cmd.mentionable {
+                        builder = builder.mentionable(mentionable);
+                    }
                     if let Err(e) = http.edit_role(guild, role, &builder, None).await {
-                        warn!("Failed to edit role {} in guild {}: {}", cmd.role_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to edit role {} in guild {}: {}",
+                            cmd.role_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize edit_role command: {}", e),
@@ -2910,15 +3158,13 @@ where
         Ok(())
     }
 
-    async fn handle_stage_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_stage_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::builder::Builder;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::stage_create(&prefix);
-        let mut stream = subscriber.subscribe::<CreateStageInstanceCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<CreateStageInstanceCommand>(&subject)
+            .await?;
         info!("Listening for stage_create commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -2926,7 +3172,10 @@ where
                     let channel = ChannelId::new(cmd.channel_id);
                     let builder = CreateStageInstance::new(&cmd.topic);
                     if let Err(e) = builder.execute(&*http, channel).await {
-                        warn!("Failed to create stage instance in {}: {}", cmd.channel_id, e);
+                        warn!(
+                            "Failed to create stage instance in {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize stage_create command: {}", e),
@@ -2935,21 +3184,22 @@ where
         Ok(())
     }
 
-    async fn handle_stage_delete(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_stage_delete(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::stage_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteStageInstanceCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteStageInstanceCommand>(&subject)
+            .await?;
         info!("Listening for stage_delete commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     if let Err(e) = http.delete_stage_instance(channel, None).await {
-                        warn!("Failed to delete stage instance in {}: {}", cmd.channel_id, e);
+                        warn!(
+                            "Failed to delete stage instance in {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize stage_delete command: {}", e),
@@ -2958,11 +3208,7 @@ where
         Ok(())
     }
 
-    async fn handle_webhook_edit(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_webhook_edit(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::webhook_edit(&prefix);
         let mut stream = subscriber.subscribe::<EditWebhookCommand>(&subject).await?;
@@ -2972,11 +3218,16 @@ where
                 Ok(cmd) => {
                     let webhook_id = WebhookId::new(cmd.webhook_id);
                     let mut builder = EditWebhook::new();
-                    if let Some(ref name) = cmd.name { builder = builder.name(name); }
+                    if let Some(ref name) = cmd.name {
+                        builder = builder.name(name);
+                    }
                     if let Some(channel_id) = cmd.channel_id {
                         builder = builder.channel_id(ChannelId::new(channel_id));
                     }
-                    if let Err(e) = http.edit_webhook_with_token(webhook_id, &cmd.webhook_token, &builder, None).await {
+                    if let Err(e) = http
+                        .edit_webhook_with_token(webhook_id, &cmd.webhook_token, &builder, None)
+                        .await
+                    {
                         warn!("Failed to edit webhook {}: {}", cmd.webhook_id, e);
                     }
                 }
@@ -2986,11 +3237,7 @@ where
         Ok(())
     }
 
-    async fn handle_dm_create(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_dm_create(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::dm_create(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3014,22 +3261,24 @@ where
             let response_bytes = match user.create_dm_channel(&*http).await {
                 Ok(channel) => serde_json::to_vec(&Some(channel.id.get())).unwrap_or_default(),
                 Err(e) => {
-                    error!("dm_create: Discord API error for user {}: {}", cmd.user_id, e);
+                    error!(
+                        "dm_create: Discord API error for user {}: {}",
+                        cmd.user_id, e
+                    );
                     serde_json::to_vec::<Option<u64>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("dm_create: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_guild(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_guild(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_guild(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3063,18 +3312,17 @@ where
                     serde_json::to_vec::<Option<FetchedGuild>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_guild: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_channel(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_channel(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         use serenity::model::channel::Channel;
         use serenity::model::channel::ChannelType as SerenityChannelType;
@@ -3132,22 +3380,24 @@ where
                     serde_json::to_vec(&Some(fetched)).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_channel: Discord API error for {}: {}", cmd.channel_id, e);
+                    error!(
+                        "fetch_channel: Discord API error for {}: {}",
+                        cmd.channel_id, e
+                    );
                     serde_json::to_vec::<Option<FetchedChannel>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_channel: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_invites(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_invites(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_invites(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3185,25 +3435,29 @@ where
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_invites: Discord API error for {}: {}", cmd.channel_id, e);
+                    error!(
+                        "fetch_invites: Discord API error for {}: {}",
+                        cmd.channel_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedInvite>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_invites: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_edit_scheduled_event(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_edit_scheduled_event(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::scheduled_event_edit(&prefix);
-        let mut stream = subscriber.subscribe::<EditScheduledEventCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<EditScheduledEventCommand>(&subject)
+            .await?;
         info!("Listening for scheduled_event_edit commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -3222,8 +3476,14 @@ where
                             builder = builder.start_time(ts);
                         }
                     }
-                    if let Err(e) = http.edit_scheduled_event(guild, event_id, &builder, None).await {
-                        warn!("Failed to edit scheduled event {} in guild {}: {}", cmd.event_id, cmd.guild_id, e);
+                    if let Err(e) = http
+                        .edit_scheduled_event(guild, event_id, &builder, None)
+                        .await
+                    {
+                        warn!(
+                            "Failed to edit scheduled event {} in guild {}: {}",
+                            cmd.event_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize scheduled_event_edit command: {}", e),
@@ -3232,11 +3492,7 @@ where
         Ok(())
     }
 
-    async fn handle_edit_emoji(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_edit_emoji(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::model::id::EmojiId;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::emoji_edit(&prefix);
@@ -3249,7 +3505,10 @@ where
                     let emoji_id = EmojiId::new(cmd.emoji_id);
                     let map = serde_json::json!({ "name": cmd.name });
                     if let Err(e) = http.edit_emoji(guild, emoji_id, &map, None).await {
-                        warn!("Failed to edit emoji {} in guild {}: {}", cmd.emoji_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to edit emoji {} in guild {}: {}",
+                            cmd.emoji_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize emoji_edit command: {}", e),
@@ -3258,11 +3517,7 @@ where
         Ok(())
     }
 
-    async fn handle_fetch_guild_members(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_guild_members(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_guild_members(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3283,7 +3538,8 @@ where
                 }
             };
             let guild = GuildId::new(cmd.guild_id);
-            let response_bytes = match http.get_guild_members(guild, cmd.limit, cmd.after_id).await {
+            let response_bytes = match http.get_guild_members(guild, cmd.limit, cmd.after_id).await
+            {
                 Ok(members) => {
                     let fetched: Vec<FetchedMember> = members
                         .iter()
@@ -3303,22 +3559,24 @@ where
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_guild_members: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_guild_members: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedMember>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_guild_members: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_guild_channels(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_guild_channels(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         use serenity::model::channel::ChannelType as SerenityChannelType;
         let subject = subjects::agent::fetch_guild_channels(&prefix);
@@ -3363,22 +3621,24 @@ where
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_guild_channels: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_guild_channels: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedChannel>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_guild_channels: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_pinned(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_pinned(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_pinned(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3401,26 +3661,29 @@ where
             let channel = ChannelId::new(cmd.channel_id);
             let response_bytes = match http.get_pins(channel).await {
                 Ok(messages) => {
-                    let fetched: Vec<FetchedMessage> = messages.iter().map(to_fetched_message).collect();
+                    let fetched: Vec<FetchedMessage> =
+                        messages.iter().map(to_fetched_message).collect();
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_pinned: Discord API error for channel {}: {}", cmd.channel_id, e);
+                    error!(
+                        "fetch_pinned: Discord API error for channel {}: {}",
+                        cmd.channel_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedMessage>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_pinned: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_fetch_roles(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_roles(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_roles(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3457,11 +3720,17 @@ where
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_roles: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_roles: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedRole>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_roles: failed to send reply: {}", e);
             }
         }
@@ -3475,8 +3744,13 @@ where
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_edit_response(&prefix);
-        let mut stream = subscriber.subscribe::<EditInteractionResponseCommand>(&subject).await?;
-        info!("Listening for interaction_edit_response commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<EditInteractionResponseCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for interaction_edit_response commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
@@ -3488,11 +3762,24 @@ where
                         let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
                         builder = builder.embeds(embeds);
                     }
-                    if let Err(e) = http.edit_original_interaction_response(&cmd.interaction_token, &builder, vec![]).await {
-                        warn!("Failed to edit interaction response for token {}: {}", cmd.interaction_token, e);
+                    if let Err(e) = http
+                        .edit_original_interaction_response(
+                            &cmd.interaction_token,
+                            &builder,
+                            vec![],
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to edit interaction response for token {}: {}",
+                            cmd.interaction_token, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize interaction_edit_response command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize interaction_edit_response command: {}",
+                    e
+                ),
             }
         }
         Ok(())
@@ -3505,16 +3792,30 @@ where
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::interaction_delete_response(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteInteractionResponseCommand>(&subject).await?;
-        info!("Listening for interaction_delete_response commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<DeleteInteractionResponseCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for interaction_delete_response commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
-                    if let Err(e) = http.delete_original_interaction_response(&cmd.interaction_token).await {
-                        warn!("Failed to delete interaction response for token {}: {}", cmd.interaction_token, e);
+                    if let Err(e) = http
+                        .delete_original_interaction_response(&cmd.interaction_token)
+                        .await
+                    {
+                        warn!(
+                            "Failed to delete interaction response for token {}: {}",
+                            cmd.interaction_token, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize interaction_delete_response command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize interaction_delete_response command: {}",
+                    e
+                ),
             }
         }
         Ok(())
@@ -3527,8 +3828,13 @@ where
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::channel_set_permissions(&prefix);
-        let mut stream = subscriber.subscribe::<SetChannelPermissionsCommand>(&subject).await?;
-        info!("Listening for channel_set_permissions commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<SetChannelPermissionsCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for channel_set_permissions commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
@@ -3544,11 +3850,20 @@ where
                         deny: Permissions::from_bits_truncate(cmd.deny),
                         kind,
                     };
-                    if let Err(e) = http.create_permission(channel, target_id, &overwrite, None).await {
-                        warn!("Failed to set permissions on channel {}: {}", cmd.channel_id, e);
+                    if let Err(e) = http
+                        .create_permission(channel, target_id, &overwrite, None)
+                        .await
+                    {
+                        warn!(
+                            "Failed to set permissions on channel {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize channel_set_permissions command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize channel_set_permissions command: {}",
+                    e
+                ),
             }
         }
         Ok(())
@@ -3561,31 +3876,40 @@ where
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::channel_delete_permissions(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteChannelPermissionsCommand>(&subject).await?;
-        info!("Listening for channel_delete_permissions commands on {}", subject);
+        let mut stream = subscriber
+            .subscribe::<DeleteChannelPermissionsCommand>(&subject)
+            .await?;
+        info!(
+            "Listening for channel_delete_permissions commands on {}",
+            subject
+        );
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     let channel = ChannelId::new(cmd.channel_id);
                     let target_id = TargetId::new(cmd.target_id);
                     if let Err(e) = http.delete_permission(channel, target_id, None).await {
-                        warn!("Failed to delete permissions on channel {}: {}", cmd.channel_id, e);
+                        warn!(
+                            "Failed to delete permissions on channel {}: {}",
+                            cmd.channel_id, e
+                        );
                     }
                 }
-                Err(e) => warn!("Failed to deserialize channel_delete_permissions command: {}", e),
+                Err(e) => warn!(
+                    "Failed to deserialize channel_delete_permissions command: {}",
+                    e
+                ),
             }
         }
         Ok(())
     }
 
-    async fn handle_prune_members(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_prune_members(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::prune_members(&prefix);
-        let mut stream = subscriber.subscribe::<PruneMembersCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<PruneMembersCommand>(&subject)
+            .await?;
         info!("Listening for prune_members commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -3601,11 +3925,7 @@ where
         Ok(())
     }
 
-    async fn handle_fetch_audit_log(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_audit_log(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_audit_log(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3628,23 +3948,36 @@ where
             let guild = GuildId::new(cmd.guild_id);
             let before = cmd.before_id.map(serenity::model::id::AuditLogEntryId::new);
             let user = cmd.user_id.map(UserId::new);
-            let response_bytes = match http.get_audit_logs(guild, None, user, before, cmd.limit).await {
+            let response_bytes = match http
+                .get_audit_logs(guild, None, user, before, cmd.limit)
+                .await
+            {
                 Ok(logs) => {
-                    let entries: Vec<AuditLogEntryInfo> = logs.entries.iter().map(|e| AuditLogEntryInfo {
-                        id: e.id.get(),
-                        user_id: e.user_id.get(),
-                        target_id: e.target_id.map(|t| t.get()),
-                        action_type: e.action.num() as u32,
-                        reason: e.reason.clone(),
-                    }).collect();
+                    let entries: Vec<AuditLogEntryInfo> = logs
+                        .entries
+                        .iter()
+                        .map(|e| AuditLogEntryInfo {
+                            id: e.id.get(),
+                            user_id: e.user_id.get(),
+                            target_id: e.target_id.map(|t| t.get()),
+                            action_type: e.action.num() as u32,
+                            reason: e.reason.clone(),
+                        })
+                        .collect();
                     serde_json::to_vec(&entries).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_audit_log: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_audit_log: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<AuditLogEntryInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_audit_log: failed to send reply: {}", e);
             }
         }
@@ -3659,7 +3992,10 @@ where
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_scheduled_event_users(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
-        info!("Listening for fetch_scheduled_event_users requests on {}", subject);
+        info!(
+            "Listening for fetch_scheduled_event_users requests on {}",
+            subject
+        );
         while let Some(msg) = sub.next().await {
             let reply = match msg.reply.clone() {
                 Some(r) => r,
@@ -3677,17 +4013,23 @@ where
             };
             let guild = GuildId::new(cmd.guild_id);
             let event_id = serenity::model::id::ScheduledEventId::new(cmd.event_id);
-            let response_bytes = match http.get_scheduled_event_users(guild, event_id, cmd.limit, None, None).await {
+            let response_bytes = match http
+                .get_scheduled_event_users(guild, event_id, cmd.limit, None, None)
+                .await
+            {
                 Ok(users) => {
-                    let fetched: Vec<ScheduledEventUserInfo> = users.iter().map(|u| ScheduledEventUserInfo {
-                        event_id: cmd.event_id,
-                        user: DiscordUser {
-                            id: u.user.id.get(),
-                            username: u.user.name.clone(),
-                            global_name: u.user.global_name.as_deref().map(String::from),
-                            bot: u.user.bot,
-                        },
-                    }).collect();
+                    let fetched: Vec<ScheduledEventUserInfo> = users
+                        .iter()
+                        .map(|u| ScheduledEventUserInfo {
+                            event_id: cmd.event_id,
+                            user: DiscordUser {
+                                id: u.user.id.get(),
+                                username: u.user.name.clone(),
+                                global_name: u.user.global_name.as_deref().map(String::from),
+                                bot: u.user.bot,
+                            },
+                        })
+                        .collect();
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
@@ -3695,18 +4037,17 @@ where
                     serde_json::to_vec::<Vec<ScheduledEventUserInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_scheduled_event_users: failed to send reply: {}", e);
             }
         }
         Ok(())
     }
 
-    async fn handle_edit_sticker(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_edit_sticker(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::model::id::StickerId;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::sticker_edit(&prefix);
@@ -3726,7 +4067,10 @@ where
                     }
                     let value = serde_json::Value::Object(map);
                     if let Err(e) = http.edit_sticker(guild, sticker_id, &value, None).await {
-                        warn!("Failed to edit sticker {} in guild {}: {}", cmd.sticker_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to edit sticker {} in guild {}: {}",
+                            cmd.sticker_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize sticker_edit command: {}", e),
@@ -3735,15 +4079,13 @@ where
         Ok(())
     }
 
-    async fn handle_delete_sticker(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_delete_sticker(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::model::id::StickerId;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::sticker_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteStickerCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteStickerCommand>(&subject)
+            .await?;
         info!("Listening for sticker_delete commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -3751,7 +4093,10 @@ where
                     let guild = GuildId::new(cmd.guild_id);
                     let sticker_id = StickerId::new(cmd.sticker_id);
                     if let Err(e) = http.delete_sticker(guild, sticker_id, None).await {
-                        warn!("Failed to delete sticker {} in guild {}: {}", cmd.sticker_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to delete sticker {} in guild {}: {}",
+                            cmd.sticker_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize sticker_delete command: {}", e),
@@ -3760,23 +4105,27 @@ where
         Ok(())
     }
 
-    async fn handle_delete_integration(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_delete_integration(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::model::id::IntegrationId;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::integration_delete(&prefix);
-        let mut stream = subscriber.subscribe::<DeleteIntegrationCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<DeleteIntegrationCommand>(&subject)
+            .await?;
         info!("Listening for integration_delete commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
                 Ok(cmd) => {
                     let guild = GuildId::new(cmd.guild_id);
                     let integration_id = IntegrationId::new(cmd.integration_id);
-                    if let Err(e) = http.delete_guild_integration(guild, integration_id, None).await {
-                        warn!("Failed to delete integration {} in guild {}: {}", cmd.integration_id, cmd.guild_id, e);
+                    if let Err(e) = http
+                        .delete_guild_integration(guild, integration_id, None)
+                        .await
+                    {
+                        warn!(
+                            "Failed to delete integration {} in guild {}: {}",
+                            cmd.integration_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize integration_delete command: {}", e),
@@ -3785,15 +4134,13 @@ where
         Ok(())
     }
 
-    async fn handle_sync_integration(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_sync_integration(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::model::id::IntegrationId;
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::integration_sync(&prefix);
-        let mut stream = subscriber.subscribe::<SyncIntegrationCommand>(&subject).await?;
+        let mut stream = subscriber
+            .subscribe::<SyncIntegrationCommand>(&subject)
+            .await?;
         info!("Listening for integration_sync commands on {}", subject);
         while let Some(result) = stream.next().await {
             match result {
@@ -3801,7 +4148,10 @@ where
                     let guild = GuildId::new(cmd.guild_id);
                     let integration_id = IntegrationId::new(cmd.integration_id);
                     if let Err(e) = http.start_integration_sync(guild, integration_id).await {
-                        warn!("Failed to sync integration {} in guild {}: {}", cmd.integration_id, cmd.guild_id, e);
+                        warn!(
+                            "Failed to sync integration {} in guild {}: {}",
+                            cmd.integration_id, cmd.guild_id, e
+                        );
                     }
                 }
                 Err(e) => warn!("Failed to deserialize integration_sync command: {}", e),
@@ -3810,11 +4160,7 @@ where
         Ok(())
     }
 
-    async fn handle_fetch_voice_regions(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_voice_regions(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_voice_regions(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
@@ -3829,12 +4175,15 @@ where
             };
             let response_bytes = match http.get_voice_regions().await {
                 Ok(regions) => {
-                    let fetched: Vec<VoiceRegionInfo> = regions.iter().map(|r| VoiceRegionInfo {
-                        id: r.id.clone(),
-                        name: r.name.clone(),
-                        optimal: r.optimal,
-                        deprecated: r.deprecated,
-                    }).collect();
+                    let fetched: Vec<VoiceRegionInfo> = regions
+                        .iter()
+                        .map(|r| VoiceRegionInfo {
+                            id: r.id.clone(),
+                            name: r.name.clone(),
+                            optimal: r.optimal,
+                            deprecated: r.deprecated,
+                        })
+                        .collect();
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
@@ -3842,7 +4191,10 @@ where
                     serde_json::to_vec::<Vec<VoiceRegionInfo>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_voice_regions: failed to send reply: {}", e);
             }
         }
@@ -3857,7 +4209,10 @@ where
         use serenity::futures::StreamExt as _;
         let subject = subjects::agent::fetch_application_info(&prefix);
         let mut sub = client.subscribe(subject.clone()).await?;
-        info!("Listening for fetch_application_info requests on {}", subject);
+        info!(
+            "Listening for fetch_application_info requests on {}",
+            subject
+        );
         while let Some(msg) = sub.next().await {
             let reply = match msg.reply.clone() {
                 Some(r) => r,
@@ -3881,7 +4236,10 @@ where
                     serde_json::to_vec::<Option<AppInfo>>(&None).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_application_info: failed to send reply: {}", e);
             }
         }
@@ -3918,7 +4276,10 @@ where
                     // Send DM notification
                     let channel = serenity::model::id::ChannelId::new(channel_id);
                     if let Err(e) = channel
-                        .say(&http, "✅ Your account has been approved! You can now send me messages.")
+                        .say(
+                            &http,
+                            "✅ Your account has been approved! You can now send me messages.",
+                        )
                         .await
                     {
                         warn!(user_id, "Failed to send pairing approval DM: {}", e);
@@ -4004,11 +4365,7 @@ where
         Ok(())
     }
 
-    async fn handle_create_poll(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_create_poll(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
 
         let subject = subjects::agent::create_poll(&prefix);
@@ -4025,13 +4382,17 @@ where
             };
 
             let channel_id = ChannelId::new(cmd.channel_id);
-            let answers: Vec<CreatePollAnswer> = cmd.answers.iter()
+            let answers: Vec<CreatePollAnswer> = cmd
+                .answers
+                .iter()
                 .map(|a| CreatePollAnswer::new().text(a))
                 .collect();
             let mut poll = CreatePoll::new()
                 .question(cmd.question.as_str())
                 .answers(answers)
-                .duration(std::time::Duration::from_secs(cmd.duration_hours as u64 * 3600));
+                .duration(std::time::Duration::from_secs(
+                    cmd.duration_hours as u64 * 3600,
+                ));
             if cmd.allow_multiselect {
                 poll = poll.allow_multiselect();
             }
@@ -4044,11 +4405,7 @@ where
         Ok(())
     }
 
-    async fn handle_create_sticker(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_create_sticker(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
 
         let subject = subjects::agent::create_sticker(&prefix);
@@ -4083,11 +4440,7 @@ where
         Ok(())
     }
 
-    async fn handle_fetch_emojis(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_emojis(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
 
         let subject = subjects::agent::fetch_emojis(&prefix);
@@ -4112,19 +4465,28 @@ where
             let guild = GuildId::new(cmd.guild_id);
             let response_bytes = match guild.emojis(&*http).await {
                 Ok(emojis) => {
-                    let fetched: Vec<Emoji> = emojis.iter().map(|e| Emoji {
-                        id: Some(e.id.get()),
-                        name: e.name.clone(),
-                        animated: e.animated,
-                    }).collect();
+                    let fetched: Vec<Emoji> = emojis
+                        .iter()
+                        .map(|e| Emoji {
+                            id: Some(e.id.get()),
+                            name: e.name.clone(),
+                            animated: e.animated,
+                        })
+                        .collect();
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_emojis: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_emojis: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<Emoji>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_emojis: failed to publish reply: {}", e);
             }
         }
@@ -4132,11 +4494,7 @@ where
         Ok(())
     }
 
-    async fn handle_fetch_bans(
-        http: Arc<Http>,
-        client: N,
-        prefix: String,
-    ) -> Result<()> {
+    async fn handle_fetch_bans(http: Arc<Http>, client: N, prefix: String) -> Result<()> {
         use serenity::futures::StreamExt as _;
 
         let subject = subjects::agent::fetch_bans(&prefix);
@@ -4172,11 +4530,17 @@ where
                     serde_json::to_vec(&fetched).unwrap_or_default()
                 }
                 Err(e) => {
-                    error!("fetch_bans: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    error!(
+                        "fetch_bans: Discord API error for guild {}: {}",
+                        cmd.guild_id, e
+                    );
                     serde_json::to_vec::<Vec<FetchedBan>>(&vec![]).unwrap_or_default()
                 }
             };
-            if let Err(e) = client.publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into()).await {
+            if let Err(e) = client
+                .publish_with_headers(reply, async_nats::HeaderMap::new(), response_bytes.into())
+                .await
+            {
                 error!("fetch_bans: failed to publish reply: {}", e);
             }
         }
@@ -4361,7 +4725,10 @@ mod pure_fn_tests {
     fn test_extract_reply_tag_invalid_id_strips_tag() {
         let (content, id) = extract_reply_tag("[[reply_to:abc]] hello");
         assert_eq!(id, None);
-        assert!(!content.contains("[[reply_to:abc]]"), "tag must be stripped");
+        assert!(
+            !content.contains("[[reply_to:abc]]"),
+            "tag must be stripped"
+        );
     }
 
     #[test]
@@ -4447,12 +4814,18 @@ mod pure_fn_tests {
     #[test]
     fn test_parse_custom_emoji_invalid_id_falls_back_to_unicode() {
         let rt = parse_reaction_type("wave:notanumber");
-        assert!(matches!(rt, serenity::model::channel::ReactionType::Unicode(_)));
+        assert!(matches!(
+            rt,
+            serenity::model::channel::ReactionType::Unicode(_)
+        ));
     }
 
     #[test]
     fn test_parse_plain_text_is_unicode() {
         let rt = parse_reaction_type(":thumbsup:");
-        assert!(matches!(rt, serenity::model::channel::ReactionType::Unicode(_)));
+        assert!(matches!(
+            rt,
+            serenity::model::channel::ReactionType::Unicode(_)
+        ));
     }
 }

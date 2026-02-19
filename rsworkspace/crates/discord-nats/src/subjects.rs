@@ -963,76 +963,181 @@ mod tests {
 
     #[test]
     fn test_bot_subjects_new() {
-        assert_eq!(bot::typing_start("prod"),              "discord.prod.bot.typing.start");
-        assert_eq!(bot::voice_state_update("prod"),        "discord.prod.bot.voice.state_update");
-        assert_eq!(bot::guild_create("prod"),              "discord.prod.bot.guild.create");
-        assert_eq!(bot::guild_update("prod"),              "discord.prod.bot.guild.update");
-        assert_eq!(bot::guild_delete("prod"),              "discord.prod.bot.guild.delete");
-        assert_eq!(bot::channel_create("prod"),            "discord.prod.bot.channel.create");
-        assert_eq!(bot::channel_update("prod"),            "discord.prod.bot.channel.update");
-        assert_eq!(bot::channel_delete("prod"),            "discord.prod.bot.channel.delete");
-        assert_eq!(bot::role_create("prod"),               "discord.prod.bot.role.create");
-        assert_eq!(bot::role_update("prod"),               "discord.prod.bot.role.update");
-        assert_eq!(bot::role_delete("prod"),               "discord.prod.bot.role.delete");
-        assert_eq!(bot::presence_update("prod"),           "discord.prod.bot.presence.update");
-        assert_eq!(bot::interaction_modal("prod"),         "discord.prod.bot.interaction.modal");
-        assert_eq!(bot::interaction_autocomplete("prod"),  "discord.prod.bot.interaction.autocomplete");
-        assert_eq!(bot::bot_ready("prod"),                 "discord.prod.bot.ready");
+        assert_eq!(bot::typing_start("prod"), "discord.prod.bot.typing.start");
+        assert_eq!(
+            bot::voice_state_update("prod"),
+            "discord.prod.bot.voice.state_update"
+        );
+        assert_eq!(bot::guild_create("prod"), "discord.prod.bot.guild.create");
+        assert_eq!(bot::guild_update("prod"), "discord.prod.bot.guild.update");
+        assert_eq!(bot::guild_delete("prod"), "discord.prod.bot.guild.delete");
+        assert_eq!(
+            bot::channel_create("prod"),
+            "discord.prod.bot.channel.create"
+        );
+        assert_eq!(
+            bot::channel_update("prod"),
+            "discord.prod.bot.channel.update"
+        );
+        assert_eq!(
+            bot::channel_delete("prod"),
+            "discord.prod.bot.channel.delete"
+        );
+        assert_eq!(bot::role_create("prod"), "discord.prod.bot.role.create");
+        assert_eq!(bot::role_update("prod"), "discord.prod.bot.role.update");
+        assert_eq!(bot::role_delete("prod"), "discord.prod.bot.role.delete");
+        assert_eq!(
+            bot::presence_update("prod"),
+            "discord.prod.bot.presence.update"
+        );
+        assert_eq!(
+            bot::interaction_modal("prod"),
+            "discord.prod.bot.interaction.modal"
+        );
+        assert_eq!(
+            bot::interaction_autocomplete("prod"),
+            "discord.prod.bot.interaction.autocomplete"
+        );
+        assert_eq!(bot::bot_ready("prod"), "discord.prod.bot.ready");
     }
 
     #[test]
     fn test_agent_subjects_new() {
-        assert_eq!(agent::interaction_modal_respond("prod"),       "discord.prod.agent.interaction.modal_respond");
-        assert_eq!(agent::interaction_autocomplete_respond("prod"),"discord.prod.agent.interaction.autocomplete_respond");
-        assert_eq!(agent::guild_ban("prod"),                       "discord.prod.agent.guild.ban");
-        assert_eq!(agent::guild_kick("prod"),                      "discord.prod.agent.guild.kick");
-        assert_eq!(agent::guild_timeout("prod"),                   "discord.prod.agent.guild.timeout");
-        assert_eq!(agent::channel_create("prod"),                  "discord.prod.agent.channel.create");
-        assert_eq!(agent::channel_edit("prod"),                    "discord.prod.agent.channel.edit");
-        assert_eq!(agent::channel_delete("prod"),                  "discord.prod.agent.channel.delete");
-        assert_eq!(agent::role_create("prod"),                     "discord.prod.agent.role.create");
-        assert_eq!(agent::role_assign("prod"),                     "discord.prod.agent.role.assign");
-        assert_eq!(agent::role_remove("prod"),                     "discord.prod.agent.role.remove");
-        assert_eq!(agent::role_delete("prod"),                     "discord.prod.agent.role.delete");
-        assert_eq!(agent::message_pin("prod"),                     "discord.prod.agent.message.pin");
-        assert_eq!(agent::message_unpin("prod"),                   "discord.prod.agent.message.unpin");
-        assert_eq!(agent::message_bulk_delete("prod"),             "discord.prod.agent.message.bulk_delete");
-        assert_eq!(agent::thread_create("prod"),                   "discord.prod.agent.thread.create");
-        assert_eq!(agent::thread_archive("prod"),                  "discord.prod.agent.thread.archive");
-        assert_eq!(agent::bot_presence("prod"),                    "discord.prod.agent.bot.presence");
-        assert_eq!(agent::fetch_messages("prod"),                  "discord.prod.agent.fetch.messages");
-        assert_eq!(agent::fetch_member("prod"),                    "discord.prod.agent.fetch.member");
+        assert_eq!(
+            agent::interaction_modal_respond("prod"),
+            "discord.prod.agent.interaction.modal_respond"
+        );
+        assert_eq!(
+            agent::interaction_autocomplete_respond("prod"),
+            "discord.prod.agent.interaction.autocomplete_respond"
+        );
+        assert_eq!(agent::guild_ban("prod"), "discord.prod.agent.guild.ban");
+        assert_eq!(agent::guild_kick("prod"), "discord.prod.agent.guild.kick");
+        assert_eq!(
+            agent::guild_timeout("prod"),
+            "discord.prod.agent.guild.timeout"
+        );
+        assert_eq!(
+            agent::channel_create("prod"),
+            "discord.prod.agent.channel.create"
+        );
+        assert_eq!(
+            agent::channel_edit("prod"),
+            "discord.prod.agent.channel.edit"
+        );
+        assert_eq!(
+            agent::channel_delete("prod"),
+            "discord.prod.agent.channel.delete"
+        );
+        assert_eq!(agent::role_create("prod"), "discord.prod.agent.role.create");
+        assert_eq!(agent::role_assign("prod"), "discord.prod.agent.role.assign");
+        assert_eq!(agent::role_remove("prod"), "discord.prod.agent.role.remove");
+        assert_eq!(agent::role_delete("prod"), "discord.prod.agent.role.delete");
+        assert_eq!(agent::message_pin("prod"), "discord.prod.agent.message.pin");
+        assert_eq!(
+            agent::message_unpin("prod"),
+            "discord.prod.agent.message.unpin"
+        );
+        assert_eq!(
+            agent::message_bulk_delete("prod"),
+            "discord.prod.agent.message.bulk_delete"
+        );
+        assert_eq!(
+            agent::thread_create("prod"),
+            "discord.prod.agent.thread.create"
+        );
+        assert_eq!(
+            agent::thread_archive("prod"),
+            "discord.prod.agent.thread.archive"
+        );
+        assert_eq!(
+            agent::bot_presence("prod"),
+            "discord.prod.agent.bot.presence"
+        );
+        assert_eq!(
+            agent::fetch_messages("prod"),
+            "discord.prod.agent.fetch.messages"
+        );
+        assert_eq!(
+            agent::fetch_member("prod"),
+            "discord.prod.agent.fetch.member"
+        );
     }
 
     #[test]
     fn test_medium_impact_subjects() {
         // Bot events
-        assert_eq!(bot::invite_create("prod"),  "discord.prod.bot.invite.create");
-        assert_eq!(bot::invite_delete("prod"),  "discord.prod.bot.invite.delete");
+        assert_eq!(bot::invite_create("prod"), "discord.prod.bot.invite.create");
+        assert_eq!(bot::invite_delete("prod"), "discord.prod.bot.invite.delete");
         // Agent commands
-        assert_eq!(agent::invite_create("prod"),           "discord.prod.agent.invite.create");
-        assert_eq!(agent::invite_revoke("prod"),           "discord.prod.agent.invite.revoke");
-        assert_eq!(agent::emoji_create("prod"),            "discord.prod.agent.emoji.create");
-        assert_eq!(agent::emoji_delete("prod"),            "discord.prod.agent.emoji.delete");
-        assert_eq!(agent::scheduled_event_create("prod"),  "discord.prod.agent.scheduled_event.create");
-        assert_eq!(agent::scheduled_event_delete("prod"),  "discord.prod.agent.scheduled_event.delete");
+        assert_eq!(
+            agent::invite_create("prod"),
+            "discord.prod.agent.invite.create"
+        );
+        assert_eq!(
+            agent::invite_revoke("prod"),
+            "discord.prod.agent.invite.revoke"
+        );
+        assert_eq!(
+            agent::emoji_create("prod"),
+            "discord.prod.agent.emoji.create"
+        );
+        assert_eq!(
+            agent::emoji_delete("prod"),
+            "discord.prod.agent.emoji.delete"
+        );
+        assert_eq!(
+            agent::scheduled_event_create("prod"),
+            "discord.prod.agent.scheduled_event.create"
+        );
+        assert_eq!(
+            agent::scheduled_event_delete("prod"),
+            "discord.prod.agent.scheduled_event.delete"
+        );
     }
 
     #[test]
     fn test_thread_and_voice_subjects() {
         // Thread events (bot)
-        assert_eq!(bot::thread_created("prod"),       "discord.prod.bot.thread.created");
-        assert_eq!(bot::thread_updated("prod"),       "discord.prod.bot.thread.updated");
-        assert_eq!(bot::thread_deleted("prod"),       "discord.prod.bot.thread.deleted");
-        assert_eq!(bot::thread_member_add("prod"),    "discord.prod.bot.thread.member_add");
-        assert_eq!(bot::thread_member_remove("prod"), "discord.prod.bot.thread.member_remove");
+        assert_eq!(
+            bot::thread_created("prod"),
+            "discord.prod.bot.thread.created"
+        );
+        assert_eq!(
+            bot::thread_updated("prod"),
+            "discord.prod.bot.thread.updated"
+        );
+        assert_eq!(
+            bot::thread_deleted("prod"),
+            "discord.prod.bot.thread.deleted"
+        );
+        assert_eq!(
+            bot::thread_member_add("prod"),
+            "discord.prod.bot.thread.member_add"
+        );
+        assert_eq!(
+            bot::thread_member_remove("prod"),
+            "discord.prod.bot.thread.member_remove"
+        );
         // Webhook commands (agent)
-        assert_eq!(agent::webhook_create("prod"),     "discord.prod.agent.webhook.create");
-        assert_eq!(agent::webhook_execute("prod"),    "discord.prod.agent.webhook.execute");
-        assert_eq!(agent::webhook_delete("prod"),     "discord.prod.agent.webhook.delete");
+        assert_eq!(
+            agent::webhook_create("prod"),
+            "discord.prod.agent.webhook.create"
+        );
+        assert_eq!(
+            agent::webhook_execute("prod"),
+            "discord.prod.agent.webhook.execute"
+        );
+        assert_eq!(
+            agent::webhook_delete("prod"),
+            "discord.prod.agent.webhook.delete"
+        );
         // Voice commands (agent)
-        assert_eq!(agent::voice_move("prod"),         "discord.prod.agent.voice.move");
-        assert_eq!(agent::voice_disconnect("prod"),   "discord.prod.agent.voice.disconnect");
+        assert_eq!(agent::voice_move("prod"), "discord.prod.agent.voice.move");
+        assert_eq!(
+            agent::voice_disconnect("prod"),
+            "discord.prod.agent.voice.disconnect"
+        );
     }
 
     #[test]

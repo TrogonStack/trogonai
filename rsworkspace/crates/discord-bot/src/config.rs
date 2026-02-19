@@ -126,11 +126,17 @@ impl Config {
 
     /// Load from any `ReadEnv` implementation (useful for testing with `InMemoryEnv`).
     pub fn from_env_impl<E: ReadEnv>(env: &E) -> Result<Self> {
-        let bot_token = env.var("DISCORD_BOT_TOKEN").context("DISCORD_BOT_TOKEN not set")?;
+        let bot_token = env
+            .var("DISCORD_BOT_TOKEN")
+            .context("DISCORD_BOT_TOKEN not set")?;
 
-        let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
+        let nats_url = env
+            .var("NATS_URL")
+            .unwrap_or_else(|_| "localhost:4222".to_string());
 
-        let prefix = env.var("DISCORD_PREFIX").unwrap_or_else(|_| "prod".to_string());
+        let prefix = env
+            .var("DISCORD_PREFIX")
+            .unwrap_or_else(|_| "prod".to_string());
 
         let guild_policy = match env
             .var("DISCORD_GUILD_POLICY")
@@ -143,7 +149,8 @@ impl Config {
             _ => GuildPolicy::Allowlist,
         };
 
-        let guild_allowlist = parse_id_list(&env.var("DISCORD_GUILD_ALLOWLIST").unwrap_or_default());
+        let guild_allowlist =
+            parse_id_list(&env.var("DISCORD_GUILD_ALLOWLIST").unwrap_or_default());
 
         let dm_policy = match env
             .var("DISCORD_DM_POLICY")
@@ -196,7 +203,10 @@ impl Config {
         let reaction_allowlist =
             parse_id_list(&env.var("DISCORD_REACTION_ALLOWLIST").unwrap_or_default());
 
-        let ack_reaction = env.var("DISCORD_ACK_REACTION").ok().filter(|s| !s.is_empty());
+        let ack_reaction = env
+            .var("DISCORD_ACK_REACTION")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         let allow_bots = env
             .var("DISCORD_ALLOW_BOTS")
@@ -204,7 +214,10 @@ impl Config {
             .to_lowercase()
             == "true";
 
-        let response_prefix = env.var("DISCORD_RESPONSE_PREFIX").ok().filter(|s| !s.is_empty());
+        let response_prefix = env
+            .var("DISCORD_RESPONSE_PREFIX")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         let reply_to_mode = match env
             .var("DISCORD_REPLY_TO_MODE")
@@ -228,7 +241,10 @@ impl Config {
             .to_lowercase()
             == "true";
 
-        let pluralkit_token = env.var("DISCORD_PLURALKIT_TOKEN").ok().filter(|s| !s.is_empty());
+        let pluralkit_token = env
+            .var("DISCORD_PLURALKIT_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         let dm_group_enabled = env
             .var("DISCORD_DM_GROUP_ENABLED")

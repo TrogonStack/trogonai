@@ -183,7 +183,10 @@ async fn main() -> Result<()> {
     let shard_manager_for_outbound = client.shard_manager.clone();
 
     tokio::spawn(async move {
-        let publisher = MessagePublisher::new(nats_client_for_outbound.clone(), prefix_for_outbound.clone());
+        let publisher = MessagePublisher::new(
+            nats_client_for_outbound.clone(),
+            prefix_for_outbound.clone(),
+        );
         let processor = OutboundProcessor::new(
             http,
             nats_client_for_outbound,

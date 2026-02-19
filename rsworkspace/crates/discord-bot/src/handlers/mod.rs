@@ -2,11 +2,11 @@
 
 use serenity::async_trait;
 use serenity::builder::{CreateCommand, CreateCommandOption};
-use serenity::model::application::{Command, CommandOptionType, Interaction};
-use serenity::model::channel::{GuildChannel, Message};
-use serenity::model::application::CommandPermissions;
 use serenity::gateway::ShardStageUpdateEvent;
 use serenity::http::RatelimitInfo;
+use serenity::model::application::CommandPermissions;
+use serenity::model::application::{Command, CommandOptionType, Interaction};
+use serenity::model::channel::{GuildChannel, Message};
 use serenity::model::event::{
     ChannelPinsUpdateEvent, GuildMembersChunkEvent, GuildScheduledEventUserAddEvent,
     GuildScheduledEventUserRemoveEvent, MessagePollVoteAddEvent, MessagePollVoteRemoveEvent,
@@ -15,11 +15,11 @@ use serenity::model::event::{
     ThreadListSyncEvent, TypingStartEvent, VoiceServerUpdateEvent,
 };
 use serenity::model::gateway::{Presence, Ready};
+use serenity::model::guild::automod::{ActionExecution, Rule as AutoModRule};
+use serenity::model::guild::Integration;
 use serenity::model::guild::{
     Guild, Member, PartialGuild, Role, ScheduledEvent, ThreadMember, UnavailableGuild,
 };
-use serenity::model::guild::automod::{ActionExecution, Rule as AutoModRule};
-use serenity::model::guild::Integration;
 use serenity::model::id::{ApplicationId, ChannelId, GuildId, IntegrationId, MessageId, RoleId};
 use serenity::model::monetization::Entitlement;
 use serenity::model::user::{CurrentUser, User};
@@ -83,7 +83,10 @@ impl EventHandler for Handler {
         };
 
         if let Some(guild_id) = guild_commands_guild_id {
-            match GuildId::new(guild_id).set_commands(&ctx.http, commands).await {
+            match GuildId::new(guild_id)
+                .set_commands(&ctx.http, commands)
+                .await
+            {
                 Ok(cmds) => info!(
                     "Registered {} slash commands for guild {}",
                     cmds.len(),
@@ -122,7 +125,10 @@ impl EventHandler for Handler {
         // Skip bot messages unless allow_bots is enabled OR this is a PK-proxied message
         if msg.author.bot && pk_member_id.is_none() {
             let data = ctx.data.read().await;
-            let allow = data.get::<DiscordBridge>().map(|b| b.allow_bots).unwrap_or(false);
+            let allow = data
+                .get::<DiscordBridge>()
+                .map(|b| b.allow_bots)
+                .unwrap_or(false);
             if !allow {
                 return;
             }
@@ -180,8 +186,8 @@ impl EventHandler for Handler {
                 if bridge.access_config.dm_policy == discord_types::DmPolicy::Pairing
                     && !bridge.is_admin(msg.author.id.get())
                 {
-                    if let Some((code, _expires_at)) = bridge
-                        .try_start_pairing(msg.author.id.get(), msg.channel_id.get())
+                    if let Some((code, _expires_at)) =
+                        bridge.try_start_pairing(msg.author.id.get(), msg.channel_id.get())
                     {
                         let reply = format!(
                             "To pair your account, share this code with an admin: **{}**\n\
@@ -221,7 +227,10 @@ impl EventHandler for Handler {
             }
         }
 
-        if let Err(e) = bridge.publish_message_created(&msg, pk_member_id, pk_member_name).await {
+        if let Err(e) = bridge
+            .publish_message_created(&msg, pk_member_id, pk_member_name)
+            .await
+        {
             error!("Failed to publish message_created: {}", e);
         }
     }
@@ -363,7 +372,8 @@ impl EventHandler for Handler {
         }
 
         // Reaction mode filtering
-        let is_bot_msg = add_reaction.message_author_id
+        let is_bot_msg = add_reaction
+            .message_author_id
             .map(|author| author.get() == bridge.bot_user_id())
             .unwrap_or(false);
         let reactor_id = add_reaction.user_id.map(|u| u.get());
@@ -404,7 +414,8 @@ impl EventHandler for Handler {
         }
 
         // Reaction mode filtering
-        let is_bot_msg = removed_reaction.message_author_id
+        let is_bot_msg = removed_reaction
+            .message_author_id
             .map(|author| author.get() == bridge.bot_user_id())
             .unwrap_or(false);
         let reactor_id = removed_reaction.user_id.map(|u| u.get());
@@ -476,12 +487,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn voice_state_update(
-        &self,
-        ctx: Context,
-        old: Option<VoiceState>,
-        new: VoiceState,
-    ) {
+    async fn voice_state_update(&self, ctx: Context, old: Option<VoiceState>, new: VoiceState) {
         let bridge = {
             let data = ctx.data.read().await;
             match data.get::<DiscordBridge>() {
@@ -521,12 +527,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn guild_delete(
-        &self,
-        ctx: Context,
-        incomplete: UnavailableGuild,
-        _full: Option<Guild>,
-    ) {
+    async fn guild_delete(&self, ctx: Context, incomplete: UnavailableGuild, _full: Option<Guild>) {
         let bridge = {
             let data = ctx.data.read().await;
             match data.get::<DiscordBridge>() {
@@ -717,11 +718,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn invite_create(
-        &self,
-        ctx: Context,
-        data: serenity::model::event::InviteCreateEvent,
-    ) {
+    async fn invite_create(&self, ctx: Context, data: serenity::model::event::InviteCreateEvent) {
         let bridge = {
             let d = ctx.data.read().await;
             match d.get::<DiscordBridge>() {
@@ -739,11 +736,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn invite_delete(
-        &self,
-        ctx: Context,
-        data: serenity::model::event::InviteDeleteEvent,
-    ) {
+    async fn invite_delete(&self, ctx: Context, data: serenity::model::event::InviteDeleteEvent) {
         let bridge = {
             let d = ctx.data.read().await;
             match d.get::<DiscordBridge>() {
@@ -951,7 +944,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_guild_ban_remove(guild_id, &unbanned_user).await {
+        if let Err(e) = bridge
+            .publish_guild_ban_remove(guild_id, &unbanned_user)
+            .await
+        {
             error!("Failed to publish guild_ban_remove: {}", e);
         }
     }
@@ -972,7 +968,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_guild_emojis_update(guild_id, &current_state).await {
+        if let Err(e) = bridge
+            .publish_guild_emojis_update(guild_id, &current_state)
+            .await
+        {
             error!("Failed to publish guild_emojis_update: {}", e);
         }
     }
@@ -1081,7 +1080,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_webhooks_update(guild_id, belongs_to_channel_id).await {
+        if let Err(e) = bridge
+            .publish_webhooks_update(guild_id, belongs_to_channel_id)
+            .await
+        {
             error!("Failed to publish webhooks_update: {}", e);
         }
     }
@@ -1102,7 +1104,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_guild_stickers_update(guild_id, &current_state).await {
+        if let Err(e) = bridge
+            .publish_guild_stickers_update(guild_id, &current_state)
+            .await
+        {
             error!("Failed to publish guild_stickers_update: {}", e);
         }
     }
@@ -1138,7 +1143,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(subscribed.guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_guild_scheduled_event_user_add(&subscribed).await {
+        if let Err(e) = bridge
+            .publish_guild_scheduled_event_user_add(&subscribed)
+            .await
+        {
             error!("Failed to publish scheduled_event_user_add: {}", e);
         }
     }
@@ -1158,7 +1166,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(unsubscribed.guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_guild_scheduled_event_user_remove(&unsubscribed).await {
+        if let Err(e) = bridge
+            .publish_guild_scheduled_event_user_remove(&unsubscribed)
+            .await
+        {
             error!("Failed to publish scheduled_event_user_remove: {}", e);
         }
     }
@@ -1343,7 +1354,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_integration_delete(integration_id, guild_id, application_id).await {
+        if let Err(e) = bridge
+            .publish_integration_delete(integration_id, guild_id, application_id)
+            .await
+        {
             error!("Failed to publish integration_delete: {}", e);
         }
     }
@@ -1366,7 +1380,10 @@ impl EventHandler for Handler {
         if !bridge.check_guild_access(guild_id.get()) {
             return;
         }
-        if let Err(e) = bridge.publish_voice_channel_status_update(old, status, id, guild_id).await {
+        if let Err(e) = bridge
+            .publish_voice_channel_status_update(old, status, id, guild_id)
+            .await
+        {
             error!("Failed to publish voice_channel_status_update: {}", e);
         }
     }
@@ -1528,7 +1545,10 @@ impl EventHandler for Handler {
                 None => return,
             }
         };
-        if let Err(e) = bridge.publish_reaction_remove_emoji(&removed_reactions).await {
+        if let Err(e) = bridge
+            .publish_reaction_remove_emoji(&removed_reactions)
+            .await
+        {
             error!("Failed to publish reaction_remove_emoji: {}", e);
         }
     }

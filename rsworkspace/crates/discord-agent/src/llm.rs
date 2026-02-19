@@ -238,7 +238,8 @@ mod tests {
     #[test]
     fn test_sse_unknown_top_level_fields_do_not_panic() {
         // Claude API may add new top-level fields; we must not fail on them
-        let json = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
+        let json =
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
         let event: SseEvent = serde_json::from_str(json).unwrap();
         assert_eq!(event.event_type, "content_block_start");
         assert!(event.delta.is_none());
@@ -341,10 +342,9 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/messages"))
-            .respond_with(
-                ResponseTemplate::new(401)
-                    .set_body_string(r#"{"error":{"type":"authentication_error","message":"Invalid API key"}}"#),
-            )
+            .respond_with(ResponseTemplate::new(401).set_body_string(
+                r#"{"error":{"type":"authentication_error","message":"Invalid API key"}}"#,
+            ))
             .mount(&server)
             .await;
 
@@ -402,8 +402,16 @@ mod tests {
         let client = ClaudeClient::new(config);
 
         let history = vec![
-            Message { role: "user".to_string(), content: "previous user message".to_string(), message_id: Some(1) },
-            Message { role: "assistant".to_string(), content: "previous reply".to_string(), message_id: None },
+            Message {
+                role: "user".to_string(),
+                content: "previous user message".to_string(),
+                message_id: Some(1),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: "previous reply".to_string(),
+                message_id: None,
+            },
         ];
 
         let (tx, _rx) = mpsc::channel::<String>(16);

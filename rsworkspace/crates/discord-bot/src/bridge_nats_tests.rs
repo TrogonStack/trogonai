@@ -108,7 +108,10 @@ mod tests {
         let (bridge, mock) = make_bridge(prefix);
 
         let msg = dm_message(1, 100, 42, "Hello NATS");
-        bridge.publish_message_created(&msg, None, None).await.unwrap();
+        bridge
+            .publish_message_created(&msg, None, None)
+            .await
+            .unwrap();
 
         let msgs = mock.published_messages();
         assert_eq!(msgs.len(), 1);
@@ -129,7 +132,10 @@ mod tests {
         let (bridge, mock) = make_bridge(prefix);
 
         let msg = guild_message(5, 100, 200, 42, "Guild hello");
-        bridge.publish_message_created(&msg, None, None).await.unwrap();
+        bridge
+            .publish_message_created(&msg, None, None)
+            .await
+            .unwrap();
 
         let msgs = mock.published_messages();
         assert_eq!(msgs.len(), 1);
@@ -146,7 +152,10 @@ mod tests {
 
         for i in 1u64..=3 {
             let msg = dm_message(i, 100, 42, "seq");
-            bridge.publish_message_created(&msg, None, None).await.unwrap();
+            bridge
+                .publish_message_created(&msg, None, None)
+                .await
+                .unwrap();
         }
 
         let msgs = mock.published_messages();
@@ -269,7 +278,10 @@ mod tests {
         let ps = PairingState::new();
         let (code, _) = ps.start_pairing(42, 100).unwrap();
         ps.approve_by_code(&code);
-        assert!(ps.start_pairing(42, 100).is_none(), "approved user must return None");
+        assert!(
+            ps.start_pairing(42, 100).is_none(),
+            "approved user must return None"
+        );
     }
 
     #[test]
@@ -398,9 +410,16 @@ mod tests {
                 require_mention: require,
                 ..Default::default()
             },
-            false, None,
-            crate::config::ReactionMode::Off, vec![],
-            None, false, false, None, false, vec![],
+            false,
+            None,
+            crate::config::ReactionMode::Off,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
         )
     }
 
@@ -425,7 +444,8 @@ mod tests {
         let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
             "id": "42", "username": "bot", "global_name": null,
             "avatar": null, "bot": true
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(b.check_require_mention(&[user]));
     }
 
@@ -436,7 +456,8 @@ mod tests {
         let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
             "id": "99", "username": "other", "global_name": null,
             "avatar": null, "bot": false
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!b.check_require_mention(&[user]));
     }
 
@@ -458,10 +479,20 @@ mod tests {
         let mock = MockPublisher::new("t");
         let bridge = DiscordBridge::with_publisher(
             mock,
-            AccessConfig { dm_policy: DmPolicy::Pairing, ..Default::default() },
-            false, None,
-            crate::config::ReactionMode::Off, vec![],
-            None, false, false, None, false, vec![],
+            AccessConfig {
+                dm_policy: DmPolicy::Pairing,
+                ..Default::default()
+            },
+            false,
+            None,
+            crate::config::ReactionMode::Off,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
         );
         assert!(!bridge.check_dm_access(42));
     }
@@ -472,10 +503,20 @@ mod tests {
         let mock = MockPublisher::new("t");
         let bridge = DiscordBridge::with_publisher(
             mock,
-            AccessConfig { dm_policy: DmPolicy::Pairing, ..Default::default() },
-            false, None,
-            crate::config::ReactionMode::Off, vec![],
-            None, false, false, None, false, vec![],
+            AccessConfig {
+                dm_policy: DmPolicy::Pairing,
+                ..Default::default()
+            },
+            false,
+            None,
+            crate::config::ReactionMode::Off,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
         );
         let (code, _) = bridge.try_start_pairing(42, 100).unwrap();
         bridge.pairing_state.approve_by_code(&code);
@@ -493,9 +534,16 @@ mod tests {
                 admin_users: vec![42],
                 ..Default::default()
             },
-            false, None,
-            crate::config::ReactionMode::Off, vec![],
-            None, false, false, None, false, vec![],
+            false,
+            None,
+            crate::config::ReactionMode::Off,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
         );
         assert!(bridge.check_dm_access(42), "admin must bypass pairing");
     }
@@ -515,10 +563,20 @@ mod tests {
         let mock = MockPublisher::new("t");
         let bridge = DiscordBridge::with_publisher(
             mock,
-            AccessConfig { channel_allowlist: vec![50], ..Default::default() },
-            false, None,
-            crate::config::ReactionMode::Off, vec![],
-            None, false, false, None, false, vec![],
+            AccessConfig {
+                channel_allowlist: vec![50],
+                ..Default::default()
+            },
+            false,
+            None,
+            crate::config::ReactionMode::Off,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            false,
+            vec![],
         );
         assert!(bridge.check_channel_access(50));
         assert!(!bridge.check_channel_access(51));
@@ -528,8 +586,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_guild_member_add() {
-        use discord_types::events::GuildMemberAddEvent;
         use discord_nats::subjects;
+        use discord_types::events::GuildMemberAddEvent;
 
         let prefix = "t-member-add";
         let (bridge, mock) = make_bridge(prefix);
@@ -557,8 +615,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_guild_member_remove() {
-        use discord_types::events::GuildMemberRemoveEvent;
         use discord_nats::subjects;
+        use discord_types::events::GuildMemberRemoveEvent;
 
         let prefix = "t-member-remove";
         let (bridge, mock) = make_bridge(prefix);
@@ -566,9 +624,13 @@ mod tests {
         let user: serenity::model::user::User = serde_json::from_value(serde_json::json!({
             "id": "42", "username": "alice", "global_name": null,
             "avatar": null, "bot": false
-        })).unwrap();
+        }))
+        .unwrap();
 
-        bridge.publish_guild_member_remove(200, &user).await.unwrap();
+        bridge
+            .publish_guild_member_remove(200, &user)
+            .await
+            .unwrap();
 
         let msgs = mock.published_messages();
         assert_eq!(msgs.len(), 1);
@@ -582,13 +644,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_pairing_requested() {
-        use discord_types::events::PairingRequestedEvent;
         use discord_nats::subjects;
+        use discord_types::events::PairingRequestedEvent;
 
         let prefix = "t-pair";
         let (bridge, mock) = make_bridge(prefix);
 
-        bridge.publish_pairing_requested(42, "alice", "ABC123", 9999).await.unwrap();
+        bridge
+            .publish_pairing_requested(42, "alice", "ABC123", 9999)
+            .await
+            .unwrap();
 
         let msgs = mock.published_messages();
         assert_eq!(msgs.len(), 1);

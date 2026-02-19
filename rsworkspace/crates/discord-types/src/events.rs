@@ -1149,7 +1149,10 @@ mod tests {
             guild_id: None,
         };
         let json = serde_json::to_string(&event).unwrap();
-        assert!(!json.contains("guild_id"), "guild_id must be omitted in DMs");
+        assert!(
+            !json.contains("guild_id"),
+            "guild_id must be omitted in DMs"
+        );
         roundtrip(&event);
     }
 
@@ -1173,7 +1176,10 @@ mod tests {
             new_state: test_voice_state(),
         };
         let json = serde_json::to_string(&event).unwrap();
-        assert!(!json.contains("old_channel_id"), "old_channel_id must be omitted when None");
+        assert!(
+            !json.contains("old_channel_id"),
+            "old_channel_id must be omitted when None"
+        );
         roundtrip(&event);
     }
 
@@ -1296,7 +1302,10 @@ mod tests {
             inputs: vec![],
         };
         let json = serde_json::to_string(&event).unwrap();
-        assert!(!json.contains("guild_id"), "guild_id must be omitted in DMs");
+        assert!(
+            !json.contains("guild_id"),
+            "guild_id must be omitted in DMs"
+        );
         roundtrip(&event);
     }
 

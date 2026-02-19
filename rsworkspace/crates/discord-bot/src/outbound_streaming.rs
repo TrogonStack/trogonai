@@ -195,7 +195,7 @@ fn truncate(content: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(content)
     } else {
         const ELLIPSIS: &str = "…"; // 3 UTF-8 bytes
-        // Walk back to a char boundary so we don't split a multi-byte char.
+                                    // Walk back to a char boundary so we don't split a multi-byte char.
         let mut end = MAX_DISCORD_LEN - ELLIPSIS.len();
         while !content.is_char_boundary(end) {
             end -= 1;
