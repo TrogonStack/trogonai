@@ -2203,6 +2203,15 @@ impl DiscordBridge {
         Ok(())
     }
 
+    pub async fn publish_ratelimit(&self, path: String, timeout_ms: u64, global: bool) -> Result<()> {
+        let meta = EventMetadata::new("", self.next_sequence());
+        let ev = RatelimitEvent { metadata: meta, path, timeout_ms, global };
+        let subject = subjects::bot::ratelimit(self.prefix());
+        self.publisher.publish(&subject, &ev).await?;
+        debug!("Published ratelimit to {}", subject);
+        Ok(())
+    }
+
 }
 
 fn convert_soundboard(sound: &SerenitySoundboard) -> SoundInfo {
