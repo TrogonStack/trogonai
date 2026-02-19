@@ -17,17 +17,20 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
 
     info!(method = %args.method, "Extension notification");
 
+    let mut success = true;
+
     if let Some(nats) = &bridge.nats {
         let subject = agent::ext(&bridge.acp_prefix, &args.method);
 
         if let Err(e) = nats::publish(nats, &subject, &args, nats::PublishOptions::simple()).await {
             warn!(error = %e, method = %args.method, "Failed to publish extension notification");
+            success = false;
         }
     }
 
     bridge
         .metrics
-        .record_request("ext_notification", start.elapsed().as_secs_f64(), true);
+        .record_request("ext_notification", start.elapsed().as_secs_f64(), success);
 
     Ok(())
 }
