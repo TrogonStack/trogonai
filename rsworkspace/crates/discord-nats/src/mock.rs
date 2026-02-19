@@ -75,14 +75,9 @@ impl Publish for MockPublisher {
         &self.prefix
     }
 
-    async fn publish<T: Serialize>(
-        &self,
-        subject: impl AsRef<str>,
-        message: &T,
-    ) -> Result<()> {
+    async fn publish<T: Serialize>(&self, subject: impl AsRef<str>, message: &T) -> Result<()> {
         let subject = subject.as_ref().to_string();
-        let value = serde_json::to_value(message)
-            .map_err(crate::error::Error::Serialization)?;
+        let value = serde_json::to_value(message).map_err(crate::error::Error::Serialization)?;
         self.messages.lock().unwrap().push((subject, value));
         Ok(())
     }

@@ -652,7 +652,10 @@ mod tests {
             !json.contains("channel_id"),
             "channel_id must be omitted when None"
         );
-        assert!(!json.contains("guild_id"), "guild_id must be omitted when None");
+        assert!(
+            !json.contains("guild_id"),
+            "guild_id must be omitted when None"
+        );
         roundtrip(&state);
     }
 

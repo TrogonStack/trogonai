@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{ActionRow, AttachedFile, BotActivity, BotStatus, ChannelType, Embed, ModalInput};
+use crate::types::{
+    ActionRow, AttachedFile, BotActivity, BotStatus, ChannelType, Embed, ModalInput,
+};
 
 /// Send a new message to a channel
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1103,7 +1105,10 @@ mod tests {
             topic: None,
         };
         let json = serde_json::to_string(&cmd).unwrap();
-        assert!(!json.contains("category_id"), "category_id must be omitted when None");
+        assert!(
+            !json.contains("category_id"),
+            "category_id must be omitted when None"
+        );
         assert!(!json.contains("topic"), "topic must be omitted when None");
         roundtrip(&cmd);
     }
@@ -1225,7 +1230,10 @@ mod tests {
             auto_archive_mins: 60,
         };
         let json = serde_json::to_string(&cmd).unwrap();
-        assert!(!json.contains("message_id"), "message_id must be omitted when None");
+        assert!(
+            !json.contains("message_id"),
+            "message_id must be omitted when None"
+        );
         roundtrip(&cmd);
     }
 
