@@ -46,6 +46,8 @@ pub enum ReactionMode {
     Own,
     /// Publish all reaction events (default)
     All,
+    /// Only publish reactions from users in `reaction_allowlist`
+    Allowlist,
 }
 
 impl Default for ReactionMode {
@@ -73,10 +75,19 @@ pub struct DiscordBotConfig {
     /// Controls which reaction events are forwarded to NATS
     #[serde(default)]
     pub reaction_mode: ReactionMode,
+    /// User IDs allowed to trigger reaction events when `reaction_mode = allowlist`
+    #[serde(default)]
+    pub reaction_allowlist: Vec<u64>,
     /// Optional emoji to react with when a message is received and will be processed.
     /// Use a unicode emoji (e.g. "👀") or omit to disable.
     #[serde(default)]
     pub ack_reaction: Option<String>,
+    /// Whether to process messages sent by other bots (default: false)
+    #[serde(default)]
+    pub allow_bots: bool,
+    /// Optional string prepended to every outbound message sent by the bot
+    #[serde(default)]
+    pub response_prefix: Option<String>,
 }
 
 impl Config {
@@ -155,10 +166,21 @@ impl Config {
         {
             "off" => ReactionMode::Off,
             "own" => ReactionMode::Own,
+            "allowlist" => ReactionMode::Allowlist,
             _ => ReactionMode::All,
         };
 
+        let reaction_allowlist =
+            parse_id_list(&env.var("DISCORD_REACTION_ALLOWLIST").unwrap_or_default());
+
         let ack_reaction = env.var("DISCORD_ACK_REACTION").filter(|s| !s.is_empty());
+
+        let allow_bots = env
+            .var_or("DISCORD_ALLOW_BOTS", "false")
+            .to_lowercase()
+            == "true";
+
+        let response_prefix = env.var("DISCORD_RESPONSE_PREFIX").filter(|s| !s.is_empty());
 
         Ok(Config {
             discord: DiscordBotConfig {
@@ -166,7 +188,10 @@ impl Config {
                 presence_enabled,
                 guild_commands_guild_id,
                 reaction_mode,
+                reaction_allowlist,
                 ack_reaction,
+                allow_bots,
+                response_prefix,
                 access: AccessConfig {
                     dm_policy,
                     guild_policy,

@@ -762,6 +762,12 @@ pub struct FetchEmojisCommand {
     pub guild_id: u64,
 }
 
+/// Fetch bans for a guild (request-reply: returns `Vec<FetchedBan>`)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchBansCommand {
+    pub guild_id: u64,
+}
+
 /// Approve a DM pairing request by its code (admin → bot)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PairingApproveCommand {
@@ -800,6 +806,7 @@ mod tests {
             reply_to_message_id: Some(50),
             files: vec![],
             components: vec![],
+            as_voice: false,
         });
     }
 
@@ -812,6 +819,7 @@ mod tests {
             reply_to_message_id: None,
             files: vec![],
             components: vec![],
+            as_voice: false,
         });
     }
 

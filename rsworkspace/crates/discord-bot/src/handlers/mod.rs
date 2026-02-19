@@ -100,9 +100,13 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
-        // Skip bot messages
+        // Skip bot messages unless allow_bots is enabled
         if msg.author.bot {
-            return;
+            let data = ctx.data.read().await;
+            let allow = data.get::<DiscordBridge>().map(|b| b.allow_bots).unwrap_or(false);
+            if !allow {
+                return;
+            }
         }
 
         let bridge = {
@@ -338,7 +342,8 @@ impl EventHandler for Handler {
         let is_bot_msg = add_reaction.message_author_id
             .map(|author| author.get() == bridge.bot_user_id())
             .unwrap_or(false);
-        if !bridge.should_publish_reaction(is_bot_msg) {
+        let reactor_id = add_reaction.user_id.map(|u| u.get());
+        if !bridge.should_publish_reaction(is_bot_msg, reactor_id) {
             return;
         }
 
@@ -378,7 +383,8 @@ impl EventHandler for Handler {
         let is_bot_msg = removed_reaction.message_author_id
             .map(|author| author.get() == bridge.bot_user_id())
             .unwrap_or(false);
-        if !bridge.should_publish_reaction(is_bot_msg) {
+        let reactor_id = removed_reaction.user_id.map(|u| u.get());
+        if !bridge.should_publish_reaction(is_bot_msg, reactor_id) {
             return;
         }
 

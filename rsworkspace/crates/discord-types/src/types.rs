@@ -422,6 +422,15 @@ pub struct FetchedRole {
     pub permissions: u64,
 }
 
+/// A ban entry returned by a fetch request
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FetchedBan {
+    pub user_id: u64,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Minimal sticker info from a guild stickers update
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StickerInfo {
