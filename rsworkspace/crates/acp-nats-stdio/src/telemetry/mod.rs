@@ -25,16 +25,22 @@ pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
         .with_span_events(FmtSpan::CLOSE)
         .json();
 
-    let file_layer = log::get_log_dir().ok().map(|log_dir| {
+    let (file_layer, file_layer_info) = log::get_log_dir().ok().and_then(|log_dir| {
         let log_file = log_dir.join("acp-nats-stdio.log");
-        let file = std::fs::File::create(&log_file).expect("failed to create log file");
-        tracing::info!(log_file = %log_file.display(), "File logging enabled");
-        tracing_subscriber::fmt::layer()
-            .with_writer(file)
-            .with_thread_ids(true)
-            .with_span_events(FmtSpan::CLOSE)
-            .json()
-    });
+        match std::fs::File::options().create(true).append(true).open(&log_file) {
+            Ok(file) => {
+                let layer = tracing_subscriber::fmt::layer()
+                    .with_writer(file)
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::CLOSE)
+                    .json();
+                Some((Some(layer), Some(format!("File logging enabled: {}", log_file.display()))))
+            }
+            Err(e) => {
+                Some((None, Some(format!("Failed to create log file {}: {}", log_file.display(), e))))
+            }
+        }
+    }).unwrap_or((None, None));
 
     match try_init_otel(config) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
@@ -58,6 +64,9 @@ pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
                 .init();
 
             tracing::info!("Logger initialized with OpenTelemetry");
+            if let Some(msg) = file_layer_info {
+                tracing::info!("{}", msg);
+            }
         }
         Err(e) => {
             tracing_subscriber::registry()
@@ -70,6 +79,9 @@ pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
                 error = %e,
                 "Logger initialized without OpenTelemetry (init failed)"
             );
+            if let Some(msg) = file_layer_info {
+                tracing::info!("{}", msg);
+            }
         }
     }
 
