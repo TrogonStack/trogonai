@@ -14,6 +14,9 @@ pub struct ClaudeConfig {
     pub model: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Base URL for the Claude API. Defaults to `https://api.anthropic.com`.
+    /// Override in tests to point to a local mock server.
+    pub base_url: String,
 }
 
 impl Default for ClaudeConfig {
@@ -23,6 +26,7 @@ impl Default for ClaudeConfig {
             model: "claude-sonnet-4-6".to_string(),
             max_tokens: 1024,
             temperature: 1.0,
+            base_url: "https://api.anthropic.com".to_string(),
         }
     }
 }
@@ -80,7 +84,7 @@ impl ClaudeClient {
 
         let response = self
             .client
-            .post("https://api.anthropic.com/v1/messages")
+            .post(format!("{}/v1/messages", self.config.base_url))
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
@@ -193,4 +197,222 @@ struct SseDelta {
     #[serde(rename = "type")]
     delta_type: String,
     text: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    // ── SSE type deserialization ─────────────────────────────────────────────
+
+    #[test]
+    fn test_sse_text_delta_parsed_correctly() {
+        let json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        let event: SseEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.event_type, "content_block_delta");
+        let delta = event.delta.unwrap();
+        assert_eq!(delta.delta_type, "text_delta");
+        assert_eq!(delta.text.as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn test_sse_non_content_event_has_no_delta() {
+        // message_start and similar lifecycle events carry no text delta
+        let json = r#"{"type":"message_start","message":{"id":"msg_123"}}"#;
+        let event: SseEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.event_type, "message_start");
+        assert!(event.delta.is_none());
+    }
+
+    #[test]
+    fn test_sse_input_json_delta_has_no_text() {
+        // Tool-use deltas have type=input_json_delta and no text field
+        let json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}"#;
+        let event: SseEvent = serde_json::from_str(json).unwrap();
+        let delta = event.delta.unwrap();
+        assert_eq!(delta.delta_type, "input_json_delta");
+        assert!(delta.text.is_none());
+    }
+
+    #[test]
+    fn test_sse_unknown_top_level_fields_do_not_panic() {
+        // Claude API may add new top-level fields; we must not fail on them
+        let json = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
+        let event: SseEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.event_type, "content_block_start");
+        assert!(event.delta.is_none());
+    }
+
+    // ── Message serde ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_message_id_omitted_from_json_when_none() {
+        let msg = Message {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+            message_id: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(
+            !json.contains("message_id"),
+            "message_id should be absent when None, got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_message_id_roundtrips_when_some() {
+        let msg = Message {
+            role: "assistant".to_string(),
+            content: "hi there".to_string(),
+            message_id: Some(99999),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let restored: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.role, "assistant");
+        assert_eq!(restored.message_id, Some(99999));
+    }
+
+    // ── Full streaming integration with mock HTTP server ─────────────────────
+
+    #[tokio::test]
+    async fn test_generate_response_streaming_accumulates_text_deltas() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Minimal SSE response: two text deltas then [DONE]
+        let sse_body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_stop\"}\n",
+            "data: [DONE]\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(header("x-api-key", "test-key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_body),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = ClaudeConfig {
+            api_key: "test-key".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 100,
+            temperature: 1.0,
+            base_url: server.uri(),
+        };
+        let client = ClaudeClient::new(config);
+
+        let (tx, mut rx) = mpsc::channel::<String>(16);
+        let result = client
+            .generate_response_streaming("system prompt", "user message", &[], tx)
+            .await;
+
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "Hello world");
+
+        // Verify each chunk arrived through the channel
+        let mut chunks = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            chunks.push(chunk);
+        }
+        assert_eq!(chunks, vec!["Hello", " world"]);
+
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn test_generate_response_streaming_returns_err_on_api_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_string(r#"{"error":{"type":"authentication_error","message":"Invalid API key"}}"#),
+            )
+            .mount(&server)
+            .await;
+
+        let config = ClaudeConfig {
+            api_key: "bad-key".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 100,
+            temperature: 1.0,
+            base_url: server.uri(),
+        };
+        let client = ClaudeClient::new(config);
+
+        let (tx, _rx) = mpsc::channel::<String>(16);
+        let result = client
+            .generate_response_streaming("system", "user message", &[], tx)
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("401"),
+            "Error message should mention 401, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_response_streaming_with_conversation_history() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(body_string_contains("previous user message"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"response\"}}\ndata: [DONE]\n",
+                    ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = ClaudeConfig {
+            api_key: "test-key".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 100,
+            temperature: 1.0,
+            base_url: server.uri(),
+        };
+        let client = ClaudeClient::new(config);
+
+        let history = vec![
+            Message { role: "user".to_string(), content: "previous user message".to_string(), message_id: Some(1) },
+            Message { role: "assistant".to_string(), content: "previous reply".to_string(), message_id: None },
+        ];
+
+        let (tx, _rx) = mpsc::channel::<String>(16);
+        let result = client
+            .generate_response_streaming("system", "follow-up", &history, tx)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "response");
+        server.verify().await;
+    }
 }

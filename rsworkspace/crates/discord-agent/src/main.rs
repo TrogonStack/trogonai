@@ -197,6 +197,7 @@ async fn main() -> Result<()> {
                 model: args.claude_model,
                 max_tokens: args.max_tokens,
                 temperature,
+                base_url: "https://api.anthropic.com".to_string(),
             })
         } else {
             error!("LLM mode enabled but ANTHROPIC_API_KEY not provided");
