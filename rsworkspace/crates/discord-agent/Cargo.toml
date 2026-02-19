@@ -27,3 +27,4 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 [dev-dependencies]
 uuid = { version = "1", features = ["v4"] }
 discord-nats = { path = "../discord-nats", features = ["test-support"] }
+wiremock = "0.6"

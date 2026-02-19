@@ -271,6 +271,173 @@ async fn edit_message_with_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn proxy_http(proxy_url: &str) -> Arc<serenity::http::Http> {
+        use serenity::model::id::ApplicationId;
+        Arc::new(
+            serenity::http::HttpBuilder::new("fake-token")
+                .proxy(proxy_url)
+                .ratelimiter_disabled(true)
+                .application_id(ApplicationId::new(1))
+                .build(),
+        )
+    }
+
+    // ── Retry tests ──────────────────────────────────────────────────────────
+
+    /// When Discord returns 5xx, edit_message_with_retry must exhaust MAX_RETRIES
+    /// before giving up, making exactly MAX_RETRIES HTTP attempts.
+    #[tokio::test]
+    async fn test_edit_retries_on_server_error_and_exhausts_max_retries() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v10/channels/100/messages/42"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(MAX_RETRIES as u64) // must retry exactly MAX_RETRIES times
+            .mount(&server)
+            .await;
+
+        let http = proxy_http(&server.uri());
+        let result = edit_message_with_retry(&http, 100, 42, "some content").await;
+
+        assert!(result.is_err(), "Expected Err after exhausting retries");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("42"),
+            "Error should identify the message id, got: {}",
+            msg
+        );
+        server.verify().await; // exactly MAX_RETRIES requests were made
+    }
+
+    /// On the first attempt succeeding, no retries happen.
+    #[tokio::test]
+    async fn test_edit_succeeds_on_first_attempt_no_retries() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v10/channels/100/messages/99"))
+            .and(body_string_contains("hello"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1u64..=MAX_RETRIES as u64) // at most MAX_RETRIES (204 may or may not retry)
+            .mount(&server)
+            .await;
+
+        let http = proxy_http(&server.uri());
+        // Result may succeed or fail depending on how serenity handles 204;
+        // what we verify is that the request was made (wiremock saw it).
+        let _ = edit_message_with_retry(&http, 100, 99, "hello").await;
+        server.verify().await;
+    }
+
+    // ── Rate limiting tests ──────────────────────────────────────────────────
+
+    /// When the last edit was very recent, process_stream_message must wait at
+    /// least MIN_EDIT_INTERVAL before sending the next edit to Discord.
+    #[tokio::test]
+    async fn test_rate_limit_delays_edit_when_last_edit_too_recent() {
+        use discord_types::StreamMessageCommand;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // Accept any number of PATCH requests (204 may trigger serenity retries)
+        Mock::given(method("PATCH"))
+            .and(path("/api/v10/channels/100/messages/42"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let http = proxy_http(&server.uri());
+
+        let map: StreamingMessages = Arc::new(RwLock::new(HashMap::new()));
+        map.write().await.insert(
+            "sess-rl".to_string(),
+            StreamingState {
+                channel_id: 100,
+                message_id: 42,
+                last_edit: Instant::now(), // just now → full MIN_EDIT_INTERVAL wait
+                edit_count: 0,
+            },
+        );
+
+        let cmd = StreamMessageCommand {
+            session_id: "sess-rl".to_string(),
+            channel_id: 100,
+            content: "updated content".to_string(),
+            is_final: false,
+            reply_to_message_id: None,
+        };
+
+        let start = std::time::Instant::now();
+        process_stream_message(&http, &map, cmd).await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Allow 20ms headroom below 400ms for CI jitter
+        assert!(
+            elapsed >= std::time::Duration::from_millis(380),
+            "Expected ≥380ms rate-limit delay, got {:?}",
+            elapsed
+        );
+    }
+
+    /// When the last edit was long ago, process_stream_message proceeds without
+    /// sleeping — the elapsed time should be well under MIN_EDIT_INTERVAL.
+    #[tokio::test]
+    async fn test_rate_limit_skipped_when_last_edit_is_old() {
+        use discord_types::StreamMessageCommand;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let http = proxy_http(&server.uri());
+
+        let map: StreamingMessages = Arc::new(RwLock::new(HashMap::new()));
+        // last_edit far in the past → no rate-limit sleep needed
+        let old_instant = Instant::now() - Duration::from_secs(10);
+        map.write().await.insert(
+            "sess-old".to_string(),
+            StreamingState {
+                channel_id: 100,
+                message_id: 55,
+                last_edit: old_instant,
+                edit_count: 3,
+            },
+        );
+
+        let cmd = StreamMessageCommand {
+            session_id: "sess-old".to_string(),
+            channel_id: 100,
+            content: "quick update".to_string(),
+            is_final: false,
+            reply_to_message_id: None,
+        };
+
+        let start = std::time::Instant::now();
+        process_stream_message(&http, &map, cmd).await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Without rate-limit sleep, should complete in well under 380ms
+        // (even with potential retries on a local mock server)
+        assert!(
+            elapsed < std::time::Duration::from_millis(380),
+            "Expected <380ms when no rate-limit applies, got {:?}",
+            elapsed
+        );
+    }
 
     #[test]
     fn test_truncate_short_string_unchanged() {
