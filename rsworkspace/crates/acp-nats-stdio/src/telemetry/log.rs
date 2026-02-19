@@ -3,6 +3,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use trogon_std::env::ReadEnv;
 
 pub(super) static LOGGER_PROVIDER: OnceLock<SdkLoggerProvider> = OnceLock::new();
 
@@ -27,8 +28,8 @@ pub(super) fn shutdown() {
     }
 }
 
-pub(super) fn get_log_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(dir) = std::env::var("ACP_LOG_DIR") {
+pub(super) fn get_log_dir<E: ReadEnv>(env: &E) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(dir) = env.var("ACP_LOG_DIR") {
         let path = PathBuf::from(dir);
         std::fs::create_dir_all(&path)?;
         return Ok(path);

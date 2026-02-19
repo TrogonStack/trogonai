@@ -12,7 +12,7 @@ use trogon_std::env::SystemEnv;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::from_env_with_provider(&SystemEnv);
-    telemetry::init_logger(&config)?;
+    telemetry::init_logger(&config, &SystemEnv)?;
 
     info!("ACP bridge starting");
 

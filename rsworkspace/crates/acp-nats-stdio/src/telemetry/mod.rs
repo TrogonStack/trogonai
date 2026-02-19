@@ -13,10 +13,11 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_std::env::ReadEnv;
 
 const OTEL_SERVICE_NAME: &str = "acp-nats-stdio";
 
-pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn init_logger<E: ReadEnv>(config: &Config, env: &E) -> Result<(), Box<dyn std::error::Error>> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let stderr_layer = tracing_subscriber::fmt::layer()
@@ -25,7 +26,7 @@ pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
         .with_span_events(FmtSpan::CLOSE)
         .json();
 
-    let (file_layer, file_layer_info) = log::get_log_dir().ok().and_then(|log_dir| {
+    let (file_layer, file_layer_info) = log::get_log_dir(env).ok().map(|log_dir| {
         let log_file = log_dir.join("acp-nats-stdio.log");
         match std::fs::File::options().create(true).append(true).open(&log_file) {
             Ok(file) => {
@@ -34,10 +35,10 @@ pub fn init_logger(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
                     .with_thread_ids(true)
                     .with_span_events(FmtSpan::CLOSE)
                     .json();
-                Some((Some(layer), Some(format!("File logging enabled: {}", log_file.display()))))
+                (Some(layer), Some(format!("File logging enabled: {}", log_file.display())))
             }
             Err(e) => {
-                Some((None, Some(format!("Failed to create log file {}: {}", log_file.display(), e))))
+                (None, Some(format!("Failed to create log file {}: {}", log_file.display(), e)))
             }
         }
     }).unwrap_or((None, None));
