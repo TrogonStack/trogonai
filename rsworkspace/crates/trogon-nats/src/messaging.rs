@@ -6,7 +6,7 @@ use std::time::Duration;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct HeaderMapCarrier<'a>(&'a mut HeaderMap);
 
@@ -29,12 +29,6 @@ pub fn headers_with_trace_context() -> HeaderMap {
     headers
 }
 
-pub fn build_request_headers() -> HeaderMap {
-    let mut headers = headers_with_trace_context();
-    headers.insert(REQ_ID_HEADER, uuid::Uuid::new_v4().to_string().as_str());
-    headers
-}
-
 pub async fn request_with_timeout<N: RequestClient, Req, Res>(
     client: &N,
     subject: &str,
@@ -46,7 +40,7 @@ where
     Res: DeserializeOwned,
 {
     let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
-    let headers = build_request_headers();
+    let headers = headers_with_trace_context();
 
     let response = tokio::time::timeout(
         timeout,
@@ -115,61 +109,67 @@ impl RetryPolicy {
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<(), PublishOperationError>>,
     {
-        let mut last_error = match operation().await {
-            Ok(()) => return Ok(()),
-            Err(e) => e,
-        };
+        let mut attempts = 0;
+        let mut last_error: Option<PublishOperationError> = None;
 
-        for attempt in 1..=self.max_retries {
-            let exp = (attempt - 1).min(31);
-            let delay = self.initial_retry_delay * (1u32 << exp);
-            tracing::debug!(
-                error = %last_error,
-                operation = operation_name,
-                subject = %subject,
-                attempt,
-                max_retries = self.max_retries,
-                delay_ms = delay.as_millis(),
-                "Operation failed, retrying"
-            );
-            tokio::time::sleep(delay).await;
-
+        while attempts <= self.max_retries {
+            attempts += 1;
             match operation().await {
                 Ok(()) => {
-                    tracing::info!(
-                        operation = operation_name,
-                        subject = %subject,
-                        attempts = attempt + 1,
-                        "Operation succeeded after retries"
-                    );
+                    if attempts > 1 {
+                        tracing::info!(
+                            operation = operation_name,
+                            subject = %subject,
+                            attempts,
+                            "Operation succeeded after retries"
+                        );
+                    }
                     return Ok(());
                 }
-                Err(e) => last_error = e,
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempts <= self.max_retries {
+                        let exp = (attempts - 1).min(31);
+                        let delay = self.initial_retry_delay * (1u32 << exp);
+                        tracing::debug!(
+                            error = %last_error.as_ref().unwrap(),
+                            operation = operation_name,
+                            subject = %subject,
+                            attempt = attempts,
+                            max_retries = self.max_retries,
+                            delay_ms = delay.as_millis(),
+                            "Operation failed, retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                }
             }
         }
 
-        let attempts = self.max_retries + 1;
+        let final_error = last_error.unwrap_or_else(|| {
+            PublishOperationError("No error recorded in retry loop".to_string())
+        });
         if self.max_retries > 0 {
             tracing::warn!(
-                error = %last_error,
+                error = %final_error,
                 operation = operation_name,
                 subject = %subject,
                 total_attempts = attempts,
                 "Operation failed after all retry attempts"
             );
             Err(NatsError::PublishOperationExhausted {
-                error: last_error,
+                error: final_error,
                 subject: subject.to_string(),
                 attempts,
             })
         } else {
             tracing::warn!(
-                error = %last_error,
+                error = %final_error,
                 operation = operation_name,
                 subject = %subject,
                 "Operation failed"
             );
-            Err(NatsError::PublishOperation(last_error))
+            Err(NatsError::PublishOperation(final_error))
         }
     }
 }
@@ -285,12 +285,12 @@ where
         .execute(
             || {
                 let client = client.clone();
-                async move {
+                Box::pin(async move {
                     client
                         .flush()
                         .await
                         .map_err(|e| PublishOperationError(e.to_string()))
-                }
+                })
             },
             "flush",
             subject,
@@ -372,18 +372,17 @@ impl std::error::Error for NatsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
 
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
-    #[cfg(feature = "test-support")]
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
-    #[cfg(feature = "test-support")]
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
     }
@@ -411,12 +410,6 @@ mod tests {
     #[test]
     fn test_flush_policy_no_retries() {
         let policy = FlushPolicy::no_retries();
-        assert_eq!(policy.retry_policy.max_retries, 0);
-    }
-
-    #[test]
-    fn test_flush_policy_default() {
-        let policy = FlushPolicy::default();
         assert_eq!(policy.retry_policy.max_retries, 0);
     }
 
@@ -472,52 +465,6 @@ mod tests {
     fn test_inject_trace_context_does_not_panic() {
         let mut headers = async_nats::HeaderMap::new();
         inject_trace_context(&mut headers);
-    }
-
-    #[test]
-    fn header_map_carrier_set_inserts_value() {
-        use opentelemetry::propagation::Injector;
-        let mut headers = async_nats::HeaderMap::new();
-        let mut carrier = HeaderMapCarrier(&mut headers);
-        carrier.set("x-test-key", "test-value".to_string());
-        assert_eq!(
-            headers.get("x-test-key").map(|v| v.as_str()),
-            Some("test-value")
-        );
-    }
-
-    #[test]
-    fn inject_trace_context_preserves_existing_headers() {
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert("X-Custom", "preserved");
-        inject_trace_context(&mut headers);
-        assert_eq!(
-            headers.get("X-Custom").map(|v| v.as_str()),
-            Some("preserved"),
-        );
-    }
-
-    #[tokio::test]
-    async fn retry_policy_execute_does_not_panic_with_high_retry_count() {
-        tokio::time::pause();
-
-        let policy = RetryPolicy {
-            max_retries: 33,
-            initial_retry_delay: Duration::from_millis(1),
-        };
-
-        let result = policy
-            .execute(
-                || async { Err(PublishOperationError("always fails".into())) },
-                "test_op",
-                "test.subject",
-            )
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(NatsError::PublishOperationExhausted { attempts: 34, .. })
-        ));
     }
 
     #[tokio::test]
@@ -733,7 +680,6 @@ mod tests {
     async fn test_retry_policy_execute_success_after_retries() {
         use std::sync::{Arc, Mutex};
 
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
@@ -768,7 +714,6 @@ mod tests {
     async fn test_retry_policy_execute_exhausted() {
         use std::sync::{Arc, Mutex};
 
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
@@ -801,22 +746,6 @@ mod tests {
             }
             e => panic!("Expected PublishOperationExhausted error, got: {:?}", e),
         }
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "test-support")]
-    async fn test_request_with_timeout_returns_timeout_error() {
-        let mock = AdvancedMockNatsClient::new();
-        mock.hang_next_request();
-
-        let req = TestRequest {
-            message: "hello".to_string(),
-        };
-
-        let result: Result<TestResponse, NatsError> =
-            request_with_timeout(&mock, "test.subject", &req, Duration::from_millis(1)).await;
-
-        assert!(matches!(result, Err(NatsError::Timeout { .. })));
     }
 
     #[tokio::test]

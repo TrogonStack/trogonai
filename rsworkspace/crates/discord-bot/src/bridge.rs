@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use discord_nats::{subjects, MessagePublisher};
+use discord_nats::{subjects, MessagePublisher, Publish};
 use discord_types::{
     events::*,
     session::{member_session_id, session_id},
@@ -168,8 +168,8 @@ use serenity::prelude::TypeMapKey;
 use tracing::{debug, warn};
 
 /// Discord → NATS bridge
-pub struct DiscordBridge {
-    publisher: MessagePublisher,
+pub struct DiscordBridge<P: Publish = MessagePublisher> {
+    publisher: P,
     pub access_config: AccessConfig,
     sequence: Arc<AtomicU64>,
     bot_user_id: Arc<AtomicU64>,
@@ -197,12 +197,12 @@ pub struct DiscordBridge {
     pub dm_group_channels: Vec<u64>,
 }
 
-impl TypeMapKey for DiscordBridge {
-    type Value = Arc<DiscordBridge>;
+impl TypeMapKey for DiscordBridge<MessagePublisher> {
+    type Value = Arc<DiscordBridge<MessagePublisher>>;
 }
 
-impl DiscordBridge {
-    /// Create a new bridge
+impl DiscordBridge<MessagePublisher> {
+    /// Create a new bridge backed by a real NATS connection.
     pub fn new(
         client: async_nats::Client,
         prefix: String,
@@ -218,8 +218,41 @@ impl DiscordBridge {
         dm_group_enabled: bool,
         dm_group_channels: Vec<u64>,
     ) -> Self {
+        Self::with_publisher(
+            MessagePublisher::new(client, prefix),
+            access_config,
+            presence_enabled,
+            guild_commands_guild_id,
+            reaction_mode,
+            reaction_allowlist,
+            ack_reaction,
+            allow_bots,
+            pluralkit_enabled,
+            pluralkit_token,
+            dm_group_enabled,
+            dm_group_channels,
+        )
+    }
+}
+
+impl<P: Publish> DiscordBridge<P> {
+    /// Create a new bridge with any publisher (useful for testing with `MockPublisher`).
+    pub fn with_publisher(
+        publisher: P,
+        access_config: AccessConfig,
+        presence_enabled: bool,
+        guild_commands_guild_id: Option<u64>,
+        reaction_mode: crate::config::ReactionMode,
+        reaction_allowlist: Vec<u64>,
+        ack_reaction: Option<String>,
+        allow_bots: bool,
+        pluralkit_enabled: bool,
+        pluralkit_token: Option<String>,
+        dm_group_enabled: bool,
+        dm_group_channels: Vec<u64>,
+    ) -> Self {
         Self {
-            publisher: MessagePublisher::new(client, prefix),
+            publisher,
             access_config,
             sequence: Arc::new(AtomicU64::new(0)),
             bot_user_id: Arc::new(AtomicU64::new(0)),
@@ -2200,15 +2233,6 @@ impl DiscordBridge {
         let subject = subjects::bot::soundboard_sound_delete(self.prefix());
         self.publisher.publish(&subject, &ev).await?;
         debug!("Published soundboard_sound_delete to {}", subject);
-        Ok(())
-    }
-
-    pub async fn publish_ratelimit(&self, path: String, timeout_ms: u64, global: bool) -> Result<()> {
-        let meta = EventMetadata::new("", self.next_sequence());
-        let ev = RatelimitEvent { metadata: meta, path, timeout_ms, global };
-        let subject = subjects::bot::ratelimit(self.prefix());
-        self.publisher.publish(&subject, &ev).await?;
-        debug!("Published ratelimit to {}", subject);
         Ok(())
     }
 

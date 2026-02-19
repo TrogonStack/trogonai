@@ -1,18 +1,16 @@
 use async_nats::subject::ToSubject;
-use async_nats::{Client as NatsAsyncClient, HeaderMap, Message};
+use async_nats::{Client as NatsAsyncClient, HeaderMap, Message, Subscriber};
 use bytes::Bytes;
-use futures::Stream;
 use std::error::Error;
 use std::future::Future;
 
 pub trait SubscribeClient: Send + Sync + Clone + 'static {
     type SubscribeError: Error + Send + Sync;
-    type Subscription: Stream<Item = Message> + Unpin + Send + 'static;
 
     fn subscribe<S: ToSubject + Send>(
         &self,
         subject: S,
-    ) -> impl Future<Output = Result<Self::Subscription, Self::SubscribeError>> + Send;
+    ) -> impl Future<Output = Result<Subscriber, Self::SubscribeError>> + Send;
 }
 
 pub trait RequestClient: Send + Sync + Clone + 'static {
@@ -45,12 +43,11 @@ pub trait FlushClient: Send + Sync + Clone + 'static {
 
 impl SubscribeClient for NatsAsyncClient {
     type SubscribeError = async_nats::client::SubscribeError;
-    type Subscription = async_nats::Subscriber;
 
     async fn subscribe<S: ToSubject + Send>(
         &self,
         subject: S,
-    ) -> Result<Self::Subscription, Self::SubscribeError> {
+    ) -> Result<Subscriber, Self::SubscribeError> {
         self.subscribe(subject).await
     }
 }

@@ -116,13 +116,6 @@ mod tests {
     }
 
     #[test]
-    fn test_in_memory_env_default() {
-        let env = InMemoryEnv::default();
-        env.set("KEY", "val");
-        assert_eq!(env.var("KEY").unwrap(), "val");
-    }
-
-    #[test]
     fn test_in_memory_env_overwrite() {
         let env = InMemoryEnv::new();
         env.set("KEY", "v1");

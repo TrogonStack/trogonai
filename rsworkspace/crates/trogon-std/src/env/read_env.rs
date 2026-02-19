@@ -4,7 +4,7 @@ use std::env;
 ///
 /// Does **not** require `Send + Sync`. Add the bounds at your call site:
 ///
-/// ```text
+/// ```ignore
 /// fn spawn_work<E: ReadEnv + Send + Sync + 'static>(env: Arc<E>) { … }
 /// ```
 pub trait ReadEnv {

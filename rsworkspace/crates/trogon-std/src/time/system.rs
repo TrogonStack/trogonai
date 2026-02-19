@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use super::{EpochClock, GetElapsed, GetNow};
+use super::{GetElapsed, GetNow};
 
 /// Zero-sized type — delegates to `std::time::Instant`.
-#[derive(Clone)]
 pub struct SystemClock;
 
 impl GetNow for SystemClock {
@@ -19,13 +18,6 @@ impl GetElapsed for SystemClock {
     #[inline]
     fn elapsed(&self, since: std::time::Instant) -> Duration {
         since.elapsed()
-    }
-}
-
-impl EpochClock for SystemClock {
-    #[inline]
-    fn system_time(&self) -> std::time::SystemTime {
-        std::time::SystemTime::now()
     }
 }
 

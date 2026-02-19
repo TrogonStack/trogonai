@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::bridge::DiscordBridge;
+    use discord_nats::MessagePublisher;
     use discord_types::{AccessConfig, DmPolicy, GuildPolicy};
+    type Bridge = DiscordBridge<MessagePublisher>;
     use serenity::model::channel::Message as SerenityMessage;
     use serenity::model::user::User as SerenityUser;
 
@@ -183,7 +185,7 @@ mod tests {
     #[test]
     fn test_convert_user_basic() {
         let user = parse_user(user_json(42, "alice", false));
-        let converted = DiscordBridge::convert_user(&user);
+        let converted = Bridge::convert_user(&user);
         assert_eq!(converted.id, 42);
         assert_eq!(converted.username, "alice");
         assert!(!converted.bot);
@@ -193,7 +195,7 @@ mod tests {
     #[test]
     fn test_convert_user_bot_flag() {
         let user = parse_user(user_json(1, "mybot", true));
-        let converted = DiscordBridge::convert_user(&user);
+        let converted = Bridge::convert_user(&user);
         assert!(converted.bot);
     }
 
@@ -207,14 +209,14 @@ mod tests {
             "bot": false
         });
         let user = parse_user(json);
-        let converted = DiscordBridge::convert_user(&user);
+        let converted = Bridge::convert_user(&user);
         assert_eq!(converted.global_name, Some("Alice Wonderland".to_string()));
     }
 
     #[test]
     fn test_convert_user_large_id() {
         let user = parse_user(user_json(987654321098765432, "bigid", false));
-        let converted = DiscordBridge::convert_user(&user);
+        let converted = Bridge::convert_user(&user);
         assert_eq!(converted.id, 987654321098765432);
     }
 
@@ -224,7 +226,7 @@ mod tests {
     fn test_convert_dm_message_fields() {
         let json = dm_message_json(1, 100, 42, "Hello world");
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
 
         assert_eq!(converted.id, 1);
         assert_eq!(converted.channel_id, 100);
@@ -241,7 +243,7 @@ mod tests {
     fn test_convert_guild_message_has_guild_id() {
         let json = guild_message_json(5, 100, 200, 42, "Guild message");
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
         assert_eq!(converted.guild_id, Some(200));
         assert_eq!(converted.channel_id, 100);
     }
@@ -250,7 +252,7 @@ mod tests {
     fn test_convert_message_empty_content() {
         let json = dm_message_json(1, 100, 42, "");
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
         assert_eq!(converted.content, "");
     }
 
@@ -258,7 +260,7 @@ mod tests {
     fn test_convert_message_author_is_converted() {
         let json = dm_message_json(1, 100, 77, "Hi");
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
         assert_eq!(converted.author.id, 77);
         assert_eq!(converted.author.username, "alice");
     }
@@ -289,7 +291,7 @@ mod tests {
             "type": 0
         });
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
 
         assert_eq!(converted.attachments.len(), 1);
         assert_eq!(converted.attachments[0].filename, "image.png");
@@ -304,7 +306,7 @@ mod tests {
     fn test_convert_message_timestamp_is_nonempty() {
         let json = dm_message_json(1, 100, 42, "ts test");
         let msg = parse_message(json);
-        let converted = DiscordBridge::convert_message(&msg);
+        let converted = Bridge::convert_message(&msg);
         assert!(!converted.timestamp.is_empty());
     }
 }
