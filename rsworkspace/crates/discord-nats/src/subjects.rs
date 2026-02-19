@@ -859,6 +859,11 @@ pub mod agent {
         format!("discord.{}.agent.fetch.emojis", prefix)
     }
 
+    /// Fetch guild bans (request-reply)
+    pub fn fetch_bans(prefix: &str) -> String {
+        format!("discord.{}.agent.fetch.bans", prefix)
+    }
+
     /// Wildcard for all agent commands
     pub fn all(prefix: &str) -> String {
         format!("discord.{}.agent.>", prefix)

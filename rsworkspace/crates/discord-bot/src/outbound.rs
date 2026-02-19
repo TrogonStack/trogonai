@@ -23,7 +23,7 @@ use discord_types::{
     DeleteStageInstanceCommand, DeleteWebhookCommand, EditChannelCommand,
     EditEmojiCommand, EditInteractionResponseCommand, EditMessageCommand, EditRoleCommand,
     EditScheduledEventCommand, EditStickerCommand, EditWebhookCommand, ExecuteWebhookCommand,
-    FetchAuditLogCommand, FetchChannelCommand, FetchEmojisCommand,
+    FetchAuditLogCommand, FetchBansCommand, FetchChannelCommand, FetchEmojisCommand,
     FetchGuildChannelsCommand, FetchGuildCommand, FetchGuildMembersCommand, FetchInvitesCommand,
     FetchMemberCommand, FetchMessagesCommand, FetchPinnedMessagesCommand, FetchRolesCommand,
     FetchScheduledEventUsersCommand,
@@ -37,8 +37,8 @@ use discord_types::{
 use discord_types::types::{
     ActionRowComponent, AppInfo, AttachedFile, AuditLogEntryInfo, ButtonStyle as DcButtonStyle,
     ChannelType, DiscordUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, Emoji,
-    FetchedChannel, FetchedGuild, FetchedInvite, FetchedMember, FetchedMessage, FetchedRole,
-    ScheduledEventUserInfo, VoiceRegionInfo,
+    FetchedBan, FetchedChannel, FetchedGuild, FetchedInvite, FetchedMember, FetchedMessage,
+    FetchedRole, ScheduledEventUserInfo, VoiceRegionInfo,
 };
 use serenity::builder::{
     CreateActionRow, CreateAttachment, CreateAutocompleteResponse, CreateButton, CreateChannel,
@@ -78,6 +78,42 @@ fn truncate(s: &str) -> &str {
         }
         &s[..end]
     }
+}
+
+/// Split text into chunks no longer than `max_len` characters.
+/// Breaks preferably at newlines, then spaces; falls back to a hard character boundary.
+fn chunk_text(text: &str, max_len: usize) -> Vec<String> {
+    if text.len() <= max_len {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        if remaining.len() <= max_len {
+            chunks.push(remaining.to_string());
+            break;
+        }
+        // Find the last valid char boundary within max_len
+        let mut boundary = max_len;
+        while !remaining.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        let slice = &remaining[..boundary];
+        let break_pos = slice
+            .rfind('\n')
+            .or_else(|| slice.rfind(' '))
+            .unwrap_or(boundary);
+        let mut bp = break_pos;
+        while bp > 0 && !remaining.is_char_boundary(bp) {
+            bp -= 1;
+        }
+        if bp == 0 {
+            bp = boundary; // hard break if no whitespace found
+        }
+        chunks.push(remaining[..bp].to_string());
+        remaining = remaining[bp..].trim_start_matches(|c: char| c == '\n' || c == ' ');
+    }
+    chunks
 }
 
 /// Convert a discord-types `Embed` into a serenity `CreateEmbed`.
@@ -323,6 +359,7 @@ pub struct OutboundProcessor {
     pub(crate) streaming_messages: StreamingMessages,
     pub(crate) shard_manager: Option<Arc<serenity::all::ShardManager>>,
     pub(crate) pairing_state: Arc<PairingState>,
+    pub(crate) response_prefix: Option<String>,
 }
 
 impl OutboundProcessor {
@@ -332,6 +369,7 @@ impl OutboundProcessor {
         prefix: String,
         shard_manager: Option<Arc<serenity::all::ShardManager>>,
         pairing_state: Arc<PairingState>,
+        response_prefix: Option<String>,
     ) -> Self {
         Self {
             http,
@@ -340,6 +378,7 @@ impl OutboundProcessor {
             streaming_messages: Arc::new(RwLock::new(HashMap::new())),
             shard_manager,
             pairing_state,
+            response_prefix,
         }
     }
 
@@ -351,6 +390,7 @@ impl OutboundProcessor {
         let streaming_messages = self.streaming_messages;
         let shard_manager = self.shard_manager;
         let pairing_state = self.pairing_state;
+        let response_prefix = self.response_prefix;
         let publisher = MessagePublisher::new(client.clone(), prefix.clone());
 
         info!("Starting outbound processor for prefix: {}", prefix);
@@ -367,12 +407,14 @@ impl OutboundProcessor {
             r67, r68, r69, r70, r71, r72, r73, r74, r75,
             r76, r77,
             r78, r79, r80,
+            r81,
         ) = tokio::join!(
             Self::handle_send_messages(
                 http.clone(),
                 client.clone(),
                 prefix.clone(),
-                publisher.clone()
+                publisher.clone(),
+                response_prefix,
             ),
             Self::handle_edit_messages(
                 http.clone(),
@@ -483,6 +525,7 @@ impl OutboundProcessor {
             Self::handle_create_poll(http.clone(), client.clone(), prefix.clone()),
             Self::handle_create_sticker(http.clone(), client.clone(), prefix.clone()),
             Self::handle_fetch_emojis(http.clone(), client.clone(), prefix.clone()),
+            Self::handle_fetch_bans(http.clone(), client.clone(), prefix.clone()),
         );
 
         // Log any errors (all handlers run indefinitely until NATS disconnects)
@@ -567,6 +610,7 @@ impl OutboundProcessor {
             ("create_poll", r78),
             ("create_sticker", r79),
             ("fetch_emojis", r80),
+            ("fetch_bans", r81),
         ] {
             if let Err(e) = result {
                 error!("Outbound handler '{}' exited with error: {}", name, e);
@@ -581,6 +625,7 @@ impl OutboundProcessor {
         client: async_nats::Client,
         prefix: String,
         publisher: MessagePublisher,
+        response_prefix: Option<String>,
     ) -> Result<()> {
         let subscriber = MessageSubscriber::new(client, &prefix);
         let subject = subjects::agent::message_send(&prefix);
@@ -596,40 +641,82 @@ impl OutboundProcessor {
                     let context = format!("Failed to send message to channel {}", cmd.channel_id);
                     // Load attachments before the retry loop (async path reads)
                     let attachments = load_attachments(&cmd.files).await;
-                    let builder = if cmd.as_voice && !attachments.is_empty() {
+
+                    if cmd.as_voice && !attachments.is_empty() {
                         // Voice messages: empty content + IS_VOICE_MESSAGE flag (bit 13)
-                        CreateMessage::new()
+                        let builder = CreateMessage::new()
                             .content("")
                             .flags(serenity::model::channel::MessageFlags::from_bits_truncate(1 << 13))
-                            .add_files(attachments)
+                            .add_files(attachments);
+                        for attempt in 0..=MAX_RETRIES {
+                            match channel.send_message(&*http, builder.clone()).await {
+                                Ok(_) => break,
+                                Err(e) => match classify(&subject, &e) {
+                                    ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                        tokio::time::sleep(dur).await;
+                                    }
+                                    outcome => {
+                                        publish_if_permanent(&publisher, &error_subject, &outcome)
+                                            .await;
+                                        log_outcome(&subject, &context, outcome);
+                                        break;
+                                    }
+                                },
+                            }
+                        }
                     } else {
-                        let mut b = CreateMessage::new().content(truncate(&cmd.content));
-                        if let Some(reply_id) = cmd.reply_to_message_id {
-                            b = b.reference_message((channel, MessageId::new(reply_id)));
-                        }
-                        if !cmd.embeds.is_empty() {
-                            let embeds: Vec<CreateEmbed> = cmd.embeds.iter().map(build_embed).collect();
-                            b = b.embeds(embeds);
-                        }
-                        if !cmd.components.is_empty() {
-                            b = b.components(build_action_rows(&cmd.components));
-                        }
-                        b.add_files(attachments)
-                    };
-                    for attempt in 0..=MAX_RETRIES {
-                        match channel.send_message(&*http, builder.clone()).await {
-                            Ok(_) => break,
-                            Err(e) => match classify(&subject, &e) {
-                                ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
-                                    tokio::time::sleep(dur).await;
+                        // Text message: prepend response_prefix then chunk if needed
+                        let full_content = match &response_prefix {
+                            Some(rp) => format!("{}{}", rp, cmd.content),
+                            None => cmd.content.clone(),
+                        };
+                        let chunks = chunk_text(&full_content, MAX_DISCORD_LEN);
+                        let n = chunks.len();
+
+                        for (i, chunk) in chunks.iter().enumerate() {
+                            let is_first = i == 0;
+                            let is_last = i == n - 1;
+
+                            let mut b = CreateMessage::new().content(chunk.as_str());
+                            if is_first {
+                                if let Some(reply_id) = cmd.reply_to_message_id {
+                                    b = b.reference_message((channel, MessageId::new(reply_id)));
                                 }
-                                outcome => {
-                                    publish_if_permanent(&publisher, &error_subject, &outcome)
-                                        .await;
-                                    log_outcome(&subject, &context, outcome);
-                                    break;
+                            }
+                            if is_last {
+                                if !cmd.embeds.is_empty() {
+                                    let embeds: Vec<CreateEmbed> =
+                                        cmd.embeds.iter().map(build_embed).collect();
+                                    b = b.embeds(embeds);
                                 }
-                            },
+                                if !cmd.components.is_empty() {
+                                    b = b.components(build_action_rows(&cmd.components));
+                                }
+                                if !attachments.is_empty() {
+                                    b = b.add_files(attachments.clone());
+                                }
+                            }
+
+                            for attempt in 0..=MAX_RETRIES {
+                                match channel.send_message(&*http, b.clone()).await {
+                                    Ok(_) => break,
+                                    Err(e) => match classify(&subject, &e) {
+                                        ErrorOutcome::Retry(dur) if attempt < MAX_RETRIES => {
+                                            tokio::time::sleep(dur).await;
+                                        }
+                                        outcome => {
+                                            publish_if_permanent(
+                                                &publisher,
+                                                &error_subject,
+                                                &outcome,
+                                            )
+                                            .await;
+                                            log_outcome(&subject, &context, outcome);
+                                            break;
+                                        }
+                                    },
+                                }
+                            }
                         }
                     }
                 }
@@ -3950,6 +4037,58 @@ impl OutboundProcessor {
             };
             if let Err(e) = client.publish(reply, response_bytes.into()).await {
                 error!("fetch_emojis: failed to publish reply: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_fetch_bans(
+        http: Arc<Http>,
+        client: async_nats::Client,
+        prefix: String,
+    ) -> Result<()> {
+        use serenity::futures::StreamExt as _;
+
+        let subject = subjects::agent::fetch_bans(&prefix);
+        let mut sub = client.subscribe(subject.clone()).await?;
+        info!("Listening for fetch_bans requests on {}", subject);
+
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => {
+                    warn!("fetch_bans: message without reply subject");
+                    continue;
+                }
+            };
+            let cmd: FetchBansCommand = match serde_json::from_slice(&msg.payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("fetch_bans: bad payload: {}", e);
+                    continue;
+                }
+            };
+            let guild = GuildId::new(cmd.guild_id);
+            let response_bytes = match guild.bans(&*http, None, None).await {
+                Ok(bans) => {
+                    let fetched: Vec<FetchedBan> = bans
+                        .iter()
+                        .map(|b| FetchedBan {
+                            user_id: b.user.id.get(),
+                            username: b.user.name.clone(),
+                            reason: b.reason.clone(),
+                        })
+                        .collect();
+                    serde_json::to_vec(&fetched).unwrap_or_default()
+                }
+                Err(e) => {
+                    error!("fetch_bans: Discord API error for guild {}: {}", cmd.guild_id, e);
+                    serde_json::to_vec::<Vec<FetchedBan>>(&vec![]).unwrap_or_default()
+                }
+            };
+            if let Err(e) = client.publish(reply, response_bytes.into()).await {
+                error!("fetch_bans: failed to publish reply: {}", e);
             }
         }
 

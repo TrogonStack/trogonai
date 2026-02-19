@@ -36,10 +36,19 @@ mod tests {
     }
 
     async fn start_processor(client: async_nats::Client, prefix: &str) {
+        use crate::bridge::PairingState;
         // TODO: ShardManager cannot be constructed outside serenity's Client builder,
         // so we pass None here. The bot_presence handler will log a warning and skip
         // any presence updates received during tests.
-        let processor = OutboundProcessor::new(fake_http(), client, prefix.to_string(), None);
+        let pairing_state = Arc::new(PairingState::new());
+        let processor = OutboundProcessor::new(
+            fake_http(),
+            client,
+            prefix.to_string(),
+            None,
+            pairing_state,
+            None,
+        );
         tokio::spawn(async move {
             let _ = processor.run().await;
         });
