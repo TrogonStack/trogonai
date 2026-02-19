@@ -9,7 +9,7 @@ mod prompt;
 mod set_session_mode;
 
 use crate::metrics::Metrics;
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SessionReady, SubscribeClient, agent};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
@@ -20,6 +20,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use tokio::sync::oneshot;
+use tracing::{info, warn};
 
 /// Pre-flight checks to avoid sending prompt requests for cancelled sessions.
 #[derive(Clone)]
@@ -102,6 +103,35 @@ impl<N: SubscribeClient + RequestClient + PublishClient + FlushClient> Bridge<N>
                 "NATS connection unavailable - bridge cannot function without NATS",
             )
         })
+    }
+
+    pub(crate) fn spawn_session_ready(&self, nats: &N, session_id: &SessionId) {
+        let nats_clone = nats.clone();
+        let prefix = self.acp_prefix.clone();
+        let session_id = session_id.clone();
+        tokio::task::spawn_local(async move {
+            let ready_subject = agent::ext_session_ready(&prefix, &session_id.to_string());
+            info!(session_id = %session_id, subject = %ready_subject, "Publishing session.ready");
+
+            let ready_message = SessionReady::new(session_id.to_string());
+
+            let options = nats::PublishOptions::builder()
+                .publish_retry_policy(nats::RetryPolicy::standard())
+                .flush_policy(nats::FlushPolicy::standard())
+                .build();
+
+            if let Err(e) =
+                nats::publish(&nats_clone, &ready_subject, &ready_message, options).await
+            {
+                warn!(
+                    error = %e,
+                    session_id = %session_id,
+                    "Failed to publish session.ready"
+                );
+            } else {
+                info!(session_id = %session_id, "Published session.ready");
+            }
+        });
     }
 }
 

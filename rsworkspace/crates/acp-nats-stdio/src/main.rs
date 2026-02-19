@@ -38,6 +38,9 @@ async fn run_bridge(nats_client: Option<NatsAsyncClient>, config: &acp_nats::Con
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
+    // `Rc` is intentional: the ACP `Agent` trait is `?Send`, so the entire
+    // bridge runs on a `LocalSet` with `spawn_local`. Do not replace with `Arc`
+    // or move tasks to `tokio::spawn` — that would violate the `!Send` constraint.
     let bridge = Rc::new(Bridge::<NatsAsyncClient>::new(
         nats_client.clone(),
         config.acp_prefix.clone(),

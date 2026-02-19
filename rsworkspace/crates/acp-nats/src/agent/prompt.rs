@@ -71,13 +71,11 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
     let result = match tokio::time::timeout(PROMPT_TIMEOUT, rx).await {
         Ok(Ok(response)) => Ok(response),
         Ok(Err(_)) => {
-            warn!(session_id = %args.session_id, "Prompt response channel closed");
+            warn!(session_id = %args.session_id, "Prompt response channel closed unexpectedly");
+            bridge.metrics.record_error("prompt_channel_closed");
             Ok(PromptResponse::new(StopReason::EndTurn))
         }
         Err(_) => {
-            bridge
-                .pending_session_prompt_responses
-                .remove_waiter(&args.session_id);
             warn!(session_id = %args.session_id, "Prompt request timed out");
             Ok(PromptResponse::new(StopReason::EndTurn))
         }

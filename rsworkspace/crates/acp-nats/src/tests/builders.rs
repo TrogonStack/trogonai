@@ -1,5 +1,9 @@
-//! ACP Message Builders - Factory pattern for constructing realistic ACP protocol messages
-//! These builders create both protobuf payloads and JSON representations for testing
+//! Arbitrary test fixtures for mock NATS transport.
+//!
+//! The raw byte payloads (`build_payload`) are **not** valid ACP/protobuf wire data.
+//! They exist only to give the mock NATS client non-empty `Bytes` values so that
+//! publish/request round-trips have something to carry. Protocol correctness is
+//! verified at a higher level; these builders focus on exercising the bridge plumbing.
 
 pub struct AcpInitializeRequestBuilder {
     protocol_version: u32,

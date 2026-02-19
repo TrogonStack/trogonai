@@ -1,10 +1,8 @@
 use super::Bridge;
-use crate::nats::{
-    self, FlushClient, PublishClient, RequestClient, SessionReady, SubscribeClient, agent,
-};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, LoadSessionRequest, LoadSessionResponse, Result};
 use std::time::Instant;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 #[instrument(
     name = "acp.session.load",
@@ -27,35 +25,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
         .map_err(|e| Error::new(-32603, e.to_string()));
 
     if result.is_ok() {
-        // Publish session.ready after this handler returns.
-        // The backend adds a small delay before sending notifications to ensure
-        // the response has been written to stdout.
-        let session_id = args.session_id.clone();
-        let nats_clone = nats.clone();
-        let prefix = bridge.acp_prefix.clone();
-        tokio::task::spawn_local(async move {
-            let ready_subject = agent::ext_session_ready(&prefix, &session_id.to_string());
-            info!(session_id = %session_id, subject = %ready_subject, "Publishing session.ready");
-
-            let ready_message = SessionReady::new(session_id.to_string());
-
-            let options = nats::PublishOptions::builder()
-                .publish_retry_policy(nats::RetryPolicy::standard())
-                .flush_policy(nats::FlushPolicy::standard())
-                .build();
-
-            if let Err(e) =
-                nats::publish(&nats_clone, &ready_subject, &ready_message, options).await
-            {
-                warn!(
-                    error = %e,
-                    session_id = %session_id,
-                    "Failed to publish session.ready"
-                );
-            } else {
-                info!(session_id = %session_id, "Published session.ready");
-            }
-        });
+        bridge.spawn_session_ready(nats, &args.session_id);
     }
 
     bridge.metrics.record_request(

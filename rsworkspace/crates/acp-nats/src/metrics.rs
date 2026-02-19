@@ -41,9 +41,10 @@ impl Metrics {
     }
 
     pub fn record_request(&self, method: &str, duration: f64, success: bool) {
+        let success_str = if success { "true" } else { "false" };
         let attrs = &[
             KeyValue::new("method", method.to_string()),
-            KeyValue::new("success", success.to_string()),
+            KeyValue::new("success", success_str),
         ];
         self.requests_total.add(1, attrs);
         self.request_duration.record(duration, attrs);

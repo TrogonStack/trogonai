@@ -17,6 +17,33 @@ use trogon_std::env::ReadEnv;
 
 const OTEL_SERVICE_NAME: &str = "acp-nats-stdio";
 
+fn try_open_log_file(env: &impl ReadEnv) -> (Option<std::fs::File>, Option<String>) {
+    let log_dir = match log::get_log_dir(env) {
+        Ok(dir) => dir,
+        Err(_) => return (None, None),
+    };
+
+    let log_file = log_dir.join("acp-nats-stdio.log");
+    match std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+    {
+        Ok(file) => (
+            Some(file),
+            Some(format!("File logging enabled: {}", log_file.display())),
+        ),
+        Err(e) => (
+            None,
+            Some(format!(
+                "Failed to create log file {}: {}",
+                log_file.display(),
+                e
+            )),
+        ),
+    }
+}
+
 pub fn init_logger<E: ReadEnv>(config: &Config, env: &E) -> Result<(), Box<dyn std::error::Error>> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -26,22 +53,14 @@ pub fn init_logger<E: ReadEnv>(config: &Config, env: &E) -> Result<(), Box<dyn s
         .with_span_events(FmtSpan::CLOSE)
         .json();
 
-    let (file_layer, file_layer_info) = log::get_log_dir(env).ok().map(|log_dir| {
-        let log_file = log_dir.join("acp-nats-stdio.log");
-        match std::fs::File::options().create(true).append(true).open(&log_file) {
-            Ok(file) => {
-                let layer = tracing_subscriber::fmt::layer()
-                    .with_writer(file)
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::CLOSE)
-                    .json();
-                (Some(layer), Some(format!("File logging enabled: {}", log_file.display())))
-            }
-            Err(e) => {
-                (None, Some(format!("Failed to create log file {}: {}", log_file.display(), e)))
-            }
-        }
-    }).unwrap_or((None, None));
+    let (log_file, file_layer_info) = try_open_log_file(env);
+    let file_layer = log_file.map(|file| {
+        tracing_subscriber::fmt::layer()
+            .with_writer(file)
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::CLOSE)
+            .json()
+    });
 
     match try_init_otel(config) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {

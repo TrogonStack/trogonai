@@ -11,6 +11,7 @@ pub struct NamedHandler {
 pub enum HandlerType {
     Initialize,
     Authenticate,
+    SessionNew,
     SessionPrompt,
 }
 
@@ -62,7 +63,7 @@ impl BridgeConfiguration {
                 NamedHandler::new(
                     "SessionNewHandler",
                     "acp.agent.session.new",
-                    HandlerType::Authenticate,
+                    HandlerType::SessionNew,
                 ),
             ],
         }
