@@ -1,13 +1,13 @@
-mod ext_session_prompt_response;
-mod fs_read_text_file;
-mod fs_write_text_file;
-mod request_permission;
-mod session_update;
-mod terminal_create;
-mod terminal_kill;
-mod terminal_output;
-mod terminal_release;
-mod terminal_wait_for_exit;
+pub(crate) mod ext_session_prompt_response;
+pub(crate) mod fs_read_text_file;
+pub(crate) mod fs_write_text_file;
+pub(crate) mod request_permission;
+pub(crate) mod session_update;
+pub(crate) mod terminal_create;
+pub(crate) mod terminal_kill;
+pub(crate) mod terminal_output;
+pub(crate) mod terminal_release;
+pub(crate) mod terminal_wait_for_exit;
 
 use crate::JSONRPC_INTERNAL_ERROR;
 use crate::agent::Bridge;
