@@ -7,7 +7,7 @@ mod sender;
 mod webhook;
 
 use async_nats::jetstream;
-use config::SlackBotConfig;
+use config::{BotMode, SlackBotConfig};
 use futures::StreamExt;
 use listener::{
     BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event,
@@ -72,8 +72,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!(port = config.events_port, "Starting Slack Events webhook server...");
     tokio::spawn(webhook::start_webhook_server(
         config.events_port,
+        config.http_path.clone(),
         config.signing_secret.clone(),
         js.clone(),
+        config.bot_token.clone(),
+        config.bot_user_id.clone(),
+        config.allow_bots,
+        config.media_max_mb,
+        config.mention_gating,
+        config.mention_gating_channels.clone(),
+        config.no_mention_channels.clone(),
+        config.mention_patterns.clone(),
     ));
 
     tracing::info!("Creating JetStream consumers...");
@@ -99,44 +108,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut list_users_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_USERS).await?;
     let mut list_conversations_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_CONVERSATIONS).await?;
 
-    tracing::info!("Connecting to Slack via Socket Mode...");
+    // slack_client is needed for outbound/proactive loops in both modes.
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
 
-    let bot_state = BotState {
-        nats: js.clone(),
-        bot_user_id: config.bot_user_id.clone(),
-        mention_gating: config.mention_gating,
-        mention_gating_channels: config.mention_gating_channels.clone(),
-        no_mention_channels: config.no_mention_channels.clone(),
-        mention_patterns: config.mention_patterns.clone(),
-        allow_bots: config.allow_bots,
-        bot_token: config.bot_token.clone(),
-        http_client: reqwest::Client::new(),
-        media_max_mb: config.media_max_mb,
-        user_token: config.user_token.clone(),
-    };
+    // HTTP mode: the webhook server was already tokio::spawned above.
+    // Socket Mode: set up BotState, callbacks, listener, and connect.
+    // We use a boxed future to unify both cases in tokio::select!.
+    let slack_listener_fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+        if config.mode == BotMode::Socket {
+            tracing::info!("Connecting to Slack via Socket Mode...");
 
-    let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
-        .with_push_events(handle_push_event)
-        .with_command_events(handle_command_event)
-        .with_interaction_events(handle_interaction_event);
+            let bot_state = BotState {
+                nats: js.clone(),
+                bot_user_id: config.bot_user_id.clone(),
+                mention_gating: config.mention_gating,
+                mention_gating_channels: config.mention_gating_channels.clone(),
+                no_mention_channels: config.no_mention_channels.clone(),
+                mention_patterns: config.mention_patterns.clone(),
+                allow_bots: config.allow_bots,
+                bot_token: config.bot_token.clone(),
+                http_client: reqwest::Client::new(),
+                media_max_mb: config.media_max_mb,
+                user_token: config.user_token.clone(),
+            };
 
-    let listener_environment = Arc::new(
-        SlackClientEventsListenerEnvironment::new(slack_client.clone())
-            .with_error_handler(error_handler)
-            .with_user_state(bot_state),
-    );
+            let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
+                .with_push_events(handle_push_event)
+                .with_command_events(handle_command_event)
+                .with_interaction_events(handle_interaction_event);
 
-    let socket_mode_listener = SlackClientSocketModeListener::new(
-        &SlackClientSocketModeConfig::new(),
-        listener_environment,
-        socket_mode_callbacks,
-    );
+            let listener_environment = Arc::new(
+                SlackClientEventsListenerEnvironment::new(slack_client.clone())
+                    .with_error_handler(error_handler)
+                    .with_user_state(bot_state),
+            );
 
-    let app_token: SlackApiToken = SlackApiToken::new(config.app_token.clone().into());
-    socket_mode_listener.listen_for(&app_token).await?;
+            let socket_mode_listener = SlackClientSocketModeListener::new(
+                &SlackClientSocketModeConfig::new(),
+                listener_environment,
+                socket_mode_callbacks,
+            );
 
-    tracing::info!("Slack bot running. Press Ctrl+C to stop.");
+            let app_token_str = config
+                .app_token
+                .as_deref()
+                .expect("SLACK_APP_TOKEN is required in Socket Mode")
+                .to_string();
+            let app_token: SlackApiToken = SlackApiToken::new(app_token_str.into());
+            socket_mode_listener.listen_for(&app_token).await?;
+
+            tracing::info!("Slack bot running (Socket Mode). Press Ctrl+C to stop.");
+
+            Box::pin(async move { let _ = socket_mode_listener.serve().await; })
+        } else {
+            tracing::info!(
+                "Running in HTTP Events API mode. Slack events received via webhook on port {}.",
+                config.events_port
+            );
+            // HTTP mode: the webhook server is already spawned above.
+            // Just wait forever (Ctrl+C will terminate).
+            Box::pin(std::future::pending())
+        };
 
     let bot_token = config.bot_token.clone();
 
@@ -853,8 +885,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let list_conversations_abort = list_conversations_handle.abort_handle();
 
     tokio::select! {
-        _ = socket_mode_listener.serve() => {
-            tracing::warn!("Socket Mode listener exited");
+        _ = slack_listener_fut => {
+            tracing::warn!("Slack listener exited");
         }
         res = outbound_handle => {
             match res {
