@@ -112,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         allow_bots: config.allow_bots,
         bot_token: config.bot_token.clone(),
         http_client: reqwest::Client::new(),
+        media_max_mb: config.media_max_mb,
     };
 
     let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()

@@ -17,10 +17,6 @@ use slack_types::events::{
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
 
-/// Maximum size of a file whose content will be downloaded and forwarded
-/// to the agent. Files larger than this are passed as metadata only.
-const MAX_FILE_CONTENT_BYTES: u64 = 50_000;
-
 /// Maximum image size that will be base64-encoded and forwarded to the agent.
 /// Matches the practical limit for Claude's vision API.
 const MAX_IMAGE_BYTES: u64 = 5_000_000;
@@ -49,6 +45,8 @@ pub struct BotState {
     pub bot_token: String,
     /// HTTP client reused across file download requests.
     pub http_client: reqwest::Client,
+    /// Maximum file size in MB for inbound media downloads.
+    pub media_max_mb: u64,
 }
 
 /// Module-level display name cache shared across all Socket Mode callbacks.
@@ -286,7 +284,7 @@ pub async fn handle_push_event(
 
                     let raw_files = extract_files(msg.content.as_ref());
                     let files =
-                        fetch_file_contents(raw_files, &state.bot_token, &state.http_client).await;
+                        fetch_file_contents(raw_files, &state.bot_token, &state.http_client, state.media_max_mb).await;
                     let attachments = extract_attachments(msg.content.as_ref());
                     let display_name =
                         lookup_display_name(&user, &state.bot_token, &state.http_client)
@@ -339,7 +337,7 @@ pub async fn handle_push_event(
 
             let raw_files = extract_files(Some(&mention.content));
             let files =
-                fetch_file_contents(raw_files, &state.bot_token, &state.http_client).await;
+                fetch_file_contents(raw_files, &state.bot_token, &state.http_client, state.media_max_mb).await;
             let display_name =
                 lookup_display_name(&user, &state.bot_token, &state.http_client)
                     .await;
@@ -679,6 +677,7 @@ async fn fetch_file_contents(
     files: Vec<OurSlackFile>,
     bot_token: &str,
     http_client: &HttpClient,
+    media_max_mb: u64,
 ) -> Vec<OurSlackFile> {
     let mut out = Vec::with_capacity(files.len());
     for mut file in files {
@@ -698,7 +697,7 @@ async fn fetch_file_contents(
             .unwrap_or(false);
         let within_limit = file
             .size
-            .map(|s| s <= MAX_FILE_CONTENT_BYTES)
+            .map(|s| s <= media_max_mb * 1024 * 1024)
             .unwrap_or(true);
 
         if is_text && within_limit {

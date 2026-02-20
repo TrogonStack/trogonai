@@ -114,6 +114,9 @@ pub async fn run_outbound_loop(
                 if let Some(ref icon_url) = outbound.icon_url {
                     request = request.with_icon_url(icon_url.clone());
                 }
+                if let Some(ref icon_emoji) = outbound.icon_emoji {
+                    request = request.with_icon_emoji(icon_emoji.clone());
+                }
 
                 let post_result = {
                     let r = session.chat_post_message(&request).await;
@@ -159,6 +162,9 @@ pub async fn run_outbound_loop(
                         }
                         if let Some(ref icon_url) = outbound.icon_url {
                             chunk_req = chunk_req.with_icon_url(icon_url.clone());
+                        }
+                        if let Some(ref icon_emoji) = outbound.icon_emoji {
+                            chunk_req = chunk_req.with_icon_emoji(icon_emoji.clone());
                         }
                         if let Err(e) = session.chat_post_message(&chunk_req).await {
                             tracing::error!(error = %e, "Failed to send message chunk to Slack");
@@ -1130,6 +1136,9 @@ pub async fn run_proactive_loop(
                 }
                 if let Some(ref icon_url) = proactive.icon_url {
                     request = request.with_icon_url(icon_url.clone());
+                }
+                if let Some(ref icon_emoji) = proactive.icon_emoji {
+                    request = request.with_icon_emoji(icon_emoji.clone());
                 }
 
                 rate_limiter.acquire().await;

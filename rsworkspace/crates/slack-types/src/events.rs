@@ -195,6 +195,9 @@ pub struct SlackOutboundMessage {
     pub username: Option<String>,
     /// Custom icon URL (requires `chat:write.customize`).
     pub icon_url: Option<String>,
+    /// Custom icon emoji (requires `chat:write.customize`). E.g. ":robot_face:".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_emoji: Option<String>,
 }
 
 // ── Streaming outbound ───────────────────────────────────────────────────────
@@ -502,6 +505,9 @@ pub struct SlackProactiveMessage {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
+    /// Custom icon emoji (requires `chat:write.customize`). E.g. ":robot_face:".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_emoji: Option<String>,
 }
 
 /// Request to post an ephemeral message (visible only to `user`).
@@ -586,11 +592,13 @@ mod tests {
             media_url: None,
             username: None,
             icon_url: None,
+            icon_emoji: Some(":robot_face:".to_string()),
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: SlackOutboundMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.channel, "C123");
+        assert_eq!(decoded.icon_emoji.as_deref(), Some(":robot_face:"));
     }
 
     #[test]
@@ -605,6 +613,7 @@ mod tests {
             media_url: None,
             username: Some("MyBot".into()),
             icon_url: None,
+            icon_emoji: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: SlackOutboundMessage = serde_json::from_str(&json).unwrap();
@@ -1149,6 +1158,7 @@ mod tests {
             blocks: None,
             username: Some("MyBot".into()),
             icon_url: None,
+            icon_emoji: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: SlackProactiveMessage = serde_json::from_str(&json).unwrap();

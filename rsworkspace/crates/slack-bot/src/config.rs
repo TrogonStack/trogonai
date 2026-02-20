@@ -39,6 +39,9 @@ pub struct SlackBotConfig {
     /// Max outbound Slack API requests per second. Default: 1.0.
     /// Configurable via SLACK_API_RPS. Clamped to [0.1, 50.0].
     pub slack_api_rps: f32,
+    /// Maximum file size in MB for inbound media downloads. Default: 20.
+    /// Read from SLACK_MEDIA_MAX_MB.
+    pub media_max_mb: u64,
 }
 
 impl SlackBotConfig {
@@ -98,6 +101,11 @@ impl SlackBotConfig {
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(1.0)
             .clamp(0.1, 50.0);
+        let media_max_mb = env
+            .var("SLACK_MEDIA_MAX_MB")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(20);
 
         Self {
             bot_token,
@@ -113,6 +121,7 @@ impl SlackBotConfig {
             signing_secret,
             events_port,
             slack_api_rps,
+            media_max_mb,
         }
     }
 }
@@ -332,5 +341,27 @@ mod tests {
         env.set("SLACK_MENTION_PATTERNS", " hello , world ");
         let config = SlackBotConfig::from_env(&env);
         assert_eq!(config.mention_patterns, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn media_max_mb_default_is_20() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert_eq!(config.media_max_mb, 20);
+    }
+
+    #[test]
+    fn media_max_mb_custom_value() {
+        let env = base_env();
+        env.set("SLACK_MEDIA_MAX_MB", "50");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.media_max_mb, 50);
+    }
+
+    #[test]
+    fn media_max_mb_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("SLACK_MEDIA_MAX_MB", "not_a_number");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.media_max_mb, 20);
     }
 }

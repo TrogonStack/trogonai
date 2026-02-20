@@ -93,6 +93,8 @@ pub struct AgentContext {
     /// Cache mapping channel:thread_ts -> file_id for uploaded responses.
     /// Used to delete the file on regenerate (arrows_counterclockwise).
     pub file_id_cache: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
+    /// KV store for DM pairing codes. Only populated when dm_policy == Pairing.
+    pub pairing_store: Option<async_nats::jetstream::kv::Store>,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -209,6 +211,20 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         session_key
     };
 
+    // Feature: history_scope_parent — when enabled and we're in a thread,
+    // use the parent channel's session key instead of the thread-level key.
+    let session_key = if ctx.config.history_scope_parent && msg.thread_ts.is_some() {
+        // Strip the thread suffix by using the channel-level key.
+        if session_key.contains(":thread:") {
+            let parent = session_key[..session_key.find(":thread:").unwrap()].to_string();
+            parent
+        } else {
+            session_key
+        }
+    } else {
+        session_key
+    };
+
     // Prune session locks whose Arc is held only by the map (no task is using them).
     {
         let mut locks = ctx.session_locks.lock().unwrap();
@@ -228,7 +244,11 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             .reply_to_mode_group
             .as_ref()
             .unwrap_or(&ctx.config.reply_to_mode),
-        SessionType::Channel => &ctx.config.reply_to_mode,
+        SessionType::Channel => ctx
+            .config
+            .reply_to_mode_channel
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
     };
     let effective_thread_ts = reply_target_override.or_else(|| {
         resolve_reply_thread_ts(effective_reply_mode, &msg.ts, msg.thread_ts.as_deref())
@@ -286,6 +306,22 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             tracing::debug!(
                 count = history.len(),
                 "Seeded thread history from parent channel session"
+            );
+        }
+    }
+
+    // 3aa. inherit_parent — seed fresh thread session with the full parent channel history.
+    if history.is_empty()
+        && msg.thread_ts.is_some()
+        && ctx.config.inherit_parent
+    {
+        let parent_key = format!("slack:channel:{}", msg.channel);
+        let parent_history = ctx.memory.load(&parent_key).await;
+        if !parent_history.is_empty() {
+            history = parent_history;
+            tracing::debug!(
+                count = history.len(),
+                "inherit_parent: seeded thread with full parent channel history"
             );
         }
     }
@@ -595,6 +631,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             media_url: None,
             username: None,
             icon_url: None,
+            icon_emoji: None,
         };
         if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
             tracing::error!(error = %e, "Failed to publish echo outbound");
@@ -648,6 +685,73 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         return;
     }
 
+    // DM pairing check — new users must be approved before chatting.
+    if ctx.config.dm_policy == DmPolicy::Pairing
+        && matches!(msg.session_type, SessionType::Direct)
+    {
+        if let Some(ref store) = ctx.pairing_store {
+            match store.get(&msg.user).await {
+                Ok(Some(entry)) => {
+                    let value = String::from_utf8_lossy(&entry).to_string();
+                    if value == "approved" {
+                        // User is approved — proceed normally.
+                    } else if let Some(code) = value.strip_prefix("pending:") {
+                        // User has a pending code — remind them.
+                        let reply = format!(
+                            "Your pairing code `{}` is still pending admin approval.",
+                            code
+                        );
+                        let outbound = SlackOutboundMessage {
+                            channel: msg.channel.clone(),
+                            text: reply,
+                            thread_ts: None,
+                            blocks: None,
+                            media_url: None,
+                            username: None,
+                            icon_url: None,
+                            icon_emoji: None,
+                        };
+                        let _ = publish_outbound(&ctx.js, &outbound).await;
+                        return;
+                    } else {
+                        // Unknown state — treat as unapproved, drop silently.
+                        return;
+                    }
+                }
+                Ok(None) => {
+                    // New user — generate a pairing code.
+                    let code = generate_pairing_code(&msg.user);
+                    let kv_value = format!("pending:{}", code);
+                    let _ = store
+                        .put(&msg.user, kv_value.clone().into())
+                        .await;
+                    let reply = format!(
+                        "To start chatting, share this pairing code with an admin: `{}`
+
+Once approved, you'll be able to use me normally.",
+                        code
+                    );
+                    let outbound = SlackOutboundMessage {
+                        channel: msg.channel.clone(),
+                        text: reply,
+                        thread_ts: None,
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                        icon_emoji: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, &outbound).await;
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, user = %msg.user, "Failed to look up pairing status, dropping DM");
+                    return;
+                }
+            }
+        }
+    }
+
     // Channel allowlist check (DMs bypass this).
     if !ctx.config.channel_allowlist.is_empty()
         && !matches!(msg.session_type, SessionType::Direct)
@@ -668,6 +772,18 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     {
         tracing::debug!(user = %msg.user, "User not in allowlist, dropping message");
         return;
+    }
+
+    // Per-channel user allowlist — if the channel has an entry, only those users can interact.
+    if let Some(allowed_users) = ctx.config.channel_user_allowlists.get(&msg.channel) {
+        if !allowed_users.iter().any(|id| id == &msg.user) {
+            tracing::debug!(
+                channel = %msg.channel,
+                user = %msg.user,
+                "User not in per-channel allowlist, dropping message"
+            );
+            return;
+        }
     }
 
     // Per-user rate limit check.
@@ -767,6 +883,7 @@ async fn fallback_claude_response(
                         media_url: None,
                         username: None,
                         icon_url: None,
+                        icon_emoji: None,
                     };
                     if let Err(e) = publish_outbound(js, &outbound).await {
                         tracing::error!(error = %e, "Failed to publish fallback outbound");
@@ -846,6 +963,83 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         }
         let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
         post_response_url(&ctx.http_client, &ev.response_url, &greeting).await;
+        return;
+    }
+
+    // Pairing management: pair approve <code> / pair reject <code>
+    if text.starts_with("pair approve ") || text.starts_with("pair reject ") {
+        if let Some(ref store) = ctx.pairing_store {
+            let is_approve = text.starts_with("pair approve ");
+            let code = if is_approve {
+                text["pair approve ".len()..].trim().to_string()
+            } else {
+                text["pair reject ".len()..].trim().to_string()
+            };
+
+            if is_approve {
+                // Scan KV for a user with pending:<code>
+                let target_value = format!("pending:{}", code);
+                match store.keys().await {
+                    Ok(mut keys_stream) => {
+                        use futures::StreamExt as _;
+                        let mut found_user: Option<String> = None;
+                        while let Some(key_result) = keys_stream.next().await {
+                            if let Ok(key) = key_result {
+                                if let Ok(Some(val)) = store.get(&key).await {
+                                    let val_str = String::from_utf8_lossy(&val).to_string();
+                                    if val_str == target_value {
+                                        found_user = Some(key);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(user_id) = found_user {
+                            let _ = store.put(&user_id, "approved".into()).await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "User approved.").await;
+                        } else {
+                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.").await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to list pairing store keys");
+                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.").await;
+                    }
+                }
+            } else {
+                // Reject: find and delete the entry with this code
+                let target_value = format!("pending:{}", code);
+                match store.keys().await {
+                    Ok(mut keys_stream) => {
+                        use futures::StreamExt as _;
+                        let mut found_user: Option<String> = None;
+                        while let Some(key_result) = keys_stream.next().await {
+                            if let Ok(key) = key_result {
+                                if let Ok(Some(val)) = store.get(&key).await {
+                                    let val_str = String::from_utf8_lossy(&val).to_string();
+                                    if val_str == target_value {
+                                        found_user = Some(key);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(user_id) = found_user {
+                            let _ = store.delete(&user_id).await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "User rejected.").await;
+                        } else {
+                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.").await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to list pairing store keys");
+                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.").await;
+                    }
+                }
+            }
+        } else {
+            post_response_url(&ctx.http_client, &ev.response_url, "Pairing is not enabled.").await;
+        }
         return;
     }
 
@@ -951,6 +1145,10 @@ fn derive_session_key_for_event(
 // ── Remaining event handlers ──────────────────────────────────────────────────
 
 pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
+    if !ctx.config.actions_reactions {
+        tracing::debug!("actions_reactions disabled, skipping reaction event");
+        return;
+    }
     tracing::info!(
         reaction = %ev.reaction,
         user = %ev.user,
@@ -1087,6 +1285,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                         media_url: None,
                         username: None,
                         icon_url: None,
+                        icon_emoji: None,
                     };
                     let _ = publish_outbound(&ctx.js, &ack).await;
                 }
@@ -1115,6 +1314,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                         media_url: None,
                         username: None,
                         icon_url: None,
+                        icon_emoji: None,
                     };
                     let _ = publish_outbound(&ctx.js, &ack).await;
                 }
@@ -1296,6 +1496,7 @@ pub async fn handle_member(ev: SlackMemberEvent, ctx: Arc<AgentContext>) {
             media_url: None,
             username: None,
             icon_url: None,
+            icon_emoji: None,
         };
         if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
             tracing::warn!(
@@ -1372,6 +1573,10 @@ pub async fn handle_view_closed(ev: SlackViewClosedEvent, _ctx: Arc<AgentContext
 }
 
 pub async fn handle_pin(ev: SlackPinEvent, ctx: Arc<AgentContext>) {
+    if !ctx.config.actions_pins {
+        tracing::debug!("actions_pins disabled, skipping pin event");
+        return;
+    }
     let add = matches!(ev.kind, PinEventKind::Added);
     tracing::info!(channel = %ev.channel, item_ts = ?ev.item_ts, added = add, "Pin event");
     if let Some(ref ts) = ev.item_ts {
@@ -1438,6 +1643,33 @@ fn build_message_content(text: &str, files: &[SlackFile], attachments: &[SlackAt
     }
 
     content
+}
+
+/// Generate a 6-character uppercase alphanumeric pairing code from user_id + timestamp.
+/// Uses DefaultHasher to avoid a `rand` dependency.
+fn generate_pairing_code(user_id: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    let mut hasher = DefaultHasher::new();
+    user_id.hash(&mut hasher);
+    ts.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut code = String::with_capacity(6);
+    let mut h = hash;
+    for _ in 0..6 {
+        code.push(ALPHABET[(h as usize) % ALPHABET.len()] as char);
+        h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    }
+    code
 }
 
 /// Parse manual reply-targeting directives from the message text.

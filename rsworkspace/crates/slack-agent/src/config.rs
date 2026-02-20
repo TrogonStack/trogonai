@@ -12,12 +12,15 @@ pub enum DmPolicy {
     Open,
     /// All DMs are silently ignored.
     Disabled,
+    /// New users must be approved via pairing code before chatting.
+    Pairing,
 }
 
 impl DmPolicy {
     pub fn from_str(s: &str) -> Self {
         match s {
             "disabled" => Self::Disabled,
+            "pairing" => Self::Pairing,
             _ => Self::Open,
         }
     }
@@ -170,6 +173,33 @@ pub struct SlackAgentConfig {
     /// Parsed from SLACK_SUGGESTED_PROMPTS as "Title1:Message1,Title2:Message2".
     /// Empty or missing = no suggested prompts.
     pub suggested_prompts: Vec<SlackSuggestedPrompt>,
+
+    // ── History scope ─────────────────────────────────────────────────────────
+    /// History scope for thread messages. "thread" uses thread history (default),
+    /// "parent" uses the parent channel history. Read from SLACK_HISTORY_SCOPE.
+    pub history_scope_parent: bool,
+
+    // ── Inherit parent session ────────────────────────────────────────────────
+    /// When true, new thread sessions are seeded with the parent channel's history.
+    /// Read from SLACK_INHERIT_PARENT (default: false).
+    pub inherit_parent: bool,
+
+    // ── Per-chat-type reply mode for channel ──────────────────────────────────
+    /// Reply threading mode override for channel messages (not DM or group).
+    /// Read from SLACK_REPLY_TO_MODE_CHANNEL.
+    pub reply_to_mode_channel: Option<ReplyToMode>,
+
+    // ── Per-channel user allowlists ───────────────────────────────────────────
+    /// Per-channel user allowlists. Format: CHANNEL_USER_ALLOWLISTS=C123:U1,U2;C456:U3
+    /// If a channel has an entry, only those users can interact in that channel.
+    pub channel_user_allowlists: HashMap<String, Vec<String>>,
+
+    // ── Action feature flags ──────────────────────────────────────────────────
+    /// Feature flags to enable/disable action groups.
+    pub actions_reactions: bool,   // SLACK_ACTIONS_REACTIONS (default: true)
+    pub actions_pins: bool,        // SLACK_ACTIONS_PINS (default: true)
+    pub actions_member_info: bool, // SLACK_ACTIONS_MEMBER_INFO (default: true)
+    pub actions_emoji_list: bool,  // SLACK_ACTIONS_EMOJI_LIST (default: true)
 }
 
 impl SlackAgentConfig {
@@ -381,6 +411,72 @@ impl SlackAgentConfig {
             })
             .unwrap_or_default();
 
+        let history_scope_parent = env
+            .var("SLACK_HISTORY_SCOPE")
+            .ok()
+            .map(|v| v == "parent")
+            .unwrap_or(false);
+
+        let inherit_parent = env
+            .var("SLACK_INHERIT_PARENT")
+            .ok()
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let reply_to_mode_channel = env
+            .var("SLACK_REPLY_TO_MODE_CHANNEL")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| ReplyToMode::from_str(&v));
+
+        let channel_user_allowlists = env
+            .var("CHANNEL_USER_ALLOWLISTS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(';')
+                    .filter_map(|entry| {
+                        let colon = entry.find(':')?;
+                        let channel_id = entry[..colon].trim().to_string();
+                        let users_str = &entry[colon + 1..];
+                        let users: Vec<String> = users_str
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        if channel_id.is_empty() || users.is_empty() {
+                            return None;
+                        }
+                        Some((channel_id, users))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let actions_reactions = env
+            .var("SLACK_ACTIONS_REACTIONS")
+            .ok()
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let actions_pins = env
+            .var("SLACK_ACTIONS_PINS")
+            .ok()
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let actions_member_info = env
+            .var("SLACK_ACTIONS_MEMBER_INFO")
+            .ok()
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let actions_emoji_list = env
+            .var("SLACK_ACTIONS_EMOJI_LIST")
+            .ok()
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -414,6 +510,14 @@ impl SlackAgentConfig {
             dm_pair_channel,
             upload_threshold_chars,
             suggested_prompts,
+            history_scope_parent,
+            inherit_parent,
+            reply_to_mode_channel,
+            channel_user_allowlists,
+            actions_reactions,
+            actions_pins,
+            actions_member_info,
+            actions_emoji_list,
         }
     }
 
@@ -1140,5 +1244,163 @@ mod tests {
         assert_eq!(config.suggested_prompts[0].message, "Say hello");
         assert_eq!(config.suggested_prompts[1].title, "Help");
         assert_eq!(config.suggested_prompts[1].message, "What can you do?");
+    }
+
+    // ── dm_policy pairing ─────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_policy_pairing() {
+        let env = base_env();
+        env.set("SLACK_DM_POLICY", "pairing");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.dm_policy, DmPolicy::Pairing);
+    }
+
+    // ── history_scope_parent ──────────────────────────────────────────────────
+
+    #[test]
+    fn history_scope_parent_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.history_scope_parent);
+    }
+
+    #[test]
+    fn history_scope_parent_set_to_parent() {
+        let env = base_env();
+        env.set("SLACK_HISTORY_SCOPE", "parent");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.history_scope_parent);
+    }
+
+    #[test]
+    fn history_scope_thread_is_false() {
+        let env = base_env();
+        env.set("SLACK_HISTORY_SCOPE", "thread");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.history_scope_parent);
+    }
+
+    // ── inherit_parent ────────────────────────────────────────────────────────
+
+    #[test]
+    fn inherit_parent_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.inherit_parent);
+    }
+
+    #[test]
+    fn inherit_parent_set_true() {
+        let env = base_env();
+        env.set("SLACK_INHERIT_PARENT", "true");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.inherit_parent);
+    }
+
+    #[test]
+    fn inherit_parent_set_one() {
+        let env = base_env();
+        env.set("SLACK_INHERIT_PARENT", "1");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.inherit_parent);
+    }
+
+    #[test]
+    fn inherit_parent_set_false() {
+        let env = base_env();
+        env.set("SLACK_INHERIT_PARENT", "false");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.inherit_parent);
+    }
+
+    // ── reply_to_mode_channel ─────────────────────────────────────────────────
+
+    #[test]
+    fn reply_to_mode_channel_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.reply_to_mode_channel.is_none());
+    }
+
+    #[test]
+    fn reply_to_mode_channel_set() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_CHANNEL", "all");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode_channel, Some(ReplyToMode::All));
+    }
+
+    #[test]
+    fn reply_to_mode_channel_empty_treated_as_none() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_CHANNEL", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.reply_to_mode_channel.is_none());
+    }
+
+    // ── channel_user_allowlists ───────────────────────────────────────────────
+
+    #[test]
+    fn channel_user_allowlists_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.channel_user_allowlists.is_empty());
+    }
+
+    #[test]
+    fn channel_user_allowlists_parsed() {
+        let env = base_env();
+        env.set("CHANNEL_USER_ALLOWLISTS", "C123:U1,U2;C456:U3");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_user_allowlists.get("C123"), Some(&vec!["U1".to_string(), "U2".to_string()]));
+        assert_eq!(config.channel_user_allowlists.get("C456"), Some(&vec!["U3".to_string()]));
+    }
+
+    #[test]
+    fn channel_user_allowlists_trims_whitespace() {
+        let env = base_env();
+        env.set("CHANNEL_USER_ALLOWLISTS", " C123 : U1 , U2 ; C456 : U3 ");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_user_allowlists.get("C123"), Some(&vec!["U1".to_string(), "U2".to_string()]));
+        assert_eq!(config.channel_user_allowlists.get("C456"), Some(&vec!["U3".to_string()]));
+    }
+
+    // ── actions_* feature flags ───────────────────────────────────────────────
+
+    #[test]
+    fn actions_reactions_defaults_to_true() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.actions_reactions);
+    }
+
+    #[test]
+    fn actions_reactions_disabled() {
+        let env = base_env();
+        env.set("SLACK_ACTIONS_REACTIONS", "false");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.actions_reactions);
+    }
+
+    #[test]
+    fn actions_pins_defaults_to_true() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.actions_pins);
+    }
+
+    #[test]
+    fn actions_pins_disabled() {
+        let env = base_env();
+        env.set("SLACK_ACTIONS_PINS", "0");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.actions_pins);
+    }
+
+    #[test]
+    fn actions_member_info_defaults_to_true() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.actions_member_info);
+    }
+
+    #[test]
+    fn actions_emoji_list_defaults_to_true() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.actions_emoji_list);
     }
 }

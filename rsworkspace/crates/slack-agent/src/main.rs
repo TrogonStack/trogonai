@@ -7,7 +7,7 @@ mod user_settings;
 mod views;
 
 use async_nats::jetstream;
-use config::SlackAgentConfig;
+use config::{DmPolicy, SlackAgentConfig};
 use futures::StreamExt;
 use handler::{
     AgentContext, UserRateLimiter, handle_app_home, handle_block_action, handle_channel,
@@ -89,6 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let memory = ConversationMemory::new(&js, config.claude_max_history, config.claude_max_history_chars).await?;
     let user_settings = UserSettingsStore::new(&js).await?;
 
+    // Set up pairing KV store if DM pairing policy is active.
+    let pairing_store = if config.dm_policy == DmPolicy::Pairing {
+        tracing::info!("DM pairing enabled — opening slack-pairing KV bucket");
+        let store = js
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "slack-pairing".into(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| format!("Failed to create pairing KV store: {e:?}"))?;
+        Some(store)
+    } else {
+        None
+    };
+
     tracing::info!("Creating JetStream consumers...");
     let inbound_consumer = create_inbound_consumer(&js).await?;
     let reaction_consumer = create_reaction_consumer(&js).await?;
@@ -162,6 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             None
         },
         file_id_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        pairing_store,
     });
 
     // Subscribe to file upload notifications to track file_id per session.
