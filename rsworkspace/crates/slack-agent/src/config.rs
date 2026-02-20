@@ -274,6 +274,11 @@ pub struct SlackAgentConfig {
     /// Values: "partial" (default, live updates), "block" (full response then finalize),
     /// "off" (no streaming, single postMessage).
     pub stream_mode: StreamMode,
+
+    /// Optional account identifier for multi-workspace deployments.
+    /// When set, all NATS subjects are namespaced as `slack.<account_id>.<rest>`.
+    /// Read from SLACK_ACCOUNT_ID. Default: None (single-account, backward compatible).
+    pub account_id: Option<String>,
 }
 
 impl SlackAgentConfig {
@@ -627,6 +632,11 @@ impl SlackAgentConfig {
             .map(|v| StreamMode::from_str(&v))
             .unwrap_or(StreamMode::Partial);
 
+        let account_id = env
+            .var("SLACK_ACCOUNT_ID")
+            .ok()
+            .filter(|v| !v.is_empty());
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -676,6 +686,7 @@ impl SlackAgentConfig {
             slash_command_options,
             require_mention,
             stream_mode,
+            account_id,
         }
     }
 
@@ -1766,6 +1777,27 @@ mod tests {
         env.set("SLACK_STREAM_MODE", "unknown");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.stream_mode, StreamMode::Partial);
+    }
+
+    // ── account_id ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn account_id_default_is_none() {
+        assert!(SlackAgentConfig::from_env(&base_env()).account_id.is_none());
+    }
+
+    #[test]
+    fn account_id_set() {
+        let env = base_env();
+        env.set("SLACK_ACCOUNT_ID", "workspace1");
+        assert_eq!(SlackAgentConfig::from_env(&env).account_id.as_deref(), Some("workspace1"));
+    }
+
+    #[test]
+    fn account_id_empty_string_is_none() {
+        let env = base_env();
+        env.set("SLACK_ACCOUNT_ID", "");
+        assert!(SlackAgentConfig::from_env(&env).account_id.is_none());
     }
 
 }

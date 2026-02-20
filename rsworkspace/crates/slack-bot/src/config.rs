@@ -72,6 +72,10 @@ pub struct SlackBotConfig {
     /// Optional Slack user token (xoxp-...) for read-only API calls that
     /// require user-level permissions. Read from SLACK_USER_TOKEN.
     pub user_token: Option<String>,
+    /// Optional account identifier for multi-workspace deployments.
+    /// When set, all NATS subjects are namespaced as `slack.<account_id>.<rest>`.
+    /// Read from SLACK_ACCOUNT_ID. Default: None (single-account, backward compatible).
+    pub account_id: Option<String>,
     /// Connection mode. Read from SLACK_MODE ("socket" or "http"). Default: socket.
     pub mode: BotMode,
     /// HTTP path for Events API webhook. Read from SLACK_HTTP_PATH. Default: "/slack/events".
@@ -151,6 +155,10 @@ impl SlackBotConfig {
             .var("SLACK_USER_TOKEN")
             .ok()
             .filter(|v| !v.is_empty());
+        let account_id = env
+            .var("SLACK_ACCOUNT_ID")
+            .ok()
+            .filter(|v| !v.is_empty());
         let mode = env
             .var("SLACK_MODE")
             .map(|v| BotMode::from_str(&v))
@@ -177,6 +185,7 @@ impl SlackBotConfig {
             text_chunk_limit,
             chunk_mode_newline,
             user_token,
+            account_id,
             mode,
             http_path,
         }
@@ -527,5 +536,24 @@ mod tests {
         env.set("SLACK_APP_TOKEN", "xapp-test-token");
         let config = SlackBotConfig::from_env(&env);
         assert_eq!(config.app_token.as_deref(), Some("xapp-test-token"));
+    }
+
+    #[test]
+    fn account_id_default_is_none() {
+        assert!(SlackBotConfig::from_env(&base_env()).account_id.is_none());
+    }
+
+    #[test]
+    fn account_id_set() {
+        let env = base_env();
+        env.set("SLACK_ACCOUNT_ID", "workspace1");
+        assert_eq!(SlackBotConfig::from_env(&env).account_id.as_deref(), Some("workspace1"));
+    }
+
+    #[test]
+    fn account_id_empty_string_is_none() {
+        let env = base_env();
+        env.set("SLACK_ACCOUNT_ID", "");
+        assert!(SlackBotConfig::from_env(&env).account_id.is_none());
     }
 }

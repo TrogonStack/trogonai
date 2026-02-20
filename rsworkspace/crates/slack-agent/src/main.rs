@@ -27,6 +27,7 @@ use slack_nats::subscriber::{
     create_slash_command_consumer, create_thread_broadcast_consumer,
     create_view_closed_consumer, create_view_submission_consumer,
 };
+use slack_types::subjects::for_account;
 use slack_types::events::{
     SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
     SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent,
@@ -64,9 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_raw = nats_client.clone();
     let js = Arc::new(jetstream::new(nats_client));
 
+    let account_id = config.account_id.as_deref();
+
     // Auto-detect bot_user_id from slack-bot's auth.test announcement.
     if config.bot_user_id.is_none() {
-        match nats_raw.subscribe("slack.bot.identity").await {
+        let bot_identity_subject = for_account("slack.bot.identity", account_id);
+        match nats_raw.subscribe(bot_identity_subject).await {
             Ok(mut sub) => {
                 match tokio::time::timeout(std::time::Duration::from_secs(3), sub.next()).await {
                     Ok(Some(msg)) => {
@@ -105,19 +109,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     tracing::info!("Creating JetStream consumers...");
-    let inbound_consumer = create_inbound_consumer(&js).await?;
-    let reaction_consumer = create_reaction_consumer(&js).await?;
-    let changed_consumer = create_message_changed_consumer(&js).await?;
-    let deleted_consumer = create_message_deleted_consumer(&js).await?;
-    let slash_consumer = create_slash_command_consumer(&js).await?;
-    let block_action_consumer = create_block_action_consumer(&js).await?;
-    let thread_broadcast_consumer = create_thread_broadcast_consumer(&js).await?;
-    let member_consumer = create_member_consumer(&js).await?;
-    let channel_consumer = create_channel_consumer(&js).await?;
-    let app_home_consumer = create_app_home_consumer(&js).await?;
-    let view_submission_consumer = create_view_submission_consumer(&js).await?;
-    let view_closed_consumer = create_view_closed_consumer(&js).await?;
-    let pin_consumer = create_pin_consumer(&js).await?;
+    let inbound_consumer = create_inbound_consumer(&js, account_id).await?;
+    let reaction_consumer = create_reaction_consumer(&js, account_id).await?;
+    let changed_consumer = create_message_changed_consumer(&js, account_id).await?;
+    let deleted_consumer = create_message_deleted_consumer(&js, account_id).await?;
+    let slash_consumer = create_slash_command_consumer(&js, account_id).await?;
+    let block_action_consumer = create_block_action_consumer(&js, account_id).await?;
+    let thread_broadcast_consumer = create_thread_broadcast_consumer(&js, account_id).await?;
+    let member_consumer = create_member_consumer(&js, account_id).await?;
+    let channel_consumer = create_channel_consumer(&js, account_id).await?;
+    let app_home_consumer = create_app_home_consumer(&js, account_id).await?;
+    let view_submission_consumer = create_view_submission_consumer(&js, account_id).await?;
+    let view_closed_consumer = create_view_closed_consumer(&js, account_id).await?;
+    let pin_consumer = create_pin_consumer(&js, account_id).await?;
 
     let mut inbound_msgs = inbound_consumer.messages().await?;
     let mut reaction_msgs = reaction_consumer.messages().await?;
@@ -178,14 +182,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         },
         file_id_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         pairing_store,
+        account_id: config.account_id.clone(),
     });
 
     // Subscribe to file upload notifications to track file_id per session.
     {
+        let file_subject = for_account("slack.file.uploaded", ctx.account_id.as_deref());
         let file_cache_clone = ctx.file_id_cache.clone();
         let nats_for_files = ctx.nats.clone();
         tokio::spawn(async move {
-            let mut sub = match nats_for_files.subscribe("slack.file.uploaded").await {
+            let mut sub = match nats_for_files.subscribe(file_subject).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!(error=%e, "Failed to subscribe to file notifications");

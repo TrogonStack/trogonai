@@ -15,7 +15,7 @@ use slack_types::events::{
     SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUploadRequest, SlackViewClosedEvent,
     SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
-use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
+use slack_types::subjects::{for_account, SLACK_OUTBOUND_STREAM_START};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -95,6 +95,9 @@ pub struct AgentContext {
     pub file_id_cache: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
     /// KV store for DM pairing codes. Only populated when dm_policy == Pairing.
     pub pairing_store: Option<async_nats::jetstream::kv::Store>,
+    /// Optional account identifier. When set, all NATS subjects are namespaced
+    /// as `slack.<account_id>.<rest>` to support multi-workspace deployments.
+    pub account_id: Option<String>,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -115,14 +118,14 @@ pub fn resolve_reply_thread_ts(
 
 // ── Helper: ack reaction ──────────────────────────────────────────────────────
 
-async fn ack_reaction(js: &JsContext, channel: &str, ts: &str, emoji: &str, add: bool) {
+async fn ack_reaction(js: &JsContext, account_id: Option<&str>, channel: &str, ts: &str, emoji: &str, add: bool) {
     let action = SlackReactionAction {
         channel: channel.to_string(),
         ts: ts.to_string(),
         reaction: emoji.to_string(),
         add,
     };
-    if let Err(e) = publish_reaction_action(js, &action).await {
+    if let Err(e) = publish_reaction_action(js, account_id, &action).await {
         tracing::warn!(error = %e, add, emoji, "Failed to publish ack reaction");
     }
 }
@@ -131,6 +134,7 @@ async fn ack_reaction(js: &JsContext, channel: &str, ts: &str, emoji: &str, add:
 
 async fn request_stream_start(
     nats: &NatsClient,
+    account_id: Option<&str>,
     channel: &str,
     thread_ts: Option<&str>,
 ) -> Result<SlackStreamStartResponse, String> {
@@ -140,8 +144,9 @@ async fn request_stream_start(
         initial_text: Some("…".to_string()),
     };
     let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize: {e}"))?;
+    let subject = for_account(SLACK_OUTBOUND_STREAM_START, account_id);
     let msg = nats
-        .request(SLACK_OUTBOUND_STREAM_START, payload.into())
+        .request(subject, payload.into())
         .await
         .map_err(|e| format!("request: {e}"))?;
     serde_json::from_slice::<SlackStreamStartResponse>(&msg.payload)
@@ -174,7 +179,8 @@ async fn refresh_app_home(ctx: &AgentContext, user_id: &str) {
         user_id: user_id.to_string(),
         view,
     };
-    if let Err(e) = publish_view_publish(&ctx.js, &req).await {
+    let account_id = ctx.account_id.as_deref();
+    if let Err(e) = publish_view_publish(&ctx.js, account_id, &req).await {
         tracing::warn!(error = %e, user = %user_id, "Failed to refresh App Home view");
     }
 }
@@ -294,7 +300,8 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         .or(ctx.config.ack_reaction.as_ref())
         .map(|s| s.as_str())
         .unwrap_or("robot_face");
-    ack_reaction(&ctx.js, &msg.channel, &msg.ts, effective_ack, true).await;
+    let account_id = ctx.account_id.as_deref();
+    ack_reaction(&ctx.js, account_id, &msg.channel, &msg.ts, effective_ack, true).await;
 
     // 2. Acquire per-session lock so parallel messages don't corrupt history.
     let session_lock = get_session_lock(&ctx, &session_key);
@@ -362,7 +369,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     oldest: None,
                     latest: Some(msg.ts.clone()), // only messages before current
                 };
-                match request_read_replies(&ctx.nats, &req).await {
+                match request_read_replies(&ctx.nats, account_id, &req).await {
                     Ok(resp) if resp.ok => Ok(resp.messages),
                     Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
                     Err(e) => Err(e.to_string()),
@@ -376,7 +383,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     oldest: None,
                     latest: Some(msg.ts.clone()), // only messages before current
                 };
-                match request_read_messages(&ctx.nats, &req).await {
+                match request_read_messages(&ctx.nats, account_id, &req).await {
                     Ok(resp) if resp.ok => Ok(resp.messages),
                     Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
                     Err(e) => Err(e.to_string()),
@@ -454,6 +461,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         if let Some(ref ts) = effective_thread_ts {
             let _ = publish_set_status(
                 &ctx.js,
+                account_id,
                 &SlackSetStatusRequest {
                     channel_id: msg.channel.clone(),
                     thread_ts: ts.clone(),
@@ -479,6 +487,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     claude,
                     &history,
                     &ctx.js,
+                    account_id,
                     &msg.channel,
                     effective_thread_ts.as_deref(),
                     ctx.config.upload_threshold_chars,
@@ -490,7 +499,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                 // then finalize with stream.stop (no interim appends).
                 let stream_ref = match tokio::time::timeout(
                     STREAM_START_TIMEOUT,
-                    request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
+                    request_stream_start(&ctx.nats, account_id, &msg.channel, effective_thread_ts.as_deref()),
                 )
                 .await
                 {
@@ -514,7 +523,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                         title: None,
                         prompts: ctx.config.suggested_prompts.clone(),
                     };
-                    if let Err(e) = publish_set_suggested_prompts(&ctx.js, &req).await {
+                    if let Err(e) = publish_set_suggested_prompts(&ctx.js, account_id, &req).await {
                         tracing::warn!(error = %e, "Failed to publish suggested prompts");
                     }
                 }
@@ -563,7 +572,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                     }
                                 };
                                 let stop_text = maybe_upload_response(
-                                    &ctx.js, &final_text, ctx.config.upload_threshold_chars,
+                                    &ctx.js, account_id, &final_text, ctx.config.upload_threshold_chars,
                                     &msg.channel, effective_thread_ts.as_deref(),
                                 ).await;
                                 let stop = SlackStreamStopMessage {
@@ -572,7 +581,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                     final_text: stop_text,
                                     blocks: None,
                                 };
-                                if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
+                                if let Err(e) = publish_stream_stop(&ctx.js, account_id, &stop).await {
                                     tracing::error!(error = %e, "Failed to publish stream.stop");
                                 }
                                 final_text
@@ -586,7 +595,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                     final_text: fallback.clone(),
                                     blocks: None,
                                 };
-                                let _ = publish_stream_stop(&ctx.js, &stop).await;
+                                let _ = publish_stream_stop(&ctx.js, account_id, &stop).await;
                                 fallback
                             }
                         }
@@ -595,7 +604,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                         tracing::warn!(error = %e, "stream.start failed — falling back to chat.postMessage");
                         let _permit = None::<tokio::sync::SemaphorePermit<'_>>;
                         fallback_claude_response(
-                            claude, &history, &ctx.js, &msg.channel,
+                            claude, &history, &ctx.js, account_id, &msg.channel,
                             effective_thread_ts.as_deref(), ctx.config.upload_threshold_chars,
                         ).await
                     }
@@ -606,7 +615,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                 // 4a. Open a streaming placeholder on Slack (with timeout).
                 let stream_ref = match tokio::time::timeout(
                     STREAM_START_TIMEOUT,
-                    request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
+                    request_stream_start(&ctx.nats, account_id, &msg.channel, effective_thread_ts.as_deref()),
                 )
                 .await
                 {
@@ -669,7 +678,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                 title: None,
                                 prompts: ctx.config.suggested_prompts.clone(),
                             };
-                            if let Err(e) = publish_set_suggested_prompts(&ctx.js, &req).await {
+                            if let Err(e) = publish_set_suggested_prompts(&ctx.js, account_id, &req).await {
                                 tracing::warn!(error = %e, "Failed to publish suggested prompts");
                             }
                         }
@@ -697,7 +706,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                             ts: stream_start.ts.clone(),
                                             text: delta,
                                         };
-                                        if let Err(e) = publish_stream_append(&ctx.js, &append).await {
+                                        if let Err(e) = publish_stream_append(&ctx.js, account_id, &append).await {
                                             tracing::warn!(error = %e, "Failed to publish stream.append");
                                         }
                                         last_published_len = new_len;
@@ -720,7 +729,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                 // 4c. If upload threshold exceeded, upload as file and replace
                                 //     the streamed message with a short notice.
                                 let stop_text =
-                                    maybe_upload_response(&ctx.js, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
+                                    maybe_upload_response(&ctx.js, account_id, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
 
                                 // Finalize with stream.stop.
                                 let stop = SlackStreamStopMessage {
@@ -729,7 +738,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                     final_text: stop_text,
                                     blocks: None,
                                 };
-                                if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
+                                if let Err(e) = publish_stream_stop(&ctx.js, account_id, &stop).await {
                                     tracing::error!(error = %e, "Failed to publish stream.stop");
                                 }
 
@@ -745,7 +754,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                     final_text: fallback.clone(),
                                     blocks: None,
                                 };
-                                let _ = publish_stream_stop(&ctx.js, &stop).await;
+                                let _ = publish_stream_stop(&ctx.js, account_id, &stop).await;
                                 fallback
                             }
                         }
@@ -760,6 +769,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                             claude,
                             &history,
                             &ctx.js,
+                            account_id,
                             &msg.channel,
                             effective_thread_ts.as_deref(),
                             ctx.config.upload_threshold_chars,
@@ -783,7 +793,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             icon_url: None,
             icon_emoji: None,
         };
-        if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
+        if let Err(e) = publish_outbound(&ctx.js, account_id, &outbound).await {
             tracing::error!(error = %e, "Failed to publish echo outbound");
         }
         echo
@@ -794,6 +804,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         if let Some(ref ts) = effective_thread_ts {
             let _ = publish_set_status(
                 &ctx.js,
+                account_id,
                 &SlackSetStatusRequest {
                     channel_id: msg.channel.clone(),
                     thread_ts: ts.clone(),
@@ -817,7 +828,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     }
 
     // 6. Remove ack reaction.
-    ack_reaction(&ctx.js, &msg.channel, &msg.ts, effective_ack, false).await;
+    ack_reaction(&ctx.js, account_id, &msg.channel, &msg.ts, effective_ack, false).await;
 }
 
 /// Handles a regular inbound message.
@@ -859,7 +870,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                             icon_url: None,
                             icon_emoji: None,
                         };
-                        let _ = publish_outbound(&ctx.js, &outbound).await;
+                        let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await;
                         return;
                     } else {
                         // Unknown state — treat as unapproved, drop silently.
@@ -889,7 +900,7 @@ Once approved, you'll be able to use me normally.",
                         icon_url: None,
                         icon_emoji: None,
                     };
-                    let _ = publish_outbound(&ctx.js, &outbound).await;
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await;
                     return;
                 }
                 Err(e) => {
@@ -1008,6 +1019,7 @@ Once approved, you'll be able to use me normally.",
 /// and returns a short notice string. Otherwise returns `text` unchanged.
 async fn maybe_upload_response(
     js: &JsContext,
+    account_id: Option<&str>,
     text: &str,
     threshold: Option<usize>,
     channel: &str,
@@ -1026,7 +1038,7 @@ async fn maybe_upload_response(
         content: text.to_string(),
         title: None,
     };
-    match publish_upload_request(js, &upload).await {
+    match publish_upload_request(js, account_id, &upload).await {
         Ok(_) => "_(Response is too long — see attached file)_".to_string(),
         Err(e) => {
             tracing::warn!(error = %e, "Failed to publish upload request — sending inline");
@@ -1040,6 +1052,7 @@ async fn fallback_claude_response(
     claude: &ClaudeClient,
     history: &[ConversationMessage],
     js: &JsContext,
+    account_id: Option<&str>,
     channel: &str,
     thread_ts: Option<&str>,
     upload_threshold_chars: Option<usize>,
@@ -1050,7 +1063,7 @@ async fn fallback_claude_response(
             while rx.recv().await.is_some() {}
             match handle.await {
                 Ok(Ok(text)) => {
-                    let send_text = maybe_upload_response(js, &text, upload_threshold_chars, channel, thread_ts).await;
+                    let send_text = maybe_upload_response(js, account_id, &text, upload_threshold_chars, channel, thread_ts).await;
                     let outbound = SlackOutboundMessage {
                         channel: channel.to_string(),
                         text: send_text,
@@ -1061,7 +1074,7 @@ async fn fallback_claude_response(
                         icon_url: None,
                         icon_emoji: None,
                     };
-                    if let Err(e) = publish_outbound(js, &outbound).await {
+                    if let Err(e) = publish_outbound(js, account_id, &outbound).await {
                         tracing::error!(error = %e, "Failed to publish fallback outbound");
                     }
                     text
@@ -1257,7 +1270,7 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             thread_ts: None,
             blocks: None,
         };
-        if let Err(e) = publish_ephemeral_message(&ctx.js, &ephemeral).await {
+        if let Err(e) = publish_ephemeral_message(&ctx.js, ctx.account_id.as_deref(), &ephemeral).await {
             tracing::warn!(error = %e, "Failed to publish ephemeral help message");
         }
         return;
@@ -1465,7 +1478,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
             };
             if let Some(file_id) = ctx.file_id_cache.lock().await.remove(&cache_key) {
                 let del = SlackDeleteFile { file_id };
-                if let Err(e) = publish_delete_file(&ctx.js, &del).await {
+                if let Err(e) = publish_delete_file(&ctx.js, ctx.account_id.as_deref(), &del).await {
                     tracing::warn!(error = %e, "Failed to publish delete_file on regenerate");
                 }
             }
@@ -1553,7 +1566,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                         icon_url: None,
                         icon_emoji: None,
                     };
-                    let _ = publish_outbound(&ctx.js, &ack).await;
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &ack).await;
                 }
             }
         }
@@ -1582,7 +1595,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                         icon_url: None,
                         icon_emoji: None,
                     };
-                    let _ = publish_outbound(&ctx.js, &ack).await;
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &ack).await;
                 }
             }
         }
@@ -1724,7 +1737,7 @@ pub async fn handle_block_action(ev: SlackBlockActionEvent, ctx: Arc<AgentContex
             let settings = ctx.user_settings.load(&ev.user_id).await;
             let view = build_settings_modal(&settings, &ctx.config.claude_model);
             let req = SlackViewOpenRequest { trigger_id, view };
-            if let Err(e) = publish_view_open(&ctx.js, &req).await {
+            if let Err(e) = publish_view_open(&ctx.js, ctx.account_id.as_deref(), &req).await {
                 tracing::error!(error = %e, "Failed to publish views.open for settings");
             }
         }
@@ -1797,7 +1810,7 @@ pub async fn handle_member(ev: SlackMemberEvent, ctx: Arc<AgentContext>) {
             icon_url: None,
             icon_emoji: None,
         };
-        if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
+        if let Err(e) = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await {
             tracing::warn!(
                 error = %e,
                 channel = %ev.channel,
@@ -1885,7 +1898,7 @@ pub async fn handle_pin(ev: SlackPinEvent, ctx: Arc<AgentContext>) {
             reaction: "pushpin".to_string(),
             add,
         };
-        if let Err(e) = publish_reaction_action(&ctx.js, &action).await {
+        if let Err(e) = publish_reaction_action(&ctx.js, ctx.account_id.as_deref(), &action).await {
             tracing::warn!(error = %e, "Failed to publish pin reaction action");
         }
     }

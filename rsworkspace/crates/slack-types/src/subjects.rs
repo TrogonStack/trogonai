@@ -103,6 +103,29 @@ pub const SLACK_OUTBOUND_LIST_USERS: &str = "slack.outbound.list_users";
 pub const SLACK_OUTBOUND_LIST_CONVERSATIONS: &str = "slack.outbound.list_conversations";
 
 
+
+/// Inserts an optional account-ID namespace into a Slack NATS subject.
+///
+/// If `account_id` is `None` or empty, returns the bare subject unchanged
+/// (backward-compatible with single-account deployments). Otherwise inserts
+/// the account ID as the second segment:
+///   `"slack.inbound.message"` → `"slack.<id>.inbound.message"`
+///
+/// This enables running multiple slack-bot + slack-agent pairs on the same
+/// NATS cluster without subject collisions.
+pub fn for_account(subject: &str, account_id: Option<&str>) -> String {
+    match account_id.filter(|id| !id.is_empty()) {
+        Some(id) => {
+            if let Some(rest) = subject.strip_prefix("slack.") {
+                format!("slack.{}.{}", id, rest)
+            } else {
+                subject.to_string()
+            }
+        }
+        None => subject.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,4 +184,36 @@ mod tests {
             assert!(seen.insert(s), "duplicate subject: {s}");
         }
     }
+
+    #[test]
+    fn for_account_none_returns_bare() {
+        assert_eq!(for_account(SLACK_INBOUND, None), SLACK_INBOUND);
+    }
+
+    #[test]
+    fn for_account_empty_returns_bare() {
+        assert_eq!(for_account(SLACK_INBOUND, Some("")), SLACK_INBOUND);
+    }
+
+    #[test]
+    fn for_account_inserts_account_id() {
+        assert_eq!(
+            for_account("slack.inbound.message", Some("ws1")),
+            "slack.ws1.inbound.message"
+        );
+    }
+
+    #[test]
+    fn for_account_outbound_prefixed() {
+        assert_eq!(
+            for_account(SLACK_OUTBOUND, Some("acme")),
+            "slack.acme.outbound.message"
+        );
+    }
+
+    #[test]
+    fn for_account_non_slack_subject_unchanged() {
+        assert_eq!(for_account("other.subject", Some("ws1")), "other.subject");
+    }
+
 }

@@ -51,6 +51,8 @@ pub struct BotState {
     /// When set, prefer this over bot_token for users.info and emoji.list calls.
     #[allow(dead_code)]
     pub user_token: Option<String>,
+    /// Optional account identifier for multi-workspace deployments.
+    pub account_id: Option<String>,
 }
 
 /// Module-level display name cache shared across all Socket Mode callbacks.
@@ -119,7 +121,7 @@ pub async fn handle_push_event(
                         user,
                     };
 
-                    if let Err(e) = publish_message_changed(&state.nats, &ev).await {
+                    if let Err(e) = publish_message_changed(&state.nats, state.account_id.as_deref(), &ev).await {
                         tracing::error!(error = %e, "Failed to publish message_changed to NATS");
                     }
                 }
@@ -146,7 +148,7 @@ pub async fn handle_push_event(
                         thread_ts,
                     };
 
-                    if let Err(e) = publish_message_deleted(&state.nats, &ev).await {
+                    if let Err(e) = publish_message_deleted(&state.nats, state.account_id.as_deref(), &ev).await {
                         tracing::error!(error = %e, "Failed to publish message_deleted to NATS");
                     }
                 }
@@ -188,7 +190,7 @@ pub async fn handle_push_event(
                         event_ts,
                     };
 
-                    if let Err(e) = publish_thread_broadcast(&state.nats, &ev).await {
+                    if let Err(e) = publish_thread_broadcast(&state.nats, state.account_id.as_deref(), &ev).await {
                         tracing::error!(error = %e, "Failed to publish thread_broadcast to NATS");
                     }
                 }
@@ -310,7 +312,7 @@ pub async fn handle_push_event(
                         display_name,
                     };
 
-                    if let Err(e) = publish_inbound(&state.nats, &inbound).await {
+                    if let Err(e) = publish_inbound(&state.nats, state.account_id.as_deref(), &inbound).await {
                         tracing::error!(error = %e, "Failed to publish inbound message to NATS");
                     }
                 }
@@ -369,7 +371,7 @@ pub async fn handle_push_event(
                 display_name,
             };
 
-            if let Err(e) = publish_inbound(&state.nats, &inbound).await {
+            if let Err(e) = publish_inbound(&state.nats, state.account_id.as_deref(), &inbound).await {
                 tracing::error!(error = %e, "Failed to publish app_mention to NATS");
             }
         }
@@ -394,7 +396,7 @@ pub async fn handle_push_event(
                 added: true,
             };
 
-            if let Err(e) = publish_reaction(&state.nats, &reaction_ev).await {
+            if let Err(e) = publish_reaction(&state.nats, state.account_id.as_deref(), &reaction_ev).await {
                 tracing::error!(error = %e, "Failed to publish reaction_added to NATS");
             }
         }
@@ -419,7 +421,7 @@ pub async fn handle_push_event(
                 added: false,
             };
 
-            if let Err(e) = publish_reaction(&state.nats, &reaction_ev).await {
+            if let Err(e) = publish_reaction(&state.nats, state.account_id.as_deref(), &reaction_ev).await {
                 tracing::error!(error = %e, "Failed to publish reaction_removed to NATS");
             }
         }
@@ -434,7 +436,7 @@ pub async fn handle_push_event(
                 joined: true,
             };
 
-            if let Err(e) = publish_member(&state.nats, &member_ev).await {
+            if let Err(e) = publish_member(&state.nats, state.account_id.as_deref(), &member_ev).await {
                 tracing::error!(error = %e, "Failed to publish member_joined to NATS");
             }
         }
@@ -449,7 +451,7 @@ pub async fn handle_push_event(
                 joined: false,
             };
 
-            if let Err(e) = publish_member(&state.nats, &member_ev).await {
+            if let Err(e) = publish_member(&state.nats, state.account_id.as_deref(), &member_ev).await {
                 tracing::error!(error = %e, "Failed to publish member_left to NATS");
             }
         }
@@ -462,7 +464,7 @@ pub async fn handle_push_event(
                 user: ev.channel.creator.as_ref().map(|u| u.0.clone()),
             };
 
-            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
+            if let Err(e) = publish_channel(&state.nats, state.account_id.as_deref(), &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_created to NATS");
             }
         }
@@ -475,7 +477,7 @@ pub async fn handle_push_event(
                 user: None,
             };
 
-            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
+            if let Err(e) = publish_channel(&state.nats, state.account_id.as_deref(), &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_deleted to NATS");
             }
         }
@@ -488,7 +490,7 @@ pub async fn handle_push_event(
                 user: Some(ev.user.0.clone()),
             };
 
-            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
+            if let Err(e) = publish_channel(&state.nats, state.account_id.as_deref(), &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_archive to NATS");
             }
         }
@@ -501,7 +503,7 @@ pub async fn handle_push_event(
                 user: None,
             };
 
-            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
+            if let Err(e) = publish_channel(&state.nats, state.account_id.as_deref(), &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_rename to NATS");
             }
         }
@@ -514,7 +516,7 @@ pub async fn handle_push_event(
                 user: Some(ev.user.0.clone()),
             };
 
-            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
+            if let Err(e) = publish_channel(&state.nats, state.account_id.as_deref(), &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_unarchive to NATS");
             }
         }
@@ -525,7 +527,7 @@ pub async fn handle_push_event(
                 tab: ev.tab.unwrap_or_default(),
                 view_id: None,
             };
-            if let Err(e) = publish_app_home(&state.nats, &app_home_ev).await {
+            if let Err(e) = publish_app_home(&state.nats, state.account_id.as_deref(), &app_home_ev).await {
                 tracing::error!(error = %e, "Failed to publish app_home_opened to NATS");
             }
         }
@@ -585,7 +587,7 @@ pub async fn handle_interaction_event(
                     trigger_id: trigger_id.clone(),
                 };
 
-                if let Err(e) = publish_block_action(&state.nats, &block_action_ev).await {
+                if let Err(e) = publish_block_action(&state.nats, state.account_id.as_deref(), &block_action_ev).await {
                     tracing::error!(error = %e, "Failed to publish block_action to NATS");
                 }
             }
@@ -610,7 +612,7 @@ pub async fn handle_interaction_event(
                 values,
             };
 
-            if let Err(e) = publish_view_submission(&state.nats, &view_submission_ev).await {
+            if let Err(e) = publish_view_submission(&state.nats, state.account_id.as_deref(), &view_submission_ev).await {
                 tracing::error!(error = %e, "Failed to publish view_submission to NATS");
             }
         }
@@ -632,7 +634,7 @@ pub async fn handle_interaction_event(
                 values: serde_json::Value::Null,
             };
 
-            if let Err(e) = publish_view_closed(&state.nats, &view_closed_ev).await {
+            if let Err(e) = publish_view_closed(&state.nats, state.account_id.as_deref(), &view_closed_ev).await {
                 tracing::error!(error = %e, "Failed to publish view_closed to NATS");
             }
         }
@@ -666,7 +668,7 @@ pub async fn handle_command_event(
         trigger_id: Some(event.trigger_id.0.clone()),
     };
 
-    if let Err(e) = publish_slash_command(&state.nats, &slash_ev).await {
+    if let Err(e) = publish_slash_command(&state.nats, state.account_id.as_deref(), &slash_ev).await {
         tracing::error!(error = %e, "Failed to publish slash command to NATS");
     }
 
@@ -872,8 +874,9 @@ pub fn error_handler(
                     if let Ok(guard) = states.try_read() {
                         if let Some(state) = guard.get_user_state::<BotState>() {
                             let nats = state.nats.clone();
+                            let account_id = state.account_id.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = publish_pin(&nats, &pin_event).await {
+                                if let Err(e) = publish_pin(&nats, account_id.as_deref(), &pin_event).await {
                                     tracing::error!(
                                         error = %e,
                                         kind  = ?pin_event.kind,

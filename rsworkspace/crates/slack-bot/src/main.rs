@@ -36,8 +36,8 @@ use slack_types::events::{
     SlackStreamStartResponse,
 };
 use slack_types::subjects::{
-    SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_READ_MESSAGES,
-    SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
+    for_account, SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS,
+    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let config = SlackBotConfig::from_env(&SystemEnv);
+    let account_id = config.account_id.as_deref();
     let rate_limiter = Arc::new(RateLimiter::new(config.slack_api_rps));
 
     tracing::info!(port = config.health_port, "Starting health check server...");
@@ -83,30 +84,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.mention_gating_channels.clone(),
         config.no_mention_channels.clone(),
         config.mention_patterns.clone(),
+        config.account_id.clone(),
     ));
 
     tracing::info!("Creating JetStream consumers...");
-    let outbound_consumer = create_outbound_consumer(&js).await?;
-    let stream_append_consumer = create_stream_append_consumer(&js).await?;
-    let stream_stop_consumer = create_stream_stop_consumer(&js).await?;
-    let reaction_action_consumer = create_reaction_action_consumer(&js).await?;
-    let view_open_consumer = create_view_open_consumer(&js).await?;
-    let view_publish_consumer = create_view_publish_consumer(&js).await?;
-    let set_status_consumer = create_set_status_consumer(&js).await?;
-    let delete_consumer = create_delete_consumer(&js).await?;
-    let update_consumer = create_update_consumer(&js).await?;
-    let upload_consumer = create_upload_consumer(&js).await?;
-    let suggested_prompts_consumer = create_suggested_prompts_consumer(&js).await?;
-    let proactive_consumer = create_proactive_consumer(&js).await?;
-    let ephemeral_consumer = create_ephemeral_consumer(&js).await?;
-    let delete_file_consumer = create_delete_file_consumer(&js).await?;
+    let outbound_consumer = create_outbound_consumer(&js, account_id).await?;
+    let stream_append_consumer = create_stream_append_consumer(&js, account_id).await?;
+    let stream_stop_consumer = create_stream_stop_consumer(&js, account_id).await?;
+    let reaction_action_consumer = create_reaction_action_consumer(&js, account_id).await?;
+    let view_open_consumer = create_view_open_consumer(&js, account_id).await?;
+    let view_publish_consumer = create_view_publish_consumer(&js, account_id).await?;
+    let set_status_consumer = create_set_status_consumer(&js, account_id).await?;
+    let delete_consumer = create_delete_consumer(&js, account_id).await?;
+    let update_consumer = create_update_consumer(&js, account_id).await?;
+    let upload_consumer = create_upload_consumer(&js, account_id).await?;
+    let suggested_prompts_consumer = create_suggested_prompts_consumer(&js, account_id).await?;
+    let proactive_consumer = create_proactive_consumer(&js, account_id).await?;
+    let ephemeral_consumer = create_ephemeral_consumer(&js, account_id).await?;
+    let delete_file_consumer = create_delete_file_consumer(&js, account_id).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
-    let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
-    let mut read_messages_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_MESSAGES).await?;
-    let mut read_replies_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_REPLIES).await?;
-    let mut list_users_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_USERS).await?;
-    let mut list_conversations_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_CONVERSATIONS).await?;
+    let mut stream_start_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_STREAM_START, account_id)).await?;
+    let mut read_messages_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_READ_MESSAGES, account_id)).await?;
+    let mut read_replies_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_READ_REPLIES, account_id)).await?;
+    let mut list_users_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_LIST_USERS, account_id)).await?;
+    let mut list_conversations_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_LIST_CONVERSATIONS, account_id)).await?;
 
     // slack_client is needed for outbound/proactive loops in both modes.
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -130,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 http_client: reqwest::Client::new(),
                 media_max_mb: config.media_max_mb,
                 user_token: config.user_token.clone(),
+                account_id: config.account_id.clone(),
             };
 
             let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
@@ -186,8 +189,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Ok(v) if v["ok"].as_bool() == Some(true) => {
                     if let Some(uid) = v["user_id"].as_str() {
                         let payload = serde_json::json!({"bot_user_id": uid}).to_string();
+                        let subject = for_account("slack.bot.identity", account_id);
                         let _ = nats_client
-                            .publish("slack.bot.identity", payload.into())
+                            .publish(subject, payload.into())
                             .await;
                         tracing::info!(bot_user_id = %uid, "Published bot identity from auth.test");
                     }

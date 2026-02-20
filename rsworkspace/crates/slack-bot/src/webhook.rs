@@ -52,6 +52,7 @@ pub struct WebhookState {
     pub no_mention_channels: HashSet<String>,
     pub mention_patterns: Vec<String>,
     pub http_client: reqwest::Client,
+    pub account_id: Option<String>,
 }
 
 /// Start the Slack Events API HTTP webhook server.
@@ -72,6 +73,7 @@ pub async fn start_webhook_server(
     mention_gating_channels: HashSet<String>,
     no_mention_channels: HashSet<String>,
     mention_patterns: Vec<String>,
+    account_id: Option<String>,
 ) {
     let state = WebhookState {
         signing_secret,
@@ -85,6 +87,7 @@ pub async fn start_webhook_server(
         no_mention_channels,
         mention_patterns,
         http_client: reqwest::Client::new(),
+        account_id,
     };
 
     let app = Router::new()
@@ -234,7 +237,7 @@ async fn handle_message_event(state: &WebhookState, event: &serde_json::Value) {
                 thread_ts: event["message"]["thread_ts"].as_str().map(String::from),
                 user: event["message"]["user"].as_str().map(String::from),
             };
-            if let Err(e) = publish_message_changed(&state.js, &ev).await {
+            if let Err(e) = publish_message_changed(&state.js, state.account_id.as_deref(), &ev).await {
                 tracing::error!(error = %e, "Failed to publish message_changed");
             }
         }
@@ -248,7 +251,7 @@ async fn handle_message_event(state: &WebhookState, event: &serde_json::Value) {
                 event_ts: event["event_ts"].as_str().map(String::from),
                 thread_ts: event["thread_ts"].as_str().map(String::from),
             };
-            if let Err(e) = publish_message_deleted(&state.js, &ev).await {
+            if let Err(e) = publish_message_deleted(&state.js, state.account_id.as_deref(), &ev).await {
                 tracing::error!(error = %e, "Failed to publish message_deleted");
             }
         }
@@ -266,7 +269,7 @@ async fn handle_message_event(state: &WebhookState, event: &serde_json::Value) {
                 thread_ts,
                 event_ts: None,
             };
-            if let Err(e) = publish_thread_broadcast(&state.js, &ev).await {
+            if let Err(e) = publish_thread_broadcast(&state.js, state.account_id.as_deref(), &ev).await {
                 tracing::error!(error = %e, "Failed to publish thread_broadcast");
             }
         }
@@ -340,7 +343,7 @@ async fn handle_message_event(state: &WebhookState, event: &serde_json::Value) {
                 display_name,
             };
 
-            if let Err(e) = publish_inbound(&state.js, &inbound).await {
+            if let Err(e) = publish_inbound(&state.js, state.account_id.as_deref(), &inbound).await {
                 tracing::error!(error = %e, "Failed to publish inbound message");
             }
         }
@@ -380,7 +383,7 @@ async fn handle_app_mention_event(state: &WebhookState, event: &serde_json::Valu
         display_name,
     };
 
-    if let Err(e) = publish_inbound(&state.js, &inbound).await {
+    if let Err(e) = publish_inbound(&state.js, state.account_id.as_deref(), &inbound).await {
         tracing::error!(error = %e, "Failed to publish app_mention");
     }
 }
@@ -408,7 +411,7 @@ async fn handle_reaction_event(state: &WebhookState, event: &serde_json::Value, 
         added,
     };
 
-    if let Err(e) = publish_reaction(&state.js, &ev).await {
+    if let Err(e) = publish_reaction(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, added, "Failed to publish reaction event");
     }
 }
@@ -423,7 +426,7 @@ async fn handle_member_event(state: &WebhookState, event: &serde_json::Value, jo
         joined,
     };
 
-    if let Err(e) = publish_member(&state.js, &ev).await {
+    if let Err(e) = publish_member(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, joined, "Failed to publish member event");
     }
 }
@@ -455,7 +458,7 @@ async fn handle_channel_event(
     };
 
     let ev = SlackChannelEvent { kind, channel_id, channel_name, user };
-    if let Err(e) = publish_channel(&state.js, &ev).await {
+    if let Err(e) = publish_channel(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, "Failed to publish channel event");
     }
 }
@@ -466,7 +469,7 @@ async fn handle_app_home_event(state: &WebhookState, event: &serde_json::Value) 
         tab: event["tab"].as_str().unwrap_or_default().to_string(),
         view_id: None,
     };
-    if let Err(e) = publish_app_home(&state.js, &ev).await {
+    if let Err(e) = publish_app_home(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, "Failed to publish app_home_opened");
     }
 }
@@ -512,7 +515,7 @@ async fn handle_pin_event(
         .map(String::from);
 
     let ev = SlackPinEvent { kind, channel, user, item_ts, item_type, event_ts };
-    if let Err(e) = publish_pin(&state.js, &ev).await {
+    if let Err(e) = publish_pin(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, "Failed to publish pin event");
     }
 }
@@ -571,7 +574,7 @@ async fn handle_interactive_payload(
                     value: action["value"].as_str().map(String::from),
                     trigger_id: trigger_id.clone(),
                 };
-                if let Err(e) = publish_block_action(&state.js, &ev).await {
+                if let Err(e) = publish_block_action(&state.js, state.account_id.as_deref(), &ev).await {
                     tracing::error!(error = %e, "Failed to publish block_action");
                 }
             }
@@ -590,7 +593,7 @@ async fn handle_interactive_payload(
                 callback_id,
                 values,
             };
-            if let Err(e) = publish_view_submission(&state.js, &ev).await {
+            if let Err(e) = publish_view_submission(&state.js, state.account_id.as_deref(), &ev).await {
                 tracing::error!(error = %e, "Failed to publish view_submission");
             }
         }
@@ -607,7 +610,7 @@ async fn handle_interactive_payload(
                 callback_id,
                 values: serde_json::Value::Null,
             };
-            if let Err(e) = publish_view_closed(&state.js, &ev).await {
+            if let Err(e) = publish_view_closed(&state.js, state.account_id.as_deref(), &ev).await {
                 tracing::error!(error = %e, "Failed to publish view_closed");
             }
         }
@@ -641,7 +644,7 @@ async fn handle_slash_command(
         trigger_id,
     };
 
-    if let Err(e) = publish_slash_command(&state.js, &ev).await {
+    if let Err(e) = publish_slash_command(&state.js, state.account_id.as_deref(), &ev).await {
         tracing::error!(error = %e, "Failed to publish slash command");
     }
 
