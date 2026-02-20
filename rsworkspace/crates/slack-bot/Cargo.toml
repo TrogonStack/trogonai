@@ -23,6 +23,7 @@ trogon-std = { path = "../trogon-std" }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1.0.149"
+base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]

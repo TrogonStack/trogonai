@@ -15,6 +15,10 @@ pub struct SlackFile {
     /// the download failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Base64-encoded bytes for image files (JPEG/PNG/GIF/WebP).
+    /// Populated by the bot when the file is within the size limit for Claude vision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base64_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -532,6 +536,7 @@ mod tests {
             ),
             size: Some(1024),
             content: Some("hello world".into()),
+            base64_content: None,
         };
         let json = serde_json::to_string(&file).unwrap();
         let decoded: SlackFile = serde_json::from_str(&json).unwrap();
@@ -549,6 +554,7 @@ mod tests {
             url_private_download: None,
             size: Some(4096),
             content: None,
+            base64_content: None,
         };
         let json = serde_json::to_string(&file).unwrap();
         assert!(!json.contains("content"));
@@ -577,6 +583,7 @@ mod tests {
                 url_private_download: None,
                 size: Some(512),
                 content: None,
+                base64_content: None,
             }],
         };
         let json = serde_json::to_string(&attachment).unwrap();
@@ -818,5 +825,12 @@ mod tests {
         assert_eq!(decoded.channel, "C9");
         assert_eq!(decoded.final_text, "complete response");
         assert!(decoded.blocks.is_some());
+    }
+
+    #[test]
+    fn slack_file_base64_content_backward_compat() {
+        let json = r#"{"id":"F1","name":"photo.png","mimetype":"image/png"}"#;
+        let f: SlackFile = serde_json::from_str(json).unwrap();
+        assert!(f.base64_content.is_none());
     }
 }

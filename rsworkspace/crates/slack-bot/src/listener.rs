@@ -19,6 +19,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 /// to the agent. Files larger than this are passed as metadata only.
 const MAX_FILE_CONTENT_BYTES: u64 = 50_000;
 
+/// Maximum image size that will be base64-encoded and forwarded to the agent.
+/// Matches the practical limit for Claude's vision API.
+const MAX_IMAGE_BYTES: u64 = 5_000_000;
+
 /// Shared state injected into the Socket Mode listener via `with_user_state`.
 #[derive(Clone)]
 pub struct BotState {
@@ -42,6 +46,11 @@ pub struct BotState {
 /// Module-level display name cache shared across all Socket Mode callbacks.
 static USER_DISPLAY_NAME_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Module-level cache for the workspace's custom emoji map (name → URL/alias).
+/// Populated lazily on the first message and shared across all callbacks.
+static EMOJI_CACHE: LazyLock<Mutex<Option<HashMap<String, String>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 pub async fn handle_push_event(
     event: SlackPushEventCallback,
@@ -212,6 +221,8 @@ pub async fn handle_push_event(
                     if text.is_empty() {
                         return Ok(());
                     }
+                    let custom_emoji = fetch_custom_emoji(&state.bot_token, &state.http_client).await;
+                    let text = annotate_custom_emoji(&text, &custom_emoji);
 
                     let ts = msg.origin.ts.0.clone();
                     let thread_ts = msg.origin.thread_ts.as_ref().map(|t| t.0.clone());
@@ -302,6 +313,8 @@ pub async fn handle_push_event(
             if text.is_empty() {
                 return Ok(());
             }
+            let custom_emoji = fetch_custom_emoji(&state.bot_token, &state.http_client).await;
+            let text = annotate_custom_emoji(&text, &custom_emoji);
 
             let ts = mention.origin.ts.0.clone();
             let thread_ts = mention.origin.thread_ts.as_ref().map(|t| t.0.clone());
@@ -685,6 +698,54 @@ async fn fetch_file_contents(
                 }
             }
         }
+        // Download and base64-encode images for Claude vision.
+        let is_image = file
+            .mimetype
+            .as_deref()
+            .map(|m| {
+                matches!(
+                    m,
+                    "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+                )
+            })
+            .unwrap_or(false);
+        let within_image_limit = file
+            .size
+            .map(|s| s <= MAX_IMAGE_BYTES)
+            .unwrap_or(true);
+
+        if is_image && within_image_limit && file.base64_content.is_none() {
+            let url = file
+                .url_private_download
+                .as_deref()
+                .or(file.url_private.as_deref());
+            if let Some(url) = url {
+                match http_client.get(url).bearer_auth(bot_token).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        match resp.bytes().await {
+                            Ok(bytes) => {
+                                use base64::Engine as _;
+                                file.base64_content = Some(
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes),
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to read image file bytes");
+                            }
+                        }
+                    }
+                    Ok(resp) => {
+                        tracing::warn!(
+                            status = %resp.status(),
+                            "Non-success status downloading image file"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "HTTP error downloading image file");
+                    }
+                }
+            }
+        }
         out.push(file);
     }
     out
@@ -704,6 +765,7 @@ fn extract_files(content: Option<&SlackMessageContent>) -> Vec<OurSlackFile> {
             url_private_download: f.url_private_download.as_ref().map(|u| u.to_string()),
             size: None,
             content: None,
+            base64_content: None,
         })
         .collect()
 }
@@ -837,6 +899,73 @@ async fn lookup_display_name(
     Some(name)
 }
 
+/// Fetch the workspace custom emoji list from `emoji.list`, caching the result.
+/// Returns an empty map on failure or if the API returns no emoji.
+async fn fetch_custom_emoji(
+    bot_token: &str,
+    http_client: &HttpClient,
+) -> HashMap<String, String> {
+    {
+        let cache = EMOJI_CACHE.lock().expect("emoji cache lock poisoned");
+        if let Some(ref map) = *cache {
+            return map.clone();
+        }
+    }
+
+    match http_client
+        .get("https://slack.com/api/emoji.list")
+        .bearer_auth(bot_token)
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(body) if body["ok"].as_bool().unwrap_or(false) => {
+                let map: HashMap<String, String> = body["emoji"]
+                    .as_object()
+                    .map(|obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                *EMOJI_CACHE.lock().expect("emoji cache lock poisoned") = Some(map.clone());
+                map
+            }
+            Ok(body) => {
+                tracing::warn!(
+                    api_error = body["error"].as_str().unwrap_or("unknown"),
+                    "emoji.list failed"
+                );
+                HashMap::new()
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to parse emoji.list response");
+                HashMap::new()
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "HTTP error calling emoji.list");
+            HashMap::new()
+        }
+    }
+}
+
+/// Replace `:name:` emoji shortcodes that appear in the workspace's custom
+/// emoji list with `:name: [custom emoji]` so Claude can identify them.
+fn annotate_custom_emoji(text: &str, custom_emoji: &HashMap<String, String>) -> String {
+    if custom_emoji.is_empty() || !text.contains(':') {
+        return text.to_string();
+    }
+    let mut result = text.to_string();
+    for name in custom_emoji.keys() {
+        let pattern = format!(":{name}:");
+        if result.contains(&pattern) {
+            result = result.replace(&pattern, &format!(":{name}: [custom emoji]"));
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,5 +1038,29 @@ mod tests {
             compute_session_key(&SessionType::Group, "G1", "U1", Some("9.0")),
             Some("slack:group:G1:thread:9.0".to_string())
         );
+    }
+
+    // ── annotate_custom_emoji ─────────────────────────────────────────────────
+
+    #[test]
+    fn annotate_custom_emoji_replaces_known() {
+        let mut map = HashMap::new();
+        map.insert("company_logo".to_string(), "https://emoji.example.com/logo.png".to_string());
+        let result = annotate_custom_emoji("Great :company_logo: work!", &map);
+        assert!(result.contains(":company_logo: [custom emoji]"));
+    }
+
+    #[test]
+    fn annotate_custom_emoji_leaves_standard_alone() {
+        let mut map = HashMap::new();
+        map.insert("custom_one".to_string(), "url".to_string());
+        let result = annotate_custom_emoji("Hello :thumbsup: world", &map);
+        assert_eq!(result, "Hello :thumbsup: world");
+    }
+
+    #[test]
+    fn annotate_custom_emoji_empty_map_returns_unchanged() {
+        let result = annotate_custom_emoji("Hello :custom:", &HashMap::new());
+        assert_eq!(result, "Hello :custom:");
     }
 }

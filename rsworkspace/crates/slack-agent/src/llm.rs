@@ -32,10 +32,53 @@ pub struct ClaudeClient {
 struct MessagesRequest<'a> {
     model: &'a str,
     max_tokens: u32,
-    messages: &'a [ConversationMessage],
+    messages: Vec<ApiMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<&'a str>,
+}
+
+/// Wire representation of a conversation message sent to the Anthropic API.
+///
+/// `content` is a plain string for text-only messages and a JSON array of
+/// content blocks for multimodal messages (images + text).  Both forms are
+/// accepted by the API.
+#[derive(Serialize)]
+struct ApiMessage {
+    role: String,
+    content: serde_json::Value,
+}
+
+impl From<&crate::memory::ConversationMessage> for ApiMessage {
+    fn from(msg: &crate::memory::ConversationMessage) -> Self {
+        let content = if msg.images.is_empty() {
+            serde_json::Value::String(msg.content.clone())
+        } else {
+            // Build a content-block array: images first, then the text.
+            let mut blocks: Vec<serde_json::Value> = msg
+                .images
+                .iter()
+                .map(|img| {
+                    serde_json::json!({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": img.base64,
+                        }
+                    })
+                })
+                .collect();
+            if !msg.content.is_empty() {
+                blocks.push(serde_json::json!({"type": "text", "text": msg.content}));
+            }
+            serde_json::Value::Array(blocks)
+        };
+        ApiMessage {
+            role: msg.role.clone(),
+            content,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -83,7 +126,7 @@ impl ClaudeClient {
         let request_body = MessagesRequest {
             model: &self.model,
             max_tokens: self.max_tokens,
-            messages,
+            messages: messages.iter().map(ApiMessage::from).collect(),
             stream: true,
             system: self.system_prompt.as_deref(),
         };

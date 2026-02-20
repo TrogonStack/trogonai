@@ -253,10 +253,22 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         Some(name) if !name.is_empty() => format!("[{name}]: {effective_text}"),
         _ => effective_text.to_string(),
     };
+    // Collect base64 images from attached files for Claude vision.
+    let images: Vec<crate::memory::ImageData> = msg
+        .files
+        .iter()
+        .filter_map(|f| {
+            let base64 = f.base64_content.as_ref()?.clone();
+            let media_type = f.mimetype.as_deref()?.to_string();
+            Some(crate::memory::ImageData { base64, media_type })
+        })
+        .collect();
+
     history.push(ConversationMessage {
         role: "user".to_string(),
         content: build_message_content(&content_text, &msg.files),
         ts: Some(msg.ts.clone()),
+        images,
     });
 
     // 3b. Set "is thinking…" typing status (best-effort, only for threaded messages).
@@ -416,6 +428,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             role: "assistant".to_string(),
             content: response_text.clone(),
             ts: None,
+            images: vec![],
         });
         ctx.memory.save(&session_key, &updated).await;
     }
@@ -522,6 +535,7 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             role: "user".to_string(),
             content: prompt,
             ts: None,
+            images: vec![],
         }];
         match claude.stream_response(messages).await {
             Ok((mut rx, handle)) => {
@@ -1140,6 +1154,7 @@ mod tests {
             url_private_download: None,
             size: None,
             content: None,
+            base64_content: None,
         }];
         let result = build_message_content("look at this", &files);
         assert!(result.starts_with("look at this"));
@@ -1157,6 +1172,7 @@ mod tests {
             url_private_download: None,
             size: None,
             content: None,
+            base64_content: None,
         }];
         let result = build_message_content("hi", &files);
         assert!(result.contains("unknown"));

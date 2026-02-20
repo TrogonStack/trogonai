@@ -6,6 +6,15 @@ use std::time::Duration;
 /// Name of the JetStream KV bucket that stores conversation histories.
 pub const KV_BUCKET: &str = "slack-conversations";
 
+/// A base64-encoded image attached to a conversation message, for Claude vision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImageData {
+    /// Raw image bytes encoded as standard base64.
+    pub base64: String,
+    /// MIME type: `"image/jpeg"`, `"image/png"`, `"image/gif"`, or `"image/webp"`.
+    pub media_type: String,
+}
+
 /// A single turn in a conversation, compatible with the Anthropic Messages API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMessage {
@@ -16,6 +25,10 @@ pub struct ConversationMessage {
     /// can be found and updated in history. Absent for assistant turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ts: Option<String>,
+    /// Base64-encoded images for Claude vision. Only set on user turns with image
+    /// attachments. Empty for assistant turns and text-only user turns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImageData>,
 }
 
 /// Persistent conversation memory backed by NATS JetStream KV.
@@ -107,5 +120,43 @@ mod tests {
     fn sanitize_key_no_colons_unchanged() {
         assert_eq!(sanitize_key("simple"), "simple");
         assert_eq!(sanitize_key("slack.channel.C1"), "slack.channel.C1");
+    }
+
+    #[test]
+    fn conversation_message_images_backward_compat() {
+        // Old messages without images field should deserialise with empty vec.
+        let json = r#"[{"role":"user","content":"hello"}]"#;
+        let msgs: Vec<ConversationMessage> = serde_json::from_str(json).unwrap();
+        assert!(msgs[0].images.is_empty());
+    }
+
+    #[test]
+    fn conversation_message_images_roundtrip() {
+        let msg = ConversationMessage {
+            role: "user".to_string(),
+            content: "check this image".to_string(),
+            ts: None,
+            images: vec![ImageData {
+                base64: "abc123".to_string(),
+                media_type: "image/png".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ConversationMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.images.len(), 1);
+        assert_eq!(decoded.images[0].media_type, "image/png");
+    }
+
+    #[test]
+    fn image_data_without_images_omits_field() {
+        // When images is empty, the field should be omitted from serialized JSON.
+        let msg = ConversationMessage {
+            role: "user".to_string(),
+            content: "text".to_string(),
+            ts: None,
+            images: vec![],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("images"));
     }
 }
