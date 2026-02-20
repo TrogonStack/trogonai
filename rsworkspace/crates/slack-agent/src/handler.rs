@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig, SlashCommandOption};
+use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig, SlashCommandOption, StreamMode};
 use crate::llm::ClaudeClient;
 use crate::memory::{ConversationMemory, ConversationMessage};
 use crate::user_settings::{UserSettings, UserSettingsStore};
@@ -466,59 +466,41 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
     // 4. Determine the response text (streaming or fallback).
     let response_text = if let Some(claude) = claude {
-        // 4a. Open a streaming placeholder on Slack (with timeout).
-        let stream_ref = match tokio::time::timeout(
-            STREAM_START_TIMEOUT,
-            request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_elapsed) => {
-                tracing::warn!("stream.start timed out after {STREAM_START_TIMEOUT:?}");
-                Err("stream.start timed out".to_string())
+        match ctx.config.stream_mode {
+            StreamMode::Off => {
+                // Skip streaming entirely — call Claude and post via chat.postMessage.
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+                fallback_claude_response(
+                    claude,
+                    &history,
+                    &ctx.js,
+                    &msg.channel,
+                    effective_thread_ts.as_deref(),
+                    ctx.config.upload_threshold_chars,
+                )
+                .await
             }
-        };
-
-        // Acquire concurrency permit when configured.
-        let _permit = if let Some(ref sem) = ctx.claude_semaphore {
-            Some(sem.acquire().await.expect("semaphore closed"))
-        } else {
-            None
-        };
-
-        // Retry loop with exponential backoff for transient Claude errors.
-        let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1); // at least 1 attempt
-        let mut _last_error = String::new();
-        let mut attempt = 0u32;
-        let call_result = loop {
-            attempt += 1;
-            match claude.stream_response(history.clone()).await {
-                Ok(result) => break Ok(result),
-                Err(e) => {
-                    _last_error = e.to_string();
-                    if attempt >= max_attempts {
-                        tracing::error!(
-                            error = %e,
-                            attempt,
-                            "Claude API call failed after all retries"
-                        );
-                        break Err(e);
+            StreamMode::Block => {
+                // Open stream.start (shows placeholder), wait for full Claude response,
+                // then finalize with stream.stop (no interim appends).
+                let stream_ref = match tokio::time::timeout(
+                    STREAM_START_TIMEOUT,
+                    request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        tracing::warn!("stream.start timed out after {STREAM_START_TIMEOUT:?}");
+                        Err("stream.start timed out".to_string())
                     }
-                    let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4)); // 500ms, 1s, 2s, 4s, 8s
-                    tracing::warn!(
-                        error = %e,
-                        attempt,
-                        backoff_ms,
-                        "Claude API call failed, retrying..."
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-                }
-            }
-        };
+                };
 
-        match stream_ref {
-            Ok(stream_start) => {
                 // Publish suggested prompts for fresh sessions (non-DM only).
                 if !ctx.config.suggested_prompts.is_empty()
                     && history_was_empty
@@ -537,97 +519,254 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     }
                 }
 
-                // 4b. Stream Claude response; publish stream.append periodically.
-                match call_result {
-                    Ok((mut rx, handle)) => {
-                        let mut accumulated = String::new();
-                        let mut last_published_len: usize = 0;
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
 
-                        while let Some(chunk) = rx.recv().await {
-                            accumulated.push_str(&chunk);
+                // Call Claude and wait for full response.
+                let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1);
+                let mut attempt = 0u32;
+                let call_result = loop {
+                    attempt += 1;
+                    match claude.stream_response(history.clone()).await {
+                        Ok(result) => break Ok(result),
+                        Err(e) => {
+                            if attempt >= max_attempts {
+                                tracing::error!(error = %e, attempt, "Claude API call failed after all retries");
+                                break Err(e);
+                            }
+                            let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4));
+                            tracing::warn!(error = %e, attempt, backoff_ms, "Claude API call failed, retrying...");
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                        }
+                    }
+                };
 
-                            // Publish stream.append every 80 new chars or on sentence end.
-                            let new_len = accumulated.len();
-                            let is_sentence_end = chunk.ends_with('.')
-                                || chunk.ends_with('!')
-                                || chunk.ends_with('?')
-                                || chunk.ends_with('\n');
-
-                            if new_len - last_published_len >= 80 || is_sentence_end {
-                                let delta = accumulated[last_published_len..].to_string();
-                                let append = SlackStreamAppendMessage {
+                match stream_ref {
+                    Ok(stream_start) => {
+                        match call_result {
+                            Ok((mut rx, handle)) => {
+                                // Drain the stream (runs in background task) — no interim appends.
+                                while rx.recv().await.is_some() {}
+                                let final_text = match handle.await {
+                                    Ok(Ok(text)) => text,
+                                    Ok(Err(e)) => {
+                                        tracing::error!(error = %e, "Claude stream task error");
+                                        format!("Sorry, I encountered an error: {e}")
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "Claude stream task panicked");
+                                        "Sorry, I encountered an error.".to_string()
+                                    }
+                                };
+                                let stop_text = maybe_upload_response(
+                                    &ctx.js, &final_text, ctx.config.upload_threshold_chars,
+                                    &msg.channel, effective_thread_ts.as_deref(),
+                                ).await;
+                                let stop = SlackStreamStopMessage {
                                     channel: stream_start.channel.clone(),
                                     ts: stream_start.ts.clone(),
-                                    text: delta,
+                                    final_text: stop_text,
+                                    blocks: None,
                                 };
-                                if let Err(e) = publish_stream_append(&ctx.js, &append).await {
-                                    tracing::warn!(error = %e, "Failed to publish stream.append");
+                                if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
+                                    tracing::error!(error = %e, "Failed to publish stream.stop");
                                 }
-                                last_published_len = new_len;
-                            }
-                        }
-
-                        // Await the handle to get the full text (and propagate errors).
-                        let final_text = match handle.await {
-                            Ok(Ok(text)) => text,
-                            Ok(Err(e)) => {
-                                tracing::error!(error = %e, "Claude stream task error");
-                                accumulated
+                                final_text
                             }
                             Err(e) => {
-                                tracing::error!(error = %e, "Claude stream task panicked");
-                                accumulated
+                                tracing::error!(error = %e, "Claude streaming failed");
+                                let fallback = format!("Sorry, I encountered an error: {e}");
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: fallback.clone(),
+                                    blocks: None,
+                                };
+                                let _ = publish_stream_stop(&ctx.js, &stop).await;
+                                fallback
                             }
-                        };
-
-                        // 4c. If upload threshold exceeded, upload as file and replace
-                        //     the streamed message with a short notice.
-                        let stop_text =
-                            maybe_upload_response(&ctx.js, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
-
-                        // Finalize with stream.stop.
-                        let stop = SlackStreamStopMessage {
-                            channel: stream_start.channel.clone(),
-                            ts: stream_start.ts.clone(),
-                            final_text: stop_text,
-                            blocks: None,
-                        };
-                        if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
-                            tracing::error!(error = %e, "Failed to publish stream.stop");
                         }
-
-                        final_text
                     }
                     Err(e) => {
-                        tracing::error!(error = %e, "Claude streaming failed");
-                        let fallback = format!("Sorry, I encountered an error: {e}");
-                        // Still close the stream gracefully.
-                        let stop = SlackStreamStopMessage {
-                            channel: stream_start.channel.clone(),
-                            ts: stream_start.ts.clone(),
-                            final_text: fallback.clone(),
-                            blocks: None,
-                        };
-                        let _ = publish_stream_stop(&ctx.js, &stop).await;
-                        fallback
+                        tracing::warn!(error = %e, "stream.start failed — falling back to chat.postMessage");
+                        let _permit = None::<tokio::sync::SemaphorePermit<'_>>;
+                        fallback_claude_response(
+                            claude, &history, &ctx.js, &msg.channel,
+                            effective_thread_ts.as_deref(), ctx.config.upload_threshold_chars,
+                        ).await
                     }
                 }
             }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "stream.start failed — falling back to chat.postMessage"
-                );
-                // Fallback: call Claude without streaming.
-                fallback_claude_response(
-                    claude,
-                    &history,
-                    &ctx.js,
-                    &msg.channel,
-                    effective_thread_ts.as_deref(),
-                    ctx.config.upload_threshold_chars,
+            StreamMode::Partial => {
+                // Current behavior: live streaming (stream.start → append → stop).
+                // 4a. Open a streaming placeholder on Slack (with timeout).
+                let stream_ref = match tokio::time::timeout(
+                    STREAM_START_TIMEOUT,
+                    request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
                 )
                 .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        tracing::warn!("stream.start timed out after {STREAM_START_TIMEOUT:?}");
+                        Err("stream.start timed out".to_string())
+                    }
+                };
+
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+
+                // Retry loop with exponential backoff for transient Claude errors.
+                let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1);
+                let mut _last_error = String::new();
+                let mut attempt = 0u32;
+                let call_result = loop {
+                    attempt += 1;
+                    match claude.stream_response(history.clone()).await {
+                        Ok(result) => break Ok(result),
+                        Err(e) => {
+                            _last_error = e.to_string();
+                            if attempt >= max_attempts {
+                                tracing::error!(
+                                    error = %e,
+                                    attempt,
+                                    "Claude API call failed after all retries"
+                                );
+                                break Err(e);
+                            }
+                            let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4));
+                            tracing::warn!(
+                                error = %e,
+                                attempt,
+                                backoff_ms,
+                                "Claude API call failed, retrying..."
+                            );
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                        }
+                    }
+                };
+
+                match stream_ref {
+                    Ok(stream_start) => {
+                        // Publish suggested prompts for fresh sessions (non-DM only).
+                        if !ctx.config.suggested_prompts.is_empty()
+                            && history_was_empty
+                            && !matches!(msg.session_type, SessionType::Direct)
+                        {
+                            let req = SlackSetSuggestedPromptsRequest {
+                                channel_id: msg.channel.clone(),
+                                thread_ts: effective_thread_ts
+                                    .clone()
+                                    .unwrap_or_else(|| msg.ts.clone()),
+                                title: None,
+                                prompts: ctx.config.suggested_prompts.clone(),
+                            };
+                            if let Err(e) = publish_set_suggested_prompts(&ctx.js, &req).await {
+                                tracing::warn!(error = %e, "Failed to publish suggested prompts");
+                            }
+                        }
+
+                        // 4b. Stream Claude response; publish stream.append periodically.
+                        match call_result {
+                            Ok((mut rx, handle)) => {
+                                let mut accumulated = String::new();
+                                let mut last_published_len: usize = 0;
+
+                                while let Some(chunk) = rx.recv().await {
+                                    accumulated.push_str(&chunk);
+
+                                    // Publish stream.append every 80 new chars or on sentence end.
+                                    let new_len = accumulated.len();
+                                    let is_sentence_end = chunk.ends_with('.')
+                                        || chunk.ends_with('!')
+                                        || chunk.ends_with('?')
+                                        || chunk.ends_with('\n');
+
+                                    if new_len - last_published_len >= 80 || is_sentence_end {
+                                        let delta = accumulated[last_published_len..].to_string();
+                                        let append = SlackStreamAppendMessage {
+                                            channel: stream_start.channel.clone(),
+                                            ts: stream_start.ts.clone(),
+                                            text: delta,
+                                        };
+                                        if let Err(e) = publish_stream_append(&ctx.js, &append).await {
+                                            tracing::warn!(error = %e, "Failed to publish stream.append");
+                                        }
+                                        last_published_len = new_len;
+                                    }
+                                }
+
+                                // Await the handle to get the full text (and propagate errors).
+                                let final_text = match handle.await {
+                                    Ok(Ok(text)) => text,
+                                    Ok(Err(e)) => {
+                                        tracing::error!(error = %e, "Claude stream task error");
+                                        accumulated
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "Claude stream task panicked");
+                                        accumulated
+                                    }
+                                };
+
+                                // 4c. If upload threshold exceeded, upload as file and replace
+                                //     the streamed message with a short notice.
+                                let stop_text =
+                                    maybe_upload_response(&ctx.js, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
+
+                                // Finalize with stream.stop.
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: stop_text,
+                                    blocks: None,
+                                };
+                                if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
+                                    tracing::error!(error = %e, "Failed to publish stream.stop");
+                                }
+
+                                final_text
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "Claude streaming failed");
+                                let fallback = format!("Sorry, I encountered an error: {e}");
+                                // Still close the stream gracefully.
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: fallback.clone(),
+                                    blocks: None,
+                                };
+                                let _ = publish_stream_stop(&ctx.js, &stop).await;
+                                fallback
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "stream.start failed — falling back to chat.postMessage"
+                        );
+                        // Fallback: call Claude without streaming.
+                        fallback_claude_response(
+                            claude,
+                            &history,
+                            &ctx.js,
+                            &msg.channel,
+                            effective_thread_ts.as_deref(),
+                            ctx.config.upload_threshold_chars,
+                        )
+                        .await
+                    }
+                }
             }
         }
     } else {
@@ -800,6 +939,24 @@ Once approved, you'll be able to use me normally.",
                 channel = %msg.channel,
                 user = %msg.user,
                 "User not in per-channel allowlist, dropping message"
+            );
+            return;
+        }
+    }
+
+    // requireMention: only respond in channels/groups when the bot is @mentioned.
+    // DMs are always allowed through regardless.
+    if ctx.config.require_mention
+        && !matches!(msg.session_type, SessionType::Direct)
+    {
+        let mentioned = ctx.config.bot_user_id.as_deref()
+            .map(|bot_id| msg.text.contains(&format!("<@{}>", bot_id)))
+            .unwrap_or(false); // if bot_user_id unknown, can't detect mention → drop
+        if !mentioned {
+            tracing::debug!(
+                channel = %msg.channel,
+                user = %msg.user,
+                "require_mention: bot not mentioned, dropping message"
             );
             return;
         }

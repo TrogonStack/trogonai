@@ -56,6 +56,28 @@ pub struct SlashCommandOption {
     pub payload: String,
 }
 
+/// Controls how responses are streamed to Slack.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamMode {
+    /// Stream response incrementally as Claude generates it (default).
+    Partial,
+    /// Wait for the full Claude response, then post as a single message (no live updates, but
+    /// a stream.start placeholder is shown while processing).
+    Block,
+    /// Skip streaming entirely — call Claude and post the complete response via chat.postMessage.
+    Off,
+}
+
+impl StreamMode {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "block" => Self::Block,
+            "off" => Self::Off,
+            _ => Self::Partial,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SlackAgentConfig {
     pub nats: NatsConfig,
@@ -241,6 +263,17 @@ pub struct SlackAgentConfig {
     /// 1-5 options render as buttons; 6+ as a static select menu.
     /// Format: SLACK_SLASH_COMMAND_OPTIONS=Label1:payload1,Label2:payload2
     pub slash_command_options: Vec<SlashCommandOption>,
+
+    // ── requireMention ────────────────────────────────────────────────────────────
+    /// When true, the bot only responds in channels/groups when @mentioned.
+    /// DMs are unaffected. Read from SLACK_REQUIRE_MENTION (default: false).
+    pub require_mention: bool,
+
+    // ── Stream mode ───────────────────────────────────────────────────────────────
+    /// Controls how responses are delivered. Read from SLACK_STREAM_MODE.
+    /// Values: "partial" (default, live updates), "block" (full response then finalize),
+    /// "off" (no streaming, single postMessage).
+    pub stream_mode: StreamMode,
 }
 
 impl SlackAgentConfig {
@@ -583,6 +616,17 @@ impl SlackAgentConfig {
             })
             .unwrap_or_default();
 
+        let require_mention = env
+            .var("SLACK_REQUIRE_MENTION")
+            .ok()
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let stream_mode = env
+            .var("SLACK_STREAM_MODE")
+            .map(|v| StreamMode::from_str(&v))
+            .unwrap_or(StreamMode::Partial);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -630,6 +674,8 @@ impl SlackAgentConfig {
             channel_ack_reactions,
             group_dm_channels,
             slash_command_options,
+            require_mention,
+            stream_mode,
         }
     }
 
@@ -1656,6 +1702,70 @@ mod tests {
         assert_eq!(config.slash_command_options[1].payload, "What can you do?");
         assert_eq!(config.slash_command_options[2].label, "Status");
         assert_eq!(config.slash_command_options[2].payload, "Show status");
+    }
+
+    // ── require_mention ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn require_mention_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.require_mention);
+    }
+
+    #[test]
+    fn require_mention_set_true() {
+        let env = base_env();
+        env.set("SLACK_REQUIRE_MENTION", "true");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.require_mention);
+    }
+
+    #[test]
+    fn require_mention_set_one() {
+        let env = base_env();
+        env.set("SLACK_REQUIRE_MENTION", "1");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.require_mention);
+    }
+
+    #[test]
+    fn require_mention_set_false() {
+        let env = base_env();
+        env.set("SLACK_REQUIRE_MENTION", "false");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.require_mention);
+    }
+
+    // ── stream_mode ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stream_mode_defaults_to_partial() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.stream_mode, StreamMode::Partial);
+    }
+
+    #[test]
+    fn stream_mode_set_block() {
+        let env = base_env();
+        env.set("SLACK_STREAM_MODE", "block");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.stream_mode, StreamMode::Block);
+    }
+
+    #[test]
+    fn stream_mode_set_off() {
+        let env = base_env();
+        env.set("SLACK_STREAM_MODE", "off");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.stream_mode, StreamMode::Off);
+    }
+
+    #[test]
+    fn stream_mode_unknown_falls_back_to_partial() {
+        let env = base_env();
+        env.set("SLACK_STREAM_MODE", "unknown");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.stream_mode, StreamMode::Partial);
     }
 
 }
