@@ -22,6 +22,7 @@ use slack_nats::subscriber::{
 use slack_types::events::{SlackStreamStartRequest, SlackStreamStartResponse};
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::sync::Arc;
+use std::time::Duration;
 use trogon_nats::connect;
 use trogon_std::env::SystemEnv;
 
@@ -97,24 +98,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let bt = bot_token.clone();
         async move { run_outbound_loop(outbound_consumer, sc, bt).await }
     });
+    let outbound_abort = outbound_handle.abort_handle();
 
     let stream_append_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
         async move { run_stream_append_loop(stream_append_consumer, sc, bt).await }
     });
+    let stream_append_abort = stream_append_handle.abort_handle();
 
     let stream_stop_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
         async move { run_stream_stop_loop(stream_stop_consumer, sc, bt).await }
     });
+    let stream_stop_abort = stream_stop_handle.abort_handle();
 
     let reaction_action_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
         async move { run_reaction_action_loop(reaction_action_consumer, sc, bt).await }
     });
+    let reaction_action_abort = reaction_action_handle.abort_handle();
 
     // stream.start handler: Core NATS request/reply — stays on raw client.
     let stream_start_handle = tokio::spawn({
@@ -187,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     });
+    let stream_start_abort = stream_start_handle.abort_handle();
 
     tokio::select! {
         _ = socket_mode_listener.serve() => {
@@ -226,6 +232,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             tracing::info!("Received Ctrl+C, shutting down");
         }
     }
+
+    // Abort any still-running NATS consumer loops and give them a moment to exit.
+    outbound_abort.abort();
+    stream_append_abort.abort();
+    stream_stop_abort.abort();
+    stream_start_abort.abort();
+    reaction_action_abort.abort();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    tracing::info!("Shutdown complete");
 
     Ok(())
 }

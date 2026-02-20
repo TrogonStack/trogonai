@@ -1,6 +1,7 @@
 use async_nats::jetstream::Context as JsContext;
 use async_nats::jetstream::kv::{Config as KvConfig, Store};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Name of the JetStream KV bucket that stores conversation histories.
 pub const KV_BUCKET: &str = "slack-conversations";
@@ -26,6 +27,8 @@ impl ConversationMemory {
         let store = js
             .create_key_value(KvConfig {
                 bucket: KV_BUCKET.to_string(),
+                // Expire entries after 30 days of inactivity to prevent unbounded growth.
+                max_age: Duration::from_secs(30 * 24 * 3600),
                 ..Default::default()
             })
             .await?;
