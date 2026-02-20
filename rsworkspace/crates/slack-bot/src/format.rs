@@ -187,9 +187,13 @@ fn find_closing_char(chars: &[char], start: usize, target: char) -> Option<usize
         .map(|p| p + start)
 }
 
-/// Split `text` into chunks of at most `limit` characters, preferring to break
-/// on paragraph boundaries (`\n\n`) before falling back to single newlines.
-pub fn chunk_text(text: &str, limit: usize) -> Vec<String> {
+/// Split `text` into chunks of at most `limit` characters.
+///
+/// When `newline_mode` is `true`, the splitter prefers to break on paragraph
+/// boundaries (`\n\n`) before falling back to single newlines, then hard
+/// character limit. When `newline_mode` is `false`, a pure hard character
+/// split is performed (no newline preference).
+pub fn chunk_text(text: &str, limit: usize, newline_mode: bool) -> Vec<String> {
     if limit == 0 {
         return vec![];
     }
@@ -198,12 +202,17 @@ pub fn chunk_text(text: &str, limit: usize) -> Vec<String> {
 
     while remaining.len() > limit {
         let slice = &remaining[..limit];
-        // Try to break on a paragraph boundary (\n\n) first.
-        let break_pos = if let Some(p) = slice.rfind("\n\n") {
-            p + 2
-        } else if let Some(p) = slice.rfind('\n') {
-            p + 1
+        let break_pos = if newline_mode {
+            // Prefer paragraph boundary (\n\n), then newline, then hard split.
+            if let Some(p) = slice.rfind("\n\n") {
+                p + 2
+            } else if let Some(p) = slice.rfind('\n') {
+                p + 1
+            } else {
+                limit
+            }
         } else {
+            // Chars mode: hard split at limit.
             limit
         };
         chunks.push(remaining[..break_pos].to_string());
@@ -254,7 +263,7 @@ mod tests {
     #[test]
     fn chunk_text_splits_correctly() {
         let text = "line1\nline2\nline3";
-        let chunks = chunk_text(text, 12);
+        let chunks = chunk_text(text, 12, true);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "line1\nline2\n");
         assert_eq!(chunks[1], "line3");
@@ -262,13 +271,13 @@ mod tests {
 
     #[test]
     fn chunk_text_short_text() {
-        let chunks = chunk_text("hello", 100);
+        let chunks = chunk_text("hello", 100, true);
         assert_eq!(chunks, vec!["hello"]);
     }
 
     #[test]
     fn chunk_text_empty() {
-        let chunks = chunk_text("", 100);
+        let chunks = chunk_text("", 100, true);
         assert!(chunks.is_empty());
     }
 
@@ -339,13 +348,13 @@ mod tests {
 
     #[test]
     fn chunk_text_zero_limit_returns_empty() {
-        let chunks = chunk_text("hello", 0);
+        let chunks = chunk_text("hello", 0, true);
         assert_eq!(chunks, Vec::<String>::new());
     }
 
     #[test]
     fn chunk_text_no_newline_hard_split() {
-        let chunks = chunk_text("abcdefgh", 4);
+        let chunks = chunk_text("abcdefgh", 4, false);
         assert_eq!(chunks, vec!["abcd", "efgh"]);
     }
 
@@ -353,13 +362,13 @@ mod tests {
     fn chunk_text_prefers_newline_break() {
         // slice is "abc\nde" (6 chars), rfind('\n') = 3, break_pos = 4
         // first chunk = "abc\n", remaining = "defgh"
-        let chunks = chunk_text("abc\ndefgh", 6);
+        let chunks = chunk_text("abc\ndefgh", 6, true);
         assert_eq!(chunks, vec!["abc\n", "defgh"]);
     }
 
     #[test]
     fn chunk_text_exact_limit_no_split() {
-        let chunks = chunk_text("hello", 5);
+        let chunks = chunk_text("hello", 5, true);
         assert_eq!(chunks, vec!["hello"]);
     }
 
@@ -429,7 +438,7 @@ mod tests {
         // "para1\n\npara2abc" with limit 14: slice is "para1\n\npara2ab" (14 chars)
         // rfind("\n\n") at pos 5, break_pos = 7
         // chunk[0] = "para1\n\n", remaining = "para2abc"
-        let chunks = chunk_text("para1\n\npara2abc", 14);
+        let chunks = chunk_text("para1\n\npara2abc", 14, true);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "para1\n\n");
         assert_eq!(chunks[1], "para2abc");

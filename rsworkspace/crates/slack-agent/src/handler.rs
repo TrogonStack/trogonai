@@ -915,6 +915,16 @@ async fn fallback_claude_response(
 /// `response_url` (webhook) — this avoids needing an active session for
 /// commands triggered outside a channel context.
 pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentContext>) {
+    // Single-mode: ignore commands that don't match the configured slash command name.
+    if let Some(ref name) = ctx.config.slash_command_name {
+        // ev.command is like "/openclaw" — strip the leading slash to compare
+        let cmd = ev.command.trim_start_matches('/');
+        if !cmd.eq_ignore_ascii_case(name) {
+            tracing::debug!(command = %ev.command, "Ignoring slash command (not configured name)");
+            return;
+        }
+    }
+
     tracing::info!(
         command = %ev.command,
         user_id = %ev.user_id,
@@ -947,6 +957,7 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             &ctx.http_client,
             &ev.response_url,
             "Conversation history cleared.",
+            ctx.config.slash_command_ephemeral,
         )
         .await;
         return;
@@ -962,7 +973,7 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             locks.remove(&dm_key);
         }
         let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
-        post_response_url(&ctx.http_client, &ev.response_url, &greeting).await;
+        post_response_url(&ctx.http_client, &ev.response_url, &greeting, ctx.config.slash_command_ephemeral).await;
         return;
     }
 
@@ -996,14 +1007,14 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
                         }
                         if let Some(user_id) = found_user {
                             let _ = store.put(&user_id, "approved".into()).await;
-                            post_response_url(&ctx.http_client, &ev.response_url, "User approved.").await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "User approved.", ctx.config.slash_command_ephemeral).await;
                         } else {
-                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.").await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.", ctx.config.slash_command_ephemeral).await;
                         }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to list pairing store keys");
-                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.").await;
+                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.", ctx.config.slash_command_ephemeral).await;
                     }
                 }
             } else {
@@ -1026,19 +1037,19 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
                         }
                         if let Some(user_id) = found_user {
                             let _ = store.delete(&user_id).await;
-                            post_response_url(&ctx.http_client, &ev.response_url, "User rejected.").await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "User rejected.", ctx.config.slash_command_ephemeral).await;
                         } else {
-                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.").await;
+                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.", ctx.config.slash_command_ephemeral).await;
                         }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to list pairing store keys");
-                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.").await;
+                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.", ctx.config.slash_command_ephemeral).await;
                     }
                 }
             }
         } else {
-            post_response_url(&ctx.http_client, &ev.response_url, "Pairing is not enabled.").await;
+            post_response_url(&ctx.http_client, &ev.response_url, "Pairing is not enabled.", ctx.config.slash_command_ephemeral).await;
         }
         return;
     }
@@ -1096,20 +1107,25 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
     };
 
     // POST the response to the Slack response_url webhook.
-    post_response_url(&ctx.http_client, &ev.response_url, &response_text).await;
+    post_response_url(&ctx.http_client, &ev.response_url, &response_text, ctx.config.slash_command_ephemeral).await;
 }
 
 /// POST a delayed response to a Slack `response_url`.
-async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &str) {
+///
+/// `ephemeral` controls the `response_type` field:
+/// - `true`  → `"ephemeral"` (only visible to the invoking user)
+/// - `false` → `"in_channel"` (visible to everyone in the channel)
+async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &str, ephemeral: bool) {
     #[derive(serde::Serialize)]
     struct SlackResponseUrlPayload<'a> {
         text: &'a str,
         response_type: &'a str,
     }
 
+    let response_type = if ephemeral { "ephemeral" } else { "in_channel" };
     let payload = SlackResponseUrlPayload {
         text,
-        response_type: "in_channel",
+        response_type,
     };
     if let Err(e) = client.post(response_url).json(&payload).send().await {
         tracing::error!(error = %e, url = %response_url, "Failed to POST to response_url");

@@ -113,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         bot_token: config.bot_token.clone(),
         http_client: reqwest::Client::new(),
         media_max_mb: config.media_max_mb,
+        user_token: config.user_token.clone(),
     };
 
     let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
@@ -171,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
         let rl = rate_limiter.clone();
-        async move { run_outbound_loop(outbound_consumer, sc, bt, hc, rl).await }
+        async move { run_outbound_loop(outbound_consumer, sc, bt, hc, rl, config.text_chunk_limit, config.chunk_mode_newline).await }
     });
     let outbound_abort = outbound_handle.abort_handle();
 
@@ -609,6 +610,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let list_users_handle = tokio::spawn({
         let nc = nats_client.clone();
         let bt = bot_token.clone();
+        let user_tok = config.user_token.clone();
         let hc = Arc::new(reqwest::Client::new());
         let rl = rate_limiter.clone();
         async move {
@@ -632,9 +634,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         }
 
                         rl.acquire().await;
+                        let auth_token_users = user_tok.as_deref().unwrap_or(&bt);
                         match hc
                             .get("https://slack.com/api/users.list")
-                            .bearer_auth(&bt)
+                            .bearer_auth(auth_token_users)
                             .query(&query)
                             .send()
                             .await
@@ -727,6 +730,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let list_conversations_handle = tokio::spawn({
         let nc = nats_client.clone();
         let bt = bot_token.clone();
+        let user_tok = config.user_token.clone();
         let hc = Arc::new(reqwest::Client::new());
         let rl = rate_limiter.clone();
         async move {
@@ -756,9 +760,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         }
 
                         rl.acquire().await;
+                        let auth_token_conv = user_tok.as_deref().unwrap_or(&bt);
                         match hc
                             .get("https://slack.com/api/conversations.list")
-                            .bearer_auth(&bt)
+                            .bearer_auth(auth_token_conv)
                             .query(&query)
                             .send()
                             .await

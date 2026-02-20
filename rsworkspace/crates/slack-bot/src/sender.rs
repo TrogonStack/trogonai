@@ -26,6 +26,8 @@ pub async fn run_outbound_loop(
     bot_token: String,
     http_client: Arc<HttpClient>,
     rate_limiter: Arc<RateLimiter>,
+    text_chunk_limit: usize,
+    chunk_mode_newline: bool,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -90,7 +92,7 @@ pub async fn run_outbound_loop(
                     }
                 }
 
-                let chunks = format::chunk_text(&converted_text, format::SLACK_TEXT_LIMIT);
+                let chunks = format::chunk_text(&converted_text, text_chunk_limit, chunk_mode_newline);
                 if chunks.is_empty() {
                     let _ = msg.ack().await;
                     continue;

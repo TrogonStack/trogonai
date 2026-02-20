@@ -200,6 +200,17 @@ pub struct SlackAgentConfig {
     pub actions_pins: bool,        // SLACK_ACTIONS_PINS (default: true)
     pub actions_member_info: bool, // SLACK_ACTIONS_MEMBER_INFO (default: true)
     pub actions_emoji_list: bool,  // SLACK_ACTIONS_EMOJI_LIST (default: true)
+
+    // ── Slash command single-mode ─────────────────────────────────────────────
+    /// If set, only process slash commands with this exact name (without leading /).
+    /// E.g., "openclaw" to only respond to /openclaw. Empty/unset = respond to all.
+    /// Read from SLACK_SLASH_COMMAND_NAME.
+    pub slash_command_name: Option<String>,
+
+    /// If true (default), slash command responses use response_type "ephemeral"
+    /// (only visible to the invoking user). If false, responses are "in_channel".
+    /// Read from SLACK_SLASH_COMMAND_EPHEMERAL (default: true).
+    pub slash_command_ephemeral: bool,
 }
 
 impl SlackAgentConfig {
@@ -477,6 +488,17 @@ impl SlackAgentConfig {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
 
+        let slash_command_name = env
+            .var("SLACK_SLASH_COMMAND_NAME")
+            .ok()
+            .filter(|v| !v.is_empty());
+
+        let slash_command_ephemeral = env
+            .var("SLACK_SLASH_COMMAND_EPHEMERAL")
+            .ok()
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -518,6 +540,8 @@ impl SlackAgentConfig {
             actions_pins,
             actions_member_info,
             actions_emoji_list,
+            slash_command_name,
+            slash_command_ephemeral,
         }
     }
 
@@ -1403,4 +1427,36 @@ mod tests {
         let config = SlackAgentConfig::from_env(&base_env());
         assert!(config.actions_emoji_list);
     }
+    // ── slash_command_name ────────────────────────────────────────────────────
+
+    #[test]
+    fn slash_command_name_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.slash_command_name.is_none());
+    }
+
+    #[test]
+    fn slash_command_name_set() {
+        let env = base_env();
+        env.set("SLACK_SLASH_COMMAND_NAME", "openclaw");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.slash_command_name, Some("openclaw".to_string()));
+    }
+
+    // ── slash_command_ephemeral ───────────────────────────────────────────────
+
+    #[test]
+    fn slash_command_ephemeral_defaults_to_true() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.slash_command_ephemeral);
+    }
+
+    #[test]
+    fn slash_command_ephemeral_set_false() {
+        let env = base_env();
+        env.set("SLACK_SLASH_COMMAND_EPHEMERAL", "false");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.slash_command_ephemeral);
+    }
+
 }

@@ -42,6 +42,16 @@ pub struct SlackBotConfig {
     /// Maximum file size in MB for inbound media downloads. Default: 20.
     /// Read from SLACK_MEDIA_MAX_MB.
     pub media_max_mb: u64,
+    /// Maximum characters per Slack message chunk. Default: 4000.
+    /// Read from SLACK_TEXT_CHUNK_LIMIT.
+    pub text_chunk_limit: usize,
+    /// Text chunking mode: "chars" (default) splits at character limit,
+    /// "newline" prefers splitting on paragraph/line boundaries first.
+    /// Read from SLACK_CHUNK_MODE.
+    pub chunk_mode_newline: bool,
+    /// Optional Slack user token (xoxp-...) for read-only API calls that
+    /// require user-level permissions. Read from SLACK_USER_TOKEN.
+    pub user_token: Option<String>,
 }
 
 impl SlackBotConfig {
@@ -106,6 +116,19 @@ impl SlackBotConfig {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(20);
+        let text_chunk_limit = env
+            .var("SLACK_TEXT_CHUNK_LIMIT")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(4000);
+        let chunk_mode_newline = env
+            .var("SLACK_CHUNK_MODE")
+            .map(|v| v == "newline")
+            .unwrap_or(false);
+        let user_token = env
+            .var("SLACK_USER_TOKEN")
+            .ok()
+            .filter(|v| !v.is_empty());
 
         Self {
             bot_token,
@@ -122,6 +145,9 @@ impl SlackBotConfig {
             events_port,
             slack_api_rps,
             media_max_mb,
+            text_chunk_limit,
+            chunk_mode_newline,
+            user_token,
         }
     }
 }
@@ -363,5 +389,61 @@ mod tests {
         env.set("SLACK_MEDIA_MAX_MB", "not_a_number");
         let config = SlackBotConfig::from_env(&env);
         assert_eq!(config.media_max_mb, 20);
+    }
+
+    // --- Feature 1: text_chunk_limit ---
+
+    #[test]
+    fn text_chunk_limit_default_is_4000() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert_eq!(config.text_chunk_limit, 4000);
+    }
+
+    #[test]
+    fn text_chunk_limit_custom_value() {
+        let env = base_env();
+        env.set("SLACK_TEXT_CHUNK_LIMIT", "2000");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.text_chunk_limit, 2000);
+    }
+
+    // --- Feature 2: chunk_mode_newline ---
+
+    #[test]
+    fn chunk_mode_newline_default_is_false() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert!(!config.chunk_mode_newline);
+    }
+
+    #[test]
+    fn chunk_mode_newline_set_to_newline() {
+        let env = base_env();
+        env.set("SLACK_CHUNK_MODE", "newline");
+        let config = SlackBotConfig::from_env(&env);
+        assert!(config.chunk_mode_newline);
+    }
+
+    // --- Feature 3: user_token ---
+
+    #[test]
+    fn user_token_default_is_none() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert!(config.user_token.is_none());
+    }
+
+    #[test]
+    fn user_token_set() {
+        let env = base_env();
+        env.set("SLACK_USER_TOKEN", "xoxp-test-token");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.user_token.as_deref(), Some("xoxp-test-token"));
+    }
+
+    #[test]
+    fn user_token_empty_string_is_none() {
+        let env = base_env();
+        env.set("SLACK_USER_TOKEN", "");
+        let config = SlackBotConfig::from_env(&env);
+        assert!(config.user_token.is_none());
     }
 }

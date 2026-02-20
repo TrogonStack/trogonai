@@ -47,6 +47,10 @@ pub struct BotState {
     pub http_client: reqwest::Client,
     /// Maximum file size in MB for inbound media downloads.
     pub media_max_mb: u64,
+    /// Optional user token (xoxp-...) for API calls requiring user-level permissions.
+    /// When set, prefer this over bot_token for users.info and emoji.list calls.
+    #[allow(dead_code)]
+    pub user_token: Option<String>,
 }
 
 /// Module-level display name cache shared across all Socket Mode callbacks.
