@@ -43,6 +43,15 @@ impl MockNatsClient {
             .collect()
     }
 
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.payload.clone())
+            .collect()
+    }
+
     pub fn subscribed_to(&self) -> Vec<String> {
         self.subscribed_subjects.lock().unwrap().clone()
     }
@@ -99,6 +108,10 @@ impl AdvancedMockNatsClient {
 
     pub fn published_messages(&self) -> Vec<String> {
         self.base.published_messages()
+    }
+
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.base.published_payloads()
     }
 
     pub fn subscribed_to(&self) -> Vec<String> {
