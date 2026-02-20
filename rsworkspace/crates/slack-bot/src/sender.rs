@@ -3,8 +3,9 @@ use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
-    SlackOutboundMessage, SlackReactionAction, SlackSetStatusRequest, SlackStreamAppendMessage,
-    SlackStreamStopMessage, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackDeleteMessage, SlackOutboundMessage, SlackReactionAction, SlackSetStatusRequest,
+    SlackStreamAppendMessage, SlackStreamStopMessage, SlackUpdateMessage, SlackViewOpenRequest,
+    SlackViewPublishRequest,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -764,6 +765,143 @@ pub async fn run_set_status_loop(
     }
 }
 
+pub async fn run_delete_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create delete message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/chat.delete");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on delete consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackDeleteMessage>(&msg.payload) {
+            Ok(req) => {
+                let mut body = serde_json::Map::new();
+                body.insert("channel".into(), serde_json::Value::String(req.channel.clone()));
+                body.insert("ts".into(), serde_json::Value::String(req.ts.clone()));
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&serde_json::Value::Object(body))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "chat.delete failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse chat.delete response");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling chat.delete");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackDeleteMessage");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK delete message");
+        }
+    }
+}
+
+pub async fn run_update_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create update message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/chat.update");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on update consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackUpdateMessage>(&msg.payload) {
+            Ok(req) => {
+                let converted_text = format::markdown_to_mrkdwn(&req.text);
+                let mut body = serde_json::Map::new();
+                body.insert("channel".into(), serde_json::Value::String(req.channel.clone()));
+                body.insert("ts".into(), serde_json::Value::String(req.ts.clone()));
+                body.insert("text".into(), serde_json::Value::String(converted_text));
+                if let Some(blocks) = req.blocks {
+                    body.insert("blocks".into(), blocks);
+                }
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&serde_json::Value::Object(body))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "chat.update failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse chat.update response");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling chat.update");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackUpdateMessage");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK update message");
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -988,5 +1126,33 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid_auth"), "expected invalid_auth in error");
+    }
+
+    #[test]
+    fn delete_message_roundtrip() {
+        let msg = SlackDeleteMessage {
+            channel: "C123".into(),
+            ts: "1234567890.001".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackDeleteMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C123");
+        assert_eq!(decoded.ts, "1234567890.001");
+    }
+
+    #[test]
+    fn update_message_roundtrip() {
+        let msg = SlackUpdateMessage {
+            channel: "C456".into(),
+            ts: "1234567890.002".into(),
+            text: "updated text".into(),
+            blocks: Some(serde_json::json!([{"type": "section"}])),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackUpdateMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C456");
+        assert_eq!(decoded.ts, "1234567890.002");
+        assert_eq!(decoded.text, "updated text");
+        assert!(decoded.blocks.is_some());
     }
 }

@@ -371,6 +371,25 @@ pub struct SlackSetStatusRequest {
     pub status: Option<String>,
 }
 
+/// Instructs the bot to delete a Slack message (`chat.delete`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackDeleteMessage {
+    pub channel: String,
+    /// Timestamp of the message to delete.
+    pub ts: String,
+}
+
+/// Instructs the bot to update an existing Slack message (`chat.update`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUpdateMessage {
+    pub channel: String,
+    /// Timestamp of the message to update.
+    pub ts: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<serde_json::Value>,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -824,6 +843,34 @@ mod tests {
         let decoded: SlackStreamStopMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.channel, "C9");
         assert_eq!(decoded.final_text, "complete response");
+        assert!(decoded.blocks.is_some());
+    }
+
+    #[test]
+    fn slack_delete_message_roundtrip() {
+        let msg = SlackDeleteMessage {
+            channel: "C123".into(),
+            ts: "1234567890.001".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackDeleteMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C123");
+        assert_eq!(decoded.ts, "1234567890.001");
+    }
+
+    #[test]
+    fn slack_update_message_roundtrip() {
+        let msg = SlackUpdateMessage {
+            channel: "C456".into(),
+            ts: "1234567890.002".into(),
+            text: "updated text".into(),
+            blocks: Some(serde_json::json!([{"type": "section"}])),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackUpdateMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C456");
+        assert_eq!(decoded.ts, "1234567890.002");
+        assert_eq!(decoded.text, "updated text");
         assert!(decoded.blocks.is_some());
     }
 

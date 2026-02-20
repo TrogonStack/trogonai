@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
@@ -108,6 +109,13 @@ pub struct SlackAgentConfig {
     /// Max messages per user per minute. 0 = disabled (default).
     /// Configurable via SLACK_USER_RATE_LIMIT.
     pub user_rate_limit: u32,
+
+    // ── Per-channel system prompts ────────────────────────────────────────────
+    /// Per-channel system prompt overrides. When a message arrives on a channel
+    /// that has an entry here, this prompt replaces `base_system_prompt` for that
+    /// request. Read from `CHANNEL_SYSTEM_PROMPTS` env var as:
+    /// `C123=prompt text,C456=other prompt`.
+    pub channel_system_prompts: HashMap<String, String>,
 }
 
 impl SlackAgentConfig {
@@ -211,6 +219,25 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let channel_system_prompts = env
+            .var("CHANNEL_SYSTEM_PROMPTS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|pair| {
+                        let eq_pos = pair.find('=')?;
+                        let channel = pair[..eq_pos].trim();
+                        let prompt = pair[eq_pos + 1..].trim();
+                        if channel.is_empty() || prompt.is_empty() {
+                            return None;
+                        }
+                        Some((channel.to_string(), prompt.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -231,6 +258,7 @@ impl SlackAgentConfig {
             thread_initial_history_limit,
             allow_bots,
             user_rate_limit,
+            channel_system_prompts,
         }
     }
 
@@ -683,5 +711,41 @@ mod tests {
         env.set("SLACK_USER_RATE_LIMIT", "not-a-number");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.user_rate_limit, 0);
+    }
+
+    // ── channel_system_prompts ────────────────────────────────────────────────
+
+    #[test]
+    fn channel_system_prompts_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.channel_system_prompts.is_empty());
+    }
+
+    #[test]
+    fn channel_system_prompts_parsed() {
+        let env = base_env();
+        env.set("CHANNEL_SYSTEM_PROMPTS", "C123=You are a helper,C456=You are a coder");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_system_prompts.get("C123").map(|s| s.as_str()), Some("You are a helper"));
+        assert_eq!(config.channel_system_prompts.get("C456").map(|s| s.as_str()), Some("You are a coder"));
+        assert_eq!(config.channel_system_prompts.len(), 2);
+    }
+
+    #[test]
+    fn channel_system_prompts_trims_whitespace() {
+        let env = base_env();
+        env.set("CHANNEL_SYSTEM_PROMPTS", " C123 = You are a helper , C456 = coder ");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_system_prompts.get("C123").map(|s| s.as_str()), Some("You are a helper"));
+        assert_eq!(config.channel_system_prompts.get("C456").map(|s| s.as_str()), Some("coder"));
+    }
+
+    #[test]
+    fn channel_system_prompts_prompt_with_equals_sign() {
+        // Prompt text can contain '=' — only the FIRST '=' is the delimiter
+        let env = base_env();
+        env.set("CHANNEL_SYSTEM_PROMPTS", "C123=a=b=c");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_system_prompts.get("C123").map(|s| s.as_str()), Some("a=b=c"));
     }
 }

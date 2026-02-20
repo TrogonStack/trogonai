@@ -13,15 +13,16 @@ use listener::{
     BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event,
 };
 use sender::{
-    run_outbound_loop, run_reaction_action_loop, run_set_status_loop, run_stream_append_loop,
-    run_stream_stop_loop, run_view_open_loop, run_view_publish_loop,
+    run_delete_loop, run_outbound_loop, run_reaction_action_loop, run_set_status_loop,
+    run_stream_append_loop, run_stream_stop_loop, run_update_loop, run_view_open_loop,
+    run_view_publish_loop,
 };
 use slack_morphism::prelude::*;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
-    create_outbound_consumer, create_reaction_action_consumer, create_set_status_consumer,
-    create_stream_append_consumer, create_stream_stop_consumer, create_view_open_consumer,
-    create_view_publish_consumer,
+    create_delete_consumer, create_outbound_consumer, create_reaction_action_consumer,
+    create_set_status_consumer, create_stream_append_consumer, create_stream_stop_consumer,
+    create_update_consumer, create_view_open_consumer, create_view_publish_consumer,
 };
 use rate_limit::RateLimiter;
 use slack_types::events::{SlackStreamStartRequest, SlackStreamStartResponse};
@@ -71,6 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let view_open_consumer = create_view_open_consumer(&js).await?;
     let view_publish_consumer = create_view_publish_consumer(&js).await?;
     let set_status_consumer = create_set_status_consumer(&js).await?;
+    let delete_consumer = create_delete_consumer(&js).await?;
+    let update_consumer = create_update_consumer(&js).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
@@ -169,6 +172,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         async move { run_set_status_loop(set_status_consumer, bt, hc, rl).await }
     });
     let set_status_abort = set_status_handle.abort_handle();
+
+    let delete_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_delete_loop(delete_consumer, bt, hc, rl).await }
+    });
+    let delete_abort = delete_handle.abort_handle();
+
+    let update_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_update_loop(update_consumer, bt, hc, rl).await }
+    });
+    let update_abort = update_handle.abort_handle();
 
     // stream.start handler: Core NATS request/reply — stays on raw client.
     let stream_start_handle = tokio::spawn({
@@ -316,6 +335,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "Set status NATS loop panicked"),
             }
         }
+        res = delete_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Delete NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Delete NATS loop panicked"),
+            }
+        }
+        res = update_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Update NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Update NATS loop panicked"),
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down");
         }
@@ -330,6 +361,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     view_open_abort.abort();
     view_publish_abort.abort();
     set_status_abort.abort();
+    delete_abort.abort();
+    update_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;
     tracing::info!("Shutdown complete");
 

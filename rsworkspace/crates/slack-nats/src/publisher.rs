@@ -1,21 +1,21 @@
 use async_nats::jetstream::Context;
 use serde::Serialize;
 use slack_types::events::{
-    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
-    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
-    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackSetStatusRequest,
-    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
-    SlackViewSubmissionEvent,
+    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteMessage,
+    SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
+    SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
+    SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent, SlackUpdateMessage, SlackViewClosedEvent, SlackViewOpenRequest,
+    SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
     SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
     SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
     SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
-    SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
-    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_VIEW_OPEN,
-    SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
+    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
+    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 async fn js_publish<T: Serialize>(
@@ -171,4 +171,18 @@ pub async fn publish_set_status(
     req: &SlackSetStatusRequest,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_SET_STATUS, req).await
+}
+
+pub async fn publish_delete_message(
+    js: &Context,
+    msg: &SlackDeleteMessage,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_DELETE, msg).await
+}
+
+pub async fn publish_update_message(
+    js: &Context,
+    msg: &SlackUpdateMessage,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_UPDATE, msg).await
 }

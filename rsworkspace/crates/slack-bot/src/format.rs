@@ -3,16 +3,30 @@
 /// expansion.
 pub const SLACK_TEXT_LIMIT: usize = 4000;
 
+/// Escape HTML entities (`&`, `<`, `>`) for Slack's mrkdwn text fields.
+fn escape_entities_to(output: &mut String, text: &str) {
+    for c in text.chars() {
+        match c {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            _ => output.push(c),
+        }
+    }
+}
+
 /// Convert a subset of Markdown to Slack mrkdwn format.
 ///
 /// Handles:
 /// - `**bold**` → `*bold*`
 /// - `*italic*` → `_italic_`
-/// - `` `code` `` → `` `code` `` (unchanged)
-/// - ```` ```block``` ```` → ```` ```block``` ```` (unchanged)
-/// - `[text](url)` → `<url|text>`
+/// - `~~strikethrough~~` → `~strikethrough~`
+/// - `` `code` `` → `` `code` `` (unchanged, no entity escaping)
+/// - ```` ```block``` ```` → ```` ```block``` ```` (unchanged, no entity escaping)
+/// - `[text](url)` → `<url|text>` (text is escaped, url is not)
 /// - `# Heading` / `## Heading` etc. → `*Heading*`
 /// - `- item` / `* item` preserved
+/// - `&`, `<`, `>` in plain text are escaped to `&amp;`, `&lt;`, `&gt;`
 pub fn markdown_to_mrkdwn(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -32,6 +46,7 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
                 }
                 i += 1;
             }
+            // Code blocks are shown verbatim — do NOT escape entities.
             output.extend(&chars[start..i]);
             continue;
         }
@@ -46,7 +61,21 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             if i < len {
                 i += 1; // consume closing `
             }
+            // Inline code is shown verbatim — do NOT escape entities.
             output.extend(&chars[start..i]);
+            continue;
+        }
+
+        // Strikethrough: ~~text~~
+        if i + 1 < len
+            && chars[i] == '~'
+            && chars[i + 1] == '~'
+            && let Some(end) = find_closing(&chars, i + 2, "~~")
+        {
+            output.push('~');
+            escape_entities_to(&mut output, &chars[i + 2..end].iter().collect::<String>());
+            output.push('~');
+            i = end + 2;
             continue;
         }
 
@@ -57,7 +86,7 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             && let Some(end) = find_closing(&chars, i + 2, "**")
         {
             output.push('*');
-            output.extend(&chars[i + 2..end]);
+            escape_entities_to(&mut output, &chars[i + 2..end].iter().collect::<String>());
             output.push('*');
             i = end + 2;
             continue;
@@ -69,7 +98,7 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             && let Some(end) = find_closing_char(&chars, i + 1, '*')
         {
             output.push('_');
-            output.extend(&chars[i + 1..end]);
+            escape_entities_to(&mut output, &chars[i + 1..end].iter().collect::<String>());
             output.push('_');
             i = end + 1;
             continue;
@@ -85,9 +114,9 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             let link_text: String = chars[i + 1..bracket_end].iter().collect();
             let url: String = chars[bracket_end + 2..paren_end].iter().collect();
             output.push('<');
-            output.push_str(&url);
+            output.push_str(&url); // URL unchanged — do NOT escape entities
             output.push('|');
-            output.push_str(&link_text);
+            escape_entities_to(&mut output, &link_text); // link text is escaped
             output.push('>');
             i = paren_end + 1;
             continue;
@@ -112,13 +141,19 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             }
             let heading: String = chars[line_start..line_end].iter().collect();
             output.push('*');
-            output.push_str(&heading);
+            escape_entities_to(&mut output, &heading);
             output.push('*');
             i = line_end;
             continue;
         }
 
-        output.push(chars[i]);
+        // Fallthrough: escape entities in plain text characters.
+        match chars[i] {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            _ => output.push(chars[i]),
+        }
         i += 1;
     }
 
@@ -146,7 +181,7 @@ fn find_closing_char(chars: &[char], start: usize, target: char) -> Option<usize
 }
 
 /// Split `text` into chunks of at most `limit` characters, preferring to break
-/// on newline boundaries.
+/// on paragraph boundaries (`\n\n`) before falling back to single newlines.
 pub fn chunk_text(text: &str, limit: usize) -> Vec<String> {
     if limit == 0 {
         return vec![];
@@ -155,9 +190,15 @@ pub fn chunk_text(text: &str, limit: usize) -> Vec<String> {
     let mut remaining = text;
 
     while remaining.len() > limit {
-        // Try to break on a newline within the limit.
         let slice = &remaining[..limit];
-        let break_pos = slice.rfind('\n').map(|p| p + 1).unwrap_or(limit);
+        // Try to break on a paragraph boundary (\n\n) first.
+        let break_pos = if let Some(p) = slice.rfind("\n\n") {
+            p + 2
+        } else if let Some(p) = slice.rfind('\n') {
+            p + 1
+        } else {
+            limit
+        };
         chunks.push(remaining[..break_pos].to_string());
         remaining = &remaining[break_pos..];
     }
@@ -313,5 +354,84 @@ mod tests {
     fn chunk_text_exact_limit_no_split() {
         let chunks = chunk_text("hello", 5);
         assert_eq!(chunks, vec!["hello"]);
+    }
+
+    // --- New tests for Change 1: HTML entity escaping ---
+
+    #[test]
+    fn entity_escaping_ampersand() {
+        assert_eq!(markdown_to_mrkdwn("a & b"), "a &amp; b");
+    }
+
+    #[test]
+    fn entity_escaping_less_than() {
+        assert_eq!(markdown_to_mrkdwn("a < b"), "a &lt; b");
+    }
+
+    #[test]
+    fn entity_escaping_greater_than() {
+        assert_eq!(markdown_to_mrkdwn("a > b"), "a &gt; b");
+    }
+
+    #[test]
+    fn entity_escaping_in_bold() {
+        assert_eq!(markdown_to_mrkdwn("**a & b**"), "*a &amp; b*");
+    }
+
+    #[test]
+    fn entity_escaping_in_heading() {
+        assert_eq!(markdown_to_mrkdwn("# a > b"), "*a &gt; b*");
+    }
+
+    #[test]
+    fn code_block_not_escaped() {
+        // Raw code should not have entities escaped
+        assert_eq!(markdown_to_mrkdwn("```a < b```"), "```a < b```");
+    }
+
+    #[test]
+    fn inline_code_not_escaped() {
+        assert_eq!(markdown_to_mrkdwn("`a < b`"), "`a < b`");
+    }
+
+    // --- New tests for Change 2: Strikethrough support ---
+
+    #[test]
+    fn strikethrough_conversion() {
+        assert_eq!(markdown_to_mrkdwn("~~hello~~"), "~hello~");
+    }
+
+    #[test]
+    fn strikethrough_with_escaping() {
+        assert_eq!(markdown_to_mrkdwn("~~a & b~~"), "~a &amp; b~");
+    }
+
+    #[test]
+    fn unmatched_strikethrough_passes_through() {
+        // ~~ with no closing stays as-is (falls through char by char)
+        // This behavior: first char is '~' but not ~~, so it passes through.
+        // "~~no close" — starts with ~~, no closing ~~, falls through.
+        // The fallthrough will output "~~no close" unchanged (each char separately).
+        assert_eq!(markdown_to_mrkdwn("~~no close"), "~~no close");
+    }
+
+    // --- New tests for Change 3: Paragraph-aware chunk splitting ---
+
+    #[test]
+    fn chunk_text_prefers_paragraph_break() {
+        // "para1\n\npara2abc" with limit 14: slice is "para1\n\npara2ab" (14 chars)
+        // rfind("\n\n") at pos 5, break_pos = 7
+        // chunk[0] = "para1\n\n", remaining = "para2abc"
+        let chunks = chunk_text("para1\n\npara2abc", 14);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "para1\n\n");
+        assert_eq!(chunks[1], "para2abc");
+    }
+
+    #[test]
+    fn link_url_not_escaped() {
+        // URL part of link must NOT have & escaped (it's a URL)
+        let result = markdown_to_mrkdwn("[click](https://a.com/q?a=1&b=2)");
+        assert_eq!(result, "<https://a.com/q?a=1&b=2|click>");
     }
 }

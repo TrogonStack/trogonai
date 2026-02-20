@@ -245,8 +245,12 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
     // Load per-user settings to optionally override model / system prompt.
     let user_settings = ctx.user_settings.load(&msg.user).await;
+
+    // Per-channel system prompt: takes precedence over global base, but not user setting.
+    let channel_prompt: Option<String> = ctx.config.channel_system_prompts.get(&msg.channel).cloned();
+
     let user_claude: Option<ClaudeClient> =
-        if user_settings.model.is_some() || user_settings.system_prompt.is_some() {
+        if user_settings.model.is_some() || user_settings.system_prompt.is_some() || channel_prompt.is_some() {
             ctx.config.anthropic_api_key.as_ref().map(|key| {
                 let model = user_settings
                     .model
@@ -256,6 +260,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                 let prompt = user_settings
                     .system_prompt
                     .clone()
+                    .or(channel_prompt)
                     .or_else(|| ctx.base_system_prompt.clone());
                 ClaudeClient::new(key.clone(), model, ctx.config.claude_max_tokens, prompt)
             })
@@ -549,7 +554,8 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
     let text = ev.text.as_deref().unwrap_or("").trim().to_string();
 
     // Special built-in: /command clear — wipe conversation history for this session.
-    if text.eq_ignore_ascii_case("clear") {
+    // `/reset` is an alias for `/clear` — both wipe the conversation history.
+    if text.eq_ignore_ascii_case("clear") || text.eq_ignore_ascii_case("reset") {
         // Derive session key from channel_id prefix (standard Slack conventions):
         //   D… = IM / direct message  → keyed by user
         //   G… = group DM (MPIM)      → keyed by channel

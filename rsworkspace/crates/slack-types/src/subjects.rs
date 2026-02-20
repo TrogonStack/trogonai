@@ -68,6 +68,12 @@ pub const SLACK_OUTBOUND_VIEW_PUBLISH: &str = "slack.outbound.view.publish";
 /// (`assistant.threads.setStatus`). Requires `assistant:write` scope.
 pub const SLACK_OUTBOUND_SET_STATUS: &str = "slack.outbound.set_status";
 
+/// Delete a Slack message (`chat.delete`).
+pub const SLACK_OUTBOUND_DELETE: &str = "slack.outbound.delete";
+
+/// Update an existing Slack message (`chat.update`).
+pub const SLACK_OUTBOUND_UPDATE: &str = "slack.outbound.update";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +115,8 @@ mod tests {
             SLACK_OUTBOUND_VIEW_OPEN,
             SLACK_OUTBOUND_VIEW_PUBLISH,
             SLACK_OUTBOUND_SET_STATUS,
+            SLACK_OUTBOUND_DELETE,
+            SLACK_OUTBOUND_UPDATE,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {
