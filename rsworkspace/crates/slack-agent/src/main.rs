@@ -3,6 +3,8 @@ mod handler;
 mod health;
 mod llm;
 mod memory;
+mod user_settings;
+mod views;
 
 use async_nats::jetstream;
 use config::SlackAgentConfig;
@@ -15,6 +17,7 @@ use handler::{
 use health::start_health_server;
 use llm::ClaudeClient;
 use memory::ConversationMemory;
+use user_settings::UserSettingsStore;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
     create_app_home_consumer, create_block_action_consumer, create_channel_consumer,
@@ -60,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!("Setting up JetStream stream and KV bucket...");
     ensure_slack_stream(&js).await?;
     let memory = ConversationMemory::new(&js, config.claude_max_history).await?;
+    let user_settings = UserSettingsStore::new(&js).await?;
 
     tracing::info!("Creating JetStream consumers...");
     let inbound_consumer = create_inbound_consumer(&js).await?;
@@ -106,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             key.clone(),
             config.claude_model.clone(),
             config.claude_max_tokens,
-            system_prompt,
+            system_prompt.clone(),
         )
     });
 
@@ -121,7 +125,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         nats: nats_raw,
         claude,
         memory,
+        user_settings,
         config: config.clone(),
+        base_system_prompt: system_prompt,
         session_locks: Mutex::new(HashMap::new()),
         http_client: reqwest::Client::new(),
     });
@@ -152,7 +158,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackReactionEvent>(&msg.payload) {
-                            Ok(ev) => { handle_reaction(ev).await; }
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_reaction(ev, ctx).await });
+                            }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackReactionEvent"),
                         }
                         let _ = msg.ack().await;
@@ -203,7 +212,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackBlockActionEvent>(&msg.payload) {
-                            Ok(ev) => { handle_block_action(ev).await; }
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_block_action(ev, ctx).await });
+                            }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackBlockActionEvent"),
                         }
                         let _ = msg.ack().await;
