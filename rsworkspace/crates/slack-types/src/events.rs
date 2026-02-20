@@ -37,7 +37,7 @@ pub struct SlackAttachment {
     pub files: Vec<SlackFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionType {
     Direct,
     Channel,

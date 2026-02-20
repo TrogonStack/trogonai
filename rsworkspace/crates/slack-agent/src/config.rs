@@ -47,6 +47,15 @@ impl ReplyToMode {
     }
 }
 
+/// A predefined option for the slash command argument menu.
+#[derive(Debug, Clone)]
+pub struct SlashCommandOption {
+    /// Button label / select menu text shown to the user.
+    pub label: String,
+    /// Text payload dispatched when the user selects this option.
+    pub payload: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SlackAgentConfig {
     pub nats: NatsConfig,
@@ -211,6 +220,27 @@ pub struct SlackAgentConfig {
     /// (only visible to the invoking user). If false, responses are "in_channel".
     /// Read from SLACK_SLASH_COMMAND_EPHEMERAL (default: true).
     pub slash_command_ephemeral: bool,
+    // ── DM scope ──────────────────────────────────────────────────────────────
+    /// When true, all DMs share a single "main" session instead of per-user sessions.
+    /// Read from SLACK_DM_SCOPE: "main" → true, anything else → false (default).
+    pub dm_scope_main: bool,
+
+    // ── Per-channel ack reaction overrides ────────────────────────────────────
+    /// Per-channel ack reaction overrides. Format: CHANNEL_ACK_REACTIONS=C123:eyes,C456:wave
+    /// Overrides the global ack_reaction for specific channels.
+    pub channel_ack_reactions: std::collections::HashMap<String, String>,
+
+    // ── Group DM channel filter ───────────────────────────────────────────────
+    /// When set, only process group DMs (MPIMs) from these channel IDs.
+    /// Read from SLACK_GROUP_DM_CHANNELS as comma-separated channel IDs.
+    /// None = allow all group DMs (default).
+    pub group_dm_channels: Option<std::collections::HashSet<String>>,
+
+    // ── Slash command options ─────────────────────────────────────────────────
+    /// Predefined options shown as a menu when the slash command is invoked without arguments.
+    /// 1-5 options render as buttons; 6+ as a static select menu.
+    /// Format: SLACK_SLASH_COMMAND_OPTIONS=Label1:payload1,Label2:payload2
+    pub slash_command_options: Vec<SlashCommandOption>,
 }
 
 impl SlackAgentConfig {
@@ -498,6 +528,60 @@ impl SlackAgentConfig {
             .ok()
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
+        let dm_scope_main = env
+            .var("SLACK_DM_SCOPE")
+            .ok()
+            .map(|v| v == "main")
+            .unwrap_or(false);
+
+        let channel_ack_reactions = env
+            .var("CHANNEL_ACK_REACTIONS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|entry| {
+                        let colon = entry.find(':')?;
+                        let channel = entry[..colon].trim().to_string();
+                        let emoji = entry[colon + 1..].trim().to_string();
+                        if channel.is_empty() || emoji.is_empty() {
+                            return None;
+                        }
+                        Some((channel, emoji))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let group_dm_channels = env
+            .var("SLACK_GROUP_DM_CHANNELS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            });
+
+        let slash_command_options = env
+            .var("SLACK_SLASH_COMMAND_OPTIONS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|entry| {
+                        let colon = entry.find(':')?;
+                        let label = entry[..colon].trim().to_string();
+                        let payload = entry[colon + 1..].trim().to_string();
+                        if label.is_empty() || payload.is_empty() {
+                            return None;
+                        }
+                        Some(SlashCommandOption { label, payload })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Self {
             nats: NatsConfig::from_env(env),
@@ -542,6 +626,10 @@ impl SlackAgentConfig {
             actions_emoji_list,
             slash_command_name,
             slash_command_ephemeral,
+            dm_scope_main,
+            channel_ack_reactions,
+            group_dm_channels,
+            slash_command_options,
         }
     }
 
@@ -1457,6 +1545,117 @@ mod tests {
         env.set("SLACK_SLASH_COMMAND_EPHEMERAL", "false");
         let config = SlackAgentConfig::from_env(&env);
         assert!(!config.slash_command_ephemeral);
+    }
+
+
+    // ── dm_scope_main ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_scope_main_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.dm_scope_main);
+    }
+
+    #[test]
+    fn dm_scope_main_set_to_main() {
+        let env = base_env();
+        env.set("SLACK_DM_SCOPE", "main");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.dm_scope_main);
+    }
+
+    #[test]
+    fn dm_scope_main_other_value_is_false() {
+        let env = base_env();
+        env.set("SLACK_DM_SCOPE", "per-user");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.dm_scope_main);
+    }
+
+    // ── channel_ack_reactions ──────────────────────────────────────────────────
+
+    #[test]
+    fn channel_ack_reactions_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.channel_ack_reactions.is_empty());
+    }
+
+    #[test]
+    fn channel_ack_reactions_single() {
+        let env = base_env();
+        env.set("CHANNEL_ACK_REACTIONS", "C123:eyes");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_ack_reactions.get("C123").map(|s| s.as_str()), Some("eyes"));
+        assert_eq!(config.channel_ack_reactions.len(), 1);
+    }
+
+    #[test]
+    fn channel_ack_reactions_multiple() {
+        let env = base_env();
+        env.set("CHANNEL_ACK_REACTIONS", "C123:eyes,C456:wave");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_ack_reactions.get("C123").map(|s| s.as_str()), Some("eyes"));
+        assert_eq!(config.channel_ack_reactions.get("C456").map(|s| s.as_str()), Some("wave"));
+        assert_eq!(config.channel_ack_reactions.len(), 2);
+    }
+
+    // ── group_dm_channels ─────────────────────────────────────────────────────
+
+    #[test]
+    fn group_dm_channels_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.group_dm_channels.is_none());
+    }
+
+    #[test]
+    fn group_dm_channels_set() {
+        let env = base_env();
+        env.set("SLACK_GROUP_DM_CHANNELS", "C111,C222");
+        let config = SlackAgentConfig::from_env(&env);
+        let channels = config.group_dm_channels.as_ref().expect("should be Some");
+        assert!(channels.contains("C111"));
+        assert!(channels.contains("C222"));
+        assert_eq!(channels.len(), 2);
+    }
+
+    #[test]
+    fn group_dm_channels_empty_string_is_none() {
+        let env = base_env();
+        env.set("SLACK_GROUP_DM_CHANNELS", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.group_dm_channels.is_none());
+    }
+
+    // ── slash_command_options ─────────────────────────────────────────────────
+
+    #[test]
+    fn slash_command_options_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.slash_command_options.is_empty());
+    }
+
+    #[test]
+    fn slash_command_options_single() {
+        let env = base_env();
+        env.set("SLACK_SLASH_COMMAND_OPTIONS", "Hello:Say hello");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.slash_command_options.len(), 1);
+        assert_eq!(config.slash_command_options[0].label, "Hello");
+        assert_eq!(config.slash_command_options[0].payload, "Say hello");
+    }
+
+    #[test]
+    fn slash_command_options_multiple() {
+        let env = base_env();
+        env.set("SLACK_SLASH_COMMAND_OPTIONS", "Greet:Say hello,Help:What can you do?,Status:Show status");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.slash_command_options.len(), 3);
+        assert_eq!(config.slash_command_options[0].label, "Greet");
+        assert_eq!(config.slash_command_options[0].payload, "Say hello");
+        assert_eq!(config.slash_command_options[1].label, "Help");
+        assert_eq!(config.slash_command_options[1].payload, "What can you do?");
+        assert_eq!(config.slash_command_options[2].label, "Status");
+        assert_eq!(config.slash_command_options[2].payload, "Show status");
     }
 
 }

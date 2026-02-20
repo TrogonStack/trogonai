@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig};
+use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig, SlashCommandOption};
 use crate::llm::ClaudeClient;
 use crate::memory::{ConversationMemory, ConversationMessage};
 use crate::user_settings::{UserSettings, UserSettingsStore};
@@ -225,6 +225,13 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         session_key
     };
 
+    // Feature: dm_scope_main — collapse all DMs to a single shared session.
+    let session_key = if matches!(msg.session_type, SessionType::Direct) && ctx.config.dm_scope_main {
+        "slack:dm:main".to_string()
+    } else {
+        session_key
+    };
+
     // Prune session locks whose Arc is held only by the map (no task is using them).
     {
         let mut locks = ctx.session_locks.lock().unwrap();
@@ -281,9 +288,13 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     let claude = user_claude.as_ref().or(ctx.claude.as_ref());
 
     // 1. Add ack reaction.
-    if let Some(emoji) = &ctx.config.ack_reaction {
-        ack_reaction(&ctx.js, &msg.channel, &msg.ts, emoji, true).await;
-    }
+    // Resolve effective ack reaction: channel-specific > global > "robot_face" fallback
+    let effective_ack = ctx.config.channel_ack_reactions
+        .get(&msg.channel)
+        .or(ctx.config.ack_reaction.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("robot_face");
+    ack_reaction(&ctx.js, &msg.channel, &msg.ts, effective_ack, true).await;
 
     // 2. Acquire per-session lock so parallel messages don't corrupt history.
     let session_lock = get_session_lock(&ctx, &session_key);
@@ -667,9 +678,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     }
 
     // 6. Remove ack reaction.
-    if let Some(emoji) = &ctx.config.ack_reaction {
-        ack_reaction(&ctx.js, &msg.channel, &msg.ts, emoji, false).await;
-    }
+    ack_reaction(&ctx.js, &msg.channel, &msg.ts, effective_ack, false).await;
 }
 
 /// Handles a regular inbound message.
@@ -759,6 +768,16 @@ Once approved, you'll be able to use me normally.",
     {
         tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
         return;
+    }
+
+    // Group DM channel allowlist
+    if matches!(msg.session_type, SessionType::Group) {
+        if let Some(ref allowed) = ctx.config.group_dm_channels {
+            if !allowed.contains(&msg.channel) {
+                tracing::debug!(channel = %msg.channel, "Ignoring group DM (not in group_dm_channels allowlist)");
+                return;
+            }
+        }
     }
 
     // User blocklist — silently drop blocked users.
@@ -934,6 +953,20 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
     );
 
     let text = ev.text.as_deref().unwrap_or("").trim().to_string();
+
+    // If options are configured and command text is empty, show argument menu.
+    if text.is_empty() && !ctx.config.slash_command_options.is_empty() {
+        let options = &ctx.config.slash_command_options;
+        let blocks = build_slash_menu_blocks(options);
+        post_response_url_with_blocks(
+            &ctx.http_client,
+            &ev.response_url,
+            "Choose an option:",
+            &blocks,
+            ctx.config.slash_command_ephemeral,
+        ).await;
+        return;
+    }
 
     // Special built-in: /command clear — wipe conversation history for this session.
     // `/reset` is an alias for `/clear` — both wipe the conversation history.
@@ -1129,6 +1162,66 @@ async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &
     };
     if let Err(e) = client.post(response_url).json(&payload).send().await {
         tracing::error!(error = %e, url = %response_url, "Failed to POST to response_url");
+    }
+}
+
+// ── Slash command menu helpers ────────────────────────────────────────────────
+
+/// Build Block Kit JSON for a slash command argument menu.
+/// Renders as buttons (≤5 options) or a static select (>5 options).
+fn build_slash_menu_blocks(options: &[crate::config::SlashCommandOption]) -> String {
+    if options.len() <= 5 {
+        // Render as buttons
+        let elements: Vec<serde_json::Value> = options.iter().enumerate().map(|(i, opt)| {
+            serde_json::json!({
+                "type": "button",
+                "text": {"type": "plain_text", "text": opt.label, "emoji": true},
+                "value": opt.payload,
+                "action_id": format!("slash_option_{}", i)
+            })
+        }).collect();
+        serde_json::json!([{"type": "actions", "elements": elements}]).to_string()
+    } else {
+        // Render as static select
+        let select_options: Vec<serde_json::Value> = options.iter().map(|opt| {
+            serde_json::json!({
+                "text": {"type": "plain_text", "text": opt.label, "emoji": true},
+                "value": opt.payload
+            })
+        }).collect();
+        serde_json::json!([{
+            "type": "actions",
+            "elements": [{
+                "type": "static_select",
+                "placeholder": {"type": "plain_text", "text": "Choose an option", "emoji": true},
+                "options": select_options,
+                "action_id": "slash_option_select"
+            }]
+        }]).to_string()
+    }
+}
+
+/// POST a delayed response with Block Kit blocks to a Slack `response_url`.
+async fn post_response_url_with_blocks(
+    client: &reqwest::Client,
+    response_url: &str,
+    text: &str,
+    blocks: &str,
+    ephemeral: bool,
+) {
+    let response_type = if ephemeral { "ephemeral" } else { "in_channel" };
+    let body = serde_json::json!({
+        "response_type": response_type,
+        "text": text,
+        "blocks": serde_json::from_str::<serde_json::Value>(blocks).unwrap_or(serde_json::Value::Null),
+    });
+    if let Err(e) = client
+        .post(response_url)
+        .json(&body)
+        .send()
+        .await
+    {
+        tracing::error!(error = %e, url = %response_url, "Failed to POST blocks to response_url");
     }
 }
 
@@ -1487,6 +1580,39 @@ pub async fn handle_block_action(ev: SlackBlockActionEvent, ctx: Arc<AgentContex
                 "Response feedback received"
             );
             // Future: persist feedback to a dedicated NATS KV bucket.
+        }
+        _ if ev.action_id.starts_with("slash_option_") => {
+            let selected_text = ev.value.clone().unwrap_or_default();
+            if !selected_text.is_empty() {
+                let channel = ev.channel_id.clone().unwrap_or_default();
+                if !channel.is_empty() {
+                    let session_type = if channel.starts_with('D') {
+                        SessionType::Direct
+                    } else if channel.starts_with('G') {
+                        SessionType::Group
+                    } else {
+                        SessionType::Channel
+                    };
+                    let synthetic = SlackInboundMessage {
+                        channel: channel.clone(),
+                        user: ev.user_id.clone(),
+                        text: selected_text,
+                        ts: ev.message_ts.clone().unwrap_or_default(),
+                        event_ts: None,
+                        thread_ts: None,
+                        parent_user_id: None,
+                        session_type,
+                        source: Some("slash_menu".to_string()),
+                        session_key: None,
+                        files: vec![],
+                        attachments: vec![],
+                        display_name: None,
+                    };
+                    handle_inbound(synthetic, ctx).await;
+                } else {
+                    tracing::warn!(action_id = %ev.action_id, "slash_option action missing channel_id");
+                }
+            }
         }
         _ => {
             tracing::debug!(action_id = %ev.action_id, "Unhandled block action");
