@@ -9,28 +9,39 @@
 //!                                                       → NATS [mock] → slack-bot
 
 use slack_nats::publisher::{
-    publish_block_action, publish_channel, publish_delete_message, publish_ephemeral_message,
-    publish_inbound, publish_member, publish_outbound, publish_reaction, publish_reaction_action,
-    publish_set_status, publish_slash_command, publish_stream_append, publish_stream_stop,
-    publish_view_open, publish_view_publish, request_list_conversations, request_list_users,
-    request_read_messages, request_read_replies,
+    publish_app_home, publish_block_action, publish_channel, publish_delete_file,
+    publish_delete_message, publish_ephemeral_message, publish_inbound, publish_member,
+    publish_message_changed, publish_message_deleted, publish_outbound, publish_pin,
+    publish_proactive_message, publish_reaction, publish_reaction_action, publish_set_status,
+    publish_set_suggested_prompts, publish_slash_command, publish_stream_append,
+    publish_stream_stop, publish_thread_broadcast, publish_update_message, publish_upload_request,
+    publish_view_closed, publish_view_open, publish_view_publish, publish_view_submission,
+    request_list_conversations, request_list_users, request_read_messages, request_read_replies,
 };
 use slack_types::events::{
-    ChannelEventKind, SessionType, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteMessage,
-    SlackEphemeralMessage, SlackInboundMessage, SlackListConversationsChannel,
-    SlackListConversationsRequest, SlackListConversationsResponse, SlackListUsersRequest,
-    SlackListUsersResponse, SlackListUsersUser, SlackMemberEvent, SlackOutboundMessage,
-    SlackReactionAction, SlackReactionEvent, SlackReadMessage, SlackReadMessagesRequest,
-    SlackReadMessagesResponse, SlackReadRepliesRequest, SlackReadRepliesResponse,
-    SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStopMessage, SlackViewOpenRequest, SlackViewPublishRequest,
+    ChannelEventKind, PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackBlockActionEvent,
+    SlackChannelEvent, SlackDeleteFile, SlackDeleteMessage, SlackEphemeralMessage,
+    SlackInboundMessage, SlackListConversationsChannel, SlackListConversationsRequest,
+    SlackListConversationsResponse, SlackListUsersRequest, SlackListUsersResponse,
+    SlackListUsersUser, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
+    SlackOutboundMessage, SlackPinEvent, SlackProactiveMessage, SlackReactionAction,
+    SlackReactionEvent, SlackReadMessage, SlackReadMessagesRequest, SlackReadMessagesResponse,
+    SlackReadRepliesRequest, SlackReadRepliesResponse, SlackSetStatusRequest,
+    SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStopMessage, SlackSuggestedPrompt, SlackThreadBroadcastEvent, SlackUpdateMessage,
+    SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
-    SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER,
-    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE,
-    SLACK_OUTBOUND_EPHEMERAL, SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS,
+    SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
+    SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
+    SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
+    SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
+    SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_PROACTIVE,
     SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_REACTION,
-    SLACK_OUTBOUND_SET_STATUS, SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP,
+    SLACK_OUTBOUND_SET_STATUS, SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
+    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD,
     SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
@@ -595,4 +606,336 @@ async fn multiple_events_tracked_independently() {
     assert_eq!(decoded_dm.user, "U1");
     assert_eq!(decoded_ch.user, "U2");
     assert_eq!(decoded_reply.text, "reply1");
+}
+
+// ── Inbound event types (remaining) ──────────────────────────────────────────
+
+#[tokio::test]
+async fn message_changed_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackMessageChangedEvent {
+        channel: "C1".to_string(),
+        ts: "1.0".to_string(),
+        event_ts: None,
+        previous_text: Some("old".to_string()),
+        new_text: Some("new".to_string()),
+        thread_ts: None,
+        user: Some("U1".to_string()),
+    };
+    publish_message_changed(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_MESSAGE_CHANGED]);
+}
+
+#[tokio::test]
+async fn message_deleted_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackMessageDeletedEvent {
+        channel: "C1".to_string(),
+        deleted_ts: "1.0".to_string(),
+        event_ts: None,
+        thread_ts: None,
+    };
+    publish_message_deleted(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_MESSAGE_DELETED]);
+}
+
+#[tokio::test]
+async fn thread_broadcast_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackThreadBroadcastEvent {
+        channel: "C1".to_string(),
+        user: "U1".to_string(),
+        text: "broadcast".to_string(),
+        ts: "1.0".to_string(),
+        thread_ts: "0.9".to_string(),
+        event_ts: None,
+    };
+    publish_thread_broadcast(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_THREAD_BROADCAST]);
+}
+
+#[tokio::test]
+async fn app_home_opened_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackAppHomeOpenedEvent {
+        user: "U1".to_string(),
+        tab: "home".to_string(),
+        view_id: None,
+    };
+    publish_app_home(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_APP_HOME]);
+}
+
+#[tokio::test]
+async fn view_submission_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackViewSubmissionEvent {
+        user_id: "U1".to_string(),
+        trigger_id: "t1".to_string(),
+        view_id: "V1".to_string(),
+        callback_id: Some("settings_modal".to_string()),
+        values: serde_json::json!({}),
+    };
+    publish_view_submission(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_VIEW_SUBMISSION]);
+}
+
+#[tokio::test]
+async fn view_closed_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackViewClosedEvent {
+        user_id: "U1".to_string(),
+        trigger_id: "t1".to_string(),
+        view_id: "V1".to_string(),
+        callback_id: None,
+        values: serde_json::json!({}),
+    };
+    publish_view_closed(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_VIEW_CLOSED]);
+}
+
+#[tokio::test]
+async fn pin_event_subject() {
+    let mock = MockNatsClient::new();
+    let ev = SlackPinEvent {
+        kind: PinEventKind::Added,
+        channel: "C1".to_string(),
+        user: "U1".to_string(),
+        item_ts: Some("1.0".to_string()),
+        item_type: Some("message".to_string()),
+        event_ts: "1700000000.000".to_string(),
+    };
+    publish_pin(&mock, None, &ev).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_INBOUND_PIN]);
+}
+
+// ── Outbound actions (remaining) ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_message_subject() {
+    let mock = MockNatsClient::new();
+    let msg = SlackUpdateMessage {
+        channel: "C1".to_string(),
+        ts: "1.0".to_string(),
+        text: "updated text".to_string(),
+        blocks: None,
+    };
+    publish_update_message(&mock, None, &msg).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_OUTBOUND_UPDATE]);
+}
+
+#[tokio::test]
+async fn upload_request_subject() {
+    let mock = MockNatsClient::new();
+    let req = SlackUploadRequest {
+        channel: "C1".to_string(),
+        thread_ts: None,
+        filename: "report.md".to_string(),
+        content: "# Report\nContent here".to_string(),
+        title: Some("Monthly Report".to_string()),
+    };
+    publish_upload_request(&mock, None, &req).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_OUTBOUND_UPLOAD]);
+}
+
+#[tokio::test]
+async fn set_suggested_prompts_subject() {
+    let mock = MockNatsClient::new();
+    let req = SlackSetSuggestedPromptsRequest {
+        channel_id: "C1".to_string(),
+        thread_ts: "1.0".to_string(),
+        title: Some("Try asking:".to_string()),
+        prompts: vec![
+            SlackSuggestedPrompt {
+                title: "Summarize".to_string(),
+                message: "Summarize this thread".to_string(),
+            },
+        ],
+    };
+    publish_set_suggested_prompts(&mock, None, &req).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS]);
+}
+
+#[tokio::test]
+async fn proactive_message_subject() {
+    let mock = MockNatsClient::new();
+    let msg = SlackProactiveMessage {
+        channel: Some("C1".to_string()),
+        user_id: None,
+        text: "Heads up!".to_string(),
+        thread_ts: None,
+        blocks: None,
+        username: None,
+        icon_url: None,
+        icon_emoji: None,
+    };
+    publish_proactive_message(&mock, None, &msg).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_OUTBOUND_PROACTIVE]);
+}
+
+#[tokio::test]
+async fn delete_file_subject() {
+    let mock = MockNatsClient::new();
+    let req = SlackDeleteFile { file_id: "F1234".to_string() };
+    publish_delete_file(&mock, None, &req).await.unwrap();
+    assert_eq!(mock.published_messages(), vec![SLACK_OUTBOUND_DELETE_FILE]);
+}
+
+// ── All subjects covered: namespacing check ───────────────────────────────────
+
+#[tokio::test]
+async fn all_inbound_events_namespaced_correctly() {
+    // Verify that account_id namespacing works for every inbound event type.
+    let mock = MockNatsClient::new();
+    let account = Some("org");
+
+    publish_inbound(&mock, account, &inbound("C1", "U1", "hi", SessionType::Direct)).await.unwrap();
+    publish_reaction(&mock, account, &SlackReactionEvent {
+        reaction: "eyes".to_string(), user: "U1".to_string(), channel: None,
+        item_ts: None, item_user: None, event_ts: "1.0".to_string(), added: true,
+    }).await.unwrap();
+    publish_message_changed(&mock, account, &SlackMessageChangedEvent {
+        channel: "C1".to_string(), ts: "1.0".to_string(), event_ts: None,
+        previous_text: None, new_text: Some("x".to_string()), thread_ts: None, user: None,
+    }).await.unwrap();
+    publish_message_deleted(&mock, account, &SlackMessageDeletedEvent {
+        channel: "C1".to_string(), deleted_ts: "1.0".to_string(), event_ts: None, thread_ts: None,
+    }).await.unwrap();
+    publish_slash_command(&mock, account, &SlackSlashCommandEvent {
+        command: "/cmd".to_string(), text: None, user_id: "U1".to_string(),
+        channel_id: "C1".to_string(), team_id: None,
+        response_url: "https://hooks.slack.com/x".to_string(), trigger_id: None,
+    }).await.unwrap();
+
+    let subjects = mock.published_messages();
+    assert!(subjects.iter().all(|s| s.starts_with("slack.org.")),
+        "All subjects should be namespaced under slack.org.*: {:?}", subjects);
+}
+
+#[tokio::test]
+async fn all_outbound_events_namespaced_correctly() {
+    let mock = MockNatsClient::new();
+    let account = Some("team");
+
+    publish_outbound(&mock, account, &outbound("C1", "reply")).await.unwrap();
+    publish_stream_append(&mock, account, &SlackStreamAppendMessage {
+        channel: "C1".to_string(), ts: "1.0".to_string(), text: "chunk".to_string(),
+    }).await.unwrap();
+    publish_stream_stop(&mock, account, &SlackStreamStopMessage {
+        channel: "C1".to_string(), ts: "1.0".to_string(),
+        final_text: "done".to_string(), blocks: None,
+    }).await.unwrap();
+    publish_reaction_action(&mock, account, &SlackReactionAction {
+        channel: "C1".to_string(), ts: "1.0".to_string(), reaction: "ok".to_string(), add: true,
+    }).await.unwrap();
+    publish_delete_message(&mock, account, &SlackDeleteMessage {
+        channel: "C1".to_string(), ts: "1.0".to_string(),
+    }).await.unwrap();
+
+    let subjects = mock.published_messages();
+    assert!(subjects.iter().all(|s| s.starts_with("slack.team.")),
+        "All outbound subjects should be namespaced under slack.team.*: {:?}", subjects);
+}
+
+// ── Error handling ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn request_read_messages_malformed_response_returns_error() {
+    let mock = AdvancedMockNatsClient::new();
+    // Configure a response that is not valid JSON for SlackReadMessagesResponse.
+    mock.set_response(SLACK_OUTBOUND_READ_MESSAGES, b"not valid json at all".as_slice().into());
+
+    let req = SlackReadMessagesRequest { channel: "C1".to_string(), limit: None, oldest: None, latest: None };
+    let result = request_read_messages(&mock, None, &req).await;
+    assert!(result.is_err(), "Malformed JSON response should return an error");
+}
+
+#[tokio::test]
+async fn request_read_replies_malformed_response_returns_error() {
+    let mock = AdvancedMockNatsClient::new();
+    mock.set_response(SLACK_OUTBOUND_READ_REPLIES, b"{\"invalid\": true}".as_slice().into());
+
+    let req = SlackReadRepliesRequest {
+        channel: "C1".to_string(), ts: "1.0".to_string(),
+        limit: None, oldest: None, latest: None,
+    };
+    // Missing required fields → deserialization should fail.
+    let result = request_read_replies(&mock, None, &req).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn request_list_users_no_response_returns_error() {
+    let mock = AdvancedMockNatsClient::new();
+    let req = SlackListUsersRequest { limit: None, cursor: None };
+    let result = request_list_users(&mock, None, &req).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn request_list_conversations_no_response_returns_error() {
+    let mock = AdvancedMockNatsClient::new();
+    let req = SlackListConversationsRequest { limit: None, cursor: None, exclude_archived: None, types: None };
+    let result = request_list_conversations(&mock, None, &req).await;
+    assert!(result.is_err());
+}
+
+// ── Payload integrity for new event types ────────────────────────────────────
+
+#[tokio::test]
+async fn message_changed_payload_roundtrip() {
+    let mock = MockNatsClient::new();
+    let ev = SlackMessageChangedEvent {
+        channel: "C99".to_string(),
+        ts: "9.0".to_string(),
+        event_ts: Some("9.1".to_string()),
+        previous_text: Some("before".to_string()),
+        new_text: Some("after".to_string()),
+        thread_ts: Some("8.0".to_string()),
+        user: Some("U99".to_string()),
+    };
+    publish_message_changed(&mock, None, &ev).await.unwrap();
+
+    let payloads = mock.published_payloads();
+    let decoded: SlackMessageChangedEvent = serde_json::from_slice(&payloads[0]).unwrap();
+    assert_eq!(decoded.channel, "C99");
+    assert_eq!(decoded.new_text.as_deref(), Some("after"));
+    assert_eq!(decoded.user.as_deref(), Some("U99"));
+}
+
+#[tokio::test]
+async fn view_submission_payload_roundtrip() {
+    let mock = MockNatsClient::new();
+    let ev = SlackViewSubmissionEvent {
+        user_id: "U42".to_string(),
+        trigger_id: "trigger42".to_string(),
+        view_id: "V42".to_string(),
+        callback_id: Some("my_modal".to_string()),
+        values: serde_json::json!({"block1": {"action1": {"value": "hello"}}}),
+    };
+    publish_view_submission(&mock, None, &ev).await.unwrap();
+
+    let payloads = mock.published_payloads();
+    let decoded: SlackViewSubmissionEvent = serde_json::from_slice(&payloads[0]).unwrap();
+    assert_eq!(decoded.user_id, "U42");
+    assert_eq!(decoded.callback_id.as_deref(), Some("my_modal"));
+}
+
+#[tokio::test]
+async fn pin_event_payload_roundtrip() {
+    let mock = MockNatsClient::new();
+    let ev = SlackPinEvent {
+        kind: PinEventKind::Removed,
+        channel: "C7".to_string(),
+        user: "U7".to_string(),
+        item_ts: Some("7.0".to_string()),
+        item_type: Some("message".to_string()),
+        event_ts: "7.1".to_string(),
+    };
+    publish_pin(&mock, None, &ev).await.unwrap();
+
+    let payloads = mock.published_payloads();
+    let decoded: SlackPinEvent = serde_json::from_slice(&payloads[0]).unwrap();
+    assert_eq!(decoded.channel, "C7");
+    assert_eq!(decoded.item_ts.as_deref(), Some("7.0"));
 }
