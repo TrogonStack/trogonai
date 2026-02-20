@@ -5,8 +5,9 @@ use slack_nats::publisher::{
     publish_stream_stop, publish_view_open, publish_view_publish,
 };
 use slack_types::events::{
-    SessionType, SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackFile,
-    SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
+    SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent, SlackChannelEvent,
+    SlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
+    SlackMessageDeletedEvent,
     SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
     SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
     SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
@@ -266,7 +267,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
     history.push(ConversationMessage {
         role: "user".to_string(),
-        content: build_message_content(&content_text, &msg.files),
+        content: build_message_content(&content_text, &msg.files, &msg.attachments),
         ts: Some(msg.ts.clone()),
         images,
     });
@@ -999,25 +1000,49 @@ pub async fn handle_pin(ev: SlackPinEvent, _ctx: Arc<AgentContext>) {
 /// For text-like files where slack-bot was able to download the content, the
 /// full text is embedded between fences so Claude can read and reason about it.
 /// For binary or oversized files, only metadata (name + MIME type) is included.
-fn build_message_content(text: &str, files: &[SlackFile]) -> String {
-    if files.is_empty() {
-        return text.to_string();
-    }
+///
+/// Non-empty attachments are appended as an `[Attachments: ...]` block. Each
+/// attachment contributes its `text` field if present, or its `fallback` if
+/// `text` is absent. Attachments with neither field are skipped.
+fn build_message_content(text: &str, files: &[SlackFile], attachments: &[SlackAttachment]) -> String {
     let mut content = text.to_string();
-    content.push_str("\n\n[Attached files:");
-    for f in files {
-        let name = f.name.as_deref().unwrap_or("unknown");
-        let mime = f.mimetype.as_deref().unwrap_or("unknown type");
-        if let Some(ref file_text) = f.content {
-            content.push_str(&format!(
-                "\n- {} ({}):\n```\n{}\n```",
-                name, mime, file_text
-            ));
-        } else {
-            content.push_str(&format!("\n- {} ({})", name, mime));
+
+    if !files.is_empty() {
+        content.push_str("\n\n[Attached files:");
+        for f in files {
+            let name = f.name.as_deref().unwrap_or("unknown");
+            let mime = f.mimetype.as_deref().unwrap_or("unknown type");
+            if let Some(ref file_text) = f.content {
+                content.push_str(&format!(
+                    "\n- {} ({}):\n```\n{}\n```",
+                    name, mime, file_text
+                ));
+            } else {
+                content.push_str(&format!("\n- {} ({})", name, mime));
+            }
         }
+        content.push(']');
     }
-    content.push(']');
+
+    // Build the attachments block, skipping entries with no displayable text.
+    let attachment_lines: Vec<&str> = attachments
+        .iter()
+        .filter_map(|a| {
+            a.text
+                .as_deref()
+                .or_else(|| a.fallback.as_deref())
+                .filter(|s| !s.is_empty())
+        })
+        .collect();
+
+    if !attachment_lines.is_empty() {
+        content.push_str("\n\n[Attachments:");
+        for line in attachment_lines {
+            content.push_str(&format!("\n- {}", line));
+        }
+        content.push(']');
+    }
+
     content
 }
 
@@ -1139,9 +1164,25 @@ mod tests {
 
     // ── build_message_content ─────────────────────────────────────────────────
 
+    fn make_attachment(text: Option<&str>, fallback: Option<&str>) -> SlackAttachment {
+        SlackAttachment {
+            text: text.map(str::to_string),
+            fallback: fallback.map(str::to_string),
+            pretext: None,
+            author_name: None,
+            from_url: None,
+            image_url: None,
+            thumb_url: None,
+            channel_id: None,
+            channel_name: None,
+            ts: None,
+            files: vec![],
+        }
+    }
+
     #[test]
     fn no_files_returns_text_unchanged() {
-        assert_eq!(build_message_content("hello", &[]), "hello");
+        assert_eq!(build_message_content("hello", &[], &[]), "hello");
     }
 
     #[test]
@@ -1156,7 +1197,7 @@ mod tests {
             content: None,
             base64_content: None,
         }];
-        let result = build_message_content("look at this", &files);
+        let result = build_message_content("look at this", &files, &[]);
         assert!(result.starts_with("look at this"));
         assert!(result.contains("photo.png"));
         assert!(result.contains("image/png"));
@@ -1174,9 +1215,77 @@ mod tests {
             content: None,
             base64_content: None,
         }];
-        let result = build_message_content("hi", &files);
+        let result = build_message_content("hi", &files, &[]);
         assert!(result.contains("unknown"));
         assert!(result.contains("unknown type"));
+    }
+
+    #[test]
+    fn attachments_with_text_are_included() {
+        let attachments = vec![make_attachment(Some("This is the attachment text"), None)];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- This is the attachment text"));
+    }
+
+    #[test]
+    fn attachments_with_fallback_only_are_included() {
+        let attachments = vec![make_attachment(None, Some("fallback text here"))];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- fallback text here"));
+    }
+
+    #[test]
+    fn attachments_with_text_prefer_text_over_fallback() {
+        let attachments = vec![make_attachment(
+            Some("primary text"),
+            Some("fallback text"),
+        )];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("- primary text"));
+        assert!(!result.contains("fallback text"));
+    }
+
+    #[test]
+    fn attachments_with_neither_text_nor_fallback_are_skipped() {
+        let attachments = vec![make_attachment(None, None)];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(!result.contains("[Attachments:"));
+        assert_eq!(result, "msg");
+    }
+
+    #[test]
+    fn empty_attachments_vec_appends_no_block() {
+        let result = build_message_content("hello", &[], &[]);
+        assert!(!result.contains("[Attachments:"));
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn mix_of_files_and_attachments() {
+        let files = vec![SlackFile {
+            id: Some("F2".into()),
+            name: Some("doc.txt".into()),
+            mimetype: Some("text/plain".into()),
+            url_private: None,
+            url_private_download: None,
+            size: None,
+            content: Some("file contents".into()),
+            base64_content: None,
+        }];
+        let attachments = vec![make_attachment(Some("attachment body"), None)];
+        let result = build_message_content("base text", &files, &attachments);
+        assert!(result.starts_with("base text"));
+        assert!(result.contains("[Attached files:"));
+        assert!(result.contains("doc.txt"));
+        assert!(result.contains("file contents"));
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- attachment body"));
+        // Files block must come before Attachments block.
+        let files_pos = result.find("[Attached files:").unwrap();
+        let attachments_pos = result.find("[Attachments:").unwrap();
+        assert!(files_pos < attachments_pos);
     }
 
     // ── extract_reply_target ──────────────────────────────────────────────────

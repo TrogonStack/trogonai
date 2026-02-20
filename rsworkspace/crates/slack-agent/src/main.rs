@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     tracing::info!("Setting up JetStream stream and KV bucket...");
     ensure_slack_stream(&js).await?;
-    let memory = ConversationMemory::new(&js, config.claude_max_history).await?;
+    let memory = ConversationMemory::new(&js, config.claude_max_history, config.claude_max_history_chars).await?;
     let user_settings = UserSettingsStore::new(&js).await?;
 
     tracing::info!("Creating JetStream consumers...");

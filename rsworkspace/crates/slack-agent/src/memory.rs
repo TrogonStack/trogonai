@@ -36,11 +36,20 @@ pub struct ConversationMessage {
 pub struct ConversationMemory {
     store: Store,
     max_history: usize,
+    /// Maximum total character count of message content to retain.
+    /// `0` means disabled. Characters are used as a token proxy (chars ÷ 4 ≈ tokens).
+    max_chars: usize,
 }
 
 impl ConversationMemory {
     /// Create (or open) the KV bucket and return a `ConversationMemory`.
-    pub async fn new(js: &JsContext, max_history: usize) -> Result<Self, async_nats::Error> {
+    ///
+    /// `max_chars` caps total content character count; pass `0` to disable.
+    pub async fn new(
+        js: &JsContext,
+        max_history: usize,
+        max_chars: usize,
+    ) -> Result<Self, async_nats::Error> {
         let store = js
             .create_key_value(KvConfig {
                 bucket: KV_BUCKET.to_string(),
@@ -49,7 +58,11 @@ impl ConversationMemory {
                 ..Default::default()
             })
             .await?;
-        Ok(Self { store, max_history })
+        Ok(Self {
+            store,
+            max_history,
+            max_chars,
+        })
     }
 
     /// Load the conversation history for `session_key`.
@@ -68,14 +81,27 @@ impl ConversationMemory {
         }
     }
 
-    /// Persist `messages`, trimming to the last `max_history` entries.
+    /// Persist `messages`, trimming to the last `max_history` entries and then
+    /// by total content character count when `max_chars > 0`.
     pub async fn save(&self, session_key: &str, messages: &[ConversationMessage]) {
         let key = sanitize_key(session_key);
-        let trimmed: &[ConversationMessage] = if messages.len() > self.max_history {
+        // First pass: count-based trim.
+        let after_count: &[ConversationMessage] = if messages.len() > self.max_history {
             &messages[messages.len() - self.max_history..]
         } else {
             messages
         };
+        // Second pass: character-based trim.
+        let trimmed = trim_by_chars(after_count, self.max_chars);
+        if trimmed.len() < after_count.len() {
+            tracing::debug!(
+                session_key,
+                dropped = after_count.len() - trimmed.len(),
+                remaining = trimmed.len(),
+                max_chars = self.max_chars,
+                "Truncated conversation history by character limit"
+            );
+        }
         match serde_json::to_vec(trimmed) {
             Ok(bytes) => {
                 if let Err(e) = self.store.put(&key, bytes.into()).await {
@@ -95,6 +121,42 @@ impl ConversationMemory {
             tracing::warn!(error = %e, session_key, "Failed to clear conversation history");
         }
     }
+}
+
+/// Trim `messages` from the front so that the total `content.len()` of all
+/// remaining messages is at most `max_chars`. Always retains at least the last
+/// 2 messages to avoid dropping everything. Returns the trimmed sub-slice.
+///
+/// When `max_chars == 0` the input slice is returned unchanged.
+fn trim_by_chars<'a>(
+    messages: &'a [ConversationMessage],
+    max_chars: usize,
+) -> &'a [ConversationMessage] {
+    if max_chars == 0 || messages.is_empty() {
+        return messages;
+    }
+    // Minimum messages to always keep, regardless of size.
+    const MIN_KEEP: usize = 2;
+
+    // Accumulate character counts from the END of the slice and find the
+    // earliest index we can include without exceeding max_chars.
+    let mut total = 0usize;
+    // Start by keeping nothing; we expand towards the front in each iteration.
+    let mut keep_from = messages.len();
+
+    for (i, msg) in messages.iter().enumerate().rev() {
+        let new_total = total.saturating_add(msg.content.len());
+        let would_keep = messages.len() - i; // messages kept if we include index i
+        if new_total > max_chars && would_keep > MIN_KEEP {
+            // Adding this message would exceed the limit and we already have
+            // at least MIN_KEEP messages — stop and do not include this one.
+            break;
+        }
+        total = new_total;
+        keep_from = i;
+    }
+
+    &messages[keep_from..]
 }
 
 /// NATS KV keys allow `[-\w.]` — replace `:` with `.`.
@@ -158,5 +220,109 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("images"));
+    }
+
+    // ── trim_by_chars tests ───────────────────────────────────────────────────
+
+    fn make_msg(role: &str, content: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+            ts: None,
+            images: vec![],
+        }
+    }
+
+    #[test]
+    fn trim_by_chars_zero_disabled() {
+        let msgs = vec![
+            make_msg("user", "hello world"),
+            make_msg("assistant", "hi there"),
+        ];
+        // max_chars = 0 means disabled — nothing is trimmed.
+        let result = trim_by_chars(&msgs, 0);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn trim_by_chars_empty_slice() {
+        let msgs: Vec<ConversationMessage> = vec![];
+        let result = trim_by_chars(&msgs, 10);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn trim_by_chars_within_limit_unchanged() {
+        let msgs = vec![
+            make_msg("user", "hi"),      // 2 chars
+            make_msg("assistant", "ok"), // 2 chars
+        ];
+        // total = 4, limit = 100 — nothing dropped
+        let result = trim_by_chars(&msgs, 100);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn trim_by_chars_drops_front_messages_when_over_limit() {
+        let msgs = vec![
+            make_msg("user", "aaaa"),      // 4 chars — should be dropped
+            make_msg("assistant", "bbbb"), // 4 chars — should be dropped
+            make_msg("user", "cccc"),      // 4 chars
+            make_msg("assistant", "dddd"), // 4 chars
+        ];
+        // limit = 8: only last 2 messages fit
+        let result = trim_by_chars(&msgs, 8);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "cccc");
+        assert_eq!(result[1].content, "dddd");
+    }
+
+    #[test]
+    fn trim_by_chars_keeps_at_least_two_messages() {
+        let msgs = vec![
+            make_msg("user", "a very long message that exceeds the limit"),
+            make_msg("assistant", "another very long response that also exceeds"),
+        ];
+        // limit = 1 — would drop everything, but MIN_KEEP = 2 applies
+        let result = trim_by_chars(&msgs, 1);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn trim_by_chars_single_message_always_kept() {
+        let msgs = vec![make_msg("user", "hello world")];
+        // limit = 1 — single message, MIN_KEEP = 2 but only 1 exists
+        let result = trim_by_chars(&msgs, 1);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn trim_by_chars_exactly_at_limit_unchanged() {
+        let msgs = vec![
+            make_msg("user", "abcd"),      // 4 chars
+            make_msg("assistant", "efgh"), // 4 chars
+        ];
+        // total = 8, limit = 8 — exactly at limit, nothing dropped
+        let result = trim_by_chars(&msgs, 8);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn trim_by_chars_drops_multiple_from_front() {
+        // 5 messages, each with 10-char content. Total = 50 chars.
+        // With limit = 25, only last 2 messages (20 chars) fit if we're strict,
+        // but last 3 (30 chars) don't fit — so we keep 2.
+        let msgs = vec![
+            make_msg("user", "0123456789"),
+            make_msg("assistant", "abcdefghij"),
+            make_msg("user", "ABCDEFGHIJ"),
+            make_msg("assistant", "KLMNOPQRST"),
+            make_msg("user", "zyxwvutsrq"),
+        ];
+        let result = trim_by_chars(&msgs, 25);
+        // Last 2 messages = 20 chars (<= 25). Last 3 messages = 30 chars (> 25).
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "KLMNOPQRST");
+        assert_eq!(result[1].content, "zyxwvutsrq");
     }
 }

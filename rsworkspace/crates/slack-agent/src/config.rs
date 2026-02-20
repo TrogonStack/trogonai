@@ -67,6 +67,10 @@ pub struct SlackAgentConfig {
     pub claude_system_prompt_file: Option<String>,
     /// Maximum conversation history messages retained per session. Default: 40.
     pub claude_max_history: usize,
+    /// Maximum total character count of message content kept in history.
+    /// `0` = disabled. Characters are used as a token proxy (chars ÷ 4 ≈ tokens).
+    /// Read from `CLAUDE_MAX_HISTORY_CHARS`. Default: 0 (disabled).
+    pub claude_max_history_chars: usize,
 
     // ── Infra ─────────────────────────────────────────────────────────────
     /// Port for the HTTP health check endpoint. Default: 8081.
@@ -138,6 +142,12 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(40);
 
+        let claude_max_history_chars = env
+            .var("CLAUDE_MAX_HISTORY_CHARS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         let health_port = env
             .var("HEALTH_PORT")
             .ok()
@@ -200,6 +210,7 @@ impl SlackAgentConfig {
             claude_system_prompt,
             claude_system_prompt_file,
             claude_max_history,
+            claude_max_history_chars,
             health_port,
             welcome_message,
             dm_policy,
@@ -604,5 +615,37 @@ mod tests {
         env.set("SLACK_ALLOW_BOTS", "false");
         let config = SlackAgentConfig::from_env(&env);
         assert!(!config.allow_bots);
+    }
+
+    // ── claude_max_history_chars ───────────────────────────────────────────────
+
+    #[test]
+    fn claude_max_history_chars_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.claude_max_history_chars, 0);
+    }
+
+    #[test]
+    fn claude_max_history_chars_set() {
+        let env = base_env();
+        env.set("CLAUDE_MAX_HISTORY_CHARS", "200000");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_max_history_chars, 200_000);
+    }
+
+    #[test]
+    fn claude_max_history_chars_invalid_falls_back_to_zero() {
+        let env = base_env();
+        env.set("CLAUDE_MAX_HISTORY_CHARS", "not-a-number");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_max_history_chars, 0);
+    }
+
+    #[test]
+    fn claude_max_history_chars_zero_explicit() {
+        let env = base_env();
+        env.set("CLAUDE_MAX_HISTORY_CHARS", "0");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_max_history_chars, 0);
     }
 }
