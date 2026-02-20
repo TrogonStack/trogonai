@@ -175,8 +175,8 @@ pub async fn run_outbound_loop(
 
 pub async fn run_stream_append_loop(
     consumer: Consumer<pull::Config>,
-    slack_client: Arc<SlackHyperClient>,
     bot_token: String,
+    http_client: Arc<HttpClient>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -185,7 +185,7 @@ pub async fn run_stream_append_loop(
             return;
         }
     };
-    let token = SlackApiToken::new(bot_token.into());
+    let url = format!("{SLACK_API_BASE}/api/chat.appendStream");
 
     while let Some(result) = messages.next().await {
         let msg = match result {
@@ -198,31 +198,31 @@ pub async fn run_stream_append_loop(
 
         match serde_json::from_slice::<SlackStreamAppendMessage>(&msg.payload) {
             Ok(append) => {
-                let session = slack_client.open_session(&token);
-                let channel: SlackChannelId = append.channel.into();
-                let ts: SlackTs = append.ts.into();
-                let converted = format::markdown_to_mrkdwn(&append.text);
-                let content = SlackMessageContent::new().with_text(converted);
-                let request = SlackApiChatUpdateRequest::new(channel, content, ts);
-                let update_result = {
-                    let r = session.chat_update(&request).await;
-                    if let Err(ref e) = r
-                        && format!("{e}").contains("ratelimited")
-                    {
-                        tracing::warn!(
-                            "Slack rate limit on chat.update (append), retrying after 5 s"
-                        );
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        slack_client
-                            .open_session(&token)
-                            .chat_update(&request)
-                            .await
-                    } else {
-                        r
-                    }
-                };
-                if let Err(e) = update_result {
-                    tracing::error!(error = %e, "Failed to update streaming message (append)");
+                let body = serde_json::json!({
+                    "channel": append.channel,
+                    "message_ts": append.ts,
+                    "content": append.text,
+                });
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "chat.appendStream failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse chat.appendStream response");
+                        }
+                    },
+                    Err(e) => tracing::error!(error = %e, "HTTP error calling chat.appendStream"),
                 }
             }
             Err(e) => {
@@ -238,8 +238,8 @@ pub async fn run_stream_append_loop(
 
 pub async fn run_stream_stop_loop(
     consumer: Consumer<pull::Config>,
-    slack_client: Arc<SlackHyperClient>,
     bot_token: String,
+    http_client: Arc<HttpClient>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -248,7 +248,7 @@ pub async fn run_stream_stop_loop(
             return;
         }
     };
-    let token = SlackApiToken::new(bot_token.into());
+    let url = format!("{SLACK_API_BASE}/api/chat.stopStream");
 
     while let Some(result) = messages.next().await {
         let msg = match result {
@@ -261,45 +261,30 @@ pub async fn run_stream_stop_loop(
 
         match serde_json::from_slice::<SlackStreamStopMessage>(&msg.payload) {
             Ok(stop) => {
-                let session = slack_client.open_session(&token);
-                let channel: SlackChannelId = stop.channel.into();
-                let ts: SlackTs = stop.ts.into();
-
-                let blocks: Option<Vec<SlackBlock>> = stop.blocks.as_ref().and_then(|v| {
-                    let bytes = serde_json::to_vec(v).ok()?;
-                    serde_json::from_slice::<Vec<SlackBlock>>(&bytes)
-                        .map_err(|e| {
-                            tracing::warn!(error = %e, "Failed to parse stop blocks JSON");
-                        })
-                        .ok()
+                let body = serde_json::json!({
+                    "channel": stop.channel,
+                    "message_ts": stop.ts,
                 });
-
-                let converted_final = format::markdown_to_mrkdwn(&stop.final_text);
-                let mut content = SlackMessageContent::new().with_text(converted_final);
-                if let Some(blks) = blocks {
-                    content = content.with_blocks(blks);
-                }
-
-                let request = SlackApiChatUpdateRequest::new(channel, content, ts);
-                let update_result = {
-                    let r = session.chat_update(&request).await;
-                    if let Err(ref e) = r
-                        && format!("{e}").contains("ratelimited")
-                    {
-                        tracing::warn!(
-                            "Slack rate limit on chat.update (stop), retrying after 5 s"
-                        );
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        slack_client
-                            .open_session(&token)
-                            .chat_update(&request)
-                            .await
-                    } else {
-                        r
-                    }
-                };
-                if let Err(e) = update_result {
-                    tracing::error!(error = %e, "Failed to update streaming message (stop)");
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "chat.stopStream failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse chat.stopStream response");
+                        }
+                    },
+                    Err(e) => tracing::error!(error = %e, "HTTP error calling chat.stopStream"),
                 }
             }
             Err(e) => {
@@ -312,6 +297,7 @@ pub async fn run_stream_stop_loop(
         }
     }
 }
+
 
 pub async fn run_reaction_action_loop(
     consumer: Consumer<pull::Config>,

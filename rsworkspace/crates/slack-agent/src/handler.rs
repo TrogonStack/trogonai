@@ -302,10 +302,11 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                                 || chunk.ends_with('\n');
 
                             if new_len - last_published_len >= 80 || is_sentence_end {
+                                let delta = accumulated[last_published_len..].to_string();
                                 let append = SlackStreamAppendMessage {
                                     channel: stream_start.channel.clone(),
                                     ts: stream_start.ts.clone(),
-                                    text: accumulated.clone(),
+                                    text: delta,
                                 };
                                 if let Err(e) = publish_stream_append(&ctx.js, &append).await {
                                     tracing::warn!(error = %e, "Failed to publish stream.append");

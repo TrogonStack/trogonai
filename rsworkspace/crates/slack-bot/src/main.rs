@@ -110,16 +110,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outbound_abort = outbound_handle.abort_handle();
 
     let stream_append_handle = tokio::spawn({
-        let sc = slack_client.clone();
         let bt = bot_token.clone();
-        async move { run_stream_append_loop(stream_append_consumer, sc, bt).await }
+        let hc = Arc::new(reqwest::Client::new());
+        async move { run_stream_append_loop(stream_append_consumer, bt, hc).await }
     });
     let stream_append_abort = stream_append_handle.abort_handle();
 
     let stream_stop_handle = tokio::spawn({
-        let sc = slack_client.clone();
         let bt = bot_token.clone();
-        async move { run_stream_stop_loop(stream_stop_consumer, sc, bt).await }
+        let hc = Arc::new(reqwest::Client::new());
+        async move { run_stream_stop_loop(stream_stop_consumer, bt, hc).await }
     });
     let stream_stop_abort = stream_stop_handle.abort_handle();
 
@@ -153,11 +153,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // stream.start handler: Core NATS request/reply — stays on raw client.
     let stream_start_handle = tokio::spawn({
-        let sc = slack_client.clone();
         let nc = nats_client.clone();
         let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
         async move {
-            let token = SlackApiToken::new(bt.into());
             while let Some(msg) = stream_start_sub.next().await {
                 let reply_to = match msg.reply {
                     Some(ref r) => r.clone(),
@@ -169,45 +168,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                 match serde_json::from_slice::<SlackStreamStartRequest>(&msg.payload) {
                     Ok(req) => {
-                        let session = sc.open_session(&token);
-                        let channel: SlackChannelId = req.channel.clone().into();
-                        let initial_text = req.initial_text.unwrap_or_else(|| "…".to_string());
-
-                        let mut post_req = SlackApiChatPostMessageRequest::new(
-                            channel,
-                            SlackMessageContent::new().with_text(initial_text),
-                        );
+                        let mut body = serde_json::Map::new();
+                        body.insert("channel".into(), serde_json::Value::String(req.channel.clone()));
                         if let Some(ref tts) = req.thread_ts {
-                            post_req = post_req.with_thread_ts(tts.clone().into());
+                            body.insert("thread_ts".into(), serde_json::Value::String(tts.clone()));
                         }
 
-                        match session.chat_post_message(&post_req).await {
-                            Ok(resp) => {
-                                let response = SlackStreamStartResponse {
-                                    channel: resp.channel.0.clone(),
-                                    ts: resp.ts.0.clone(),
-                                };
-                                match serde_json::to_vec(&response) {
-                                    Ok(bytes) => {
-                                        if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                        match hc
+                            .post("https://slack.com/api/chat.startStream")
+                            .bearer_auth(&bt)
+                            .json(&serde_json::Value::Object(body))
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let channel = api_resp["channel"]
+                                        .as_str()
+                                        .unwrap_or(&req.channel)
+                                        .to_string();
+                                    let ts = api_resp["message_ts"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let response = SlackStreamStartResponse { channel, ts };
+                                    match serde_json::to_vec(&response) {
+                                        Ok(bytes) => {
+                                            if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                                                tracing::error!(
+                                                    error = %e,
+                                                    "Failed to publish stream_start reply"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
                                             tracing::error!(
                                                 error = %e,
-                                                "Failed to publish stream_start reply"
+                                                "Failed to serialize stream_start response"
                                             );
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            error = %e,
-                                            "Failed to serialize stream_start response"
-                                        );
-                                    }
                                 }
-                            }
+                                Ok(api_resp) => {
+                                    tracing::error!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        "chat.startStream failed"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse chat.startStream response"
+                                    );
+                                }
+                            },
                             Err(e) => {
                                 tracing::error!(
                                     error = %e,
-                                    "Failed to post initial stream message to Slack"
+                                    "HTTP error calling chat.startStream"
                                 );
                             }
                         }
@@ -223,6 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
     let stream_start_abort = stream_start_handle.abort_handle();
+
 
     tokio::select! {
         _ = socket_mode_listener.serve() => {
