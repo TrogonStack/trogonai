@@ -122,6 +122,13 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
             continue;
         }
 
+        // Blockquote: > at the start of a line → preserve as Slack mrkdwn blockquote.
+        if (i == 0 || chars[i - 1] == '\n') && chars[i] == '>' {
+            output.push('>');
+            i += 1;
+            continue;
+        }
+
         // Headings at start of line: # / ## / ### etc.
         if (i == 0 || chars[i - 1] == '\n') && chars[i] == '#' {
             // Count leading #
@@ -434,4 +441,31 @@ mod tests {
         let result = markdown_to_mrkdwn("[click](https://a.com/q?a=1&b=2)");
         assert_eq!(result, "<https://a.com/q?a=1&b=2|click>");
     }
+    #[test]
+    fn blockquote_at_line_start_preserved() {
+        assert_eq!(markdown_to_mrkdwn("> hello world"), "> hello world");
+    }
+
+    #[test]
+    fn blockquote_mid_line_still_escaped() {
+        // > not at line start must still be escaped
+        assert_eq!(markdown_to_mrkdwn("text > more"), "text &gt; more");
+    }
+
+    #[test]
+    fn blockquote_content_entities_escaped() {
+        // Content inside a blockquote gets entity-escaped
+        assert_eq!(markdown_to_mrkdwn("> a & b"), "> a &amp; b");
+    }
+
+    #[test]
+    fn blockquote_after_newline() {
+        assert_eq!(markdown_to_mrkdwn("line\n> quote"), "line\n> quote");
+    }
+
+    #[test]
+    fn blockquote_with_bold_inside() {
+        assert_eq!(markdown_to_mrkdwn("> **bold**"), "> *bold*");
+    }
+
 }

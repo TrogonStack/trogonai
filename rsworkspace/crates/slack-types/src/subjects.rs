@@ -74,6 +74,9 @@ pub const SLACK_OUTBOUND_DELETE: &str = "slack.outbound.delete";
 /// Update an existing Slack message (`chat.update`).
 pub const SLACK_OUTBOUND_UPDATE: &str = "slack.outbound.update";
 
+/// Request channel history (`conversations.history`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_READ_MESSAGES: &str = "slack.outbound.read_messages";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +120,7 @@ mod tests {
             SLACK_OUTBOUND_SET_STATUS,
             SLACK_OUTBOUND_DELETE,
             SLACK_OUTBOUND_UPDATE,
+            SLACK_OUTBOUND_READ_MESSAGES,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

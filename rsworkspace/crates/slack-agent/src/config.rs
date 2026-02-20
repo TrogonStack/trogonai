@@ -110,12 +110,23 @@ pub struct SlackAgentConfig {
     /// Configurable via SLACK_USER_RATE_LIMIT.
     pub user_rate_limit: u32,
 
+    // ── Debouncing ────────────────────────────────────────────────────────────
+    /// Debounce window in milliseconds. 0 = disabled (default).
+    /// When enabled, if a user sends multiple messages within this window,
+    /// only the last one is processed. Configurable via SLACK_DEBOUNCE_MS.
+    pub debounce_ms: u64,
+
     // ── Per-channel system prompts ────────────────────────────────────────────
     /// Per-channel system prompt overrides. When a message arrives on a channel
     /// that has an entry here, this prompt replaces `base_system_prompt` for that
     /// request. Read from `CHANNEL_SYSTEM_PROMPTS` env var as:
     /// `C123=prompt text,C456=other prompt`.
     pub channel_system_prompts: HashMap<String, String>,
+
+    // ── Reaction notifications ────────────────────────────────────────────────
+    /// When true, publish acknowledgment messages on thumbsup/thumbsdown reactions.
+    /// Read from SLACK_REACTION_NOTIFICATIONS env var. Default: false.
+    pub reaction_notifications: bool,
 }
 
 impl SlackAgentConfig {
@@ -219,6 +230,12 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let debounce_ms = env
+            .var("SLACK_DEBOUNCE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         let channel_system_prompts = env
             .var("CHANNEL_SYSTEM_PROMPTS")
             .ok()
@@ -237,6 +254,12 @@ impl SlackAgentConfig {
                     .collect()
             })
             .unwrap_or_default();
+
+        let reaction_notifications = env
+            .var("SLACK_REACTION_NOTIFICATIONS")
+            .ok()
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
 
         Self {
             nats: NatsConfig::from_env(env),
@@ -258,7 +281,9 @@ impl SlackAgentConfig {
             thread_initial_history_limit,
             allow_bots,
             user_rate_limit,
+            debounce_ms,
             channel_system_prompts,
+            reaction_notifications,
         }
     }
 
@@ -713,6 +738,30 @@ mod tests {
         assert_eq!(config.user_rate_limit, 0);
     }
 
+    // ── debounce_ms ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn debounce_ms_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.debounce_ms, 0);
+    }
+
+    #[test]
+    fn debounce_ms_set() {
+        let env = base_env();
+        env.set("SLACK_DEBOUNCE_MS", "500");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.debounce_ms, 500);
+    }
+
+    #[test]
+    fn debounce_ms_invalid_falls_back_to_zero() {
+        let env = base_env();
+        env.set("SLACK_DEBOUNCE_MS", "not-a-number");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.debounce_ms, 0);
+    }
+
     // ── channel_system_prompts ────────────────────────────────────────────────
 
     #[test]
@@ -747,5 +796,26 @@ mod tests {
         env.set("CHANNEL_SYSTEM_PROMPTS", "C123=a=b=c");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.channel_system_prompts.get("C123").map(|s| s.as_str()), Some("a=b=c"));
+    }
+
+    // ── reaction_notifications ────────────────────────────────────────────────
+
+    #[test]
+    fn reaction_notifications_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.reaction_notifications);
+    }
+
+    #[test]
+    fn reaction_notifications_enabled() {
+        let env = base_env();
+        env.set("SLACK_REACTION_NOTIFICATIONS", "true");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.reaction_notifications);
+
+        let env2 = base_env();
+        env2.set("SLACK_REACTION_NOTIFICATIONS", "1");
+        let config2 = SlackAgentConfig::from_env(&env2);
+        assert!(config2.reaction_notifications);
     }
 }

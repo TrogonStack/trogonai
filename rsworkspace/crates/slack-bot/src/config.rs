@@ -21,6 +21,9 @@ pub struct SlackBotConfig {
     /// Channels where mention gating is always OFF, regardless of `mention_gating`.
     /// Comma-separated channel IDs in `SLACK_NO_MENTION_CHANNELS`.
     pub no_mention_channels: HashSet<String>,
+    /// Custom text patterns (beyond @mention) that activate the bot even when
+    /// mention gating is enabled. Comma-separated substrings in `SLACK_MENTION_PATTERNS`.
+    pub mention_patterns: Vec<String>,
     /// When true, messages from bots are forwarded to NATS instead of being
     /// silently dropped. Default: false.
     pub allow_bots: bool,
@@ -62,6 +65,17 @@ impl SlackBotConfig {
             .var("SLACK_NO_MENTION_CHANNELS")
             .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
             .unwrap_or_default();
+        let mention_patterns = env
+            .var("SLACK_MENTION_PATTERNS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         let allow_bots = env
             .var("SLACK_ALLOW_BOTS")
             .map(|v| v == "true" || v == "1")
@@ -92,6 +106,7 @@ impl SlackBotConfig {
             mention_gating,
             mention_gating_channels,
             no_mention_channels,
+            mention_patterns,
             allow_bots,
             nats,
             health_port,
@@ -294,5 +309,28 @@ mod tests {
         env.set("SLACK_API_RPS", "0.0");
         let config = SlackBotConfig::from_env(&env);
         assert!((config.slack_api_rps - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mention_patterns_defaults_to_empty() {
+        let env = base_env();
+        let config = SlackBotConfig::from_env(&env);
+        assert!(config.mention_patterns.is_empty());
+    }
+
+    #[test]
+    fn mention_patterns_parsed() {
+        let env = base_env();
+        env.set("SLACK_MENTION_PATTERNS", "hey bot, help me, assistant");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.mention_patterns, vec!["hey bot", "help me", "assistant"]);
+    }
+
+    #[test]
+    fn mention_patterns_trims_whitespace() {
+        let env = base_env();
+        env.set("SLACK_MENTION_PATTERNS", " hello , world ");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.mention_patterns, vec!["hello", "world"]);
     }
 }

@@ -390,6 +390,41 @@ pub struct SlackUpdateMessage {
     pub blocks: Option<serde_json::Value>,
 }
 
+/// Request to fetch messages from a Slack channel (`conversations.history`).
+/// Uses Core NATS request/reply — send to `SLACK_OUTBOUND_READ_MESSAGES`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackReadMessagesRequest {
+    pub channel: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<String>,
+}
+
+/// A single message entry from `conversations.history`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackReadMessage {
+    pub ts: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_id: Option<String>,
+}
+
+/// NATS reply payload for `SlackReadMessagesRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackReadMessagesResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub messages: Vec<SlackReadMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -880,4 +915,58 @@ mod tests {
         let f: SlackFile = serde_json::from_str(json).unwrap();
         assert!(f.base64_content.is_none());
     }
+    #[test]
+    fn slack_read_messages_request_roundtrip() {
+        let req = SlackReadMessagesRequest {
+            channel: "C123456".into(),
+            limit: Some(50),
+            oldest: Some("1609459200.000000".into()),
+            latest: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackReadMessagesRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C123456");
+        assert_eq!(decoded.limit, Some(50));
+        assert_eq!(decoded.oldest, Some("1609459200.000000".into()));
+        assert!(decoded.latest.is_none());
+    }
+
+    #[test]
+    fn slack_read_message_roundtrip() {
+        let msg = SlackReadMessage {
+            ts: "1609459200.000001".into(),
+            user: Some("U123".into()),
+            text: Some("Hello world".into()),
+            bot_id: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackReadMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.ts, "1609459200.000001");
+        assert_eq!(decoded.user, Some("U123".into()));
+        assert_eq!(decoded.text, Some("Hello world".into()));
+        assert!(decoded.bot_id.is_none());
+    }
+
+    #[test]
+    fn slack_read_messages_response_roundtrip() {
+        let resp = SlackReadMessagesResponse {
+            ok: true,
+            messages: vec![
+                SlackReadMessage {
+                    ts: "1609459200.000001".into(),
+                    user: Some("U123".into()),
+                    text: Some("Hello".into()),
+                    bot_id: None,
+                },
+            ],
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: SlackReadMessagesResponse = serde_json::from_str(&json).unwrap();
+        assert!(decoded.ok);
+        assert_eq!(decoded.messages.len(), 1);
+        assert_eq!(decoded.messages[0].ts, "1609459200.000001");
+        assert!(decoded.error.is_none());
+    }
+
 }

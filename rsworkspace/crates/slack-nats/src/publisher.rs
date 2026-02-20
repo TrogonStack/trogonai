@@ -4,7 +4,8 @@ use slack_types::events::{
     SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteMessage,
     SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
     SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
-    SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackReadMessagesRequest, SlackReadMessagesResponse, SlackSetStatusRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
     SlackThreadBroadcastEvent, SlackUpdateMessage, SlackViewClosedEvent, SlackViewOpenRequest,
     SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
@@ -185,4 +186,18 @@ pub async fn publish_update_message(
     msg: &SlackUpdateMessage,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_UPDATE, msg).await
+}
+
+/// Fetch channel history from the bot via Core NATS request/reply.
+pub async fn request_read_messages(
+    client: &async_nats::Client,
+    req: &SlackReadMessagesRequest,
+) -> Result<SlackReadMessagesResponse, async_nats::Error> {
+    use slack_types::subjects::SLACK_OUTBOUND_READ_MESSAGES;
+    let payload = serde_json::to_vec(req)?;
+    let response = client
+        .request(SLACK_OUTBOUND_READ_MESSAGES, payload.into())
+        .await?;
+    let result: SlackReadMessagesResponse = serde_json::from_slice(&response.payload)?;
+    Ok(result)
 }

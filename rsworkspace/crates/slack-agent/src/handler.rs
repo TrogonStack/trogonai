@@ -5,8 +5,8 @@ use slack_nats::publisher::{
     publish_stream_stop, publish_view_open, publish_view_publish,
 };
 use slack_types::events::{
-    SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent, SlackChannelEvent,
-    SlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
+    PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
+    SlackChannelEvent, SlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
     SlackMessageDeletedEvent,
     SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
     SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
@@ -83,6 +83,10 @@ pub struct AgentContext {
     pub http_client: reqwest::Client,
     /// Per-user sliding-window rate limiter for inbound messages.
     pub user_rate_limiter: UserRateLimiter,
+    /// Debounce window in milliseconds (0 = disabled).
+    pub debounce_ms: u64,
+    /// Per-session pending debounce task handles; keyed by session key.
+    pub session_debounce: tokio::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -169,41 +173,11 @@ async fn refresh_app_home(ctx: &AgentContext, user_id: &str) {
 
 // ── Main inbound handler ──────────────────────────────────────────────────────
 
-/// Handles a regular inbound message.
+/// Core processing logic for an inbound message.
 ///
-/// Flow:
-/// 1. Add ack reaction (if configured).
-/// 2. Acquire per-session lock (serialises concurrent messages for the same session).
-/// 3. Load conversation history from NATS KV.
-/// 4. Request a streaming placeholder via `stream.start` (Core NATS req/reply, 10 s timeout).
-/// 5. Call Claude, streaming chunks → `stream.append` every ~80 new chars.
-/// 6. Finalize with `stream.stop`.
-/// 7. Save updated history to NATS KV.
-/// 8. Remove ack reaction.
-pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
-    // DM policy check — silently ignore direct messages when disabled.
-    if ctx.config.dm_policy == DmPolicy::Disabled
-        && matches!(msg.session_type, SessionType::Direct)
-    {
-        tracing::debug!(user = %msg.user, "DM disabled by policy, dropping message");
-        return;
-    }
-
-    // Channel allowlist check (DMs bypass this).
-    if !ctx.config.channel_allowlist.is_empty()
-        && !matches!(msg.session_type, SessionType::Direct)
-        && !ctx.config.channel_allowlist.contains(&msg.channel)
-    {
-        tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
-        return;
-    }
-
-    // Per-user rate limit check.
-    if !ctx.user_rate_limiter.check_and_record(&msg.user) {
-        tracing::warn!(user = %msg.user, "Rate limit exceeded, dropping message");
-        return;
-    }
-
+/// Contains all Claude call + history management after the early checks.
+/// Invoked either directly (debounce disabled) or after the debounce delay.
+async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     tracing::info!(
         channel = %msg.channel,
         user = %msg.user,
@@ -490,6 +464,70 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     }
 }
 
+/// Handles a regular inbound message.
+///
+/// Performs early checks (DM policy, channel allowlist, user rate limit), then
+/// either debounces or calls `process_inbound` directly.
+pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
+    // DM policy check — silently ignore direct messages when disabled.
+    if ctx.config.dm_policy == DmPolicy::Disabled
+        && matches!(msg.session_type, SessionType::Direct)
+    {
+        tracing::debug!(user = %msg.user, "DM disabled by policy, dropping message");
+        return;
+    }
+
+    // Channel allowlist check (DMs bypass this).
+    if !ctx.config.channel_allowlist.is_empty()
+        && !matches!(msg.session_type, SessionType::Direct)
+        && !ctx.config.channel_allowlist.contains(&msg.channel)
+    {
+        tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
+        return;
+    }
+
+    // Per-user rate limit check.
+    if !ctx.user_rate_limiter.check_and_record(&msg.user) {
+        tracing::warn!(user = %msg.user, "Rate limit exceeded, dropping message");
+        return;
+    }
+
+    if ctx.debounce_ms > 0 {
+        // Derive session key for debounce grouping (reuse msg.session_key if present,
+        // otherwise fall back to the channel).
+        let session_key = msg
+            .session_key
+            .clone()
+            .unwrap_or_else(|| msg.channel.clone());
+
+        // Cancel existing pending debounce for this session.
+        {
+            let mut map = ctx.session_debounce.lock().await;
+            if let Some(handle) = map.remove(&session_key) {
+                handle.abort();
+            }
+        }
+
+        // Spawn debounced processing.
+        let key = session_key.clone();
+        let ctx2 = ctx.clone();
+        let msg2 = msg;
+        let ms = ctx.debounce_ms;
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            ctx2.session_debounce.lock().await.remove(&key);
+            process_inbound(msg2, ctx2).await;
+        });
+        ctx.session_debounce
+            .lock()
+            .await
+            .insert(session_key, handle.abort_handle());
+        return;
+    }
+
+    process_inbound(msg, ctx).await;
+}
+
 /// Fallback: call Claude without streaming, send response as a regular message.
 async fn fallback_claude_response(
     claude: &ClaudeClient,
@@ -577,6 +615,20 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             "Conversation history cleared.",
         )
         .await;
+        return;
+    } else if text.eq_ignore_ascii_case("new") {
+        // Clear both possible session keys for this user/channel.
+        let channel_key = format!("slack:channel:{}", ev.channel_id);
+        let dm_key = format!("slack:dm:{}", ev.user_id);
+        ctx.memory.clear(&channel_key).await;
+        ctx.memory.clear(&dm_key).await;
+        {
+            let mut locks = ctx.session_locks.lock().unwrap();
+            locks.remove(&channel_key);
+            locks.remove(&dm_key);
+        }
+        let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
+        post_response_url(&ctx.http_client, &ev.response_url, &greeting).await;
         return;
     }
 
@@ -772,6 +824,20 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                 ts = ?ev.item_ts,
                 "Positive feedback received"
             );
+            if ctx.config.reaction_notifications {
+                if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
+                    let ack = SlackOutboundMessage {
+                        channel: channel.clone(),
+                        text: ":thumbsup: Thanks for the positive feedback!".to_string(),
+                        thread_ts: Some(ts.clone()),
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, &ack).await;
+                }
+            }
         }
 
         // Negative feedback.
@@ -781,6 +847,20 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                 ts = ?ev.item_ts,
                 "Negative feedback received"
             );
+            if ctx.config.reaction_notifications {
+                if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
+                    let ack = SlackOutboundMessage {
+                        channel: channel.clone(),
+                        text: ":thumbsdown: Thanks for the feedback — I'll try to do better!".to_string(),
+                        thread_ts: Some(ts.clone()),
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, &ack).await;
+                }
+            }
         }
 
         _ => {}
@@ -947,7 +1027,6 @@ pub async fn handle_member(ev: SlackMemberEvent, ctx: Arc<AgentContext>) {
         joined = %ev.joined,
         "Received member event"
     );
-
     if ev.joined
         && let Some(ref msg) = ctx.config.welcome_message
     {
@@ -1034,14 +1113,20 @@ pub async fn handle_view_closed(ev: SlackViewClosedEvent, _ctx: Arc<AgentContext
     // No action needed — just log. Future: could clean up pending state.
 }
 
-pub async fn handle_pin(ev: SlackPinEvent, _ctx: Arc<AgentContext>) {
-    tracing::info!(
-        kind = ?ev.kind,
-        channel = %ev.channel,
-        user = %ev.user,
-        item_ts = ?ev.item_ts,
-        "Pin event received"
-    );
+pub async fn handle_pin(ev: SlackPinEvent, ctx: Arc<AgentContext>) {
+    let add = matches!(ev.kind, PinEventKind::Added);
+    tracing::info!(channel = %ev.channel, item_ts = ?ev.item_ts, added = add, "Pin event");
+    if let Some(ref ts) = ev.item_ts {
+        let action = SlackReactionAction {
+            channel: ev.channel.clone(),
+            ts: ts.clone(),
+            reaction: "pushpin".to_string(),
+            add,
+        };
+        if let Err(e) = publish_reaction_action(&ctx.js, &action).await {
+            tracing::warn!(error = %e, "Failed to publish pin reaction action");
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

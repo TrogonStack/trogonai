@@ -38,6 +38,8 @@ pub struct BotState {
     pub mention_gating_channels: HashSet<String>,
     /// Channels where mention gating is always OFF regardless of `mention_gating`.
     pub no_mention_channels: HashSet<String>,
+    /// Custom text patterns that activate the bot even when mention gating is enabled.
+    pub mention_patterns: Vec<String>,
     /// When true, messages from bots are forwarded to NATS instead of being
     /// silently dropped.
     pub allow_bots: bool,
@@ -247,6 +249,8 @@ pub async fn handle_push_event(
                         state.mention_gating,
                         &state.mention_gating_channels,
                         &state.no_mention_channels,
+                        &text,
+                        &state.mention_patterns,
                     ) {
                         match &state.bot_user_id {
                             Some(bot_uid) => {
@@ -969,9 +973,18 @@ fn resolve_mention_gating(
     mention_gating: bool,
     mention_gating_channels: &HashSet<String>,
     no_mention_channels: &HashSet<String>,
+    text: &str,
+    mention_patterns: &[String],
 ) -> bool {
     if matches!(session_type, SessionType::Direct) || thread_ts.is_some() {
         return false;
+    }
+    // Pattern match bypasses gating regardless of channel settings.
+    if !mention_patterns.is_empty() {
+        let text_lower = text.to_lowercase();
+        if mention_patterns.iter().any(|p| text_lower.contains(&p.to_lowercase())) {
+            return false; // gating OFF = process the message
+        }
     }
     if no_mention_channels.contains(channel_id) {
         return false;
@@ -1081,42 +1094,42 @@ mod tests {
     #[test]
     fn gating_dm_always_off() {
         assert!(!resolve_mention_gating(
-            &SessionType::Direct, "C1", None, true, &make_sets(&["C1"]), &HashSet::new()
+            &SessionType::Direct, "C1", None, true, &make_sets(&["C1"]), &HashSet::new(), "", &[]
         ));
     }
 
     #[test]
     fn gating_thread_reply_always_off() {
         assert!(!resolve_mention_gating(
-            &SessionType::Channel, "C1", Some("123.0"), true, &HashSet::new(), &HashSet::new()
+            &SessionType::Channel, "C1", Some("123.0"), true, &HashSet::new(), &HashSet::new(), "", &[]
         ));
     }
 
     #[test]
     fn gating_no_mention_channel_overrides_global_on() {
         assert!(!resolve_mention_gating(
-            &SessionType::Channel, "C1", None, true, &HashSet::new(), &make_sets(&["C1"])
+            &SessionType::Channel, "C1", None, true, &HashSet::new(), &make_sets(&["C1"]), "", &[]
         ));
     }
 
     #[test]
     fn gating_mention_gating_channel_overrides_global_off() {
         assert!(resolve_mention_gating(
-            &SessionType::Channel, "C1", None, false, &make_sets(&["C1"]), &HashSet::new()
+            &SessionType::Channel, "C1", None, false, &make_sets(&["C1"]), &HashSet::new(), "", &[]
         ));
     }
 
     #[test]
     fn gating_falls_back_to_global_true() {
         assert!(resolve_mention_gating(
-            &SessionType::Channel, "C2", None, true, &make_sets(&["C1"]), &make_sets(&["C3"])
+            &SessionType::Channel, "C2", None, true, &make_sets(&["C1"]), &make_sets(&["C3"]), "", &[]
         ));
     }
 
     #[test]
     fn gating_falls_back_to_global_false() {
         assert!(!resolve_mention_gating(
-            &SessionType::Channel, "C2", None, false, &make_sets(&["C1"]), &make_sets(&["C3"])
+            &SessionType::Channel, "C2", None, false, &make_sets(&["C1"]), &make_sets(&["C3"]), "", &[]
         ));
     }
 
@@ -1124,7 +1137,7 @@ mod tests {
     fn gating_no_mention_takes_precedence_over_gating_channel() {
         // If a channel is in both sets, no_mention_channels wins (checked first).
         assert!(!resolve_mention_gating(
-            &SessionType::Channel, "C1", None, true, &make_sets(&["C1"]), &make_sets(&["C1"])
+            &SessionType::Channel, "C1", None, true, &make_sets(&["C1"]), &make_sets(&["C1"]), "", &[]
         ));
     }
 
@@ -1150,5 +1163,54 @@ mod tests {
     fn annotate_custom_emoji_empty_map_returns_unchanged() {
         let result = annotate_custom_emoji("Hello :custom:", &HashMap::new());
         assert_eq!(result, "Hello :custom:");
+    }
+
+    #[test]
+    fn gating_pattern_match_bypasses_gating() {
+        // Even with gating=true, a message matching a pattern is allowed through.
+        let patterns = vec!["hey bot".to_string()];
+        let result = resolve_mention_gating(
+            &SessionType::Channel,
+            "C1",
+            None,
+            true,  // gating ON
+            &HashSet::new(),
+            &HashSet::new(),
+            "hey bot can you help?",
+            &patterns,
+        );
+        assert!(!result, "gating should be OFF when pattern matches");
+    }
+
+    #[test]
+    fn gating_pattern_case_insensitive() {
+        let patterns = vec!["hey bot".to_string()];
+        let result = resolve_mention_gating(
+            &SessionType::Channel,
+            "C1",
+            None,
+            true,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HEY BOT please help",
+            &patterns,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn gating_no_patterns_does_not_affect_behavior() {
+        // Empty patterns — gating still applies normally
+        let result = resolve_mention_gating(
+            &SessionType::Channel,
+            "C1",
+            None,
+            true,
+            &HashSet::new(),
+            &HashSet::new(),
+            "random message",
+            &[],
+        );
+        assert!(result, "gating should still be ON with no patterns");
     }
 }

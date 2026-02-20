@@ -25,8 +25,8 @@ use slack_nats::subscriber::{
     create_update_consumer, create_view_open_consumer, create_view_publish_consumer,
 };
 use rate_limit::RateLimiter;
-use slack_types::events::{SlackStreamStartRequest, SlackStreamStartResponse};
-use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
+use slack_types::events::{SlackReadMessage, SlackReadMessagesRequest, SlackReadMessagesResponse, SlackStreamStartRequest, SlackStreamStartResponse};
+use slack_types::subjects::{SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_STREAM_START};
 use std::sync::Arc;
 use std::time::Duration;
 use trogon_nats::connect;
@@ -77,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
+    let mut read_messages_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_MESSAGES).await?;
 
     tracing::info!("Connecting to Slack via Socket Mode...");
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -87,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         mention_gating: config.mention_gating,
         mention_gating_channels: config.mention_gating_channels.clone(),
         no_mention_channels: config.no_mention_channels.clone(),
+        mention_patterns: config.mention_patterns.clone(),
         allow_bots: config.allow_bots,
         bot_token: config.bot_token.clone(),
         http_client: reqwest::Client::new(),
@@ -282,6 +284,116 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
     let stream_start_abort = stream_start_handle.abort_handle();
 
+    // read_messages handler: Core NATS request/reply — stays on raw client.
+    let read_messages_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = read_messages_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("read_messages message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                match serde_json::from_slice::<SlackReadMessagesRequest>(&msg.payload) {
+                    Ok(req) => {
+                        let limit = req.limit.unwrap_or(20).min(200);
+                        let mut query: Vec<(&str, String)> = vec![
+                            ("channel", req.channel.clone()),
+                            ("limit", limit.to_string()),
+                        ];
+                        if let Some(ref oldest) = req.oldest {
+                            query.push(("oldest", oldest.clone()));
+                        }
+                        if let Some(ref latest) = req.latest {
+                            query.push(("latest", latest.clone()));
+                        }
+
+                        rl.acquire().await;
+                        match hc
+                            .get("https://slack.com/api/conversations.history")
+                            .bearer_auth(&bt)
+                            .query(&query)
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let messages: Vec<SlackReadMessage> = api_resp["messages"]
+                                        .as_array()
+                                        .unwrap_or(&vec![])
+                                        .iter()
+                                        .map(|m| SlackReadMessage {
+                                            ts: m["ts"].as_str().unwrap_or("").to_string(),
+                                            user: m["user"].as_str().map(String::from),
+                                            text: m["text"].as_str().map(String::from),
+                                            bot_id: m["bot_id"].as_str().map(String::from),
+                                        })
+                                        .collect();
+                                    let response = SlackReadMessagesResponse { ok: true, messages, error: None };
+                                    match serde_json::to_vec(&response) {
+                                        Ok(bytes) => {
+                                            if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                                                tracing::error!(
+                                                    error = %e,
+                                                    "Failed to publish read_messages reply"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                error = %e,
+                                                "Failed to serialize read_messages response"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(api_resp) => {
+                                    tracing::error!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        "conversations.history failed"
+                                    );
+                                    let response = SlackReadMessagesResponse {
+                                        ok: false,
+                                        messages: vec![],
+                                        error: Some(api_resp["error"].as_str().unwrap_or("unknown").to_string()),
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse conversations.history response"
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "HTTP error calling conversations.history"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to deserialize read_messages NATS message"
+                        );
+                    }
+                }
+            }
+        }
+    });
+    let read_messages_abort = read_messages_handle.abort_handle();
+
 
     tokio::select! {
         _ = socket_mode_listener.serve() => {
@@ -309,6 +421,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             match res {
                 Ok(()) => tracing::warn!("Stream start NATS loop exited"),
                 Err(e) => tracing::error!(error = %e, "Stream start NATS loop panicked"),
+            }
+        }
+        res = read_messages_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Read messages NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Read messages NATS loop panicked"),
             }
         }
         res = reaction_action_handle => {
@@ -357,6 +475,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     stream_append_abort.abort();
     stream_stop_abort.abort();
     stream_start_abort.abort();
+    read_messages_abort.abort();
     reaction_action_abort.abort();
     view_open_abort.abort();
     view_publish_abort.abort();
