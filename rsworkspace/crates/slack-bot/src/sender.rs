@@ -4,6 +4,7 @@ use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
     SlackOutboundMessage, SlackReactionAction, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackViewOpenRequest, SlackViewPublishRequest,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -550,6 +551,122 @@ async fn upload_file_to_slack(
     }
 
     Ok(())
+}
+
+// ── View modal loops ──────────────────────────────────────────────────────────
+
+pub async fn run_view_open_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create view_open message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/views.open");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on view_open consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackViewOpenRequest>(&msg.payload) {
+            Ok(req) => {
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&req)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "views.open failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse views.open response");
+                        }
+                    },
+                    Err(e) => tracing::error!(error = %e, "HTTP error calling views.open"),
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackViewOpenRequest"),
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK view_open message");
+        }
+    }
+}
+
+pub async fn run_view_publish_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create view_publish message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/views.publish");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on view_publish consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackViewPublishRequest>(&msg.payload) {
+            Ok(req) => {
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&req)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "views.publish failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse views.publish response");
+                        }
+                    },
+                    Err(e) => tracing::error!(error = %e, "HTTP error calling views.publish"),
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackViewPublishRequest");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK view_publish message");
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

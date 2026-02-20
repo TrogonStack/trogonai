@@ -4,18 +4,18 @@ use slack_nats::publisher::{
     publish_outbound, publish_reaction_action, publish_stream_append, publish_stream_stop,
 };
 use slack_types::events::{
-    SessionType, SlackBlockActionEvent, SlackChannelEvent, SlackFile, SlackInboundMessage,
-    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
-    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent,
+    SessionType, SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackFile,
+    SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
+    SlackOutboundMessage, SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent,
+    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
+    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::config::{ReplyToMode, SlackAgentConfig};
+use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig};
 use crate::llm::ClaudeClient;
 use crate::memory::{ConversationMemory, ConversationMessage};
 
@@ -111,6 +111,23 @@ fn get_session_lock(ctx: &AgentContext, session_key: &str) -> Arc<tokio::sync::M
 /// 7. Save updated history to NATS KV.
 /// 8. Remove ack reaction.
 pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
+    // DM policy check — silently ignore direct messages when disabled.
+    if ctx.config.dm_policy == DmPolicy::Disabled
+        && matches!(msg.session_type, SessionType::Direct)
+    {
+        tracing::debug!(user = %msg.user, "DM disabled by policy, dropping message");
+        return;
+    }
+
+    // Channel allowlist check (DMs bypass this).
+    if !ctx.config.channel_allowlist.is_empty()
+        && !matches!(msg.session_type, SessionType::Direct)
+        && !ctx.config.channel_allowlist.contains(&msg.channel)
+    {
+        tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
+        return;
+    }
+
     tracing::info!(
         channel = %msg.channel,
         user = %msg.user,
@@ -131,8 +148,11 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         locks.retain(|_, arc| Arc::strong_count(arc) > 1);
     }
 
-    let thread_ts =
-        resolve_reply_thread_ts(&ctx.config.reply_to_mode, &msg.ts, msg.thread_ts.as_deref());
+    // Extract manual reply-target directive; compute effective thread_ts.
+    let (effective_text, reply_target_override) = extract_reply_target(&msg.text, &msg.ts);
+    let thread_ts = reply_target_override.or_else(|| {
+        resolve_reply_thread_ts(&ctx.config.reply_to_mode, &msg.ts, msg.thread_ts.as_deref())
+    });
 
     // 1. Add ack reaction.
     if let Some(emoji) = &ctx.config.ack_reaction {
@@ -147,7 +167,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     let mut history = ctx.memory.load(&session_key).await;
     history.push(ConversationMessage {
         role: "user".to_string(),
-        content: build_message_content(&msg.text, &msg.files),
+        content: build_message_content(&effective_text, &msg.files),
         ts: Some(msg.ts.clone()),
     });
 
@@ -616,6 +636,25 @@ pub async fn handle_channel(ev: SlackChannelEvent) {
     );
 }
 
+pub async fn handle_app_home(ev: SlackAppHomeOpenedEvent, _ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user = %ev.user,
+        tab = %ev.tab,
+        "Received app_home_opened event"
+    );
+    // TODO: publish views.publish to render a custom App Home tab for this user.
+}
+
+pub async fn handle_view_submission(ev: SlackViewSubmissionEvent, _ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user_id = %ev.user_id,
+        view_id = %ev.view_id,
+        callback_id = ?ev.callback_id,
+        "Received view_submission event"
+    );
+    // TODO: handle modal submission based on callback_id.
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Build the content string sent to Claude.
@@ -643,6 +682,30 @@ fn build_message_content(text: &str, files: &[SlackFile]) -> String {
     }
     content.push(']');
     content
+}
+
+/// Parse manual reply-targeting directives from the message text.
+///
+/// Directives are stripped from the returned text:
+/// - `[[reply_to_current]]`    — thread the reply under the message's own `ts`
+/// - `[[reply_to:<ts>]]`       — thread the reply under a specific `ts`
+fn extract_reply_target(text: &str, current_ts: &str) -> (String, Option<String>) {
+    if let Some(idx) = text.find("[[reply_to_current]]") {
+        let cleaned = (text[..idx].to_string() + &text[idx + "[[reply_to_current]]".len()..])
+            .trim()
+            .to_string();
+        return (cleaned, Some(current_ts.to_string()));
+    }
+    if let Some(start) = text.find("[[reply_to:") {
+        let after = &text[start + "[[reply_to:".len()..];
+        if let Some(end) = after.find("]]") {
+            let ts = after[..end].to_string();
+            let full_tag = format!("[[reply_to:{ts}]]");
+            let cleaned = text.replacen(&full_tag, "", 1).trim().to_string();
+            return (cleaned, Some(ts));
+        }
+    }
+    (text.to_string(), None)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -775,5 +838,28 @@ mod tests {
         let result = build_message_content("hi", &files);
         assert!(result.contains("unknown"));
         assert!(result.contains("unknown type"));
+    }
+
+    // ── extract_reply_target ──────────────────────────────────────────────────
+
+    #[test]
+    fn reply_target_current_directive() {
+        let (text, ts) = extract_reply_target("hello [[reply_to_current]]", "1234.0");
+        assert_eq!(text, "hello");
+        assert_eq!(ts, Some("1234.0".to_string()));
+    }
+
+    #[test]
+    fn reply_target_specific_ts() {
+        let (text, ts) = extract_reply_target("hi [[reply_to:9999.1]]", "1234.0");
+        assert_eq!(text, "hi");
+        assert_eq!(ts, Some("9999.1".to_string()));
+    }
+
+    #[test]
+    fn reply_target_none_when_no_directive() {
+        let (text, ts) = extract_reply_target("hello world", "1234.0");
+        assert_eq!(text, "hello world");
+        assert_eq!(ts, None);
     }
 }

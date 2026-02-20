@@ -3,10 +3,12 @@ use async_nats::jetstream::{
     consumer::{Consumer, pull},
 };
 use slack_types::subjects::{
-    SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER,
-    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_REACTION,
-    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_OUTBOUND,
-    SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP,
+    SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
+    SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
+    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
+    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION,
+    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_VIEW_OPEN,
+    SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 use crate::setup::STREAM_NAME;
@@ -125,4 +127,30 @@ pub async fn create_channel_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
     make_consumer(js, "slack-agent-channel", SLACK_INBOUND_CHANNEL).await
+}
+
+pub async fn create_app_home_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-app-home", SLACK_INBOUND_APP_HOME).await
+}
+
+pub async fn create_view_submission_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-view-submission", SLACK_INBOUND_VIEW_SUBMISSION).await
+}
+
+// ── Bot consumers for view outbound ──────────────────────────────────────────
+
+pub async fn create_view_open_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-view-open", SLACK_OUTBOUND_VIEW_OPEN).await
+}
+
+pub async fn create_view_publish_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-view-publish", SLACK_OUTBOUND_VIEW_PUBLISH).await
 }

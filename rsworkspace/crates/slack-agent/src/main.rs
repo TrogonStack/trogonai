@@ -8,23 +8,24 @@ use async_nats::jetstream;
 use config::SlackAgentConfig;
 use futures::StreamExt;
 use handler::{
-    AgentContext, handle_block_action, handle_channel, handle_inbound, handle_member,
-    handle_message_changed, handle_message_deleted, handle_reaction, handle_slash_command,
-    handle_thread_broadcast,
+    AgentContext, handle_app_home, handle_block_action, handle_channel, handle_inbound,
+    handle_member, handle_message_changed, handle_message_deleted, handle_reaction,
+    handle_slash_command, handle_thread_broadcast, handle_view_submission,
 };
 use health::start_health_server;
 use llm::ClaudeClient;
 use memory::ConversationMemory;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
-    create_block_action_consumer, create_channel_consumer, create_inbound_consumer,
-    create_member_consumer, create_message_changed_consumer, create_message_deleted_consumer,
-    create_reaction_consumer, create_slash_command_consumer, create_thread_broadcast_consumer,
+    create_app_home_consumer, create_block_action_consumer, create_channel_consumer,
+    create_inbound_consumer, create_member_consumer, create_message_changed_consumer,
+    create_message_deleted_consumer, create_reaction_consumer, create_slash_command_consumer,
+    create_thread_broadcast_consumer, create_view_submission_consumer,
 };
 use slack_types::events::{
-    SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackThreadBroadcastEvent,
+    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent,
+    SlackSlashCommandEvent, SlackThreadBroadcastEvent, SlackViewSubmissionEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -70,6 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let thread_broadcast_consumer = create_thread_broadcast_consumer(&js).await?;
     let member_consumer = create_member_consumer(&js).await?;
     let channel_consumer = create_channel_consumer(&js).await?;
+    let app_home_consumer = create_app_home_consumer(&js).await?;
+    let view_submission_consumer = create_view_submission_consumer(&js).await?;
 
     let mut inbound_msgs = inbound_consumer.messages().await?;
     let mut reaction_msgs = reaction_consumer.messages().await?;
@@ -80,6 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut thread_broadcast_msgs = thread_broadcast_consumer.messages().await?;
     let mut member_msgs = member_consumer.messages().await?;
     let mut channel_msgs = channel_consumer.messages().await?;
+    let mut app_home_msgs = app_home_consumer.messages().await?;
+    let mut view_submission_msgs = view_submission_consumer.messages().await?;
 
     // Resolve the effective system prompt: file takes precedence over inline text.
     let system_prompt = config
@@ -243,6 +248,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let _ = msg.ack().await;
                     }
                     Err(e) => tracing::error!(error = %e, "JetStream error on channel consumer"),
+                }
+            }
+            Some(result) = app_home_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackAppHomeOpenedEvent>(&msg.payload) {
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_app_home(ev, ctx).await });
+                            }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackAppHomeOpenedEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on app_home consumer"),
+                }
+            }
+            Some(result) = view_submission_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackViewSubmissionEvent>(&msg.payload) {
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_view_submission(ev, ctx).await });
+                            }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackViewSubmissionEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on view_submission consumer"),
                 }
             }
             _ = tokio::signal::ctrl_c() => {

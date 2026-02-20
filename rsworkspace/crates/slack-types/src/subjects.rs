@@ -27,6 +27,12 @@ pub const SLACK_INBOUND_SLASH_COMMAND: &str = "slack.inbound.slash_command";
 /// Block Kit interactive component events (button clicks, selects, etc.).
 pub const SLACK_INBOUND_BLOCK_ACTION: &str = "slack.inbound.block_action";
 
+/// User opened the App Home tab.
+pub const SLACK_INBOUND_APP_HOME: &str = "slack.inbound.app_home";
+
+/// A modal view was submitted by a user.
+pub const SLACK_INBOUND_VIEW_SUBMISSION: &str = "slack.inbound.view_submission";
+
 // ── Outbound (agent → NATS → slack-bot → Slack) ─────────────────────────────
 
 /// Simple one-shot responses (`chat.postMessage`).
@@ -46,6 +52,12 @@ pub const SLACK_OUTBOUND_STREAM_STOP: &str = "slack.outbound.stream.stop";
 /// Add or remove a reaction emoji on a Slack message (`reactions.add` / `reactions.remove`).
 pub const SLACK_OUTBOUND_REACTION: &str = "slack.outbound.reaction";
 
+/// Open a modal (`views.open`).
+pub const SLACK_OUTBOUND_VIEW_OPEN: &str = "slack.outbound.view.open";
+
+/// Publish (update) the App Home view (`views.publish`).
+pub const SLACK_OUTBOUND_VIEW_PUBLISH: &str = "slack.outbound.view.publish";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,6 +74,8 @@ mod tests {
             SLACK_INBOUND_CHANNEL,
             SLACK_INBOUND_SLASH_COMMAND,
             SLACK_INBOUND_BLOCK_ACTION,
+            SLACK_INBOUND_APP_HOME,
+            SLACK_INBOUND_VIEW_SUBMISSION,
         ];
         for s in subjects {
             assert!(!s.is_empty());
@@ -80,6 +94,8 @@ mod tests {
             SLACK_OUTBOUND_STREAM_APPEND,
             SLACK_OUTBOUND_STREAM_STOP,
             SLACK_OUTBOUND_REACTION,
+            SLACK_OUTBOUND_VIEW_OPEN,
+            SLACK_OUTBOUND_VIEW_PUBLISH,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

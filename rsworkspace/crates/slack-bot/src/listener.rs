@@ -2,15 +2,15 @@ use async_nats::jetstream::Context as JsContext;
 use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_nats::publisher::{
-    publish_block_action, publish_channel, publish_inbound, publish_member,
+    publish_app_home, publish_block_action, publish_channel, publish_inbound, publish_member,
     publish_message_changed, publish_message_deleted, publish_reaction, publish_slash_command,
-    publish_thread_broadcast,
+    publish_thread_broadcast, publish_view_submission,
 };
 use slack_types::events::{
-    ChannelEventKind, SessionType, SlackAttachment, SlackBlockActionEvent, SlackChannelEvent,
-    SlackFile as OurSlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
-    SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackThreadBroadcastEvent,
+    ChannelEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
+    SlackChannelEvent, SlackFile as OurSlackFile, SlackInboundMessage, SlackMemberEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
+    SlackThreadBroadcastEvent, SlackViewSubmissionEvent,
 };
 use std::sync::Arc;
 
@@ -473,6 +473,17 @@ pub async fn handle_push_event(
             }
         }
 
+        SlackEventCallbackBody::AppHomeOpened(ev) => {
+            let app_home_ev = SlackAppHomeOpenedEvent {
+                user: ev.user.0.clone(),
+                tab: ev.tab.unwrap_or_default(),
+                view_id: None,
+            };
+            if let Err(e) = publish_app_home(&state.nats, &app_home_ev).await {
+                tracing::error!(error = %e, "Failed to publish app_home_opened to NATS");
+            }
+        }
+
         _ => {
             // Unhandled event types (including pin_added / pin_removed).
             // slack_morphism v2.17 does not expose a typed variant for pin events,
@@ -497,27 +508,55 @@ pub async fn handle_interaction_event(
             .clone()
     };
 
-    if let SlackInteractionEvent::BlockActions(ev) = event {
-        let channel_id = ev.channel.as_ref().map(|c| c.id.0.clone());
-        let user_id = ev.user.as_ref().map(|u| u.id.0.clone()).unwrap_or_default();
-        let message_ts = ev.message.as_ref().map(|m| m.origin.ts.0.clone());
-        let trigger_id = Some(ev.trigger_id.0.clone());
+    match event {
+        SlackInteractionEvent::BlockActions(ev) => {
+            let channel_id = ev.channel.as_ref().map(|c| c.id.0.clone());
+            let user_id = ev.user.as_ref().map(|u| u.id.0.clone()).unwrap_or_default();
+            let message_ts = ev.message.as_ref().map(|m| m.origin.ts.0.clone());
+            let trigger_id = Some(ev.trigger_id.0.clone());
 
-        for action in ev.actions.iter().flatten() {
-            let block_action_ev = SlackBlockActionEvent {
-                action_id: action.action_id.0.clone(),
-                block_id: action.block_id.as_ref().map(|b| b.0.clone()),
-                user_id: user_id.clone(),
-                channel_id: channel_id.clone(),
-                message_ts: message_ts.clone(),
-                value: action.value.clone(),
-                trigger_id: trigger_id.clone(),
-            };
+            for action in ev.actions.iter().flatten() {
+                let block_action_ev = SlackBlockActionEvent {
+                    action_id: action.action_id.0.clone(),
+                    block_id: action.block_id.as_ref().map(|b| b.0.clone()),
+                    user_id: user_id.clone(),
+                    channel_id: channel_id.clone(),
+                    message_ts: message_ts.clone(),
+                    value: action.value.clone(),
+                    trigger_id: trigger_id.clone(),
+                };
 
-            if let Err(e) = publish_block_action(&state.nats, &block_action_ev).await {
-                tracing::error!(error = %e, "Failed to publish block_action to NATS");
+                if let Err(e) = publish_block_action(&state.nats, &block_action_ev).await {
+                    tracing::error!(error = %e, "Failed to publish block_action to NATS");
+                }
             }
         }
+
+        SlackInteractionEvent::ViewSubmission(ev) => {
+            let user_id = ev.user.id.0.clone();
+            let trigger_id = ev.trigger_id.map(|t| t.0).unwrap_or_default();
+            let view_id = ev.view.state_params.id.0.clone();
+            let callback_id = match &ev.view.view {
+                SlackView::Modal(m) => m.callback_id.as_ref().map(|c| c.0.clone()),
+                SlackView::Home(_) => None,
+            };
+            let values = serde_json::to_value(&ev.view.state_params.state)
+                .unwrap_or(serde_json::Value::Null);
+
+            let view_submission_ev = SlackViewSubmissionEvent {
+                user_id,
+                trigger_id,
+                view_id,
+                callback_id,
+                values,
+            };
+
+            if let Err(e) = publish_view_submission(&state.nats, &view_submission_ev).await {
+                tracing::error!(error = %e, "Failed to publish view_submission to NATS");
+            }
+        }
+
+        _ => {}
     }
 
     Ok(())

@@ -1,6 +1,24 @@
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
+/// Controls who is allowed to send the bot direct messages.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DmPolicy {
+    /// Any Slack user may DM the bot (default).
+    Open,
+    /// All DMs are silently ignored.
+    Disabled,
+}
+
+impl DmPolicy {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "disabled" => Self::Disabled,
+            _ => Self::Open,
+        }
+    }
+}
+
 /// How the agent threads replies.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReplyToMode {
@@ -54,6 +72,15 @@ pub struct SlackAgentConfig {
     /// Optional message posted to a channel when a new member joins.
     /// Controlled by SLACK_WELCOME_MESSAGE env var.
     pub welcome_message: Option<String>,
+
+    // ── Access control ────────────────────────────────────────────────────────
+    /// Controls who is allowed to DM the bot. Read from SLACK_DM_POLICY env var.
+    /// Values: "open" (default), "disabled".
+    pub dm_policy: DmPolicy,
+    /// When non-empty, only messages from these channel IDs are processed.
+    /// DMs bypass this check. Read from SLACK_CHANNEL_ALLOWLIST env var as a
+    /// comma-separated list of channel IDs.
+    pub channel_allowlist: Vec<String>,
 }
 
 impl SlackAgentConfig {
@@ -104,6 +131,23 @@ impl SlackAgentConfig {
             .ok()
             .filter(|v| !v.is_empty());
 
+        let dm_policy = env
+            .var("SLACK_DM_POLICY")
+            .map(|v| DmPolicy::from_str(&v))
+            .unwrap_or(DmPolicy::Open);
+
+        let channel_allowlist = env
+            .var("SLACK_CHANNEL_ALLOWLIST")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -116,6 +160,8 @@ impl SlackAgentConfig {
             claude_max_history,
             health_port,
             welcome_message,
+            dm_policy,
+            channel_allowlist,
         }
     }
 }
@@ -203,5 +249,39 @@ mod tests {
         env.set("SLACK_ACK_REACTION", "");
         let config = SlackAgentConfig::from_env(&env);
         assert!(config.ack_reaction.is_none());
+    }
+
+    #[test]
+    fn dm_policy_defaults_to_open() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.dm_policy, DmPolicy::Open);
+    }
+
+    #[test]
+    fn dm_policy_disabled() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("SLACK_DM_POLICY", "disabled");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.dm_policy, DmPolicy::Disabled);
+    }
+
+    #[test]
+    fn channel_allowlist_parsed() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("SLACK_CHANNEL_ALLOWLIST", "C1, C2, C3");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_allowlist, vec!["C1", "C2", "C3"]);
+    }
+
+    #[test]
+    fn channel_allowlist_empty_by_default() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.channel_allowlist.is_empty());
     }
 }

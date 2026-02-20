@@ -265,6 +265,55 @@ pub struct SlackReactionAction {
     pub add: bool,
 }
 
+// ── App Home ──────────────────────────────────────────────────────────────────
+
+/// Emitted when a user opens the App Home tab in Slack.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackAppHomeOpenedEvent {
+    pub user: String,
+    /// "home" or "messages"
+    pub tab: String,
+    /// The view currently displayed in the App Home, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_id: Option<String>,
+}
+
+// ── View submissions ──────────────────────────────────────────────────────────
+
+/// A modal view was submitted by a user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackViewSubmissionEvent {
+    pub user_id: String,
+    /// Trigger ID — may be used to open a follow-up modal.
+    pub trigger_id: String,
+    pub view_id: String,
+    /// Callback ID set when the view was opened (identifies which modal this is).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_id: Option<String>,
+    /// Block Kit state values: `{ "block_id": { "action_id": { ... } } }`.
+    pub values: serde_json::Value,
+}
+
+// ── View outbound ─────────────────────────────────────────────────────────────
+
+/// Instructs the bot to open a modal via `views.open`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackViewOpenRequest {
+    /// Trigger ID from the block action or slash command that initiated this flow.
+    pub trigger_id: String,
+    /// Full Block Kit view payload as JSON (see Slack `views.open` docs).
+    pub view: serde_json::Value,
+}
+
+/// Instructs the bot to publish (update) the App Home view via `views.publish`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackViewPublishRequest {
+    /// The Slack user whose App Home should be updated.
+    pub user_id: String,
+    /// Full Block Kit view payload as JSON (see Slack `views.publish` docs).
+    pub view: serde_json::Value,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

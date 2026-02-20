@@ -1,16 +1,19 @@
 use async_nats::jetstream::Context;
 use serde::Serialize;
 use slack_types::events::{
-    SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackReactionAction,
-    SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent,
+    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
+    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackViewOpenRequest,
+    SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
-    SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER,
-    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_REACTION,
-    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_OUTBOUND,
-    SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP,
+    SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
+    SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
+    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
+    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION,
+    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_VIEW_OPEN,
+    SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 async fn js_publish<T: Serialize>(
@@ -115,4 +118,34 @@ pub async fn publish_reaction_action(
     action: &SlackReactionAction,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_REACTION, action).await
+}
+
+pub async fn publish_app_home(
+    js: &Context,
+    ev: &SlackAppHomeOpenedEvent,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_INBOUND_APP_HOME, ev).await
+}
+
+pub async fn publish_view_submission(
+    js: &Context,
+    ev: &SlackViewSubmissionEvent,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_INBOUND_VIEW_SUBMISSION, ev).await
+}
+
+/// Publish a request to open a modal (`views.open`).
+pub async fn publish_view_open(
+    js: &Context,
+    req: &SlackViewOpenRequest,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_VIEW_OPEN, req).await
+}
+
+/// Publish a request to update the App Home view (`views.publish`).
+pub async fn publish_view_publish(
+    js: &Context,
+    req: &SlackViewPublishRequest,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_VIEW_PUBLISH, req).await
 }
