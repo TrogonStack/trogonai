@@ -42,6 +42,9 @@ pub struct SlackAgentConfig {
     pub claude_max_tokens: u32,
     /// Optional system prompt injected at the start of every conversation.
     pub claude_system_prompt: Option<String>,
+    /// Path to a file whose contents become the system prompt.
+    /// Takes precedence over `claude_system_prompt` when both are set.
+    pub claude_system_prompt_file: Option<String>,
     /// Maximum conversation history messages retained per session. Default: 40.
     pub claude_max_history: usize,
 
@@ -76,6 +79,11 @@ impl SlackAgentConfig {
             .ok()
             .filter(|v| !v.is_empty());
 
+        let claude_system_prompt_file = env
+            .var("CLAUDE_SYSTEM_PROMPT_FILE")
+            .ok()
+            .filter(|v| !v.is_empty());
+
         let claude_max_history = env
             .var("CLAUDE_MAX_HISTORY")
             .ok()
@@ -96,6 +104,7 @@ impl SlackAgentConfig {
             claude_model,
             claude_max_tokens,
             claude_system_prompt,
+            claude_system_prompt_file,
             claude_max_history,
             health_port,
         }
@@ -149,6 +158,33 @@ mod tests {
         assert_eq!(config.claude_max_tokens, 4096);
         assert_eq!(config.claude_max_history, 20);
         assert_eq!(config.health_port, 9090);
+    }
+
+    #[test]
+    fn system_prompt_file_takes_precedence() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("CLAUDE_SYSTEM_PROMPT", "inline prompt");
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "/tmp/prompt.txt");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(
+            config.claude_system_prompt_file.as_deref(),
+            Some("/tmp/prompt.txt")
+        );
+        // Both are stored; main.rs resolves precedence at runtime.
+        assert_eq!(
+            config.claude_system_prompt.as_deref(),
+            Some("inline prompt")
+        );
+    }
+
+    #[test]
+    fn empty_system_prompt_file_treated_as_none() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.claude_system_prompt_file.is_none());
     }
 
     #[test]

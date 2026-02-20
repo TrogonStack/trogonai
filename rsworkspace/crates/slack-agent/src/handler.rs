@@ -352,9 +352,19 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
 
     let text = ev.text.as_deref().unwrap_or("").trim().to_string();
 
-    // Special built-in: /command clear — wipe conversation history for this channel.
+    // Special built-in: /command clear — wipe conversation history for this session.
     if text.eq_ignore_ascii_case("clear") {
-        let session_key = format!("slack:channel:{}", ev.channel_id);
+        // Derive session key from channel_id prefix (standard Slack conventions):
+        //   D… = IM / direct message  → keyed by user
+        //   G… = group DM (MPIM)      → keyed by channel
+        //   C… = regular channel      → keyed by channel
+        let session_key = if ev.channel_id.starts_with('D') {
+            format!("slack:dm:{}", ev.user_id)
+        } else if ev.channel_id.starts_with('G') {
+            format!("slack:group:{}", ev.channel_id)
+        } else {
+            format!("slack:channel:{}", ev.channel_id)
+        };
         ctx.memory.clear(&session_key).await;
         // Also evict the per-session lock so memory is fully reset.
         ctx.session_locks.lock().unwrap().remove(&session_key);

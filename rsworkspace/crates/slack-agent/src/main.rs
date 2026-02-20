@@ -29,6 +29,8 @@ use slack_types::events::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::task::JoinSet;
 use trogon_nats::connect;
 use trogon_std::env::SystemEnv;
 
@@ -82,6 +84,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut member_msgs = member_consumer.messages().await?;
     let mut channel_msgs = channel_consumer.messages().await?;
 
+    // Resolve the effective system prompt: file takes precedence over inline text.
+    let system_prompt = config
+        .claude_system_prompt_file
+        .as_ref()
+        .and_then(|path| match std::fs::read_to_string(path) {
+            Ok(content) => Some(content.trim().to_string()),
+            Err(e) => {
+                tracing::error!(path = %path, error = %e, "Failed to read CLAUDE_SYSTEM_PROMPT_FILE");
+                None
+            }
+        })
+        .or(config.claude_system_prompt.clone());
+
     // Build Claude client (optional — only if API key is configured).
     let claude = config.anthropic_api_key.as_ref().map(|key| {
         tracing::info!(model = %config.claude_model, "Claude client configured");
@@ -89,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             key.clone(),
             config.claude_model.clone(),
             config.claude_max_tokens,
-            config.claude_system_prompt.clone(),
+            system_prompt,
         )
     });
 
@@ -111,6 +126,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     tracing::info!("Slack agent running. Press Ctrl+C to stop.");
 
+    // JoinSet tracks in-flight handler tasks so we can await them on shutdown.
+    let mut tasks: JoinSet<()> = JoinSet::new();
+
     loop {
         tokio::select! {
             Some(result) = inbound_msgs.next() => {
@@ -119,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         match serde_json::from_slice::<SlackInboundMessage>(&msg.payload) {
                             Ok(ev) => {
                                 let ctx = Arc::clone(&ctx);
-                                tokio::spawn(async move { handle_inbound(ev, ctx).await });
+                                tasks.spawn(async move { handle_inbound(ev, ctx).await });
                             }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackInboundMessage"),
                         }
@@ -170,7 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         match serde_json::from_slice::<SlackSlashCommandEvent>(&msg.payload) {
                             Ok(ev) => {
                                 let ctx = Arc::clone(&ctx);
-                                tokio::spawn(async move { handle_slash_command(ev, ctx).await });
+                                tasks.spawn(async move { handle_slash_command(ev, ctx).await });
                             }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackSlashCommandEvent"),
                         }
@@ -209,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         match serde_json::from_slice::<SlackThreadBroadcastEvent>(&msg.payload) {
                             Ok(ev) => {
                                 let ctx = Arc::clone(&ctx);
-                                tokio::spawn(async move { handle_thread_broadcast(ev, ctx).await });
+                                tasks.spawn(async move { handle_thread_broadcast(ev, ctx).await });
                             }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackThreadBroadcastEvent"),
                         }
@@ -248,6 +266,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     }
+
+    // Wait up to 30 s for in-flight tasks (Claude calls, history saves, etc.)
+    let in_flight = tasks.len();
+    if in_flight > 0 {
+        tracing::info!(
+            count = in_flight,
+            "Waiting for in-flight tasks to finish..."
+        );
+        let _ = tokio::time::timeout(Duration::from_secs(30), async {
+            while tasks.join_next().await.is_some() {}
+        })
+        .await;
+    }
+    tracing::info!("Shutdown complete");
 
     Ok(())
 }
