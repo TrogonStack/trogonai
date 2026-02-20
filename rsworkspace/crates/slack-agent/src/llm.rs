@@ -195,3 +195,59 @@ impl ClaudeClient {
         Ok((rx, handle))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_stores_model() {
+        let client = ClaudeClient::new(
+            "key".into(),
+            "claude-sonnet-4-6".into(),
+            8192,
+            None,
+        );
+        assert_eq!(client.model, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn client_stores_max_tokens() {
+        let client = ClaudeClient::new(
+            "key".into(),
+            "claude-sonnet-4-6".into(),
+            8192,
+            None,
+        );
+        assert_eq!(client.max_tokens, 8192);
+    }
+
+    #[test]
+    fn client_stores_system_prompt() {
+        let client = ClaudeClient::new(
+            "k".into(),
+            "m".into(),
+            100,
+            Some("Be helpful".into()),
+        );
+        assert_eq!(client.system_prompt, Some("Be helpful".to_string()));
+    }
+
+    #[test]
+    fn client_no_system_prompt() {
+        let client = ClaudeClient::new("k".into(), "m".into(), 100, None);
+        assert!(client.system_prompt.is_none());
+    }
+
+    #[test]
+    fn client_is_clone() {
+        let original = ClaudeClient::new(
+            "key".into(),
+            "claude-opus-4-6".into(),
+            4096,
+            None,
+        );
+        let cloned = original.clone();
+        assert_eq!(cloned.model, original.model);
+    }
+}

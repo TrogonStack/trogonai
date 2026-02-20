@@ -135,3 +135,141 @@ pub fn build_settings_modal(settings: &UserSettings, default_model: &str) -> Val
         ]
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::user_settings::UserSettings;
+
+    #[test]
+    fn app_home_view_type_is_home() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        assert_eq!(view["type"], "home");
+    }
+
+    #[test]
+    fn app_home_view_has_blocks() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        let blocks = view["blocks"].as_array().unwrap();
+        assert!(!blocks.is_empty());
+    }
+
+    #[test]
+    fn app_home_view_shows_model() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn app_home_view_shows_history_count() {
+        let view = build_app_home_view("claude-sonnet-4-6", 42, None);
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("42"));
+    }
+
+    #[test]
+    fn app_home_view_default_prompt_status() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("Default"));
+    }
+
+    #[test]
+    fn app_home_view_custom_prompt_status() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, Some("You are helpful"));
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("Custom"));
+    }
+
+    #[test]
+    fn app_home_view_has_open_settings_action() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("open_settings"));
+    }
+
+    #[test]
+    fn app_home_view_has_clear_history_action() {
+        let view = build_app_home_view("claude-sonnet-4-6", 5, None);
+        let s = serde_json::to_string(&view).unwrap();
+        assert!(s.contains("clear_history"));
+    }
+
+    #[test]
+    fn settings_modal_type_is_modal() {
+        let settings = UserSettings::default();
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        assert_eq!(modal["type"], "modal");
+    }
+
+    #[test]
+    fn settings_modal_callback_id() {
+        let settings = UserSettings::default();
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        assert_eq!(modal["callback_id"], "user_settings");
+    }
+
+    #[test]
+    fn settings_modal_has_model_block() {
+        let settings = UserSettings::default();
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let blocks = modal["blocks"].as_array().unwrap();
+        let has_model = blocks.iter().any(|b| b["block_id"] == "model_block");
+        assert!(has_model);
+    }
+
+    #[test]
+    fn settings_modal_has_system_prompt_block() {
+        let settings = UserSettings::default();
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let blocks = modal["blocks"].as_array().unwrap();
+        let has_system_prompt = blocks.iter().any(|b| b["block_id"] == "system_prompt_block");
+        assert!(has_system_prompt);
+    }
+
+    #[test]
+    fn settings_modal_initial_option_set_when_model_matches() {
+        let settings = UserSettings {
+            model: Some("claude-opus-4-6".to_string()),
+            system_prompt: None,
+        };
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let s = serde_json::to_string(&modal).unwrap();
+        assert!(s.contains("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn settings_modal_no_initial_option_for_unknown_model() {
+        let settings = UserSettings {
+            model: Some("some-custom-model".to_string()),
+            system_prompt: None,
+        };
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let s = serde_json::to_string(&modal).unwrap();
+        assert!(!s.contains("initial_option"));
+    }
+
+    #[test]
+    fn settings_modal_system_prompt_initial_value() {
+        let settings = UserSettings {
+            model: None,
+            system_prompt: Some("Be concise".to_string()),
+        };
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let s = serde_json::to_string(&modal).unwrap();
+        assert!(s.contains("Be concise"));
+    }
+
+    #[test]
+    fn settings_modal_empty_system_prompt_when_none() {
+        let settings = UserSettings::default();
+        let modal = build_settings_modal(&settings, "claude-sonnet-4-6");
+        let blocks = modal["blocks"].as_array().unwrap();
+        let system_prompt_block = blocks
+            .iter()
+            .find(|b| b["block_id"] == "system_prompt_block")
+            .unwrap();
+        assert_eq!(system_prompt_block["element"]["initial_value"], "");
+    }
+}

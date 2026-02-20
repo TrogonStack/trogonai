@@ -450,4 +450,304 @@ mod tests {
         assert_eq!(decoded.reaction, "eyes");
         assert!(decoded.add);
     }
+
+    #[test]
+    fn slack_file_roundtrip() {
+        let file = SlackFile {
+            id: Some("F123".into()),
+            name: Some("report.txt".into()),
+            mimetype: Some("text/plain".into()),
+            url_private: Some("https://files.slack.com/files-pri/T1/report.txt".into()),
+            url_private_download: Some(
+                "https://files.slack.com/files-pri/T1/download/report.txt".into(),
+            ),
+            size: Some(1024),
+            content: Some("hello world".into()),
+        };
+        let json = serde_json::to_string(&file).unwrap();
+        let decoded: SlackFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id.as_deref(), Some("F123"));
+        assert_eq!(decoded.content.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn slack_file_without_content_roundtrip() {
+        let file = SlackFile {
+            id: Some("F456".into()),
+            name: Some("image.png".into()),
+            mimetype: Some("image/png".into()),
+            url_private: None,
+            url_private_download: None,
+            size: Some(4096),
+            content: None,
+        };
+        let json = serde_json::to_string(&file).unwrap();
+        assert!(!json.contains("content"));
+        let decoded: SlackFile = serde_json::from_str(&json).unwrap();
+        assert!(decoded.content.is_none());
+    }
+
+    #[test]
+    fn slack_attachment_roundtrip() {
+        let attachment = SlackAttachment {
+            fallback: Some("A link".into()),
+            text: Some("Attachment text".into()),
+            pretext: Some("Pretext".into()),
+            author_name: Some("Jane Doe".into()),
+            from_url: Some("https://example.com".into()),
+            image_url: Some("https://example.com/img.png".into()),
+            thumb_url: Some("https://example.com/thumb.png".into()),
+            channel_id: Some("C1".into()),
+            channel_name: Some("general".into()),
+            ts: Some("1234567890.000".into()),
+            files: vec![SlackFile {
+                id: Some("F789".into()),
+                name: Some("doc.txt".into()),
+                mimetype: Some("text/plain".into()),
+                url_private: None,
+                url_private_download: None,
+                size: Some(512),
+                content: None,
+            }],
+        };
+        let json = serde_json::to_string(&attachment).unwrap();
+        let decoded: SlackAttachment = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.fallback.as_deref(), Some("A link"));
+        assert_eq!(decoded.files.len(), 1);
+        assert_eq!(decoded.files[0].id.as_deref(), Some("F789"));
+    }
+
+    #[test]
+    fn slack_message_changed_event_roundtrip() {
+        let ev = SlackMessageChangedEvent {
+            channel: "C1".into(),
+            ts: "1234567890.100".into(),
+            event_ts: Some("1234567890.200".into()),
+            previous_text: Some("old text".into()),
+            new_text: Some("new text".into()),
+            thread_ts: Some("1234567890.000".into()),
+            user: Some("U1".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackMessageChangedEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C1");
+        assert_eq!(decoded.new_text.as_deref(), Some("new text"));
+        assert_eq!(decoded.previous_text.as_deref(), Some("old text"));
+    }
+
+    #[test]
+    fn slack_message_deleted_event_roundtrip() {
+        let ev = SlackMessageDeletedEvent {
+            channel: "C2".into(),
+            deleted_ts: "1234567890.111".into(),
+            event_ts: Some("1234567890.222".into()),
+            thread_ts: Some("1234567890.000".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackMessageDeletedEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C2");
+        assert_eq!(decoded.deleted_ts, "1234567890.111");
+    }
+
+    #[test]
+    fn slack_thread_broadcast_event_roundtrip() {
+        let ev = SlackThreadBroadcastEvent {
+            channel: "C3".into(),
+            user: "U2".into(),
+            text: "broadcasted reply".into(),
+            ts: "1234567890.333".into(),
+            thread_ts: "1234567890.000".into(),
+            event_ts: Some("1234567890.444".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackThreadBroadcastEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C3");
+        assert_eq!(decoded.text, "broadcasted reply");
+        assert_eq!(decoded.thread_ts, "1234567890.000");
+    }
+
+    #[test]
+    fn slack_member_event_roundtrip() {
+        let ev = SlackMemberEvent {
+            user: "U3".into(),
+            channel: "C4".into(),
+            channel_type: Some("channel".into()),
+            team: Some("T1".into()),
+            inviter: Some("U0".into()),
+            joined: true,
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackMemberEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.user, "U3");
+        assert!(decoded.joined);
+        assert_eq!(decoded.inviter.as_deref(), Some("U0"));
+    }
+
+    #[test]
+    fn channel_event_kind_all_variants() {
+        let variants = [
+            ChannelEventKind::Created,
+            ChannelEventKind::Deleted,
+            ChannelEventKind::Renamed,
+            ChannelEventKind::Archived,
+            ChannelEventKind::Unarchived,
+        ];
+        for kind in variants {
+            let json = serde_json::to_string(&kind).unwrap();
+            let _: ChannelEventKind = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    #[test]
+    fn slack_channel_event_roundtrip() {
+        let ev = SlackChannelEvent {
+            kind: ChannelEventKind::Renamed,
+            channel_id: "C5".into(),
+            channel_name: Some("renamed-channel".into()),
+            user: Some("U4".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackChannelEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel_id, "C5");
+        assert_eq!(decoded.channel_name.as_deref(), Some("renamed-channel"));
+    }
+
+    #[test]
+    fn slack_slash_command_event_roundtrip() {
+        let ev = SlackSlashCommandEvent {
+            command: "/deploy".into(),
+            text: Some("production".into()),
+            user_id: "U5".into(),
+            channel_id: "C6".into(),
+            team_id: Some("T2".into()),
+            response_url: "https://hooks.slack.com/commands/T2/123/abc".into(),
+            trigger_id: Some("1234567.890".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackSlashCommandEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.command, "/deploy");
+        assert_eq!(decoded.text.as_deref(), Some("production"));
+        assert_eq!(decoded.user_id, "U5");
+    }
+
+    #[test]
+    fn slack_block_action_event_roundtrip() {
+        let ev = SlackBlockActionEvent {
+            action_id: "approve_button".into(),
+            block_id: Some("approval_block".into()),
+            user_id: "U6".into(),
+            channel_id: Some("C7".into()),
+            message_ts: Some("1234567890.555".into()),
+            value: Some("approved".into()),
+            trigger_id: Some("9876543.210".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackBlockActionEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.action_id, "approve_button");
+        assert_eq!(decoded.user_id, "U6");
+        assert_eq!(decoded.value.as_deref(), Some("approved"));
+    }
+
+    #[test]
+    fn slack_app_home_opened_event_roundtrip() {
+        let ev = SlackAppHomeOpenedEvent {
+            user: "U7".into(),
+            tab: "home".into(),
+            view_id: Some("V123".into()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackAppHomeOpenedEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.user, "U7");
+        assert_eq!(decoded.tab, "home");
+        assert_eq!(decoded.view_id.as_deref(), Some("V123"));
+    }
+
+    #[test]
+    fn app_home_opened_without_view_id() {
+        let json = r#"{"user":"U8","tab":"messages"}"#;
+        let decoded: SlackAppHomeOpenedEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(decoded.user, "U8");
+        assert_eq!(decoded.tab, "messages");
+        assert!(decoded.view_id.is_none());
+    }
+
+    #[test]
+    fn slack_view_submission_event_roundtrip() {
+        let ev = SlackViewSubmissionEvent {
+            user_id: "U9".into(),
+            trigger_id: "1111111.222".into(),
+            view_id: "V456".into(),
+            callback_id: Some("my_modal".into()),
+            values: serde_json::json!({"block_1": {"input_1": {"value": "some text"}}}),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let decoded: SlackViewSubmissionEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.user_id, "U9");
+        assert_eq!(decoded.view_id, "V456");
+        assert_eq!(decoded.callback_id.as_deref(), Some("my_modal"));
+    }
+
+    #[test]
+    fn view_submission_without_callback_id() {
+        let json = r#"{"user_id":"U10","trigger_id":"3333.444","view_id":"V789","values":{}}"#;
+        let decoded: SlackViewSubmissionEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(decoded.user_id, "U10");
+        assert_eq!(decoded.view_id, "V789");
+        assert!(decoded.callback_id.is_none());
+    }
+
+    #[test]
+    fn slack_view_open_request_roundtrip() {
+        let req = SlackViewOpenRequest {
+            trigger_id: "5555555.666".into(),
+            view: serde_json::json!({"type": "modal", "title": {"type": "plain_text", "text": "My Modal"}, "blocks": []}),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackViewOpenRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.trigger_id, "5555555.666");
+        assert_eq!(decoded.view["type"], "modal");
+    }
+
+    #[test]
+    fn slack_view_publish_request_roundtrip() {
+        let req = SlackViewPublishRequest {
+            user_id: "U11".into(),
+            view: serde_json::json!({"type": "home", "blocks": []}),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackViewPublishRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.user_id, "U11");
+        assert_eq!(decoded.view["type"], "home");
+    }
+
+    #[test]
+    fn slack_stream_append_message_roundtrip() {
+        let msg = SlackStreamAppendMessage {
+            channel: "C8".into(),
+            ts: "1234567890.777".into(),
+            text: "partial response so far...".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackStreamAppendMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C8");
+        assert_eq!(decoded.ts, "1234567890.777");
+        assert_eq!(decoded.text, "partial response so far...");
+    }
+
+    #[test]
+    fn slack_stream_stop_message_roundtrip() {
+        let msg = SlackStreamStopMessage {
+            channel: "C9".into(),
+            ts: "1234567890.888".into(),
+            final_text: "complete response".into(),
+            blocks: Some(
+                serde_json::json!([{"type": "section", "text": {"type": "mrkdwn", "text": "complete response"}}]),
+            ),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackStreamStopMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C9");
+        assert_eq!(decoded.final_text, "complete response");
+        assert!(decoded.blocks.is_some());
+    }
 }

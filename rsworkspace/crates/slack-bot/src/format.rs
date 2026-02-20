@@ -223,4 +223,95 @@ mod tests {
         let chunks = chunk_text("", 100);
         assert!(chunks.is_empty());
     }
+
+    #[test]
+    fn bold_and_italic_in_same_string() {
+        assert_eq!(
+            markdown_to_mrkdwn("**bold** and *italic*"),
+            "*bold* and _italic_"
+        );
+    }
+
+    #[test]
+    fn heading_only_at_start_of_line() {
+        assert_eq!(
+            markdown_to_mrkdwn("text\n## Heading\nmore"),
+            "text\n*Heading*\nmore"
+        );
+    }
+
+    #[test]
+    fn heading_h3_converts() {
+        assert_eq!(markdown_to_mrkdwn("### Title"), "*Title*");
+    }
+
+    #[test]
+    fn unmatched_bold_passes_through() {
+        assert_eq!(markdown_to_mrkdwn("**no close"), "**no close");
+    }
+
+    #[test]
+    fn unmatched_italic_passes_through() {
+        assert_eq!(markdown_to_mrkdwn("*no close"), "*no close");
+    }
+
+    #[test]
+    fn code_block_not_converted() {
+        assert_eq!(
+            markdown_to_mrkdwn("```**bold**```"),
+            "```**bold**```"
+        );
+    }
+
+    #[test]
+    fn link_with_bold_text() {
+        assert_eq!(
+            markdown_to_mrkdwn("[**click**](https://example.com)"),
+            "<https://example.com|**click**>"
+        );
+    }
+
+    #[test]
+    fn multiple_links() {
+        assert_eq!(
+            markdown_to_mrkdwn("[a](https://a.com) and [b](https://b.com)"),
+            "<https://a.com|a> and <https://b.com|b>"
+        );
+    }
+
+    #[test]
+    fn empty_string_unchanged() {
+        assert_eq!(markdown_to_mrkdwn(""), "");
+    }
+
+    #[test]
+    fn plain_text_unchanged() {
+        assert_eq!(markdown_to_mrkdwn("hello world"), "hello world");
+    }
+
+    #[test]
+    fn chunk_text_zero_limit_returns_empty() {
+        let chunks = chunk_text("hello", 0);
+        assert_eq!(chunks, Vec::<String>::new());
+    }
+
+    #[test]
+    fn chunk_text_no_newline_hard_split() {
+        let chunks = chunk_text("abcdefgh", 4);
+        assert_eq!(chunks, vec!["abcd", "efgh"]);
+    }
+
+    #[test]
+    fn chunk_text_prefers_newline_break() {
+        // slice is "abc\nde" (6 chars), rfind('\n') = 3, break_pos = 4
+        // first chunk = "abc\n", remaining = "defgh"
+        let chunks = chunk_text("abc\ndefgh", 6);
+        assert_eq!(chunks, vec!["abc\n", "defgh"]);
+    }
+
+    #[test]
+    fn chunk_text_exact_limit_no_split() {
+        let chunks = chunk_text("hello", 5);
+        assert_eq!(chunks, vec!["hello"]);
+    }
 }
