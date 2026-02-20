@@ -88,6 +88,12 @@ pub struct SlackAgentConfig {
     /// DMs bypass this check. Read from SLACK_CHANNEL_ALLOWLIST env var as a
     /// comma-separated list of channel IDs.
     pub channel_allowlist: Vec<String>,
+    /// When non-empty, only messages from these user IDs are processed.
+    /// Comma-separated list from SLACK_USER_ALLOWLIST.
+    pub user_allowlist: Vec<String>,
+    /// Messages from these user IDs are silently ignored.
+    /// Comma-separated list from SLACK_USER_BLOCKLIST.
+    pub user_blocklist: Vec<String>,
 
     // ── Per-chat-type reply mode overrides ────────────────────────────────────
     /// When set, overrides reply_to_mode for DM sessions.
@@ -127,6 +133,19 @@ pub struct SlackAgentConfig {
     /// When true, publish acknowledgment messages on thumbsup/thumbsdown reactions.
     /// Read from SLACK_REACTION_NOTIFICATIONS env var. Default: false.
     pub reaction_notifications: bool,
+
+    /// Number of retry attempts on transient Claude API errors. 0 = no retries.
+    /// Clamped to 0..=5. Default: 3.
+    pub claude_retry_attempts: u32,
+
+    /// The bot's own Slack user ID (e.g. "U01234ABCDE"). When set and
+    /// `reaction_notifications` is true, acks are only sent for reactions on
+    /// the bot's own messages. Read from SLACK_BOT_USER_ID.
+    pub bot_user_id: Option<String>,
+
+    /// Maximum concurrent Claude API calls. 0 = unlimited (default).
+    /// Read from SLACK_MAX_CONCURRENT_SESSIONS.
+    pub max_concurrent_sessions: u32,
 }
 
 impl SlackAgentConfig {
@@ -200,6 +219,20 @@ impl SlackAgentConfig {
             })
             .unwrap_or_default();
 
+        let user_allowlist = env
+            .var("SLACK_USER_ALLOWLIST")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default();
+
+        let user_blocklist = env
+            .var("SLACK_USER_BLOCKLIST")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default();
+
         let reply_to_mode_dm = env
             .var("SLACK_REPLY_TO_MODE_DM")
             .ok()
@@ -261,6 +294,21 @@ impl SlackAgentConfig {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
+        let claude_retry_attempts = env
+            .var("CLAUDE_RETRY_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(3)
+            .min(5);
+
+        let bot_user_id = env.var("SLACK_BOT_USER_ID").ok().filter(|v| !v.is_empty());
+
+        let max_concurrent_sessions = env
+            .var("SLACK_MAX_CONCURRENT_SESSIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -276,6 +324,8 @@ impl SlackAgentConfig {
             welcome_message,
             dm_policy,
             channel_allowlist,
+            user_allowlist,
+            user_blocklist,
             reply_to_mode_dm,
             reply_to_mode_group,
             thread_initial_history_limit,
@@ -284,6 +334,9 @@ impl SlackAgentConfig {
             debounce_ms,
             channel_system_prompts,
             reaction_notifications,
+            claude_retry_attempts,
+            bot_user_id,
+            max_concurrent_sessions,
         }
     }
 
@@ -817,5 +870,93 @@ mod tests {
         env2.set("SLACK_REACTION_NOTIFICATIONS", "1");
         let config2 = SlackAgentConfig::from_env(&env2);
         assert!(config2.reaction_notifications);
+    }
+
+    // ── user_allowlist ────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_allowlist_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.user_allowlist.is_empty());
+    }
+
+    #[test]
+    fn user_allowlist_parsed() {
+        let env = base_env();
+        env.set("SLACK_USER_ALLOWLIST", "U1, U2, U3");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.user_allowlist, vec!["U1", "U2", "U3"]);
+    }
+
+    // ── user_blocklist ────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_blocklist_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.user_blocklist.is_empty());
+    }
+
+    #[test]
+    fn user_blocklist_parsed() {
+        let env = base_env();
+        env.set("SLACK_USER_BLOCKLIST", "U4, U5");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.user_blocklist, vec!["U4", "U5"]);
+    }
+
+    // ── claude_retry_attempts ─────────────────────────────────────────────────
+
+    #[test]
+    fn claude_retry_attempts_defaults_to_three() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.claude_retry_attempts, 3);
+    }
+
+    #[test]
+    fn claude_retry_attempts_set() {
+        let env = base_env();
+        env.set("CLAUDE_RETRY_ATTEMPTS", "2");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_retry_attempts, 2);
+    }
+
+    #[test]
+    fn claude_retry_attempts_clamped_to_five() {
+        let env = base_env();
+        env.set("CLAUDE_RETRY_ATTEMPTS", "10");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_retry_attempts, 5);
+    }
+
+    // ── bot_user_id ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn bot_user_id_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.bot_user_id.is_none());
+    }
+
+    #[test]
+    fn bot_user_id_set() {
+        let env = base_env();
+        env.set("SLACK_BOT_USER_ID", "U01234ABCDE");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.bot_user_id.as_deref(), Some("U01234ABCDE"));
+    }
+
+    // ── max_concurrent_sessions ───────────────────────────────────────────────
+
+    #[test]
+    fn max_concurrent_sessions_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.max_concurrent_sessions, 0);
+    }
+
+    #[test]
+    fn max_concurrent_sessions_set() {
+        let env = base_env();
+        env.set("SLACK_MAX_CONCURRENT_SESSIONS", "5");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.max_concurrent_sessions, 5);
     }
 }

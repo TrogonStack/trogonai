@@ -136,6 +136,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         user_rate_limiter: UserRateLimiter::new(config.user_rate_limit),
         debounce_ms: config.debounce_ms,
         session_debounce: tokio::sync::Mutex::new(HashMap::new()),
+        claude_semaphore: if config.max_concurrent_sessions > 0 {
+            Some(Arc::new(tokio::sync::Semaphore::new(config.max_concurrent_sessions as usize)))
+        } else {
+            None
+        },
     });
 
     tracing::info!("Slack agent running. Press Ctrl+C to stop.");

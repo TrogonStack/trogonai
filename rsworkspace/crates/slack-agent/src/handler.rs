@@ -87,6 +87,8 @@ pub struct AgentContext {
     pub debounce_ms: u64,
     /// Per-session pending debounce task handles; keyed by session key.
     pub session_debounce: tokio::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    /// Semaphore limiting concurrent Claude calls. `None` = unlimited.
+    pub claude_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -325,10 +327,47 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             }
         };
 
+        // Acquire concurrency permit when configured.
+        let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+            Some(sem.acquire().await.expect("semaphore closed"))
+        } else {
+            None
+        };
+
+        // Retry loop with exponential backoff for transient Claude errors.
+        let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1); // at least 1 attempt
+        let mut _last_error = String::new();
+        let mut attempt = 0u32;
+        let call_result = loop {
+            attempt += 1;
+            match claude.stream_response(history.clone()).await {
+                Ok(result) => break Ok(result),
+                Err(e) => {
+                    _last_error = e.to_string();
+                    if attempt >= max_attempts {
+                        tracing::error!(
+                            error = %e,
+                            attempt,
+                            "Claude API call failed after all retries"
+                        );
+                        break Err(e);
+                    }
+                    let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4)); // 500ms, 1s, 2s, 4s, 8s
+                    tracing::warn!(
+                        error = %e,
+                        attempt,
+                        backoff_ms,
+                        "Claude API call failed, retrying..."
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        };
+
         match stream_ref {
             Ok(stream_start) => {
                 // 4b. Stream Claude response; publish stream.append periodically.
-                match claude.stream_response(history.clone()).await {
+                match call_result {
                     Ok((mut rx, handle)) => {
                         let mut accumulated = String::new();
                         let mut last_published_len: usize = 0;
@@ -483,6 +522,19 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         && !ctx.config.channel_allowlist.contains(&msg.channel)
     {
         tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
+        return;
+    }
+
+    // User blocklist — silently drop blocked users.
+    if ctx.config.user_blocklist.iter().any(|id| id == &msg.user) {
+        tracing::debug!(user = %msg.user, "User is blocklisted, dropping message");
+        return;
+    }
+    // User allowlist — only process listed users when the list is non-empty.
+    if !ctx.config.user_allowlist.is_empty()
+        && !ctx.config.user_allowlist.iter().any(|id| id == &msg.user)
+    {
+        tracing::debug!(user = %msg.user, "User not in allowlist, dropping message");
         return;
     }
 
@@ -824,7 +876,12 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                 ts = ?ev.item_ts,
                 "Positive feedback received"
             );
-            if ctx.config.reaction_notifications {
+            // Only ack reactions on the bot's own messages when bot_user_id is configured.
+            let on_bot_message = ctx.config.bot_user_id.as_deref()
+                .map(|bot_id| ev.item_user.as_deref() == Some(bot_id))
+                .unwrap_or(true); // if not configured, ack any message
+
+            if ctx.config.reaction_notifications && on_bot_message {
                 if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
                     let ack = SlackOutboundMessage {
                         channel: channel.clone(),
@@ -847,7 +904,12 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                 ts = ?ev.item_ts,
                 "Negative feedback received"
             );
-            if ctx.config.reaction_notifications {
+            // Only ack reactions on the bot's own messages when bot_user_id is configured.
+            let on_bot_message = ctx.config.bot_user_id.as_deref()
+                .map(|bot_id| ev.item_user.as_deref() == Some(bot_id))
+                .unwrap_or(true); // if not configured, ack any message
+
+            if ctx.config.reaction_notifications && on_bot_message {
                 if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
                     let ack = SlackOutboundMessage {
                         channel: channel.clone(),
