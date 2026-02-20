@@ -98,7 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outbound_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
-        async move { run_outbound_loop(outbound_consumer, sc, bt).await }
+        let hc = Arc::new(reqwest::Client::new());
+        async move { run_outbound_loop(outbound_consumer, sc, bt, hc).await }
     });
     let outbound_abort = outbound_handle.abort_handle();
 

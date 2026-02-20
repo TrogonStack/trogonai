@@ -1,5 +1,6 @@
 use async_nats::jetstream::consumer::{Consumer, pull};
 use futures::StreamExt;
+use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
     SlackOutboundMessage, SlackReactionAction, SlackStreamAppendMessage, SlackStreamStopMessage,
@@ -17,6 +18,7 @@ pub async fn run_outbound_loop(
     consumer: Consumer<pull::Config>,
     slack_client: Arc<SlackHyperClient>,
     bot_token: String,
+    http_client: Arc<HttpClient>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -25,6 +27,7 @@ pub async fn run_outbound_loop(
             return;
         }
     };
+    let raw_token = bot_token.clone();
     let token = SlackApiToken::new(bot_token.into());
 
     while let Some(result) = messages.next().await {
@@ -53,8 +56,29 @@ pub async fn run_outbound_loop(
                         .ok()
                 });
 
-                if let Some(media_url) = &outbound.media_url {
-                    tracing::warn!(url = %media_url, "TODO: media upload not yet supported");
+                if let Some(ref media_url) = outbound.media_url {
+                    match upload_file_to_slack(
+                        &http_client,
+                        &raw_token,
+                        &channel,
+                        thread_ts.as_ref(),
+                        &converted_text,
+                        media_url,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            let _ = msg.ack().await;
+                            continue;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                url = %media_url,
+                                "Media upload failed, falling back to text-only post"
+                            );
+                        }
+                    }
                 }
 
                 let chunks = format::chunk_text(&converted_text, format::SLACK_TEXT_LIMIT);
@@ -355,4 +379,127 @@ pub async fn run_reaction_action_loop(
             tracing::error!(error = %e, "Failed to ACK reaction_action message");
         }
     }
+}
+
+// ── File upload ───────────────────────────────────────────────────────────────
+
+/// Upload a file to Slack using the two-step API introduced in 2023:
+/// 1. `files.getUploadURLExternal` — obtain a pre-signed upload URL + file ID
+/// 2. PUT the raw bytes to that URL
+/// 3. `files.completeUploadExternal` — associate the file with a channel
+///
+/// On success the file appears as a native Slack attachment; the caller should
+/// skip the plain-text fallback post.  On failure the error is returned so the
+/// caller can fall back to text-only.
+async fn upload_file_to_slack(
+    http: &HttpClient,
+    token: &str,
+    channel: &SlackChannelId,
+    thread_ts: Option<&SlackTs>,
+    text: &str,
+    media_url: &str,
+) -> Result<(), String> {
+    // 1. Download the file from the media URL.
+    let download = http
+        .get(media_url)
+        .send()
+        .await
+        .map_err(|e| format!("download request: {e}"))?;
+
+    let filename = media_url
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.split('?').next())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("file")
+        .to_string();
+
+    let content_type = download
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    let bytes = download
+        .bytes()
+        .await
+        .map_err(|e| format!("download body: {e}"))?;
+    let length = bytes.len();
+
+    // 2. Ask Slack for a pre-signed upload URL.
+    let get_url: serde_json::Value = http
+        .post("https://slack.com/api/files.getUploadURLExternal")
+        .bearer_auth(token)
+        .form(&[("filename", filename.as_str()), ("length", &length.to_string())])
+        .send()
+        .await
+        .map_err(|e| format!("getUploadURLExternal request: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("getUploadURLExternal parse: {e}"))?;
+
+    if !get_url["ok"].as_bool().unwrap_or(false) {
+        return Err(format!(
+            "files.getUploadURLExternal: {}",
+            get_url["error"].as_str().unwrap_or("unknown")
+        ));
+    }
+
+    let upload_url = get_url["upload_url"]
+        .as_str()
+        .ok_or_else(|| "missing upload_url in Slack response".to_string())?
+        .to_string();
+    let file_id = get_url["file_id"]
+        .as_str()
+        .ok_or_else(|| "missing file_id in Slack response".to_string())?
+        .to_string();
+
+    // 3. PUT the raw bytes to the pre-signed URL.
+    http.put(&upload_url)
+        .header(reqwest::header::CONTENT_TYPE, &content_type)
+        .body(bytes)
+        .send()
+        .await
+        .map_err(|e| format!("upload PUT: {e}"))?;
+
+    // 4. Complete the upload and associate it with the channel.
+    let mut body = serde_json::Map::new();
+    body.insert("files".into(), serde_json::json!([{"id": file_id}]));
+    body.insert(
+        "channel_id".into(),
+        serde_json::Value::String(channel.0.clone()),
+    );
+    if !text.is_empty() {
+        body.insert(
+            "initial_comment".into(),
+            serde_json::Value::String(text.to_string()),
+        );
+    }
+    if let Some(ts) = thread_ts {
+        body.insert(
+            "thread_ts".into(),
+            serde_json::Value::String(ts.0.clone()),
+        );
+    }
+
+    let complete: serde_json::Value = http
+        .post("https://slack.com/api/files.completeUploadExternal")
+        .bearer_auth(token)
+        .json(&serde_json::Value::Object(body))
+        .send()
+        .await
+        .map_err(|e| format!("completeUploadExternal request: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("completeUploadExternal parse: {e}"))?;
+
+    if !complete["ok"].as_bool().unwrap_or(false) {
+        return Err(format!(
+            "files.completeUploadExternal: {}",
+            complete["error"].as_str().unwrap_or("unknown")
+        ));
+    }
+
+    Ok(())
 }
