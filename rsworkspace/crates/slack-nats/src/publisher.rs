@@ -259,3 +259,31 @@ pub async fn publish_delete_file(
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_DELETE_FILE, req).await
 }
+
+/// List workspace users from the bot via Core NATS request/reply.
+pub async fn request_list_users(
+    client: &async_nats::Client,
+    req: &slack_types::events::SlackListUsersRequest,
+) -> Result<slack_types::events::SlackListUsersResponse, String> {
+    use slack_types::subjects::SLACK_OUTBOUND_LIST_USERS;
+    let payload = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let response = client
+        .request(SLACK_OUTBOUND_LIST_USERS, payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&response.payload).map_err(|e| e.to_string())
+}
+
+/// List channels/conversations from the bot via Core NATS request/reply.
+pub async fn request_list_conversations(
+    client: &async_nats::Client,
+    req: &slack_types::events::SlackListConversationsRequest,
+) -> Result<slack_types::events::SlackListConversationsResponse, String> {
+    use slack_types::subjects::SLACK_OUTBOUND_LIST_CONVERSATIONS;
+    let payload = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let response = client
+        .request(SLACK_OUTBOUND_LIST_CONVERSATIONS, payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&response.payload).map_err(|e| e.to_string())
+}

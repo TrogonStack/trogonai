@@ -5,7 +5,7 @@ version: "3.9"
 #   SLACK_BOT_TOKEN   xoxb-...
 #   SLACK_APP_TOKEN   xapp-...
 # Optional:
-#   SLACK_BOT_USER_ID              UXXXXXXXX  (filters bot's own messages)
+#   SLACK_BOT_USER_ID              UXXXXXXXX  (filters bot's own messages; auto-detected)
 #   SLACK_MENTION_GATING           false      (respond to all channel messages; default: true)
 #   SLACK_MENTION_GATING_CHANNELS  C123,C456  (channels where mention-gating is enforced)
 #   SLACK_NO_MENTION_CHANNELS      C123,C456  (channels where bot responds without mention)
@@ -17,18 +17,30 @@ version: "3.9"
 #   SLACK_REPLY_TO_MODE_DM         off | first | all  (overrides SLACK_REPLY_TO_MODE for DMs)
 #   SLACK_REPLY_TO_MODE_GROUP      off | first | all  (overrides SLACK_REPLY_TO_MODE for group DMs)
 #   SLACK_ACK_REACTION             eyes       (emoji added while processing; default: none)
-#   SLACK_DM_POLICY                open       (who can DM the bot: open | allowlist; default: open)
+#   SLACK_DM_POLICY                open       (who can DM the bot: open | disabled; default: open)
 #   SLACK_CHANNEL_ALLOWLIST        C123,C456  (channels the bot will respond in; empty = all)
 #   SLACK_WELCOME_MESSAGE          "Hi!"      (message sent when a user opens a DM for the first time)
 #   SLACK_USER_RATE_LIMIT          0          (max requests per user per minute; 0 = unlimited)
+#   SLACK_USER_ALLOWLIST           U123,U456  (users allowed to interact; empty = all)
+#   SLACK_USER_BLOCKLIST           U123,U456  (users blocked from interacting; empty = none)
+#   SLACK_DEBOUNCE_MS              0          (debounce window in ms; 0 = disabled)
+#   SLACK_REACTION_NOTIFICATIONS   false      (acknowledge reactions; default: false)
+#   SLACK_SEED_HISTORY_ON_START    0          (messages to fetch on session start; 0 = disabled)
+#   SLACK_NO_TYPING_CHANNELS       C123,C456  (channels where typing indicator is suppressed)
+#   SLACK_DM_PAIR_CHANNEL          C123       (channel to pair with DM sessions)
+#   SLACK_SUGGESTED_PROMPTS        "Title:Message,Title2:Message2"  (suggested prompts for UI)
 #   THREAD_INITIAL_HISTORY_LIMIT   0          (messages fetched from thread on first reply; 0 = none)
 #   ANTHROPIC_API_KEY              sk-ant-... (enables Claude; without it the agent echoes)
 #   CLAUDE_MODEL                   claude-sonnet-4-6  (default)
 #   CLAUDE_MAX_TOKENS              8192       (default)
 #   CLAUDE_SYSTEM_PROMPT           "You are a helpful assistant."
 #   CLAUDE_SYSTEM_PROMPT_FILE      /run/secrets/prompt.txt  (takes precedence over inline)
+#   CLAUDE_RETRY_ATTEMPTS          3          (retry attempts on transient errors)
 #   CLAUDE_MAX_HISTORY             40         (messages kept in KV; default)
 #   CLAUDE_MAX_HISTORY_CHARS       0          (max total chars kept in history; 0 = unlimited)
+#   SLACK_MAX_CONCURRENT_SESSIONS  0          (concurrent Claude API calls; 0 = unlimited)
+#   SLACK_UPLOAD_THRESHOLD_CHARS   3000       (upload as file if longer than this)
+#   CHANNEL_SYSTEM_PROMPTS         "C123=prompt,C456=other prompt"  (per-channel overrides)
 #   NATS_TOKEN                                (NATS authentication token)
 #   NATS_CREDS                                (path to NATS credentials file)
 #   RUST_LOG                       info | debug | trace
@@ -99,7 +111,6 @@ services:
       SLACK_CHANNEL_ALLOWLIST: ${SLACK_CHANNEL_ALLOWLIST:-}
       SLACK_USER_ALLOWLIST: ${SLACK_USER_ALLOWLIST:-}
       SLACK_USER_BLOCKLIST: ${SLACK_USER_BLOCKLIST:-}
-      CHANNEL_SYSTEM_PROMPTS: ${CHANNEL_SYSTEM_PROMPTS:-}
       SLACK_WELCOME_MESSAGE: ${SLACK_WELCOME_MESSAGE:-}
       SLACK_ALLOW_BOTS: ${SLACK_ALLOW_BOTS:-false}
       SLACK_USER_RATE_LIMIT: ${SLACK_USER_RATE_LIMIT:-0}
@@ -107,6 +118,11 @@ services:
       SLACK_REACTION_NOTIFICATIONS: ${SLACK_REACTION_NOTIFICATIONS:-false}
       SLACK_MAX_CONCURRENT_SESSIONS: ${SLACK_MAX_CONCURRENT_SESSIONS:-0}
       SLACK_UPLOAD_THRESHOLD_CHARS: ${SLACK_UPLOAD_THRESHOLD_CHARS:-0}
+      SLACK_SEED_HISTORY_ON_START: ${SLACK_SEED_HISTORY_ON_START:-0}
+      SLACK_NO_TYPING_CHANNELS: ${SLACK_NO_TYPING_CHANNELS:-}
+      SLACK_DM_PAIR_CHANNEL: ${SLACK_DM_PAIR_CHANNEL:-}
+      SLACK_SUGGESTED_PROMPTS: ${SLACK_SUGGESTED_PROMPTS:-}
+      CHANNEL_SYSTEM_PROMPTS: ${CHANNEL_SYSTEM_PROMPTS:-}
       THREAD_INITIAL_HISTORY_LIMIT: ${THREAD_INITIAL_HISTORY_LIMIT:-0}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}

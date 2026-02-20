@@ -1185,3 +1185,202 @@ mod tests {
 
 
 }
+
+// ── users.list and conversations.list types ───────────────────────────────────
+
+/// Request to list workspace users.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListUsersRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+/// A single user in the workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListUsersUser {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub real_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub is_bot: bool,
+    pub deleted: bool,
+}
+
+/// Response from users.list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListUsersResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub members: Vec<SlackListUsersUser>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Request to list channels/conversations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListConversationsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_archived: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+}
+
+/// A single conversation/channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListConversationsChannel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub is_channel: bool,
+    pub is_private: bool,
+    pub is_archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_members: Option<u32>,
+}
+
+/// Response from conversations.list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackListConversationsResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub channels: Vec<SlackListConversationsChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+
+    #[test]
+    fn slack_list_users_request_roundtrip() {
+        let req = SlackListUsersRequest {
+            limit: Some(100),
+            cursor: Some("dXNlcjox".into()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackListUsersRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.limit, Some(100));
+        assert_eq!(decoded.cursor.as_deref(), Some("dXNlcjox"));
+
+        // None fields are skipped
+        let req_no_cursor = SlackListUsersRequest { limit: Some(10), cursor: None };
+        let json2 = serde_json::to_string(&req_no_cursor).unwrap();
+        assert!(!json2.contains("cursor"));
+    }
+
+    #[test]
+    fn slack_list_users_user_roundtrip() {
+        let user = SlackListUsersUser {
+            id: "U123".into(),
+            name: "alice".into(),
+            real_name: Some("Alice Smith".into()),
+            display_name: Some("alice".into()),
+            is_bot: false,
+            deleted: false,
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let decoded: SlackListUsersUser = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, "U123");
+        assert_eq!(decoded.name, "alice");
+        assert_eq!(decoded.real_name.as_deref(), Some("Alice Smith"));
+        assert_eq!(decoded.display_name.as_deref(), Some("alice"));
+        assert!(!decoded.is_bot);
+        assert!(!decoded.deleted);
+    }
+
+    #[test]
+    fn slack_list_users_response_roundtrip() {
+        let resp = SlackListUsersResponse {
+            ok: true,
+            members: vec![SlackListUsersUser {
+                id: "U001".into(),
+                name: "bob".into(),
+                real_name: None,
+                display_name: None,
+                is_bot: false,
+                deleted: false,
+            }],
+            next_cursor: Some("abc123".into()),
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: SlackListUsersResponse = serde_json::from_str(&json).unwrap();
+        assert!(decoded.ok);
+        assert_eq!(decoded.members.len(), 1);
+        assert_eq!(decoded.members[0].id, "U001");
+        assert_eq!(decoded.next_cursor.as_deref(), Some("abc123"));
+        assert!(decoded.error.is_none());
+    }
+
+    #[test]
+    fn slack_list_conversations_request_roundtrip() {
+        let req = SlackListConversationsRequest {
+            limit: Some(50),
+            cursor: None,
+            exclude_archived: Some(true),
+            types: Some("public_channel,private_channel".into()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackListConversationsRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.limit, Some(50));
+        assert!(decoded.cursor.is_none());
+        assert_eq!(decoded.exclude_archived, Some(true));
+        assert_eq!(decoded.types.as_deref(), Some("public_channel,private_channel"));
+    }
+
+    #[test]
+    fn slack_list_conversations_channel_roundtrip() {
+        let ch = SlackListConversationsChannel {
+            id: "C123".into(),
+            name: Some("general".into()),
+            is_channel: true,
+            is_private: false,
+            is_archived: false,
+            num_members: Some(42),
+        };
+        let json = serde_json::to_string(&ch).unwrap();
+        let decoded: SlackListConversationsChannel = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, "C123");
+        assert_eq!(decoded.name.as_deref(), Some("general"));
+        assert!(decoded.is_channel);
+        assert!(!decoded.is_private);
+        assert!(!decoded.is_archived);
+        assert_eq!(decoded.num_members, Some(42));
+    }
+
+    #[test]
+    fn slack_list_conversations_response_roundtrip() {
+        let resp = SlackListConversationsResponse {
+            ok: true,
+            channels: vec![SlackListConversationsChannel {
+                id: "C999".into(),
+                name: Some("random".into()),
+                is_channel: true,
+                is_private: false,
+                is_archived: false,
+                num_members: None,
+            }],
+            next_cursor: None,
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: SlackListConversationsResponse = serde_json::from_str(&json).unwrap();
+        assert!(decoded.ok);
+        assert_eq!(decoded.channels.len(), 1);
+        assert_eq!(decoded.channels[0].id, "C999");
+        assert!(decoded.next_cursor.is_none());
+    }
+}

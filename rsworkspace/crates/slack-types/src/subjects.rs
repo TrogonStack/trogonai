@@ -96,6 +96,13 @@ pub const SLACK_OUTBOUND_EPHEMERAL: &str = "slack.outbound.ephemeral";
 /// Delete an uploaded file (`files.delete`).
 pub const SLACK_OUTBOUND_DELETE_FILE: &str = "slack.outbound.delete_file";
 
+/// List workspace users (`users.list`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_LIST_USERS: &str = "slack.outbound.list_users";
+
+/// List channels/conversations (`conversations.list`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_LIST_CONVERSATIONS: &str = "slack.outbound.list_conversations";
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +153,8 @@ mod tests {
             SLACK_OUTBOUND_PROACTIVE,
             SLACK_OUTBOUND_EPHEMERAL,
             SLACK_OUTBOUND_DELETE_FILE,
+            SLACK_OUTBOUND_LIST_USERS,
+            SLACK_OUTBOUND_LIST_CONVERSATIONS,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

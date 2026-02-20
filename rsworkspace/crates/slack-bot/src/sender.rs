@@ -949,41 +949,53 @@ pub async fn run_suggested_prompts_loop(
                 }
                 body.insert("prompts".into(), serde_json::Value::Array(prompts));
 
+                let make_req = || {
+                    http_client
+                        .post(&url)
+                        .bearer_auth(&bot_token)
+                        .json(&serde_json::Value::Object(body.clone()))
+                };
                 rate_limiter.acquire().await;
-                match http_client
-                    .post(&url)
-                    .bearer_auth(&bot_token)
-                    .json(&serde_json::Value::Object(body))
-                    .send()
-                    .await
-                {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
-                            tracing::warn!(
-                                "Slack rate limit on setSuggestedPrompts, retrying after 5 s"
-                            );
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        }
-                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
-                            tracing::error!(
-                                api_error = body["error"].as_str().unwrap_or("unknown"),
-                                "assistant.threads.setSuggestedPrompts failed"
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                "Failed to parse setSuggestedPrompts response"
-                            );
-                        }
-                    },
+                let resp_val: Option<serde_json::Value> = match make_req().send().await {
+                    Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
                     Err(e) => {
                         tracing::error!(
                             error = %e,
                             "HTTP error calling assistant.threads.setSuggestedPrompts"
                         );
+                        None
                     }
+                };
+                let resp_val = if let Some(ref v) = resp_val
+                    && v["error"].as_str() == Some("ratelimited")
+                {
+                    tracing::warn!(
+                        "Slack rate limit on setSuggestedPrompts, retrying after 5 s"
+                    );
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    rate_limiter.acquire().await;
+                    match make_req().send().await {
+                        Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "HTTP error calling assistant.threads.setSuggestedPrompts (retry)"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    resp_val
+                };
+                match resp_val {
+                    Some(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                        tracing::error!(
+                            api_error = body["error"].as_str().unwrap_or("unknown"),
+                            "assistant.threads.setSuggestedPrompts failed"
+                        );
+                    }
+                    Some(_) => {}
+                    None => {}
                 }
             }
             Err(e) => {
@@ -1213,38 +1225,48 @@ pub async fn run_ephemeral_loop(
                     }
                 }
 
+                let make_req = || {
+                    http_client
+                        .post(&url)
+                        .bearer_auth(&bot_token)
+                        .json(&serde_json::Value::Object(body.clone()))
+                };
                 rate_limiter.acquire().await;
-                match http_client
-                    .post(&url)
-                    .bearer_auth(&bot_token)
-                    .json(&serde_json::Value::Object(body))
-                    .send()
-                    .await
+                let resp_val: Option<serde_json::Value> = match make_req().send().await {
+                    Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling chat.postEphemeral");
+                        None
+                    }
+                };
+                let resp_val = if let Some(ref v) = resp_val
+                    && v["error"].as_str() == Some("ratelimited")
                 {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
-                            tracing::warn!(
-                                "Slack rate limit on postEphemeral, retrying after 5 s"
-                            );
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        }
-                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
-                            tracing::error!(
-                                api_error = body["error"].as_str().unwrap_or("unknown"),
-                                "chat.postEphemeral failed"
-                            );
-                        }
-                        Ok(_) => {}
+                    tracing::warn!("Slack rate limit on postEphemeral, retrying after 5 s");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    rate_limiter.acquire().await;
+                    match make_req().send().await {
+                        Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
                         Err(e) => {
                             tracing::error!(
                                 error = %e,
-                                "Failed to parse chat.postEphemeral response"
+                                "HTTP error calling chat.postEphemeral (retry)"
                             );
+                            None
                         }
-                    },
-                    Err(e) => {
-                        tracing::error!(error = %e, "HTTP error calling chat.postEphemeral");
                     }
+                } else {
+                    resp_val
+                };
+                match resp_val {
+                    Some(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                        tracing::error!(
+                            api_error = body["error"].as_str().unwrap_or("unknown"),
+                            "chat.postEphemeral failed"
+                        );
+                    }
+                    Some(_) => {}
+                    None => {}
                 }
             }
             Err(e) => {
@@ -1286,35 +1308,48 @@ pub async fn run_delete_file_loop(
             Ok(req) => {
                 let body = serde_json::json!({"file": req.file_id});
 
+                let make_req = || {
+                    http_client
+                        .post(&url)
+                        .bearer_auth(&bot_token)
+                        .json(&body)
+                };
                 rate_limiter.acquire().await;
-                match http_client
-                    .post(&url)
-                    .bearer_auth(&bot_token)
-                    .json(&body)
-                    .send()
-                    .await
-                {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
-                            tracing::warn!(
-                                "Slack rate limit on files.delete, retrying after 5 s"
-                            );
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        }
-                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
-                            tracing::error!(
-                                api_error = body["error"].as_str().unwrap_or("unknown"),
-                                "files.delete failed"
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::error!(error = %e, "Failed to parse files.delete response");
-                        }
-                    },
+                let resp_val: Option<serde_json::Value> = match make_req().send().await {
+                    Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
                     Err(e) => {
                         tracing::error!(error = %e, "HTTP error calling files.delete");
+                        None
                     }
+                };
+                let resp_val = if let Some(ref v) = resp_val
+                    && v["error"].as_str() == Some("ratelimited")
+                {
+                    tracing::warn!("Slack rate limit on files.delete, retrying after 5 s");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    rate_limiter.acquire().await;
+                    match make_req().send().await {
+                        Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "HTTP error calling files.delete (retry)"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    resp_val
+                };
+                match resp_val {
+                    Some(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                        tracing::error!(
+                            api_error = body["error"].as_str().unwrap_or("unknown"),
+                            "files.delete failed"
+                        );
+                    }
+                    Some(_) => {}
+                    None => {}
                 }
             }
             Err(e) => {

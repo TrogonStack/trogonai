@@ -29,12 +29,15 @@ use slack_nats::subscriber::{
 };
 use rate_limit::RateLimiter;
 use slack_types::events::{
-    SlackReadMessage, SlackReadMessagesRequest, SlackReadMessagesResponse,
+    SlackListConversationsChannel, SlackListConversationsRequest, SlackListConversationsResponse,
+    SlackListUsersRequest, SlackListUsersResponse, SlackListUsersUser, SlackReadMessage,
+    SlackReadMessagesRequest, SlackReadMessagesResponse,
     SlackReadRepliesRequest, SlackReadRepliesResponse, SlackStreamStartRequest,
     SlackStreamStartResponse,
 };
 use slack_types::subjects::{
-    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
+    SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_READ_MESSAGES,
+    SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,6 +96,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
     let mut read_messages_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_MESSAGES).await?;
     let mut read_replies_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_REPLIES).await?;
+    let mut list_users_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_USERS).await?;
+    let mut list_conversations_sub = nats_client.subscribe(SLACK_OUTBOUND_LIST_CONVERSATIONS).await?;
 
     tracing::info!("Connecting to Slack via Socket Mode...");
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -598,6 +603,249 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
     let delete_file_abort = delete_file_handle.abort_handle();
 
+
+    // list_users handler: Core NATS request/reply — stays on raw client.
+    let list_users_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = list_users_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("list_users message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                match serde_json::from_slice::<SlackListUsersRequest>(&msg.payload) {
+                    Ok(req) => {
+                        let limit = req.limit.unwrap_or(200).min(200);
+                        let mut query: Vec<(&str, String)> = vec![
+                            ("limit", limit.to_string()),
+                        ];
+                        if let Some(ref cursor) = req.cursor {
+                            query.push(("cursor", cursor.clone()));
+                        }
+
+                        rl.acquire().await;
+                        match hc
+                            .get("https://slack.com/api/users.list")
+                            .bearer_auth(&bt)
+                            .query(&query)
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let members: Vec<SlackListUsersUser> = api_resp["members"]
+                                        .as_array()
+                                        .unwrap_or(&vec![])
+                                        .iter()
+                                        .map(|m| SlackListUsersUser {
+                                            id: m["id"].as_str().unwrap_or("").to_string(),
+                                            name: m["name"].as_str().unwrap_or("").to_string(),
+                                            real_name: m["profile"]["real_name"].as_str().map(String::from),
+                                            display_name: m["profile"]["display_name"].as_str().map(String::from),
+                                            is_bot: m["is_bot"].as_bool().unwrap_or(false),
+                                            deleted: m["deleted"].as_bool().unwrap_or(false),
+                                        })
+                                        .collect();
+                                    let next_cursor = api_resp["response_metadata"]["next_cursor"]
+                                        .as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .map(String::from);
+                                    let response = SlackListUsersResponse {
+                                        ok: true,
+                                        members,
+                                        next_cursor,
+                                        error: None,
+                                    };
+                                    match serde_json::to_vec(&response) {
+                                        Ok(bytes) => {
+                                            if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                                                tracing::error!(
+                                                    error = %e,
+                                                    "Failed to publish list_users reply"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                error = %e,
+                                                "Failed to serialize list_users response"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(api_resp) => {
+                                    tracing::error!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        "users.list failed"
+                                    );
+                                    let response = SlackListUsersResponse {
+                                        ok: false,
+                                        members: vec![],
+                                        next_cursor: None,
+                                        error: Some(api_resp["error"].as_str().unwrap_or("unknown").to_string()),
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse users.list response"
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "HTTP error calling users.list"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to deserialize list_users NATS message"
+                        );
+                    }
+                }
+            }
+        }
+    });
+    let list_users_abort = list_users_handle.abort_handle();
+
+    // list_conversations handler: Core NATS request/reply — stays on raw client.
+    let list_conversations_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = list_conversations_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("list_conversations message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                match serde_json::from_slice::<SlackListConversationsRequest>(&msg.payload) {
+                    Ok(req) => {
+                        let limit = req.limit.unwrap_or(200).min(1000);
+                        let mut query: Vec<(&str, String)> = vec![
+                            ("limit", limit.to_string()),
+                        ];
+                        if let Some(ref cursor) = req.cursor {
+                            query.push(("cursor", cursor.clone()));
+                        }
+                        if let Some(exclude_archived) = req.exclude_archived {
+                            query.push(("exclude_archived", exclude_archived.to_string()));
+                        }
+                        if let Some(ref types) = req.types {
+                            query.push(("types", types.clone()));
+                        }
+
+                        rl.acquire().await;
+                        match hc
+                            .get("https://slack.com/api/conversations.list")
+                            .bearer_auth(&bt)
+                            .query(&query)
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let channels: Vec<SlackListConversationsChannel> = api_resp["channels"]
+                                        .as_array()
+                                        .unwrap_or(&vec![])
+                                        .iter()
+                                        .map(|c| SlackListConversationsChannel {
+                                            id: c["id"].as_str().unwrap_or("").to_string(),
+                                            name: c["name"].as_str().map(String::from),
+                                            is_channel: c["is_channel"].as_bool().unwrap_or(false),
+                                            is_private: c["is_private"].as_bool().unwrap_or(false),
+                                            is_archived: c["is_archived"].as_bool().unwrap_or(false),
+                                            num_members: c["num_members"].as_u64().map(|n| n as u32),
+                                        })
+                                        .collect();
+                                    let next_cursor = api_resp["response_metadata"]["next_cursor"]
+                                        .as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .map(String::from);
+                                    let response = SlackListConversationsResponse {
+                                        ok: true,
+                                        channels,
+                                        next_cursor,
+                                        error: None,
+                                    };
+                                    match serde_json::to_vec(&response) {
+                                        Ok(bytes) => {
+                                            if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                                                tracing::error!(
+                                                    error = %e,
+                                                    "Failed to publish list_conversations reply"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                error = %e,
+                                                "Failed to serialize list_conversations response"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(api_resp) => {
+                                    tracing::error!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        "conversations.list failed"
+                                    );
+                                    let response = SlackListConversationsResponse {
+                                        ok: false,
+                                        channels: vec![],
+                                        next_cursor: None,
+                                        error: Some(api_resp["error"].as_str().unwrap_or("unknown").to_string()),
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse conversations.list response"
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "HTTP error calling conversations.list"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to deserialize list_conversations NATS message"
+                        );
+                    }
+                }
+            }
+        }
+    });
+    let list_conversations_abort = list_conversations_handle.abort_handle();
+
     tokio::select! {
         _ = socket_mode_listener.serve() => {
             tracing::warn!("Socket Mode listener exited");
@@ -704,6 +952,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "Delete file NATS loop panicked"),
             }
         }
+        res = list_users_handle => {
+            match res {
+                Ok(()) => tracing::warn!("List users NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "List users NATS loop panicked"),
+            }
+        }
+        res = list_conversations_handle => {
+            match res {
+                Ok(()) => tracing::warn!("List conversations NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "List conversations NATS loop panicked"),
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down");
         }
@@ -727,6 +987,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     proactive_abort.abort();
     ephemeral_abort.abort();
     delete_file_abort.abort();
+    list_users_abort.abort();
+    list_conversations_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;
     tracing::info!("Shutdown complete");
 
