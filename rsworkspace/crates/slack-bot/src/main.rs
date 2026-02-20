@@ -67,6 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         nats: js.clone(),
         bot_user_id: config.bot_user_id.clone(),
         mention_gating: config.mention_gating,
+        bot_token: config.bot_token.clone(),
+        http_client: reqwest::Client::new(),
     };
 
     let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()

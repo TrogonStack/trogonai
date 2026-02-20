@@ -10,6 +10,11 @@ pub struct SlackFile {
     pub url_private: Option<String>,
     pub url_private_download: Option<String>,
     pub size: Option<u64>,
+    /// Decoded text content downloaded by slack-bot for text-like files.
+    /// `None` for binary files, files exceeding the size limit, or when
+    /// the download failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -82,7 +82,22 @@ pub async fn run_outbound_loop(
                     request = request.with_icon_url(icon_url.clone());
                 }
 
-                let first_ts = match session.chat_post_message(&request).await {
+                let post_result = {
+                    let r = session.chat_post_message(&request).await;
+                    if let Err(ref e) = r
+                        && format!("{e}").contains("ratelimited")
+                    {
+                        tracing::warn!("Slack rate limit on postMessage, retrying after 5 s");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        slack_client
+                            .open_session(&token)
+                            .chat_post_message(&request)
+                            .await
+                    } else {
+                        r
+                    }
+                };
+                let first_ts = match post_result {
                     Ok(resp) => {
                         tokio::time::sleep(POST_MESSAGE_DELAY).await;
                         Some(resp.ts)
@@ -161,7 +176,24 @@ pub async fn run_stream_append_loop(
                 let converted = format::markdown_to_mrkdwn(&append.text);
                 let content = SlackMessageContent::new().with_text(converted);
                 let request = SlackApiChatUpdateRequest::new(channel, content, ts);
-                if let Err(e) = session.chat_update(&request).await {
+                let update_result = {
+                    let r = session.chat_update(&request).await;
+                    if let Err(ref e) = r
+                        && format!("{e}").contains("ratelimited")
+                    {
+                        tracing::warn!(
+                            "Slack rate limit on chat.update (append), retrying after 5 s"
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        slack_client
+                            .open_session(&token)
+                            .chat_update(&request)
+                            .await
+                    } else {
+                        r
+                    }
+                };
+                if let Err(e) = update_result {
                     tracing::error!(error = %e, "Failed to update streaming message (append)");
                 }
             }
@@ -221,7 +253,24 @@ pub async fn run_stream_stop_loop(
                 }
 
                 let request = SlackApiChatUpdateRequest::new(channel, content, ts);
-                if let Err(e) = session.chat_update(&request).await {
+                let update_result = {
+                    let r = session.chat_update(&request).await;
+                    if let Err(ref e) = r
+                        && format!("{e}").contains("ratelimited")
+                    {
+                        tracing::warn!(
+                            "Slack rate limit on chat.update (stop), retrying after 5 s"
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        slack_client
+                            .open_session(&token)
+                            .chat_update(&request)
+                            .await
+                    } else {
+                        r
+                    }
+                };
+                if let Err(e) = update_result {
                     tracing::error!(error = %e, "Failed to update streaming message (stop)");
                 }
             }

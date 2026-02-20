@@ -51,6 +51,9 @@ pub struct SlackAgentConfig {
     // ── Infra ─────────────────────────────────────────────────────────────
     /// Port for the HTTP health check endpoint. Default: 8081.
     pub health_port: u16,
+    /// Optional message posted to a channel when a new member joins.
+    /// Controlled by SLACK_WELCOME_MESSAGE env var.
+    pub welcome_message: Option<String>,
 }
 
 impl SlackAgentConfig {
@@ -96,6 +99,11 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8081);
 
+        let welcome_message = env
+            .var("SLACK_WELCOME_MESSAGE")
+            .ok()
+            .filter(|v| !v.is_empty());
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -107,6 +115,7 @@ impl SlackAgentConfig {
             claude_system_prompt_file,
             claude_max_history,
             health_port,
+            welcome_message,
         }
     }
 }

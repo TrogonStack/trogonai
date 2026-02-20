@@ -225,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackMemberEvent>(&msg.payload) {
-                            Ok(ev) => { handle_member(ev).await; }
+                            Ok(ev) => { handle_member(ev, Arc::clone(&ctx)).await; }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackMemberEvent"),
                         }
                         let _ = msg.ack().await;

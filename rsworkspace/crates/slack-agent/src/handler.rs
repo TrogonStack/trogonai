@@ -577,13 +577,34 @@ pub async fn handle_block_action(ev: SlackBlockActionEvent) {
     );
 }
 
-pub async fn handle_member(ev: SlackMemberEvent) {
+pub async fn handle_member(ev: SlackMemberEvent, ctx: Arc<AgentContext>) {
     tracing::info!(
         user = %ev.user,
         channel = %ev.channel,
         joined = %ev.joined,
         "Received member event"
     );
+
+    if ev.joined
+        && let Some(ref msg) = ctx.config.welcome_message
+    {
+        let outbound = SlackOutboundMessage {
+            channel: ev.channel.clone(),
+            text: msg.clone(),
+            thread_ts: None,
+            blocks: None,
+            media_url: None,
+            username: None,
+            icon_url: None,
+        };
+        if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
+            tracing::warn!(
+                error = %e,
+                channel = %ev.channel,
+                "Failed to publish welcome message"
+            );
+        }
+    }
 }
 
 pub async fn handle_channel(ev: SlackChannelEvent) {
@@ -597,11 +618,11 @@ pub async fn handle_channel(ev: SlackChannelEvent) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Build the content string sent to Claude, appending file metadata when present.
+/// Build the content string sent to Claude.
 ///
-/// Even though we can't download private Slack files from the agent, giving
-/// Claude the file names and MIME types lets it acknowledge attachments and
-/// ask the user for context if needed.
+/// For text-like files where slack-bot was able to download the content, the
+/// full text is embedded between fences so Claude can read and reason about it.
+/// For binary or oversized files, only metadata (name + MIME type) is included.
 fn build_message_content(text: &str, files: &[SlackFile]) -> String {
     if files.is_empty() {
         return text.to_string();
@@ -611,7 +632,14 @@ fn build_message_content(text: &str, files: &[SlackFile]) -> String {
     for f in files {
         let name = f.name.as_deref().unwrap_or("unknown");
         let mime = f.mimetype.as_deref().unwrap_or("unknown type");
-        content.push_str(&format!("\n- {} ({})", name, mime));
+        if let Some(ref file_text) = f.content {
+            content.push_str(&format!(
+                "\n- {} ({}):\n```\n{}\n```",
+                name, mime, file_text
+            ));
+        } else {
+            content.push_str(&format!("\n- {} ({})", name, mime));
+        }
     }
     content.push(']');
     content
@@ -725,6 +753,7 @@ mod tests {
             url_private: None,
             url_private_download: None,
             size: None,
+            content: None,
         }];
         let result = build_message_content("look at this", &files);
         assert!(result.starts_with("look at this"));
@@ -741,6 +770,7 @@ mod tests {
             url_private: None,
             url_private_download: None,
             size: None,
+            content: None,
         }];
         let result = build_message_content("hi", &files);
         assert!(result.contains("unknown"));

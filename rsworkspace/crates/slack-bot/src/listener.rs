@@ -1,4 +1,5 @@
 use async_nats::jetstream::Context as JsContext;
+use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_nats::publisher::{
     publish_block_action, publish_channel, publish_inbound, publish_member,
@@ -13,6 +14,10 @@ use slack_types::events::{
 };
 use std::sync::Arc;
 
+/// Maximum size of a file whose content will be downloaded and forwarded
+/// to the agent. Files larger than this are passed as metadata only.
+const MAX_FILE_CONTENT_BYTES: u64 = 50_000;
+
 /// Shared state injected into the Socket Mode listener via `with_user_state`.
 #[derive(Clone)]
 pub struct BotState {
@@ -24,6 +29,10 @@ pub struct BotState {
     /// When true, channel/group messages require an @mention or be a thread
     /// reply before being published to NATS. Mirrors OpenClaw `requireMention`.
     pub mention_gating: bool,
+    /// Bot token used to authenticate file downloads from Slack's CDN.
+    pub bot_token: String,
+    /// HTTP client reused across file download requests.
+    pub http_client: reqwest::Client,
 }
 
 pub async fn handle_push_event(
@@ -245,7 +254,9 @@ pub async fn handle_push_event(
                         "Received message, publishing to NATS"
                     );
 
-                    let files = extract_files(msg.content.as_ref());
+                    let raw_files = extract_files(msg.content.as_ref());
+                    let files =
+                        fetch_file_contents(raw_files, &state.bot_token, &state.http_client).await;
                     let attachments = extract_attachments(msg.content.as_ref());
 
                     let inbound = SlackInboundMessage {
@@ -544,6 +555,58 @@ pub async fn handle_command_event(
     ))
 }
 
+/// Download text content for files that have a text-like MIME type and are
+/// within the size limit. Binary or oversized files are passed as metadata only.
+async fn fetch_file_contents(
+    files: Vec<OurSlackFile>,
+    bot_token: &str,
+    http_client: &HttpClient,
+) -> Vec<OurSlackFile> {
+    let mut out = Vec::with_capacity(files.len());
+    for mut file in files {
+        let is_text = file
+            .mimetype
+            .as_deref()
+            .map(|m| {
+                m.starts_with("text/")
+                    || matches!(
+                        m,
+                        "application/json"
+                            | "application/xml"
+                            | "application/javascript"
+                            | "application/x-yaml"
+                    )
+            })
+            .unwrap_or(false);
+        let within_limit = file
+            .size
+            .map(|s| s <= MAX_FILE_CONTENT_BYTES)
+            .unwrap_or(true);
+
+        if is_text && within_limit {
+            let url = file
+                .url_private_download
+                .as_deref()
+                .or(file.url_private.as_deref());
+            if let Some(url) = url {
+                match http_client.get(url).bearer_auth(bot_token).send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.text().await {
+                        Ok(text) => file.content = Some(text),
+                        Err(e) => tracing::warn!(error = %e, "Failed to read file response body"),
+                    },
+                    Ok(resp) => tracing::warn!(
+                        status = %resp.status(),
+                        "Non-success status downloading file"
+                    ),
+                    Err(e) => tracing::warn!(error = %e, "HTTP error downloading Slack file"),
+                }
+            }
+        }
+        out.push(file);
+    }
+    out
+}
+
 /// Map slack-morphism `SlackFile` objects to our `OurSlackFile` type.
 fn extract_files(content: Option<&SlackMessageContent>) -> Vec<OurSlackFile> {
     let Some(c) = content else { return vec![] };
@@ -557,6 +620,7 @@ fn extract_files(content: Option<&SlackMessageContent>) -> Vec<OurSlackFile> {
             url_private: f.url_private.as_ref().map(|u| u.to_string()),
             url_private_download: f.url_private_download.as_ref().map(|u| u.to_string()),
             size: None,
+            content: None,
         })
         .collect()
 }
