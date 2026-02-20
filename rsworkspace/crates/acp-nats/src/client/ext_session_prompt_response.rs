@@ -25,6 +25,11 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
         }
         Err(e) => {
             warn!(error = %e, session_id = %session_id, "Failed to parse prompt response");
+            let session_id_typed: SessionId = session_id.to_string().into();
+            bridge
+                .pending_session_prompt_responses
+                .remove_waiter(&session_id_typed);
+            bridge.metrics.record_error("prompt_response_parse_failed");
         }
     }
 }
