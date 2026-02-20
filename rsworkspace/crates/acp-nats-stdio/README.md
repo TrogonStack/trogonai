@@ -41,7 +41,8 @@ Configure via environment variables:
 - `NATS_USER` - NATS username (optional)
 - `NATS_PASSWORD` - NATS password (optional)
 - `NATS_TOKEN` - NATS token (optional)
-- `CUSTOM_PREFIX` - Custom subject prefix for multi-tenancy (optional)
+- `ACP_PREFIX` - Custom subject prefix for multi-tenancy (default: `acp`)
+- `ACP_LOG_DIR` - Directory for file-based logging (optional)
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OpenTelemetry collector endpoint (optional)
 
 See code documentation for additional configuration options.
