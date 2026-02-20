@@ -1,12 +1,13 @@
 use async_nats::jetstream::{
     Context,
-    consumer::{pull, Consumer},
+    consumer::{Consumer, pull},
 };
 use slack_types::subjects::{
-    SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_MESSAGE_CHANGED,
-    SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION,
-    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_OUTBOUND,
-    SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP,
+    SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER,
+    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN,
+    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND,
+    SLACK_OUTBOUND_STREAM_STOP,
 };
 
 use crate::setup::STREAM_NAME;
@@ -73,13 +74,23 @@ pub async fn create_reaction_consumer(
 pub async fn create_message_changed_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
-    make_consumer(js, "slack-agent-message-changed", SLACK_INBOUND_MESSAGE_CHANGED).await
+    make_consumer(
+        js,
+        "slack-agent-message-changed",
+        SLACK_INBOUND_MESSAGE_CHANGED,
+    )
+    .await
 }
 
 pub async fn create_message_deleted_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
-    make_consumer(js, "slack-agent-message-deleted", SLACK_INBOUND_MESSAGE_DELETED).await
+    make_consumer(
+        js,
+        "slack-agent-message-deleted",
+        SLACK_INBOUND_MESSAGE_DELETED,
+    )
+    .await
 }
 
 pub async fn create_slash_command_consumer(
@@ -103,5 +114,22 @@ pub async fn create_block_action_consumer(
 pub async fn create_thread_broadcast_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
-    make_consumer(js, "slack-agent-thread-broadcast", SLACK_INBOUND_THREAD_BROADCAST).await
+    make_consumer(
+        js,
+        "slack-agent-thread-broadcast",
+        SLACK_INBOUND_THREAD_BROADCAST,
+    )
+    .await
+}
+
+pub async fn create_member_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-member", SLACK_INBOUND_MEMBER).await
+}
+
+pub async fn create_channel_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-channel", SLACK_INBOUND_CHANNEL).await
 }

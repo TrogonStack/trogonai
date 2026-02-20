@@ -51,44 +51,46 @@ pub fn markdown_to_mrkdwn(text: &str) -> String {
         }
 
         // Bold: **text**
-        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-            if let Some(end) = find_closing(&chars, i + 2, "**") {
-                output.push('*');
-                output.extend(&chars[i + 2..end]);
-                output.push('*');
-                i = end + 2;
-                continue;
-            }
+        if i + 1 < len
+            && chars[i] == '*'
+            && chars[i + 1] == '*'
+            && let Some(end) = find_closing(&chars, i + 2, "**")
+        {
+            output.push('*');
+            output.extend(&chars[i + 2..end]);
+            output.push('*');
+            i = end + 2;
+            continue;
         }
 
         // Italic: *text* (but not **)
-        if chars[i] == '*' && (i + 1 >= len || chars[i + 1] != '*') {
-            if let Some(end) = find_closing_char(&chars, i + 1, '*') {
-                output.push('_');
-                output.extend(&chars[i + 1..end]);
-                output.push('_');
-                i = end + 1;
-                continue;
-            }
+        if chars[i] == '*'
+            && (i + 1 >= len || chars[i + 1] != '*')
+            && let Some(end) = find_closing_char(&chars, i + 1, '*')
+        {
+            output.push('_');
+            output.extend(&chars[i + 1..end]);
+            output.push('_');
+            i = end + 1;
+            continue;
         }
 
         // Markdown link: [text](url)
-        if chars[i] == '[' {
-            if let Some(bracket_end) = find_closing_char(&chars, i + 1, ']') {
-                if bracket_end + 1 < len && chars[bracket_end + 1] == '(' {
-                    if let Some(paren_end) = find_closing_char(&chars, bracket_end + 2, ')') {
-                        let link_text: String = chars[i + 1..bracket_end].iter().collect();
-                        let url: String = chars[bracket_end + 2..paren_end].iter().collect();
-                        output.push('<');
-                        output.push_str(&url);
-                        output.push('|');
-                        output.push_str(&link_text);
-                        output.push('>');
-                        i = paren_end + 1;
-                        continue;
-                    }
-                }
-            }
+        if chars[i] == '['
+            && let Some(bracket_end) = find_closing_char(&chars, i + 1, ']')
+            && bracket_end + 1 < len
+            && chars[bracket_end + 1] == '('
+            && let Some(paren_end) = find_closing_char(&chars, bracket_end + 2, ')')
+        {
+            let link_text: String = chars[i + 1..bracket_end].iter().collect();
+            let url: String = chars[bracket_end + 2..paren_end].iter().collect();
+            output.push('<');
+            output.push_str(&url);
+            output.push('|');
+            output.push_str(&link_text);
+            output.push('>');
+            i = paren_end + 1;
+            continue;
         }
 
         // Headings at start of line: # / ## / ### etc.
@@ -137,7 +139,10 @@ fn find_closing(chars: &[char], start: usize, pattern: &str) -> Option<usize> {
 }
 
 fn find_closing_char(chars: &[char], start: usize, target: char) -> Option<usize> {
-    chars[start..].iter().position(|&c| c == target).map(|p| p + start)
+    chars[start..]
+        .iter()
+        .position(|&c| c == target)
+        .map(|p| p + start)
 }
 
 /// Split `text` into chunks of at most `limit` characters, preferring to break
@@ -180,7 +185,10 @@ mod tests {
 
     #[test]
     fn link_conversion() {
-        assert_eq!(markdown_to_mrkdwn("[text](https://example.com)"), "<https://example.com|text>");
+        assert_eq!(
+            markdown_to_mrkdwn("[text](https://example.com)"),
+            "<https://example.com|text>"
+        );
     }
 
     #[test]

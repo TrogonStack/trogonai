@@ -8,7 +8,8 @@ use slack_nats::publisher::{
 use slack_types::events::{
     ChannelEventKind, SessionType, SlackAttachment, SlackBlockActionEvent, SlackChannelEvent,
     SlackFile as OurSlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
-    SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent,
+    SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
+    SlackThreadBroadcastEvent,
 };
 use std::sync::Arc;
 
@@ -82,9 +83,7 @@ pub async fn handle_push_event(
                         user,
                     };
 
-                    if let Err(e) =
-                        publish_message_changed(&*state.nats, &ev).await
-                    {
+                    if let Err(e) = publish_message_changed(&state.nats, &ev).await {
                         tracing::error!(error = %e, "Failed to publish message_changed to NATS");
                     }
                 }
@@ -111,9 +110,7 @@ pub async fn handle_push_event(
                         thread_ts,
                     };
 
-                    if let Err(e) =
-                        publish_message_deleted(&*state.nats, &ev).await
-                    {
+                    if let Err(e) = publish_message_deleted(&state.nats, &ev).await {
                         tracing::error!(error = %e, "Failed to publish message_deleted to NATS");
                     }
                 }
@@ -155,9 +152,7 @@ pub async fn handle_push_event(
                         event_ts,
                     };
 
-                    if let Err(e) =
-                        publish_thread_broadcast(&*state.nats, &ev).await
-                    {
+                    if let Err(e) = publish_thread_broadcast(&state.nats, &ev).await {
                         tracing::error!(error = %e, "Failed to publish thread_broadcast to NATS");
                     }
                 }
@@ -176,10 +171,10 @@ pub async fn handle_push_event(
                         .unwrap_or_default();
 
                     // Drop messages originating from our own bot user.
-                    if let Some(ref bot_uid) = state.bot_user_id {
-                        if &user == bot_uid {
-                            return Ok(());
-                        }
+                    if let Some(ref bot_uid) = state.bot_user_id
+                        && &user == bot_uid
+                    {
+                        return Ok(());
                     }
 
                     let channel_id = msg
@@ -195,8 +190,7 @@ pub async fn handle_push_event(
                         .and_then(|c| c.text.as_deref())
                         .unwrap_or("")
                         .to_string();
-                    let text =
-                        strip_bot_mention(&raw_text, state.bot_user_id.as_deref());
+                    let text = strip_bot_mention(&raw_text, state.bot_user_id.as_deref());
 
                     if text.is_empty() {
                         return Ok(());
@@ -205,41 +199,43 @@ pub async fn handle_push_event(
                     let ts = msg.origin.ts.0.clone();
                     let thread_ts = msg.origin.thread_ts.as_ref().map(|t| t.0.clone());
 
-                    let session_type = match msg
-                        .origin
-                        .channel_type
-                        .as_ref()
-                        .map(|ct| ct.0.as_str())
-                    {
-                        Some("im") => SessionType::Direct,
-                        Some("mpim") => SessionType::Group,
-                        _ => SessionType::Channel,
-                    };
+                    let session_type =
+                        match msg.origin.channel_type.as_ref().map(|ct| ct.0.as_str()) {
+                            Some("im") => SessionType::Direct,
+                            Some("mpim") => SessionType::Group,
+                            _ => SessionType::Channel,
+                        };
 
                     // Mention-gating (OpenClaw: requireMention = true by default).
                     // Rules:
                     //   - DMs always pass through.
                     //   - Thread replies always pass through (bot is already in the thread).
                     //   - Channels/groups: require explicit @mention when gating is on.
-                    if state.mention_gating && !matches!(session_type, SessionType::Direct) {
-                        if thread_ts.is_none() {
-                            match &state.bot_user_id {
-                                Some(bot_uid) => {
-                                    // Gate on raw_text: the stripped `text` no longer
-                                    // contains the mention so we must check the original.
-                                    if !raw_text.contains(&format!("<@{}>", bot_uid)) {
-                                        return Ok(());
-                                    }
+                    if state.mention_gating
+                        && !matches!(session_type, SessionType::Direct)
+                        && thread_ts.is_none()
+                    {
+                        match &state.bot_user_id {
+                            Some(bot_uid) => {
+                                // Gate on raw_text: the stripped `text` no longer
+                                // contains the mention so we must check the original.
+                                if !raw_text.contains(&format!("<@{}>", bot_uid)) {
+                                    return Ok(());
                                 }
-                                None => {
-                                    // bot_user_id not configured — cannot gate, allow all.
-                                }
+                            }
+                            None => {
+                                // bot_user_id not configured — cannot gate, allow all.
                             }
                         }
                     }
 
                     // Compute session key for conversation routing.
-                    let session_key = compute_session_key(&session_type, &channel_id, &user, thread_ts.as_deref());
+                    let session_key = compute_session_key(
+                        &session_type,
+                        &channel_id,
+                        &user,
+                        thread_ts.as_deref(),
+                    );
 
                     tracing::debug!(
                         channel = %channel_id,
@@ -267,7 +263,7 @@ pub async fn handle_push_event(
                         attachments,
                     };
 
-                    if let Err(e) = publish_inbound(&*state.nats, &inbound).await {
+                    if let Err(e) = publish_inbound(&state.nats, &inbound).await {
                         tracing::error!(error = %e, "Failed to publish inbound message to NATS");
                     }
                 }
@@ -277,12 +273,7 @@ pub async fn handle_push_event(
         SlackEventCallbackBody::AppMention(mention) => {
             let channel_id = mention.channel.0.clone();
             let user = mention.user.0.clone();
-            let raw_text = mention
-                .content
-                .text
-                .as_deref()
-                .unwrap_or("")
-                .to_string();
+            let raw_text = mention.content.text.as_deref().unwrap_or("").to_string();
             let text = strip_bot_mention(&raw_text, state.bot_user_id.as_deref());
 
             if text.is_empty() {
@@ -321,7 +312,7 @@ pub async fn handle_push_event(
                 attachments: vec![],
             };
 
-            if let Err(e) = publish_inbound(&*state.nats, &inbound).await {
+            if let Err(e) = publish_inbound(&state.nats, &inbound).await {
                 tracing::error!(error = %e, "Failed to publish app_mention to NATS");
             }
         }
@@ -346,9 +337,7 @@ pub async fn handle_push_event(
                 added: true,
             };
 
-            if let Err(e) =
-                publish_reaction(&*state.nats, &reaction_ev).await
-            {
+            if let Err(e) = publish_reaction(&state.nats, &reaction_ev).await {
                 tracing::error!(error = %e, "Failed to publish reaction_added to NATS");
             }
         }
@@ -373,9 +362,7 @@ pub async fn handle_push_event(
                 added: false,
             };
 
-            if let Err(e) =
-                publish_reaction(&*state.nats, &reaction_ev).await
-            {
+            if let Err(e) = publish_reaction(&state.nats, &reaction_ev).await {
                 tracing::error!(error = %e, "Failed to publish reaction_removed to NATS");
             }
         }
@@ -390,9 +377,7 @@ pub async fn handle_push_event(
                 joined: true,
             };
 
-            if let Err(e) =
-                publish_member(&*state.nats, &member_ev).await
-            {
+            if let Err(e) = publish_member(&state.nats, &member_ev).await {
                 tracing::error!(error = %e, "Failed to publish member_joined to NATS");
             }
         }
@@ -407,9 +392,7 @@ pub async fn handle_push_event(
                 joined: false,
             };
 
-            if let Err(e) =
-                publish_member(&*state.nats, &member_ev).await
-            {
+            if let Err(e) = publish_member(&state.nats, &member_ev).await {
                 tracing::error!(error = %e, "Failed to publish member_left to NATS");
             }
         }
@@ -422,9 +405,7 @@ pub async fn handle_push_event(
                 user: ev.channel.creator.as_ref().map(|u| u.0.clone()),
             };
 
-            if let Err(e) =
-                publish_channel(&*state.nats, &channel_ev).await
-            {
+            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_created to NATS");
             }
         }
@@ -437,9 +418,7 @@ pub async fn handle_push_event(
                 user: None,
             };
 
-            if let Err(e) =
-                publish_channel(&*state.nats, &channel_ev).await
-            {
+            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_deleted to NATS");
             }
         }
@@ -452,9 +431,7 @@ pub async fn handle_push_event(
                 user: Some(ev.user.0.clone()),
             };
 
-            if let Err(e) =
-                publish_channel(&*state.nats, &channel_ev).await
-            {
+            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_archive to NATS");
             }
         }
@@ -467,9 +444,7 @@ pub async fn handle_push_event(
                 user: None,
             };
 
-            if let Err(e) =
-                publish_channel(&*state.nats, &channel_ev).await
-            {
+            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_rename to NATS");
             }
         }
@@ -482,9 +457,7 @@ pub async fn handle_push_event(
                 user: Some(ev.user.0.clone()),
             };
 
-            if let Err(e) =
-                publish_channel(&*state.nats, &channel_ev).await
-            {
+            if let Err(e) = publish_channel(&state.nats, &channel_ev).await {
                 tracing::error!(error = %e, "Failed to publish channel_unarchive to NATS");
             }
         }
@@ -527,7 +500,7 @@ pub async fn handle_interaction_event(
                 trigger_id: trigger_id.clone(),
             };
 
-            if let Err(e) = publish_block_action(&*state.nats, &block_action_ev).await {
+            if let Err(e) = publish_block_action(&state.nats, &block_action_ev).await {
                 tracing::error!(error = %e, "Failed to publish block_action to NATS");
             }
         }
@@ -559,9 +532,7 @@ pub async fn handle_command_event(
         trigger_id: Some(event.trigger_id.0.clone()),
     };
 
-    if let Err(e) =
-        publish_slash_command(&*state.nats, &slash_ev).await
-    {
+    if let Err(e) = publish_slash_command(&state.nats, &slash_ev).await {
         tracing::error!(error = %e, "Failed to publish slash command to NATS");
     }
 
@@ -651,4 +622,79 @@ pub fn error_handler(
 ) -> HttpStatusCode {
     tracing::error!(error = %err, "Slack socket mode error");
     HttpStatusCode::OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── strip_bot_mention ─────────────────────────────────────────────────────
+
+    #[test]
+    fn strip_removes_known_mention() {
+        assert_eq!(
+            strip_bot_mention("<@UBOT123> hello", Some("UBOT123")),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn strip_removes_mention_mid_text() {
+        assert_eq!(
+            strip_bot_mention("hey <@UBOT123> what's up", Some("UBOT123")),
+            "hey  what's up"
+        );
+    }
+
+    #[test]
+    fn strip_no_bot_id_only_trims() {
+        assert_eq!(strip_bot_mention("  hello  ", None), "hello");
+    }
+
+    #[test]
+    fn strip_unknown_bot_id_leaves_text() {
+        assert_eq!(
+            strip_bot_mention("<@UOTHER> hello", Some("UBOT123")),
+            "<@UOTHER> hello"
+        );
+    }
+
+    #[test]
+    fn strip_empty_text() {
+        assert_eq!(strip_bot_mention("", Some("UBOT123")), "");
+    }
+
+    // ── compute_session_key ───────────────────────────────────────────────────
+
+    #[test]
+    fn session_key_dm() {
+        assert_eq!(
+            compute_session_key(&SessionType::Direct, "C1", "U1", None),
+            Some("slack:dm:U1".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_no_thread() {
+        assert_eq!(
+            compute_session_key(&SessionType::Channel, "C1", "U1", None),
+            Some("slack:channel:C1".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_with_thread() {
+        assert_eq!(
+            compute_session_key(&SessionType::Channel, "C1", "U1", Some("1234.5")),
+            Some("slack:channel:C1:thread:1234.5".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_group_with_thread() {
+        assert_eq!(
+            compute_session_key(&SessionType::Group, "G1", "U1", Some("9.0")),
+            Some("slack:group:G1:thread:9.0".to_string())
+        );
+    }
 }

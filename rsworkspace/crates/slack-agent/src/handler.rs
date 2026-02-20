@@ -4,10 +4,11 @@ use slack_nats::publisher::{
     publish_outbound, publish_reaction_action, publish_stream_append, publish_stream_stop,
 };
 use slack_types::events::{
-    SlackBlockActionEvent, SlackFile, SlackInboundMessage, SlackMessageChangedEvent,
-    SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent, SlackReactionAction,
-    SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackStreamStartRequest, SlackStreamStartResponse, SlackThreadBroadcastEvent,
+    SlackBlockActionEvent, SlackChannelEvent, SlackFile, SlackInboundMessage, SlackMemberEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
+    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -86,10 +87,7 @@ async fn request_stream_start(
 
 // ── Helper: get or create per-session lock ────────────────────────────────────
 
-fn get_session_lock(
-    ctx: &AgentContext,
-    session_key: &str,
-) -> Arc<tokio::sync::Mutex<()>> {
+fn get_session_lock(ctx: &AgentContext, session_key: &str) -> Arc<tokio::sync::Mutex<()>> {
     let mut locks = ctx.session_locks.lock().unwrap();
     locks
         .entry(session_key.to_string())
@@ -238,7 +236,14 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     "stream.start failed — falling back to chat.postMessage"
                 );
                 // Fallback: call Claude without streaming.
-                fallback_claude_response(claude, &history, &ctx.js, &msg.channel, thread_ts.as_deref()).await
+                fallback_claude_response(
+                    claude,
+                    &history,
+                    &ctx.js,
+                    &msg.channel,
+                    thread_ts.as_deref(),
+                )
+                .await
             }
         }
     } else {
@@ -451,6 +456,24 @@ pub async fn handle_block_action(ev: SlackBlockActionEvent) {
     );
 }
 
+pub async fn handle_member(ev: SlackMemberEvent) {
+    tracing::info!(
+        user = %ev.user,
+        channel = %ev.channel,
+        joined = %ev.joined,
+        "Received member event"
+    );
+}
+
+pub async fn handle_channel(ev: SlackChannelEvent) {
+    tracing::info!(
+        channel_id = %ev.channel_id,
+        channel_name = ?ev.channel_name,
+        kind = ?ev.kind,
+        "Received channel event"
+    );
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Build the content string sent to Claude, appending file metadata when present.
@@ -471,4 +494,88 @@ fn build_message_content(text: &str, files: &[SlackFile]) -> String {
     }
     content.push(']');
     content
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ReplyToMode;
+
+    // ── resolve_reply_thread_ts ───────────────────────────────────────────────
+
+    #[test]
+    fn reply_to_off_returns_none() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::Off, "1.0", Some("2.0")),
+            None
+        );
+    }
+
+    #[test]
+    fn reply_to_first_uses_incoming_thread_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::First, "1.0", Some("2.0")),
+            Some("2.0".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_to_first_falls_back_to_message_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::First, "1.0", None),
+            Some("1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_to_all_always_uses_message_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::All, "1.0", Some("2.0")),
+            Some("1.0".to_string())
+        );
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::All, "1.0", None),
+            Some("1.0".to_string())
+        );
+    }
+
+    // ── build_message_content ─────────────────────────────────────────────────
+
+    #[test]
+    fn no_files_returns_text_unchanged() {
+        assert_eq!(build_message_content("hello", &[]), "hello");
+    }
+
+    #[test]
+    fn files_appended_to_content() {
+        let files = vec![SlackFile {
+            id: Some("F1".into()),
+            name: Some("photo.png".into()),
+            mimetype: Some("image/png".into()),
+            url_private: None,
+            url_private_download: None,
+            size: None,
+        }];
+        let result = build_message_content("look at this", &files);
+        assert!(result.starts_with("look at this"));
+        assert!(result.contains("photo.png"));
+        assert!(result.contains("image/png"));
+    }
+
+    #[test]
+    fn files_with_unknown_fields_use_fallback() {
+        let files = vec![SlackFile {
+            id: None,
+            name: None,
+            mimetype: None,
+            url_private: None,
+            url_private_download: None,
+            size: None,
+        }];
+        let result = build_message_content("hi", &files);
+        assert!(result.contains("unknown"));
+        assert!(result.contains("unknown type"));
+    }
 }

@@ -81,3 +81,24 @@ impl ConversationMemory {
 fn sanitize_key(session_key: &str) -> String {
     session_key.replace(':', ".")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_key_replaces_colons() {
+        assert_eq!(sanitize_key("slack:channel:C123"), "slack.channel.C123");
+        assert_eq!(
+            sanitize_key("slack:channel:C123:thread:1234.5"),
+            "slack.channel.C123.thread.1234.5"
+        );
+        assert_eq!(sanitize_key("slack:dm:U456"), "slack.dm.U456");
+    }
+
+    #[test]
+    fn sanitize_key_no_colons_unchanged() {
+        assert_eq!(sanitize_key("simple"), "simple");
+        assert_eq!(sanitize_key("slack.channel.C1"), "slack.channel.C1");
+    }
+}

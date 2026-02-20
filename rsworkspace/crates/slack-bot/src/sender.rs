@@ -1,4 +1,4 @@
-use async_nats::jetstream::consumer::{pull, Consumer};
+use async_nats::jetstream::consumer::{Consumer, pull};
 use futures::StreamExt;
 use slack_morphism::prelude::*;
 use slack_types::events::{
@@ -64,15 +64,14 @@ pub async fn run_outbound_loop(
                 }
 
                 let first_text = chunks[0].clone();
-                let mut content = SlackMessageContent::new().with_text(first_text.into());
-                if chunks.len() == 1 {
-                    if let Some(ref blks) = blocks {
-                        content = content.with_blocks(blks.clone());
-                    }
+                let mut content = SlackMessageContent::new().with_text(first_text);
+                if chunks.len() == 1
+                    && let Some(ref blks) = blocks
+                {
+                    content = content.with_blocks(blks.clone());
                 }
 
-                let mut request =
-                    SlackApiChatPostMessageRequest::new(channel.clone(), content);
+                let mut request = SlackApiChatPostMessageRequest::new(channel.clone(), content);
                 if let Some(ref ts) = thread_ts {
                     request = request.with_thread_ts(ts.clone());
                 }
@@ -98,12 +97,9 @@ pub async fn run_outbound_loop(
                     let reply_ts = first_ts.or(thread_ts.clone());
                     for (idx, chunk) in chunks[1..].iter().enumerate() {
                         let is_last = idx == chunks.len() - 2;
-                        let mut chunk_content =
-                            SlackMessageContent::new().with_text(chunk.clone().into());
-                        if is_last {
-                            if let Some(ref blks) = blocks {
-                                chunk_content = chunk_content.with_blocks(blks.clone());
-                            }
+                        let mut chunk_content = SlackMessageContent::new().with_text(chunk.clone());
+                        if is_last && let Some(ref blks) = blocks {
+                            chunk_content = chunk_content.with_blocks(blks.clone());
                         }
                         let mut chunk_req =
                             SlackApiChatPostMessageRequest::new(channel.clone(), chunk_content);
@@ -163,7 +159,7 @@ pub async fn run_stream_append_loop(
                 let channel: SlackChannelId = append.channel.into();
                 let ts: SlackTs = append.ts.into();
                 let converted = format::markdown_to_mrkdwn(&append.text);
-                let content = SlackMessageContent::new().with_text(converted.into());
+                let content = SlackMessageContent::new().with_text(converted);
                 let request = SlackApiChatUpdateRequest::new(channel, content, ts);
                 if let Err(e) = session.chat_update(&request).await {
                     tracing::error!(error = %e, "Failed to update streaming message (append)");
@@ -219,8 +215,7 @@ pub async fn run_stream_stop_loop(
                 });
 
                 let converted_final = format::markdown_to_mrkdwn(&stop.final_text);
-                let mut content =
-                    SlackMessageContent::new().with_text(converted_final.into());
+                let mut content = SlackMessageContent::new().with_text(converted_final);
                 if let Some(blks) = blocks {
                     content = content.with_blocks(blks);
                 }

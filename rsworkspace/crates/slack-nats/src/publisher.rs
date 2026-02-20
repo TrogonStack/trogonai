@@ -59,10 +59,7 @@ pub async fn publish_thread_broadcast(
     js_publish(js, SLACK_INBOUND_THREAD_BROADCAST, ev).await
 }
 
-pub async fn publish_member(
-    js: &Context,
-    ev: &SlackMemberEvent,
-) -> Result<(), async_nats::Error> {
+pub async fn publish_member(js: &Context, ev: &SlackMemberEvent) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_INBOUND_MEMBER, ev).await
 }
 
@@ -106,10 +103,7 @@ pub async fn publish_stream_stop(
     js_publish(js, SLACK_OUTBOUND_STREAM_STOP, msg).await
 }
 
-pub async fn publish_pin(
-    js: &Context,
-    ev: &SlackPinEvent,
-) -> Result<(), async_nats::Error> {
+pub async fn publish_pin(js: &Context, ev: &SlackPinEvent) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_INBOUND_PIN, ev).await
 }
 

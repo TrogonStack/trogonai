@@ -7,8 +7,12 @@ mod sender;
 use async_nats::jetstream;
 use config::SlackBotConfig;
 use futures::StreamExt;
-use listener::{BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event};
-use sender::{run_outbound_loop, run_reaction_action_loop, run_stream_append_loop, run_stream_stop_loop};
+use listener::{
+    BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event,
+};
+use sender::{
+    run_outbound_loop, run_reaction_action_loop, run_stream_append_loop, run_stream_stop_loop,
+};
 use slack_morphism::prelude::*;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
@@ -37,7 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tokio::spawn(health::start_health_server(config.health_port));
 
     tracing::info!("Connecting to NATS...");
-    let nats_client = connect(&config.nats).await.map_err(|e| format!("{:?}", e))?;
+    let nats_client = connect(&config.nats)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
     let nats_client = Arc::new(nats_client);
 
     tracing::info!("Setting up JetStream stream...");
@@ -51,9 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let reaction_action_consumer = create_reaction_action_consumer(&js).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
-    let mut stream_start_sub = nats_client
-        .subscribe(SLACK_OUTBOUND_STREAM_START)
-        .await?;
+    let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
 
     tracing::info!("Connecting to Slack via Socket Mode...");
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -132,12 +136,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     Ok(req) => {
                         let session = sc.open_session(&token);
                         let channel: SlackChannelId = req.channel.clone().into();
-                        let initial_text =
-                            req.initial_text.unwrap_or_else(|| "…".to_string());
+                        let initial_text = req.initial_text.unwrap_or_else(|| "…".to_string());
 
                         let mut post_req = SlackApiChatPostMessageRequest::new(
                             channel,
-                            SlackMessageContent::new().with_text(initial_text.into()),
+                            SlackMessageContent::new().with_text(initial_text),
                         );
                         if let Some(ref tts) = req.thread_ts {
                             post_req = post_req.with_thread_ts(tts.clone().into());
@@ -151,9 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 };
                                 match serde_json::to_vec(&response) {
                                     Ok(bytes) => {
-                                        if let Err(e) =
-                                            nc.publish(reply_to, bytes.into()).await
-                                        {
+                                        if let Err(e) = nc.publish(reply_to, bytes.into()).await {
                                             tracing::error!(
                                                 error = %e,
                                                 "Failed to publish stream_start reply"

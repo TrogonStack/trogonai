@@ -57,10 +57,7 @@ impl SlackAgentConfig {
             .map(|v| ReplyToMode::from_str(&v))
             .unwrap_or(ReplyToMode::Off);
 
-        let ack_reaction = env
-            .var("SLACK_ACK_REACTION")
-            .ok()
-            .filter(|v| !v.is_empty());
+        let ack_reaction = env.var("SLACK_ACK_REACTION").ok().filter(|v| !v.is_empty());
 
         let anthropic_api_key = env.var("ANTHROPIC_API_KEY").ok().filter(|v| !v.is_empty());
 
@@ -102,5 +99,64 @@ impl SlackAgentConfig {
             claude_max_history,
             health_port,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_std::env::InMemoryEnv;
+
+    #[test]
+    fn reply_to_mode_from_str() {
+        assert_eq!(ReplyToMode::from_str("first"), ReplyToMode::First);
+        assert_eq!(ReplyToMode::from_str("all"), ReplyToMode::All);
+        assert_eq!(ReplyToMode::from_str("off"), ReplyToMode::Off);
+        assert_eq!(ReplyToMode::from_str(""), ReplyToMode::Off);
+        assert_eq!(ReplyToMode::from_str("unknown"), ReplyToMode::Off);
+    }
+
+    #[test]
+    fn from_env_defaults() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode, ReplyToMode::Off);
+        assert!(config.ack_reaction.is_none());
+        assert!(config.anthropic_api_key.is_none());
+        assert_eq!(config.claude_model, "claude-sonnet-4-6");
+        assert_eq!(config.claude_max_tokens, 8192);
+        assert_eq!(config.claude_max_history, 40);
+        assert_eq!(config.health_port, 8081);
+    }
+
+    #[test]
+    fn from_env_custom_values() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("SLACK_REPLY_TO_MODE", "first");
+        env.set("SLACK_ACK_REACTION", "eyes");
+        env.set("ANTHROPIC_API_KEY", "sk-ant-test");
+        env.set("CLAUDE_MODEL", "claude-opus-4-6");
+        env.set("CLAUDE_MAX_TOKENS", "4096");
+        env.set("CLAUDE_MAX_HISTORY", "20");
+        env.set("HEALTH_PORT", "9090");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode, ReplyToMode::First);
+        assert_eq!(config.ack_reaction.as_deref(), Some("eyes"));
+        assert_eq!(config.anthropic_api_key.as_deref(), Some("sk-ant-test"));
+        assert_eq!(config.claude_model, "claude-opus-4-6");
+        assert_eq!(config.claude_max_tokens, 4096);
+        assert_eq!(config.claude_max_history, 20);
+        assert_eq!(config.health_port, 9090);
+    }
+
+    #[test]
+    fn empty_ack_reaction_treated_as_none() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("SLACK_ACK_REACTION", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.ack_reaction.is_none());
     }
 }

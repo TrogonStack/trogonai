@@ -305,7 +305,8 @@ mod tests {
     #[test]
     fn inbound_message_backward_compat_no_files() {
         // Old messages without files/attachments fields should still deserialise.
-        let json = r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel"}"#;
+        let json =
+            r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel"}"#;
         let msg: SlackInboundMessage = serde_json::from_str(json).unwrap();
         assert!(msg.files.is_empty());
         assert!(msg.attachments.is_empty());
@@ -334,7 +335,9 @@ mod tests {
             channel: "C1".into(),
             text: "fallback".into(),
             thread_ts: None,
-            blocks: Some(serde_json::json!([{"type":"section","text":{"type":"mrkdwn","text":"*hi*"}}])),
+            blocks: Some(
+                serde_json::json!([{"type":"section","text":{"type":"mrkdwn","text":"*hi*"}}]),
+            ),
             media_url: None,
             username: Some("MyBot".into()),
             icon_url: None,
@@ -375,7 +378,11 @@ mod tests {
 
     #[test]
     fn session_type_variants_serialize() {
-        for v in [SessionType::Direct, SessionType::Channel, SessionType::Group] {
+        for v in [
+            SessionType::Direct,
+            SessionType::Channel,
+            SessionType::Group,
+        ] {
             let j = serde_json::to_string(&v).unwrap();
             let _: SessionType = serde_json::from_str(&j).unwrap();
         }
@@ -384,7 +391,8 @@ mod tests {
     #[test]
     fn inbound_message_session_key_backward_compat() {
         // Old messages without session_key should deserialise with None.
-        let json = r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel"}"#;
+        let json =
+            r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel"}"#;
         let msg: SlackInboundMessage = serde_json::from_str(json).unwrap();
         assert!(msg.session_key.is_none());
     }

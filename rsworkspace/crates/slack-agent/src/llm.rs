@@ -141,8 +141,13 @@ impl ClaudeClient {
     pub async fn stream_response(
         &self,
         messages: Vec<ConversationMessage>,
-    ) -> Result<(mpsc::Receiver<String>, tokio::task::JoinHandle<Result<String, String>>), String>
-    {
+    ) -> Result<
+        (
+            mpsc::Receiver<String>,
+            tokio::task::JoinHandle<Result<String, String>>,
+        ),
+        String,
+    > {
         let response = self.make_request(&messages).await?;
 
         let (tx, rx) = mpsc::channel::<String>(256);
@@ -168,18 +173,15 @@ impl ClaudeClient {
                                 if data == "[DONE]" {
                                     return Ok(accumulated);
                                 }
-                                if let Ok(ev) = serde_json::from_str::<StreamEvent>(data) {
-                                    if ev.event_type == "content_block_delta" {
-                                        if let Some(delta) = ev.delta {
-                                            if delta.delta_type == "text_delta" {
-                                                if let Some(text) = delta.text {
-                                                    accumulated.push_str(&text);
-                                                    // Best-effort send; ignore if receiver dropped.
-                                                    let _ = tx.send(text).await;
-                                                }
-                                            }
-                                        }
-                                    }
+                                if let Ok(ev) = serde_json::from_str::<StreamEvent>(data)
+                                    && ev.event_type == "content_block_delta"
+                                    && let Some(delta) = ev.delta
+                                    && delta.delta_type == "text_delta"
+                                    && let Some(text) = delta.text
+                                {
+                                    accumulated.push_str(&text);
+                                    // Best-effort send; ignore if receiver dropped.
+                                    let _ = tx.send(text).await;
                                 }
                             }
                         }

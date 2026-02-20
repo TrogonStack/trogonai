@@ -22,10 +22,7 @@ const STREAM_SUBJECTS: &[&str] = &[
 pub async fn ensure_slack_stream(js: &Context) -> Result<(), async_nats::Error> {
     js.get_or_create_stream(StreamConfig {
         name: STREAM_NAME.to_string(),
-        subjects: STREAM_SUBJECTS
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+        subjects: STREAM_SUBJECTS.iter().map(|s| s.to_string()).collect(),
         // Each message is removed once the first consumer ACKs it.
         retention: RetentionPolicy::WorkQueue,
         // Survive server restarts.

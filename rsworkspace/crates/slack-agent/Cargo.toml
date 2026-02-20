@@ -20,3 +20,6 @@ trogon-nats = { path = "../trogon-nats" }
 trogon-std = { path = "../trogon-std" }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+trogon-std = { path = "../trogon-std", features = ["test-support"] }

@@ -8,22 +8,24 @@ use async_nats::jetstream;
 use config::SlackAgentConfig;
 use futures::StreamExt;
 use handler::{
-    AgentContext, handle_block_action, handle_inbound, handle_message_changed,
-    handle_message_deleted, handle_pin, handle_reaction, handle_slash_command,
-    handle_thread_broadcast,
+    AgentContext, handle_block_action, handle_channel, handle_inbound, handle_member,
+    handle_message_changed, handle_message_deleted, handle_pin, handle_reaction,
+    handle_slash_command, handle_thread_broadcast,
 };
 use health::start_health_server;
 use llm::ClaudeClient;
 use memory::ConversationMemory;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
-    create_block_action_consumer, create_inbound_consumer, create_message_changed_consumer,
-    create_message_deleted_consumer, create_pin_consumer, create_reaction_consumer,
-    create_slash_command_consumer, create_thread_broadcast_consumer,
+    create_block_action_consumer, create_channel_consumer, create_inbound_consumer,
+    create_member_consumer, create_message_changed_consumer, create_message_deleted_consumer,
+    create_pin_consumer, create_reaction_consumer, create_slash_command_consumer,
+    create_thread_broadcast_consumer,
 };
 use slack_types::events::{
-    SlackBlockActionEvent, SlackInboundMessage, SlackMessageChangedEvent, SlackMessageDeletedEvent,
-    SlackPinEvent, SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent,
+    SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage, SlackMemberEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent, SlackReactionEvent,
+    SlackSlashCommandEvent, SlackThreadBroadcastEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -46,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tokio::spawn(start_health_server(config.health_port));
 
     tracing::info!("Connecting to NATS...");
-    let nats_client = connect(&config.nats).await.map_err(|e| format!("{:?}", e))?;
+    let nats_client = connect(&config.nats)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
     // Keep raw client for Core NATS request/reply (stream.start).
     let nats_raw = nats_client.clone();
     let js = Arc::new(jetstream::new(nats_client));
@@ -64,6 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let pin_consumer = create_pin_consumer(&js).await?;
     let block_action_consumer = create_block_action_consumer(&js).await?;
     let thread_broadcast_consumer = create_thread_broadcast_consumer(&js).await?;
+    let member_consumer = create_member_consumer(&js).await?;
+    let channel_consumer = create_channel_consumer(&js).await?;
 
     let mut inbound_msgs = inbound_consumer.messages().await?;
     let mut reaction_msgs = reaction_consumer.messages().await?;
@@ -73,6 +79,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut pin_msgs = pin_consumer.messages().await?;
     let mut block_action_msgs = block_action_consumer.messages().await?;
     let mut thread_broadcast_msgs = thread_broadcast_consumer.messages().await?;
+    let mut member_msgs = member_consumer.messages().await?;
+    let mut channel_msgs = channel_consumer.messages().await?;
 
     // Build Claude client (optional — only if API key is configured).
     let claude = config.anthropic_api_key.as_ref().map(|key| {
@@ -86,7 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     if claude.is_none() {
-        tracing::warn!("ANTHROPIC_API_KEY not set — agent will echo messages instead of calling Claude");
+        tracing::warn!(
+            "ANTHROPIC_API_KEY not set — agent will echo messages instead of calling Claude"
+        );
     }
 
     let ctx = Arc::new(AgentContext {
@@ -202,6 +212,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let _ = msg.ack().await;
                     }
                     Err(e) => tracing::error!(error = %e, "JetStream error on thread_broadcast consumer"),
+                }
+            }
+            Some(result) = member_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackMemberEvent>(&msg.payload) {
+                            Ok(ev) => { handle_member(ev).await; }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackMemberEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on member consumer"),
+                }
+            }
+            Some(result) = channel_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackChannelEvent>(&msg.payload) {
+                            Ok(ev) => { handle_channel(ev).await; }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackChannelEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on channel consumer"),
                 }
             }
             _ = tokio::signal::ctrl_c() => {
