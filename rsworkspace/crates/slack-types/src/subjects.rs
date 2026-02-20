@@ -80,6 +80,22 @@ pub const SLACK_OUTBOUND_READ_MESSAGES: &str = "slack.outbound.read_messages";
 /// Upload text content as a Slack file. JetStream pub/sub.
 pub const SLACK_OUTBOUND_UPLOAD: &str = "slack.outbound.upload";
 
+
+/// Fetch thread replies (`conversations.replies`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_READ_REPLIES: &str = "slack.outbound.read_replies";
+
+/// Set suggested prompts on an assistant thread (`assistant.threads.setSuggestedPrompts`).
+pub const SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS: &str = "slack.outbound.set_suggested_prompts";
+
+/// Send a proactive message (`conversations.open` + `chat.postMessage`).
+pub const SLACK_OUTBOUND_PROACTIVE: &str = "slack.outbound.proactive";
+
+/// Post an ephemeral message visible only to a specific user (`chat.postEphemeral`).
+pub const SLACK_OUTBOUND_EPHEMERAL: &str = "slack.outbound.ephemeral";
+
+/// Delete an uploaded file (`files.delete`).
+pub const SLACK_OUTBOUND_DELETE_FILE: &str = "slack.outbound.delete_file";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +141,11 @@ mod tests {
             SLACK_OUTBOUND_UPDATE,
             SLACK_OUTBOUND_READ_MESSAGES,
             SLACK_OUTBOUND_UPLOAD,
+            SLACK_OUTBOUND_READ_REPLIES,
+            SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS,
+            SLACK_OUTBOUND_PROACTIVE,
+            SLACK_OUTBOUND_EPHEMERAL,
+            SLACK_OUTBOUND_DELETE_FILE,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

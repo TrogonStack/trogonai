@@ -7,9 +7,11 @@ use slack_types::subjects::{
     SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
     SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
     SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
-    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
-    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
-    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
+    SLACK_OUTBOUND_PROACTIVE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
+    SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
+    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD,
+    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 use crate::setup::STREAM_NAME;
@@ -190,4 +192,33 @@ pub async fn create_upload_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
     make_consumer(js, "slack-bot-upload", SLACK_OUTBOUND_UPLOAD).await
+}
+
+pub async fn create_suggested_prompts_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        "slack-bot-suggested-prompts",
+        SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS,
+    )
+    .await
+}
+
+pub async fn create_proactive_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-proactive", SLACK_OUTBOUND_PROACTIVE).await
+}
+
+pub async fn create_ephemeral_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-ephemeral", SLACK_OUTBOUND_EPHEMERAL).await
+}
+
+pub async fn create_delete_file_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-delete-file", SLACK_OUTBOUND_DELETE_FILE).await
 }

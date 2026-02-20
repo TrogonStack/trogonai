@@ -13,21 +13,29 @@ use listener::{
     BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event,
 };
 use sender::{
-    run_delete_loop, run_outbound_loop, run_reaction_action_loop, run_set_status_loop,
-    run_stream_append_loop, run_stream_stop_loop, run_update_loop, run_upload_loop,
-    run_view_open_loop, run_view_publish_loop,
+    run_delete_file_loop, run_delete_loop, run_ephemeral_loop, run_outbound_loop,
+    run_proactive_loop, run_reaction_action_loop, run_set_status_loop,
+    run_stream_append_loop, run_stream_stop_loop, run_suggested_prompts_loop, run_update_loop,
+    run_upload_loop, run_view_open_loop, run_view_publish_loop,
 };
 use slack_morphism::prelude::*;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
-    create_delete_consumer, create_outbound_consumer, create_reaction_action_consumer,
+    create_delete_consumer, create_delete_file_consumer, create_ephemeral_consumer,
+    create_outbound_consumer, create_proactive_consumer, create_reaction_action_consumer,
     create_set_status_consumer, create_stream_append_consumer, create_stream_stop_consumer,
-    create_update_consumer, create_upload_consumer, create_view_open_consumer,
-    create_view_publish_consumer,
+    create_suggested_prompts_consumer, create_update_consumer, create_upload_consumer,
+    create_view_open_consumer, create_view_publish_consumer,
 };
 use rate_limit::RateLimiter;
-use slack_types::events::{SlackReadMessage, SlackReadMessagesRequest, SlackReadMessagesResponse, SlackStreamStartRequest, SlackStreamStartResponse};
-use slack_types::subjects::{SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_STREAM_START};
+use slack_types::events::{
+    SlackReadMessage, SlackReadMessagesRequest, SlackReadMessagesResponse,
+    SlackReadRepliesRequest, SlackReadRepliesResponse, SlackStreamStartRequest,
+    SlackStreamStartResponse,
+};
+use slack_types::subjects::{
+    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use trogon_nats::connect;
@@ -76,10 +84,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let delete_consumer = create_delete_consumer(&js).await?;
     let update_consumer = create_update_consumer(&js).await?;
     let upload_consumer = create_upload_consumer(&js).await?;
+    let suggested_prompts_consumer = create_suggested_prompts_consumer(&js).await?;
+    let proactive_consumer = create_proactive_consumer(&js).await?;
+    let ephemeral_consumer = create_ephemeral_consumer(&js).await?;
+    let delete_file_consumer = create_delete_file_consumer(&js).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
     let mut read_messages_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_MESSAGES).await?;
+    let mut read_replies_sub = nats_client.subscribe(SLACK_OUTBOUND_READ_REPLIES).await?;
 
     tracing::info!("Connecting to Slack via Socket Mode...");
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -404,6 +417,158 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
     let read_messages_abort = read_messages_handle.abort_handle();
 
+    // read_replies handler: Core NATS request/reply — stays on raw client.
+    let read_replies_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = read_replies_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("read_replies message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                match serde_json::from_slice::<SlackReadRepliesRequest>(&msg.payload) {
+                    Ok(req) => {
+                        let limit = req.limit.unwrap_or(20).min(200);
+                        let mut query: Vec<(&str, String)> = vec![
+                            ("channel", req.channel.clone()),
+                            ("ts", req.ts.clone()),
+                            ("limit", limit.to_string()),
+                        ];
+                        if let Some(ref oldest) = req.oldest {
+                            query.push(("oldest", oldest.clone()));
+                        }
+                        if let Some(ref latest) = req.latest {
+                            query.push(("latest", latest.clone()));
+                        }
+
+                        rl.acquire().await;
+                        match hc
+                            .get("https://slack.com/api/conversations.replies")
+                            .bearer_auth(&bt)
+                            .query(&query)
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let messages: Vec<SlackReadMessage> = api_resp["messages"]
+                                        .as_array()
+                                        .unwrap_or(&vec![])
+                                        .iter()
+                                        .map(|m| SlackReadMessage {
+                                            ts: m["ts"].as_str().unwrap_or("").to_string(),
+                                            user: m["user"].as_str().map(String::from),
+                                            text: m["text"].as_str().map(String::from),
+                                            bot_id: m["bot_id"].as_str().map(String::from),
+                                        })
+                                        .collect();
+                                    let response = SlackReadRepliesResponse {
+                                        ok: true,
+                                        messages,
+                                        error: None,
+                                    };
+                                    match serde_json::to_vec(&response) {
+                                        Ok(bytes) => {
+                                            if let Err(e) = nc.publish(reply_to, bytes.into()).await {
+                                                tracing::error!(
+                                                    error = %e,
+                                                    "Failed to publish read_replies reply"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                error = %e,
+                                                "Failed to serialize read_replies response"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(api_resp) => {
+                                    tracing::error!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        "conversations.replies failed"
+                                    );
+                                    let response = SlackReadRepliesResponse {
+                                        ok: false,
+                                        messages: vec![],
+                                        error: Some(
+                                            api_resp["error"]
+                                                .as_str()
+                                                .unwrap_or("unknown")
+                                                .to_string(),
+                                        ),
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse conversations.replies response"
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "HTTP error calling conversations.replies"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to deserialize read_replies NATS message"
+                        );
+                    }
+                }
+            }
+        }
+    });
+    let read_replies_abort = read_replies_handle.abort_handle();
+
+    let suggested_prompts_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_suggested_prompts_loop(suggested_prompts_consumer, bt, hc, rl).await }
+    });
+    let suggested_prompts_abort = suggested_prompts_handle.abort_handle();
+
+    let proactive_handle = tokio::spawn({
+        let sc = slack_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_proactive_loop(proactive_consumer, sc, bt, hc, rl).await }
+    });
+    let proactive_abort = proactive_handle.abort_handle();
+
+    let ephemeral_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_ephemeral_loop(ephemeral_consumer, bt, hc, rl).await }
+    });
+    let ephemeral_abort = ephemeral_handle.abort_handle();
+
+    let delete_file_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_delete_file_loop(delete_file_consumer, bt, hc, rl).await }
+    });
+    let delete_file_abort = delete_file_handle.abort_handle();
 
     tokio::select! {
         _ = socket_mode_listener.serve() => {
@@ -481,6 +646,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "Upload NATS loop panicked"),
             }
         }
+        res = read_replies_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Read replies NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Read replies NATS loop panicked"),
+            }
+        }
+        res = suggested_prompts_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Suggested prompts NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Suggested prompts NATS loop panicked"),
+            }
+        }
+        res = proactive_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Proactive NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Proactive NATS loop panicked"),
+            }
+        }
+        res = ephemeral_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Ephemeral NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Ephemeral NATS loop panicked"),
+            }
+        }
+        res = delete_file_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Delete file NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Delete file NATS loop panicked"),
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down");
         }
@@ -499,6 +694,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     delete_abort.abort();
     update_abort.abort();
     upload_abort.abort();
+    read_replies_abort.abort();
+    suggested_prompts_abort.abort();
+    proactive_abort.abort();
+    ephemeral_abort.abort();
+    delete_file_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;
     tracing::info!("Shutdown complete");
 

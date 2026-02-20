@@ -1,22 +1,26 @@
 use async_nats::jetstream::Context;
 use serde::Serialize;
 use slack_types::events::{
-    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteMessage,
-    SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
-    SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
-    SlackReadMessagesRequest, SlackReadMessagesResponse, SlackSetStatusRequest,
-    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackUpdateMessage, SlackUploadRequest, SlackViewClosedEvent,
-    SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteFile,
+    SlackDeleteMessage, SlackEphemeralMessage, SlackInboundMessage, SlackMemberEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
+    SlackProactiveMessage, SlackReactionAction, SlackReactionEvent, SlackReadMessagesRequest,
+    SlackReadMessagesResponse, SlackReadRepliesRequest, SlackReadRepliesResponse,
+    SlackSetStatusRequest, SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent,
+    SlackStreamAppendMessage, SlackStreamStopMessage, SlackThreadBroadcastEvent,
+    SlackUpdateMessage, SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest,
+    SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
     SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
     SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
     SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
-    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
-    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
-    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
+    SLACK_OUTBOUND_PROACTIVE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
+    SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
+    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD,
+    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 async fn js_publish<T: Serialize>(
@@ -208,4 +212,50 @@ pub async fn publish_upload_request(
     req: &SlackUploadRequest,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_UPLOAD, req).await
+}
+
+/// Fetch thread replies from the bot via Core NATS request/reply.
+pub async fn request_read_replies(
+    client: &async_nats::Client,
+    req: &SlackReadRepliesRequest,
+) -> Result<SlackReadRepliesResponse, async_nats::Error> {
+    use slack_types::subjects::SLACK_OUTBOUND_READ_REPLIES;
+    let payload = serde_json::to_vec(req)?;
+    let response = client
+        .request(SLACK_OUTBOUND_READ_REPLIES, payload.into())
+        .await?;
+    let result: SlackReadRepliesResponse = serde_json::from_slice(&response.payload)?;
+    Ok(result)
+}
+
+/// Publish a request to set suggested prompts on an assistant thread.
+pub async fn publish_set_suggested_prompts(
+    js: &Context,
+    req: &SlackSetSuggestedPromptsRequest,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, req).await
+}
+
+/// Publish a proactive message (no inbound trigger required).
+pub async fn publish_proactive_message(
+    js: &Context,
+    msg: &SlackProactiveMessage,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_PROACTIVE, msg).await
+}
+
+/// Publish an ephemeral message (visible only to a specific user).
+pub async fn publish_ephemeral_message(
+    js: &Context,
+    msg: &SlackEphemeralMessage,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_EPHEMERAL, msg).await
+}
+
+/// Publish a request to delete an uploaded file.
+pub async fn publish_delete_file(
+    js: &Context,
+    req: &SlackDeleteFile,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_DELETE_FILE, req).await
 }

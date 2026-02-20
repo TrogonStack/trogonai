@@ -3,9 +3,10 @@ use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
-    SlackDeleteMessage, SlackOutboundMessage, SlackReactionAction, SlackSetStatusRequest,
-    SlackStreamAppendMessage, SlackStreamStopMessage, SlackUpdateMessage, SlackViewOpenRequest,
-    SlackViewPublishRequest,
+    SlackDeleteFile, SlackDeleteMessage, SlackEphemeralMessage, SlackOutboundMessage,
+    SlackProactiveMessage, SlackReactionAction, SlackSetStatusRequest,
+    SlackSetSuggestedPromptsRequest, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackUpdateMessage, SlackViewOpenRequest, SlackViewPublishRequest,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -898,6 +899,431 @@ pub async fn run_update_loop(
 
         if let Err(e) = msg.ack().await {
             tracing::error!(error = %e, "Failed to ACK update message");
+        }
+    }
+}
+
+
+pub async fn run_suggested_prompts_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create suggested_prompts message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/assistant.threads.setSuggestedPrompts");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on suggested_prompts consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackSetSuggestedPromptsRequest>(&msg.payload) {
+            Ok(req) => {
+                let prompts: Vec<serde_json::Value> = req
+                    .prompts
+                    .iter()
+                    .map(|p| serde_json::json!({"title": p.title, "message": p.message}))
+                    .collect();
+                let mut body = serde_json::Map::new();
+                body.insert(
+                    "channel_id".into(),
+                    serde_json::Value::String(req.channel_id.clone()),
+                );
+                body.insert(
+                    "thread_ts".into(),
+                    serde_json::Value::String(req.thread_ts.clone()),
+                );
+                if let Some(ref title) = req.title {
+                    body.insert("title".into(), serde_json::Value::String(title.clone()));
+                }
+                body.insert("prompts".into(), serde_json::Value::Array(prompts));
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&serde_json::Value::Object(body))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
+                            tracing::warn!(
+                                "Slack rate limit on setSuggestedPrompts, retrying after 5 s"
+                            );
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "assistant.threads.setSuggestedPrompts failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "Failed to parse setSuggestedPrompts response"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "HTTP error calling assistant.threads.setSuggestedPrompts"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "Failed to deserialize SlackSetSuggestedPromptsRequest"
+                );
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK suggested_prompts message");
+        }
+    }
+}
+
+pub async fn run_proactive_loop(
+    consumer: Consumer<pull::Config>,
+    slack_client: Arc<SlackHyperClient>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create proactive message stream");
+            return;
+        }
+    };
+    let token = SlackApiToken::new(bot_token.clone().into());
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on proactive consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackProactiveMessage>(&msg.payload) {
+            Ok(proactive) => {
+                // Resolve channel: if only user_id provided, open a DM first.
+                let channel_id = if let Some(ref uid) = proactive.user_id {
+                    if proactive.channel.is_none() {
+                        let open_url =
+                            format!("{SLACK_API_BASE}/api/conversations.open");
+                        rate_limiter.acquire().await;
+                        match http_client
+                            .post(&open_url)
+                            .bearer_auth(&bot_token)
+                            .json(&serde_json::json!({"users": uid}))
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(body) if body["ok"].as_bool().unwrap_or(false) => {
+                                    body["channel"]["id"]
+                                        .as_str()
+                                        .map(String::from)
+                                }
+                                Ok(body) => {
+                                    tracing::error!(
+                                        api_error = body["error"].as_str().unwrap_or("unknown"),
+                                        "conversations.open failed"
+                                    );
+                                    None
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to parse conversations.open response"
+                                    );
+                                    None
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "HTTP error calling conversations.open"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        proactive.channel.clone()
+                    }
+                } else {
+                    proactive.channel.clone()
+                };
+
+                let channel_id = match channel_id {
+                    Some(c) => c,
+                    None => {
+                        tracing::error!("No channel resolved for proactive message, skipping");
+                        let _ = msg.ack().await;
+                        continue;
+                    }
+                };
+
+                let session = slack_client.open_session(&token);
+                let channel: SlackChannelId = channel_id.into();
+                let thread_ts: Option<SlackTs> = proactive.thread_ts.map(|ts| ts.into());
+                let converted_text = format::markdown_to_mrkdwn(&proactive.text);
+
+                let blocks: Option<Vec<SlackBlock>> =
+                    proactive.blocks.as_ref().and_then(|s| {
+                        serde_json::from_str::<Vec<SlackBlock>>(s)
+                            .map_err(|e| {
+                                tracing::warn!(
+                                    error = %e,
+                                    "Failed to parse proactive blocks JSON"
+                                );
+                            })
+                            .ok()
+                    });
+
+                let mut content =
+                    SlackMessageContent::new().with_text(converted_text.clone());
+                if let Some(ref blks) = blocks {
+                    content = content.with_blocks(blks.clone());
+                }
+
+                let mut request =
+                    SlackApiChatPostMessageRequest::new(channel.clone(), content);
+                if let Some(ref ts) = thread_ts {
+                    request = request.with_thread_ts(ts.clone());
+                }
+                if let Some(ref username) = proactive.username {
+                    request = request.with_username(username.clone());
+                }
+                if let Some(ref icon_url) = proactive.icon_url {
+                    request = request.with_icon_url(icon_url.clone());
+                }
+
+                rate_limiter.acquire().await;
+                let post_result = {
+                    let r = session.chat_post_message(&request).await;
+                    if let Err(ref e) = r
+                        && format!("{e}").contains("ratelimited")
+                    {
+                        tracing::warn!(
+                            "Slack rate limit on proactive postMessage, retrying after 5 s"
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        slack_client
+                            .open_session(&token)
+                            .chat_post_message(&request)
+                            .await
+                    } else {
+                        r
+                    }
+                };
+
+                if let Err(e) = post_result {
+                    tracing::error!(error = %e, "Failed to send proactive message to Slack");
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackProactiveMessage");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK proactive message");
+        }
+    }
+}
+
+pub async fn run_ephemeral_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create ephemeral message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/chat.postEphemeral");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on ephemeral consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackEphemeralMessage>(&msg.payload) {
+            Ok(req) => {
+                let mut body = serde_json::Map::new();
+                body.insert(
+                    "channel".into(),
+                    serde_json::Value::String(req.channel.clone()),
+                );
+                body.insert(
+                    "user".into(),
+                    serde_json::Value::String(req.user.clone()),
+                );
+                body.insert(
+                    "text".into(),
+                    serde_json::Value::String(req.text.clone()),
+                );
+                if let Some(ref ts) = req.thread_ts {
+                    body.insert(
+                        "thread_ts".into(),
+                        serde_json::Value::String(ts.clone()),
+                    );
+                }
+                if let Some(ref blocks_str) = req.blocks {
+                    match serde_json::from_str::<serde_json::Value>(blocks_str) {
+                        Ok(blocks_val) => {
+                            body.insert("blocks".into(), blocks_val);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to parse ephemeral blocks JSON, sending text only"
+                            );
+                        }
+                    }
+                }
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&serde_json::Value::Object(body))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
+                            tracing::warn!(
+                                "Slack rate limit on postEphemeral, retrying after 5 s"
+                            );
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "chat.postEphemeral failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "Failed to parse chat.postEphemeral response"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling chat.postEphemeral");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackEphemeralMessage");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK ephemeral message");
+        }
+    }
+}
+
+pub async fn run_delete_file_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create delete_file message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/files.delete");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on delete_file consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackDeleteFile>(&msg.payload) {
+            Ok(req) => {
+                let body = serde_json::json!({"file": req.file_id});
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if body["error"].as_str() == Some("ratelimited") => {
+                            tracing::warn!(
+                                "Slack rate limit on files.delete, retrying after 5 s"
+                            );
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "files.delete failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse files.delete response");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling files.delete");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackDeleteFile");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK delete_file message");
         }
     }
 }

@@ -1,18 +1,18 @@
 use async_nats::Client as NatsClient;
 use async_nats::jetstream::Context as JsContext;
 use slack_nats::publisher::{
-    publish_outbound, publish_reaction_action, publish_set_status, publish_stream_append,
-    publish_stream_stop, publish_upload_request, publish_view_open, publish_view_publish,
+    publish_ephemeral_message, publish_outbound, publish_reaction_action, publish_set_status,
+    publish_stream_append, publish_stream_stop, publish_upload_request, publish_view_open,
+    publish_view_publish,
 };
 use slack_types::events::{
     PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
-    SlackChannelEvent, SlackFile, SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent,
-    SlackMessageDeletedEvent,
-    SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
-    SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest,
-    SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackChannelEvent, SlackEphemeralMessage, SlackFile, SlackInboundMessage, SlackMemberEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
+    SlackReactionAction, SlackReactionEvent, SlackReadRepliesRequest, SlackSetStatusRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStartRequest,
+    SlackStreamStartResponse, SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUploadRequest,
+    SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -291,17 +291,50 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         && ctx.config.slack_seed_history_on_start > 0
         && matches!(msg.session_type, SessionType::Channel | SessionType::Group)
     {
-        use slack_nats::publisher::request_read_messages;
-        use slack_types::events::SlackReadMessagesRequest;
-        let req = SlackReadMessagesRequest {
-            channel: msg.channel.clone(),
-            limit: Some(ctx.config.slack_seed_history_on_start as u32),
-            oldest: None,
-            latest: Some(msg.ts.clone()), // only messages before current
-        };
-        match request_read_messages(&ctx.nats, &req).await {
-            Ok(resp) if resp.ok && !resp.messages.is_empty() => {
-                let seeded: Vec<ConversationMessage> = resp.messages
+        // Determine whether this message is inside a thread (thread_ts set and
+        // different from ts).  Thread messages use conversations.replies; channel
+        // root messages use conversations.history.
+        let is_thread_reply = msg
+            .thread_ts
+            .as_deref()
+            .map(|tts| tts != msg.ts.as_str())
+            .unwrap_or(false);
+
+        let messages_result: Result<Vec<slack_types::events::SlackReadMessage>, String> =
+            if is_thread_reply {
+                use slack_nats::publisher::request_read_replies;
+                let thread_ts = msg.thread_ts.as_deref().unwrap(); // safe: is_thread_reply=true
+                let req = SlackReadRepliesRequest {
+                    channel: msg.channel.clone(),
+                    ts: thread_ts.to_string(),
+                    limit: Some(ctx.config.slack_seed_history_on_start as u32),
+                    oldest: None,
+                    latest: Some(msg.ts.clone()), // only messages before current
+                };
+                match request_read_replies(&ctx.nats, &req).await {
+                    Ok(resp) if resp.ok => Ok(resp.messages),
+                    Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
+                    Err(e) => Err(e.to_string()),
+                }
+            } else {
+                use slack_nats::publisher::request_read_messages;
+                use slack_types::events::SlackReadMessagesRequest;
+                let req = SlackReadMessagesRequest {
+                    channel: msg.channel.clone(),
+                    limit: Some(ctx.config.slack_seed_history_on_start as u32),
+                    oldest: None,
+                    latest: Some(msg.ts.clone()), // only messages before current
+                };
+                match request_read_messages(&ctx.nats, &req).await {
+                    Ok(resp) if resp.ok => Ok(resp.messages),
+                    Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
+                    Err(e) => Err(e.to_string()),
+                }
+            };
+
+        match messages_result {
+            Ok(messages) if !messages.is_empty() => {
+                let seeded: Vec<ConversationMessage> = messages
                     .iter()
                     .rev() // API returns newest-first; reverse to chronological
                     .filter_map(|m| {
@@ -323,19 +356,16 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                 tracing::debug!(
                     count = seeded.len(),
                     channel = %msg.channel,
+                    is_thread_reply,
                     "Seeded session history from Slack"
                 );
                 seeded
             }
-            Ok(resp) if !resp.ok => {
-                tracing::warn!(error = ?resp.error, "Failed to seed history from Slack");
-                history
-            }
+            Ok(_) => history, // empty messages list
             Err(e) => {
-                tracing::warn!(error = %e, "Failed to request Slack history for seeding");
+                tracing::warn!(error = %e, "Failed to seed history from Slack");
                 history
             }
-            _ => history,
         }
     } else {
         history
@@ -791,6 +821,25 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         }
         let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
         post_response_url(&ctx.http_client, &ev.response_url, &greeting).await;
+        return;
+    }
+
+    // /help: post an ephemeral usage message visible only to the invoking user.
+    if text.eq_ignore_ascii_case("help") {
+        let help_text = format!(
+            "Available commands:\n• `{cmd} clear` / `{cmd} reset` — clear conversation history\n• `{cmd} new` — start a new conversation\n• `{cmd} help` — show this help\n• `{cmd} <question>` — ask the assistant anything",
+            cmd = ev.command,
+        );
+        let ephemeral = SlackEphemeralMessage {
+            channel: ev.channel_id.clone(),
+            user: ev.user_id.clone(),
+            text: help_text,
+            thread_ts: None,
+            blocks: None,
+        };
+        if let Err(e) = publish_ephemeral_message(&ctx.js, &ephemeral).await {
+            tracing::warn!(error = %e, "Failed to publish ephemeral help message");
+        }
         return;
     }
 

@@ -441,6 +441,87 @@ pub struct SlackUploadRequest {
     pub title: Option<String>,
 }
 
+
+// ── New feature types ────────────────────────────────────────────────────────
+
+/// Request to fetch thread replies via `conversations.replies`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackReadRepliesRequest {
+    pub channel: String,
+    /// The `thread_ts` of the parent message.
+    pub ts: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<String>,
+}
+
+/// Response from `conversations.replies`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackReadRepliesResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub messages: Vec<SlackReadMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A single prompt suggestion for `assistant.threads.setSuggestedPrompts`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackSuggestedPrompt {
+    pub title: String,
+    pub message: String,
+}
+
+/// Request to set suggested prompts on an assistant thread.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackSetSuggestedPromptsRequest {
+    pub channel_id: String,
+    pub thread_ts: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub prompts: Vec<SlackSuggestedPrompt>,
+}
+
+/// Request to send a proactive message (without an inbound trigger).
+/// Provide either `channel` (channel/DM ID) OR `user_id` (bot will open a DM).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackProactiveMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_ts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+/// Request to post an ephemeral message (visible only to `user`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackEphemeralMessage {
+    pub channel: String,
+    pub user: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_ts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<String>,
+}
+
+/// Request to delete an uploaded file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackDeleteFile {
+    pub file_id: String,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1003,5 +1084,104 @@ mod tests {
         assert_eq!(decoded.content, "# Hello\nWorld");
         assert_eq!(decoded.title.as_deref(), Some("My Report"));
     }
+
+
+    #[test]
+    fn slack_read_replies_request_roundtrip() {
+        let req = SlackReadRepliesRequest {
+            channel: "C123".into(),
+            ts: "1609459200.000001".into(),
+            limit: Some(50),
+            oldest: None,
+            latest: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackReadRepliesRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C123");
+        assert_eq!(decoded.ts, "1609459200.000001");
+        assert_eq!(decoded.limit, Some(50));
+    }
+
+    #[test]
+    fn slack_read_replies_response_roundtrip() {
+        let resp = SlackReadRepliesResponse {
+            ok: true,
+            messages: vec![SlackReadMessage {
+                ts: "1609459200.000002".into(),
+                user: Some("U456".into()),
+                text: Some("Reply".into()),
+                bot_id: None,
+            }],
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: SlackReadRepliesResponse = serde_json::from_str(&json).unwrap();
+        assert!(decoded.ok);
+        assert_eq!(decoded.messages.len(), 1);
+        assert_eq!(decoded.messages[0].ts, "1609459200.000002");
+    }
+
+    #[test]
+    fn slack_set_suggested_prompts_request_roundtrip() {
+        let req = SlackSetSuggestedPromptsRequest {
+            channel_id: "C789".into(),
+            thread_ts: "1609459200.000003".into(),
+            title: Some("What can I help with?".into()),
+            prompts: vec![SlackSuggestedPrompt {
+                title: "Summarise".into(),
+                message: "Please summarise this thread.".into(),
+            }],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackSetSuggestedPromptsRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel_id, "C789");
+        assert_eq!(decoded.prompts.len(), 1);
+        assert_eq!(decoded.prompts[0].title, "Summarise");
+    }
+
+    #[test]
+    fn slack_proactive_message_roundtrip() {
+        let msg = SlackProactiveMessage {
+            channel: None,
+            user_id: Some("U001".into()),
+            text: "Hello proactively!".into(),
+            thread_ts: None,
+            blocks: None,
+            username: Some("MyBot".into()),
+            icon_url: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackProactiveMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.user_id.as_deref(), Some("U001"));
+        assert_eq!(decoded.text, "Hello proactively!");
+        assert_eq!(decoded.username.as_deref(), Some("MyBot"));
+    }
+
+    #[test]
+    fn slack_ephemeral_message_roundtrip() {
+        let msg = SlackEphemeralMessage {
+            channel: "C111".into(),
+            user: "U222".into(),
+            text: "Only you can see this.".into(),
+            thread_ts: Some("1609459200.000005".into()),
+            blocks: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SlackEphemeralMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C111");
+        assert_eq!(decoded.user, "U222");
+        assert_eq!(decoded.thread_ts.as_deref(), Some("1609459200.000005"));
+    }
+
+    #[test]
+    fn slack_delete_file_roundtrip() {
+        let req = SlackDeleteFile {
+            file_id: "F333XYZ".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackDeleteFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.file_id, "F333XYZ");
+    }
+
 
 }

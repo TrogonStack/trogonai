@@ -1,16 +1,18 @@
 use async_nats::jetstream::Context as JsContext;
 use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
+use slack_morphism::errors::SlackClientError;
 use slack_nats::publisher::{
     publish_app_home, publish_block_action, publish_channel, publish_inbound, publish_member,
-    publish_message_changed, publish_message_deleted, publish_reaction, publish_slash_command,
-    publish_thread_broadcast, publish_view_closed, publish_view_submission,
+    publish_message_changed, publish_message_deleted, publish_pin, publish_reaction,
+    publish_slash_command, publish_thread_broadcast, publish_view_closed, publish_view_submission,
 };
 use slack_types::events::{
-    ChannelEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
-    SlackChannelEvent, SlackFile as OurSlackFile, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewSubmissionEvent,
+    ChannelEventKind, PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment,
+    SlackBlockActionEvent, SlackChannelEvent, SlackFile as OurSlackFile, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent,
+    SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent, SlackViewClosedEvent,
+    SlackViewSubmissionEvent,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -527,11 +529,11 @@ pub async fn handle_push_event(
         }
 
         _ => {
-            // Unhandled event types (including pin_added / pin_removed).
-            // slack_morphism v2.17 does not expose typed variants for pin events
-            // in SlackEventCallbackBody, so they fall through here.
-            // TODO: When slack-morphism adds PinAdded/PinRemoved variants, handle
-            // them by constructing SlackPinEvent and calling publish_pin.
+            // Unhandled event types.  Note: pin_added / pin_removed events never
+            // reach this arm because slack-morphism v2.17 fails to deserialise
+            // them (SlackEventCallbackBody has no typed variant for those event
+            // types), so the parse error is caught in error_handler instead,
+            // where the raw JSON body is re-parsed by try_parse_pin_event.
             tracing::debug!("Ignoring unhandled push event type");
         }
     }
@@ -839,10 +841,111 @@ fn strip_bot_mention(text: &str, bot_user_id: Option<&str>) -> String {
 pub fn error_handler(
     err: Box<dyn std::error::Error + Send + Sync>,
     _client: Arc<SlackHyperClient>,
-    _states: SlackClientEventsUserState,
+    states: SlackClientEventsUserState,
 ) -> HttpStatusCode {
+    // Attempt to intercept pin_added / pin_removed events that fail to
+    // deserialise because slack-morphism v2.x has no typed variants for them
+    // in SlackEventCallbackBody.  When the outer Socket Mode message cannot be
+    // parsed the library stores the raw JSON body inside a ProtocolError; we
+    // fish it out here and handle it before falling through to the generic
+    // error log.
+    if let Some(slack_err) = err.downcast_ref::<SlackClientError>() {
+        if let SlackClientError::ProtocolError(proto_err) = slack_err {
+            if let Some(raw_body) = &proto_err.json_body {
+                if let Some(pin_event) = try_parse_pin_event(raw_body) {
+                    // Obtain the NATS context without blocking the thread: the
+                    // futures-locks RwLock exposes a non-blocking try_read().
+                    if let Ok(guard) = states.try_read() {
+                        if let Some(state) = guard.get_user_state::<BotState>() {
+                            let nats = state.nats.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = publish_pin(&nats, &pin_event).await {
+                                    tracing::error!(
+                                        error = %e,
+                                        kind  = ?pin_event.kind,
+                                        "Failed to publish pin event to NATS"
+                                    );
+                                }
+                            });
+                            return HttpStatusCode::OK;
+                        }
+                    }
+                    // State not yet available; fall through to the generic log.
+                }
+            }
+        }
+    }
+
     tracing::error!(error = %err, "Slack socket mode error");
     HttpStatusCode::OK
+}
+
+/// Try to parse a raw Socket Mode JSON body as a `pin_added` or `pin_removed`
+/// event.
+///
+/// Slack delivers pin events wrapped in an `events_api` envelope:
+/// ```json
+/// {
+///   "type": "events_api",
+///   "payload": {
+///     "type": "event_callback",
+///     "event": {
+///       "type": "pin_added",   // or "pin_removed"
+///       "user": "U…",
+///       "channel_id": "C…",
+///       "item": { "type": "message", "message": { "ts": "…" } },
+///       "event_ts": "…"
+///     }
+///   }
+/// }
+/// ```
+///
+/// Returns `None` if the body is not a pin event or cannot be parsed.
+fn try_parse_pin_event(raw_body: &str) -> Option<SlackPinEvent> {
+    let v: serde_json::Value = serde_json::from_str(raw_body).ok()?;
+
+    // Accept both the Socket Mode envelope ("events_api" wrapping a
+    // "event_callback" payload) and bare event_callback payloads.
+    let event_obj = if v["type"] == "events_api" {
+        &v["payload"]["event"]
+    } else if v["type"] == "event_callback" {
+        &v["event"]
+    } else {
+        return None;
+    };
+
+    let event_type = event_obj["type"].as_str()?;
+    let kind = match event_type {
+        "pin_added" => PinEventKind::Added,
+        "pin_removed" => PinEventKind::Removed,
+        _ => return None,
+    };
+
+    let user = event_obj["user"].as_str()?.to_string();
+
+    // Slack may use either "channel_id" or "channel" for pin events.
+    let channel = event_obj["channel_id"]
+        .as_str()
+        .or_else(|| event_obj["channel"].as_str())?
+        .to_string();
+
+    let event_ts = event_obj["event_ts"].as_str()?.to_string();
+
+    // The timestamp of the pinned message lives at item.message.ts.
+    let item_ts = event_obj["item"]["message"]["ts"]
+        .as_str()
+        .map(str::to_string);
+
+    let item_type = event_obj["item"]["type"].as_str().map(str::to_string);
+
+    Some(SlackPinEvent {
+        kind,
+        channel,
+        user,
+        item_ts,
+        item_type,
+        event_ts,
+    })
 }
 
 /// Look up a user's display name via the Slack `users.info` API.
