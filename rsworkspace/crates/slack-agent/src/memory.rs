@@ -12,6 +12,10 @@ pub struct ConversationMessage {
     /// Either `"user"` or `"assistant"`.
     pub role: String,
     pub content: String,
+    /// Slack message timestamp — set for user turns so edited/deleted messages
+    /// can be found and updated in history. Absent for assistant turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts: Option<String>,
 }
 
 /// Persistent conversation memory backed by NATS JetStream KV.

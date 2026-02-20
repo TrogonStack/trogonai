@@ -162,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackMessageChangedEvent>(&msg.payload) {
-                            Ok(ev) => { handle_message_changed(ev).await; }
+                            Ok(ev) => { handle_message_changed(ev, Arc::clone(&ctx)).await; }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackMessageChangedEvent"),
                         }
                         let _ = msg.ack().await;
@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackMessageDeletedEvent>(&msg.payload) {
-                            Ok(ev) => { handle_message_deleted(ev).await; }
+                            Ok(ev) => { handle_message_deleted(ev, Arc::clone(&ctx)).await; }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackMessageDeletedEvent"),
                         }
                         let _ = msg.ack().await;

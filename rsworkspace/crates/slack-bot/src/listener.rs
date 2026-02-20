@@ -463,6 +463,9 @@ pub async fn handle_push_event(
         }
 
         _ => {
+            // Unhandled event types (including pin_added / pin_removed).
+            // slack_morphism v2.17 does not expose a typed variant for pin events,
+            // so they fall through here and are not routed to NATS.
             tracing::debug!("Ignoring unhandled push event type");
         }
     }

@@ -148,6 +148,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     history.push(ConversationMessage {
         role: "user".to_string(),
         content: build_message_content(&msg.text, &msg.files),
+        ts: Some(msg.ts.clone()),
     });
 
     // 4. Determine the response text (streaming or fallback).
@@ -279,6 +280,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         updated.push(ConversationMessage {
             role: "assistant".to_string(),
             content: response_text.clone(),
+            ts: None,
         });
         ctx.memory.save(&session_key, &updated).await;
     }
@@ -384,6 +386,7 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         let messages = vec![ConversationMessage {
             role: "user".to_string(),
             content: prompt,
+            ts: None,
         }];
         match claude.stream_response(messages).await {
             Ok((mut rx, handle)) => {
@@ -430,7 +433,33 @@ async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &
     }
 }
 
-// ── Remaining event handlers (log-only for now) ───────────────────────────────
+// ── Session key derivation from raw channel/user fields ──────────────────────
+
+/// Derive a session key from a raw Slack channel ID and optional user/thread
+/// fields. Returns `None` when the key cannot be determined (e.g. a DM event
+/// without a user_id).
+fn derive_session_key_for_event(
+    channel: &str,
+    user: Option<&str>,
+    thread_ts: Option<&str>,
+) -> Option<String> {
+    if channel.starts_with('D') {
+        // DM: session is per-user, not per-channel
+        Some(format!("slack:dm:{}", user?))
+    } else if channel.starts_with('G') {
+        Some(match thread_ts {
+            Some(tts) => format!("slack:group:{}:thread:{}", channel, tts),
+            None => format!("slack:group:{}", channel),
+        })
+    } else {
+        Some(match thread_ts {
+            Some(tts) => format!("slack:channel:{}:thread:{}", channel, tts),
+            None => format!("slack:channel:{}", channel),
+        })
+    }
+}
+
+// ── Remaining event handlers ──────────────────────────────────────────────────
 
 pub async fn handle_reaction(ev: SlackReactionEvent) {
     tracing::info!(
@@ -443,22 +472,71 @@ pub async fn handle_reaction(ev: SlackReactionEvent) {
     );
 }
 
-pub async fn handle_message_changed(ev: SlackMessageChangedEvent) {
+pub async fn handle_message_changed(ev: SlackMessageChangedEvent, ctx: Arc<AgentContext>) {
     tracing::info!(
         channel = %ev.channel,
         ts = %ev.ts,
-        previous_text = ?ev.previous_text,
         new_text = ?ev.new_text,
         "Received message_changed event"
     );
+
+    let new_text = match ev.new_text.as_deref() {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => return,
+    };
+
+    let Some(session_key) =
+        derive_session_key_for_event(&ev.channel, ev.user.as_deref(), ev.thread_ts.as_deref())
+    else {
+        tracing::debug!(
+            channel = %ev.channel,
+            "message_changed: cannot derive session key (DM without user_id?), skipping"
+        );
+        return;
+    };
+
+    let mut history = ctx.memory.load(&session_key).await;
+    if let Some(entry) = history
+        .iter_mut()
+        .find(|m| m.role == "user" && m.ts.as_deref() == Some(ev.ts.as_str()))
+    {
+        entry.content = new_text;
+        ctx.memory.save(&session_key, &history).await;
+        tracing::debug!(session_key = %session_key, ts = %ev.ts, "Updated history entry for edited message");
+    } else {
+        tracing::debug!(session_key = %session_key, ts = %ev.ts, "message_changed: no matching history entry");
+    }
 }
 
-pub async fn handle_message_deleted(ev: SlackMessageDeletedEvent) {
+pub async fn handle_message_deleted(ev: SlackMessageDeletedEvent, ctx: Arc<AgentContext>) {
     tracing::info!(
         channel = %ev.channel,
         deleted_ts = %ev.deleted_ts,
         "Received message_deleted event"
     );
+
+    // DM session keys require the user_id, which is absent from delete events.
+    if ev.channel.starts_with('D') {
+        tracing::debug!(channel = %ev.channel, "message_deleted in DM — skipping (no user_id in event)");
+        return;
+    }
+
+    let Some(session_key) =
+        derive_session_key_for_event(&ev.channel, None, ev.thread_ts.as_deref())
+    else {
+        return;
+    };
+
+    let mut history = ctx.memory.load(&session_key).await;
+    let before = history.len();
+    history.retain(|m| m.ts.as_deref() != Some(ev.deleted_ts.as_str()));
+
+    if history.len() < before {
+        ctx.memory.save(&session_key, &history).await;
+        tracing::debug!(session_key = %session_key, ts = %ev.deleted_ts, "Removed deleted message from history");
+    } else {
+        tracing::debug!(session_key = %session_key, ts = %ev.deleted_ts, "message_deleted: no matching history entry");
+    }
 }
 
 pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent, ctx: Arc<AgentContext>) {

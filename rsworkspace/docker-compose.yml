@@ -13,6 +13,7 @@ version: "3.9"
 #   CLAUDE_MODEL              claude-sonnet-4-6  (default)
 #   CLAUDE_MAX_TOKENS         8192       (default)
 #   CLAUDE_SYSTEM_PROMPT      "You are a helpful assistant."
+#   CLAUDE_SYSTEM_PROMPT_FILE /run/secrets/prompt.txt  (takes precedence over inline)
 #   CLAUDE_MAX_HISTORY        40         (messages kept in KV; default)
 #   RUST_LOG                  info | debug | trace
 
@@ -68,6 +69,7 @@ services:
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}
       CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-8192}
       CLAUDE_SYSTEM_PROMPT: ${CLAUDE_SYSTEM_PROMPT:-}
+      CLAUDE_SYSTEM_PROMPT_FILE: ${CLAUDE_SYSTEM_PROMPT_FILE:-}
       CLAUDE_MAX_HISTORY: ${CLAUDE_MAX_HISTORY:-40}
       HEALTH_PORT: 8081
       RUST_LOG: ${RUST_LOG:-info}
