@@ -194,6 +194,17 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         .unwrap_or(&msg.channel)
         .to_string();
 
+    // DM pairing: override session_key to share history with the paired channel.
+    let session_key = if matches!(msg.session_type, SessionType::Direct) {
+        if let Some(ref pair_channel) = ctx.config.dm_pair_channel {
+            format!("slack:channel:{}", pair_channel)
+        } else {
+            session_key
+        }
+    } else {
+        session_key
+    };
+
     // Prune session locks whose Arc is held only by the map (no task is using them).
     {
         let mut locks = ctx.session_locks.lock().unwrap();
@@ -275,6 +286,62 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         }
     }
 
+    // 3b. Seed initial context from Slack history if session is fresh.
+    let history = if history.is_empty()
+        && ctx.config.slack_seed_history_on_start > 0
+        && matches!(msg.session_type, SessionType::Channel | SessionType::Group)
+    {
+        use slack_nats::publisher::request_read_messages;
+        use slack_types::events::SlackReadMessagesRequest;
+        let req = SlackReadMessagesRequest {
+            channel: msg.channel.clone(),
+            limit: Some(ctx.config.slack_seed_history_on_start as u32),
+            oldest: None,
+            latest: Some(msg.ts.clone()), // only messages before current
+        };
+        match request_read_messages(&ctx.nats, &req).await {
+            Ok(resp) if resp.ok && !resp.messages.is_empty() => {
+                let seeded: Vec<ConversationMessage> = resp.messages
+                    .iter()
+                    .rev() // API returns newest-first; reverse to chronological
+                    .filter_map(|m| {
+                        m.text.as_ref().filter(|t| !t.is_empty()).map(|text| {
+                            let role = if m.bot_id.is_some() {
+                                "assistant"
+                            } else {
+                                "user"
+                            };
+                            ConversationMessage {
+                                role: role.to_string(),
+                                content: text.clone(),
+                                ts: Some(m.ts.clone()),
+                                images: vec![],
+                            }
+                        })
+                    })
+                    .collect();
+                tracing::debug!(
+                    count = seeded.len(),
+                    channel = %msg.channel,
+                    "Seeded session history from Slack"
+                );
+                seeded
+            }
+            Ok(resp) if !resp.ok => {
+                tracing::warn!(error = ?resp.error, "Failed to seed history from Slack");
+                history
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to request Slack history for seeding");
+                history
+            }
+            _ => history,
+        }
+    } else {
+        history
+    };
+    let mut history = history;
+
     // Prefix message with the user's display name so Claude knows who's speaking.
     let content_text = match msg.display_name.as_deref() {
         Some(name) if !name.is_empty() => format!("[{name}]: {effective_text}"),
@@ -298,17 +365,19 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         images,
     });
 
-    // 3b. Set "is thinking…" typing status (best-effort, only for threaded messages).
-    if let Some(ref ts) = effective_thread_ts {
-        let _ = publish_set_status(
-            &ctx.js,
-            &SlackSetStatusRequest {
-                channel_id: msg.channel.clone(),
-                thread_ts: ts.clone(),
-                status: Some("is thinking\u{2026}".to_string()),
-            },
-        )
-        .await;
+    // 3c. Set "is thinking…" typing status (best-effort, only for threaded messages).
+    if !ctx.config.no_typing_channels.contains(&msg.channel) {
+        if let Some(ref ts) = effective_thread_ts {
+            let _ = publish_set_status(
+                &ctx.js,
+                &SlackSetStatusRequest {
+                    channel_id: msg.channel.clone(),
+                    thread_ts: ts.clone(),
+                    status: Some("is thinking\u{2026}".to_string()),
+                },
+            )
+            .await;
+        }
     }
 
     // 4. Determine the response text (streaming or fallback).
@@ -473,16 +542,18 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     };
 
     // 4d. Clear typing status (best-effort).
-    if let Some(ref ts) = effective_thread_ts {
-        let _ = publish_set_status(
-            &ctx.js,
-            &SlackSetStatusRequest {
-                channel_id: msg.channel.clone(),
-                thread_ts: ts.clone(),
-                status: None,
-            },
-        )
-        .await;
+    if !ctx.config.no_typing_channels.contains(&msg.channel) {
+        if let Some(ref ts) = effective_thread_ts {
+            let _ = publish_set_status(
+                &ctx.js,
+                &SlackSetStatusRequest {
+                    channel_id: msg.channel.clone(),
+                    thread_ts: ts.clone(),
+                    status: None,
+                },
+            )
+            .await;
+        }
     }
 
     // 5. Persist updated history (only if we got a real response).

@@ -9,7 +9,7 @@ use slack_types::subjects::{
     SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
     SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
     SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
-    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 use crate::setup::STREAM_NAME;
@@ -184,4 +184,10 @@ pub async fn create_update_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
     make_consumer(js, "slack-bot-update", SLACK_OUTBOUND_UPDATE).await
+}
+
+pub async fn create_upload_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-upload", SLACK_OUTBOUND_UPLOAD).await
 }

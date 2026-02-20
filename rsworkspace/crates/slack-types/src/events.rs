@@ -425,6 +425,22 @@ pub struct SlackReadMessagesResponse {
     pub error: Option<String>,
 }
 
+/// Instructs the bot to upload text content as a file to Slack.
+/// Uses `files.getUploadURLExternal` + upload + `files.completeUploadExternal`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUploadRequest {
+    pub channel: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_ts: Option<String>,
+    /// File name including extension, e.g. "report.md" or "code.rs".
+    pub filename: String,
+    /// Text content to upload.
+    pub content: String,
+    /// Optional display title shown in Slack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -967,6 +983,25 @@ mod tests {
         assert_eq!(decoded.messages.len(), 1);
         assert_eq!(decoded.messages[0].ts, "1609459200.000001");
         assert!(decoded.error.is_none());
+    }
+
+
+    #[test]
+    fn slack_upload_request_roundtrip() {
+        let req = SlackUploadRequest {
+            channel: "C123".into(),
+            thread_ts: Some("1609459200.000001".into()),
+            filename: "report.md".into(),
+            content: "# Hello\nWorld".into(),
+            title: Some("My Report".into()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: SlackUploadRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.channel, "C123");
+        assert_eq!(decoded.thread_ts.as_deref(), Some("1609459200.000001"));
+        assert_eq!(decoded.filename, "report.md");
+        assert_eq!(decoded.content, "# Hello\nWorld");
+        assert_eq!(decoded.title.as_deref(), Some("My Report"));
     }
 
 }

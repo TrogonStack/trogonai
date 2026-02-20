@@ -1156,3 +1156,130 @@ mod tests {
         assert!(decoded.blocks.is_some());
     }
 }
+
+pub async fn run_upload_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    use slack_types::events::SlackUploadRequest;
+
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to subscribe to upload consumer");
+            return;
+        }
+    };
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on upload consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackUploadRequest>(&msg.payload) {
+            Ok(req) => {
+                let content_bytes = req.content.as_bytes();
+                let length = content_bytes.len();
+
+                // Step 1: Get upload URL
+                rate_limiter.acquire().await;
+                let get_url_resp = http_client
+                    .post("https://slack.com/api/files.getUploadURLExternal")
+                    .bearer_auth(&bot_token)
+                    .form(&[
+                        ("filename", req.filename.as_str()),
+                        ("length", &length.to_string()),
+                    ])
+                    .send()
+                    .await;
+
+                let (upload_url, file_id) = match get_url_resp {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(v) if v["ok"].as_bool().unwrap_or(false) => {
+                            let url = v["upload_url"].as_str().unwrap_or("").to_string();
+                            let id = v["file_id"].as_str().unwrap_or("").to_string();
+                            if url.is_empty() || id.is_empty() {
+                                tracing::error!("files.getUploadURLExternal missing fields");
+                                let _ = msg.ack().await;
+                                continue;
+                            }
+                            (url, id)
+                        }
+                        Ok(v) => {
+                            tracing::error!(
+                                error = v["error"].as_str().unwrap_or("unknown"),
+                                "files.getUploadURLExternal failed"
+                            );
+                            let _ = msg.ack().await;
+                            continue;
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse getUploadURLExternal");
+                            let _ = msg.ack().await;
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error on getUploadURLExternal");
+                        let _ = msg.ack().await;
+                        continue;
+                    }
+                };
+
+                // Step 2: Upload content
+                let upload_resp = http_client
+                    .post(&upload_url)
+                    .body(req.content.clone())
+                    .send()
+                    .await;
+
+                if let Err(e) = upload_resp {
+                    tracing::error!(error = %e, "Failed to upload file content");
+                    let _ = msg.ack().await;
+                    continue;
+                }
+
+                // Step 3: Complete upload
+                let mut complete_body = serde_json::json!({
+                    "files": [{"id": file_id, "title": req.title.as_deref().unwrap_or(&req.filename)}],
+                    "channel_id": req.channel,
+                });
+                if let Some(ref thread_ts) = req.thread_ts {
+                    complete_body["thread_ts"] = serde_json::Value::String(thread_ts.clone());
+                }
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post("https://slack.com/api/files.completeUploadExternal")
+                    .bearer_auth(&bot_token)
+                    .json(&complete_body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(v) if v["ok"].as_bool().unwrap_or(false) => {
+                            tracing::info!(file_id = %file_id, "File uploaded successfully");
+                        }
+                        Ok(v) => {
+                            tracing::error!(
+                                error = v["error"].as_str().unwrap_or("unknown"),
+                                "files.completeUploadExternal failed"
+                            );
+                        }
+                        Err(e) => tracing::error!(error = %e, "Failed to parse completeUploadExternal"),
+                    },
+                    Err(e) => tracing::error!(error = %e, "HTTP error on completeUploadExternal"),
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackUploadRequest"),
+        }
+
+        let _ = msg.ack().await;
+    }
+}

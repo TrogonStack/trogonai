@@ -6,8 +6,8 @@ use slack_types::events::{
     SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
     SlackReadMessagesRequest, SlackReadMessagesResponse, SlackSetStatusRequest,
     SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackUpdateMessage, SlackViewClosedEvent, SlackViewOpenRequest,
-    SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackThreadBroadcastEvent, SlackUpdateMessage, SlackUploadRequest, SlackViewClosedEvent,
+    SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
@@ -16,7 +16,7 @@ use slack_types::subjects::{
     SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
     SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
     SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
-    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
 async fn js_publish<T: Serialize>(
@@ -200,4 +200,12 @@ pub async fn request_read_messages(
         .await?;
     let result: SlackReadMessagesResponse = serde_json::from_slice(&response.payload)?;
     Ok(result)
+}
+
+/// Publish a request to upload content as a Slack file.
+pub async fn publish_upload_request(
+    js: &Context,
+    req: &SlackUploadRequest,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_UPLOAD, req).await
 }

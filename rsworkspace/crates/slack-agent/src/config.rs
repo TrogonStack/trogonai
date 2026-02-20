@@ -146,6 +146,19 @@ pub struct SlackAgentConfig {
     /// Maximum concurrent Claude API calls. 0 = unlimited (default).
     /// Read from SLACK_MAX_CONCURRENT_SESSIONS.
     pub max_concurrent_sessions: u32,
+
+    /// Number of recent channel messages to fetch from Slack when a session starts
+    /// with no history. 0 = disabled (default). Read from SLACK_SEED_HISTORY_ON_START.
+    pub slack_seed_history_on_start: usize,
+
+    /// Channels where the typing indicator (setStatus) is suppressed.
+    /// Read from SLACK_NO_TYPING_CHANNELS as a comma-separated list of channel IDs.
+    pub no_typing_channels: std::collections::HashSet<String>,
+
+    /// When set, DM sessions share conversation history with this channel.
+    /// DMs use the paired channel's session_key instead of their own.
+    /// Read from SLACK_DM_PAIR_CHANNEL (a single channel ID, e.g. "C01234ABCDE").
+    pub dm_pair_channel: Option<String>,
 }
 
 impl SlackAgentConfig {
@@ -309,6 +322,29 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let slack_seed_history_on_start = env
+            .var("SLACK_SEED_HISTORY_ON_START")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let no_typing_channels = env
+            .var("SLACK_NO_TYPING_CHANNELS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let dm_pair_channel = env
+            .var("SLACK_DM_PAIR_CHANNEL")
+            .ok()
+            .filter(|v| !v.is_empty());
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -337,6 +373,9 @@ impl SlackAgentConfig {
             claude_retry_attempts,
             bot_user_id,
             max_concurrent_sessions,
+            slack_seed_history_on_start,
+            no_typing_channels,
+            dm_pair_channel,
         }
     }
 
@@ -958,5 +997,56 @@ mod tests {
         env.set("SLACK_MAX_CONCURRENT_SESSIONS", "5");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.max_concurrent_sessions, 5);
+    }
+
+    // ── slack_seed_history_on_start ───────────────────────────────────────────
+
+    #[test]
+    fn slack_seed_history_on_start_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.slack_seed_history_on_start, 0);
+    }
+
+    #[test]
+    fn slack_seed_history_on_start_set() {
+        let env = base_env();
+        env.set("SLACK_SEED_HISTORY_ON_START", "20");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.slack_seed_history_on_start, 20);
+    }
+
+    // ── no_typing_channels ────────────────────────────────────────────────────
+
+    #[test]
+    fn no_typing_channels_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.no_typing_channels.is_empty());
+    }
+
+    #[test]
+    fn no_typing_channels_parsed() {
+        let env = base_env();
+        env.set("SLACK_NO_TYPING_CHANNELS", "C111, C222, C333");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.no_typing_channels.contains("C111"));
+        assert!(config.no_typing_channels.contains("C222"));
+        assert!(config.no_typing_channels.contains("C333"));
+        assert_eq!(config.no_typing_channels.len(), 3);
+    }
+
+    // ── dm_pair_channel ───────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_pair_channel_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.dm_pair_channel.is_none());
+    }
+
+    #[test]
+    fn dm_pair_channel_set() {
+        let env = base_env();
+        env.set("SLACK_DM_PAIR_CHANNEL", "C01234ABCDE");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.dm_pair_channel.as_deref(), Some("C01234ABCDE"));
     }
 }
