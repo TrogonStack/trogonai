@@ -1588,6 +1588,7 @@ pub async fn run_upload_loop(
     bot_token: String,
     http_client: Arc<HttpClient>,
     rate_limiter: Arc<RateLimiter>,
+    nats_client: async_nats::Client,
 ) {
     use slack_types::events::SlackUploadRequest;
 
@@ -1691,6 +1692,13 @@ pub async fn run_upload_loop(
                     Ok(resp) => match resp.json::<serde_json::Value>().await {
                         Ok(v) if v["ok"].as_bool().unwrap_or(false) => {
                             tracing::info!(file_id = %file_id, "File uploaded successfully");
+                            // Notify agent of the file_id for potential future deletion.
+                            let notification = serde_json::json!({
+                                "channel": req.channel,
+                                "thread_ts": req.thread_ts,
+                                "file_id": file_id,
+                            }).to_string();
+                            let _ = nats_client.publish("slack.file.uploaded", notification.into()).await;
                         }
                         Ok(v) => {
                             tracing::error!(

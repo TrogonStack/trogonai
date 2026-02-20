@@ -133,6 +133,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let bot_token = config.bot_token.clone();
 
+    // Call auth.test to get our own bot user ID and announce it on NATS.
+    {
+        let auth_url = "https://slack.com/api/auth.test";
+        let http_client = reqwest::Client::new();
+        match http_client
+            .post(auth_url)
+            .header("Authorization", format!("Bearer {}", bot_token))
+            .send()
+            .await
+        {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(v) if v["ok"].as_bool() == Some(true) => {
+                    if let Some(uid) = v["user_id"].as_str() {
+                        let payload = serde_json::json!({"bot_user_id": uid}).to_string();
+                        let _ = nats_client
+                            .publish("slack.bot.identity", payload.into())
+                            .await;
+                        tracing::info!(bot_user_id = %uid, "Published bot identity from auth.test");
+                    }
+                }
+                Ok(v) => tracing::warn!(response = ?v, "auth.test returned ok=false"),
+                Err(e) => tracing::warn!(error = %e, "Failed to parse auth.test response"),
+            },
+            Err(e) => tracing::warn!(error = %e, "auth.test request failed"),
+        }
+    }
+
     let outbound_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
@@ -210,7 +237,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
         let rl = rate_limiter.clone();
-        async move { run_upload_loop(upload_consumer, bt, hc, rl).await }
+        let nc = (*nats_client).clone();
+        async move { run_upload_loop(upload_consumer, bt, hc, rl, nc).await }
     });
     let upload_abort = upload_handle.abort_handle();
 

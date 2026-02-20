@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let config = SlackAgentConfig::from_env(&SystemEnv);
+    let mut config = SlackAgentConfig::from_env(&SystemEnv);
 
     tracing::info!(port = config.health_port, "Starting health check server...");
     tokio::spawn(start_health_server(config.health_port));
@@ -63,6 +63,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Keep raw client for Core NATS request/reply (stream.start).
     let nats_raw = nats_client.clone();
     let js = Arc::new(jetstream::new(nats_client));
+
+    // Auto-detect bot_user_id from slack-bot's auth.test announcement.
+    if config.bot_user_id.is_none() {
+        match nats_raw.subscribe("slack.bot.identity").await {
+            Ok(mut sub) => {
+                match tokio::time::timeout(std::time::Duration::from_secs(3), sub.next()).await {
+                    Ok(Some(msg)) => {
+                        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                            if let Some(id) = v["bot_user_id"].as_str() {
+                                config.bot_user_id = Some(id.to_string());
+                                tracing::info!(bot_user_id = %id, "Auto-detected bot_user_id from auth.test");
+                            }
+                        }
+                    }
+                    _ => tracing::debug!("No bot.identity announcement received within 3s, using configured value"),
+                }
+            }
+            Err(_) => tracing::debug!("No bot.identity announcement received within 3s, using configured value"),
+        }
+    }
 
     tracing::info!("Setting up JetStream stream and KV bucket...");
     ensure_slack_stream(&js).await?;
@@ -141,7 +161,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         } else {
             None
         },
+        file_id_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     });
+
+    // Subscribe to file upload notifications to track file_id per session.
+    {
+        let file_cache_clone = ctx.file_id_cache.clone();
+        let nats_for_files = ctx.nats.clone();
+        tokio::spawn(async move {
+            let mut sub = match nats_for_files.subscribe("slack.file.uploaded").await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(error=%e, "Failed to subscribe to file notifications");
+                    return;
+                }
+            };
+            while let Some(msg) = sub.next().await {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                    let key = match (v["channel"].as_str(), v["thread_ts"].as_str()) {
+                        (Some(ch), Some(ts)) => format!("{ch}:{ts}"),
+                        (Some(ch), None) => ch.to_string(),
+                        _ => continue,
+                    };
+                    if let Some(fid) = v["file_id"].as_str() {
+                        file_cache_clone.lock().await.insert(key, fid.to_string());
+                    }
+                }
+            }
+        });
+    }
 
     tracing::info!("Slack agent running. Press Ctrl+C to stop.");
 

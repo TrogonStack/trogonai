@@ -1,18 +1,19 @@
 use async_nats::Client as NatsClient;
 use async_nats::jetstream::Context as JsContext;
 use slack_nats::publisher::{
-    publish_ephemeral_message, publish_outbound, publish_reaction_action, publish_set_status,
-    publish_stream_append, publish_stream_stop, publish_upload_request, publish_view_open,
-    publish_view_publish,
+    publish_delete_file, publish_ephemeral_message, publish_outbound, publish_reaction_action,
+    publish_set_status, publish_set_suggested_prompts, publish_stream_append, publish_stream_stop,
+    publish_upload_request, publish_view_open, publish_view_publish,
 };
 use slack_types::events::{
     PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
-    SlackChannelEvent, SlackEphemeralMessage, SlackFile, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
-    SlackReactionAction, SlackReactionEvent, SlackReadRepliesRequest, SlackSetStatusRequest,
-    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStartRequest,
-    SlackStreamStartResponse, SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUploadRequest,
-    SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackChannelEvent, SlackDeleteFile, SlackEphemeralMessage, SlackFile, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
+    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackReadRepliesRequest,
+    SlackSetStatusRequest, SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent,
+    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
+    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUploadRequest, SlackViewClosedEvent,
+    SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -89,6 +90,9 @@ pub struct AgentContext {
     pub session_debounce: tokio::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
     /// Semaphore limiting concurrent Claude calls. `None` = unlimited.
     pub claude_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    /// Cache mapping channel:thread_ts -> file_id for uploaded responses.
+    /// Used to delete the file on regenerate (arrows_counterclockwise).
+    pub file_id_cache: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -372,6 +376,9 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     };
     let mut history = history;
 
+    // Track whether the session is fresh (no prior turns) before appending the new message.
+    let history_was_empty = history.is_empty();
+
     // Prefix message with the user's display name so Claude knows who's speaking.
     let content_text = match msg.display_name.as_deref() {
         Some(name) if !name.is_empty() => format!("[{name}]: {effective_text}"),
@@ -465,6 +472,24 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
         match stream_ref {
             Ok(stream_start) => {
+                // Publish suggested prompts for fresh sessions (non-DM only).
+                if !ctx.config.suggested_prompts.is_empty()
+                    && history_was_empty
+                    && !matches!(msg.session_type, SessionType::Direct)
+                {
+                    let req = SlackSetSuggestedPromptsRequest {
+                        channel_id: msg.channel.clone(),
+                        thread_ts: effective_thread_ts
+                            .clone()
+                            .unwrap_or_else(|| msg.ts.clone()),
+                        title: None,
+                        prompts: ctx.config.suggested_prompts.clone(),
+                    };
+                    if let Err(e) = publish_set_suggested_prompts(&ctx.js, &req).await {
+                        tracing::warn!(error = %e, "Failed to publish suggested prompts");
+                    }
+                }
+
                 // 4b. Stream Claude response; publish stream.append periodically.
                 match call_result {
                     Ok((mut rx, handle)) => {
@@ -968,6 +993,18 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
             } else {
                 SessionType::Channel
             };
+
+            // If the previous response was uploaded as a file, delete it before regenerating.
+            let cache_key = match ev.item_ts.as_deref() {
+                Some(ts) => format!("{}:{}", channel, ts),
+                None => channel.to_string(),
+            };
+            if let Some(file_id) = ctx.file_id_cache.lock().await.remove(&cache_key) {
+                let del = SlackDeleteFile { file_id };
+                if let Err(e) = publish_delete_file(&ctx.js, &del).await {
+                    tracing::warn!(error = %e, "Failed to publish delete_file on regenerate");
+                }
+            }
 
             let inbound = SlackInboundMessage {
                 channel: channel.to_string(),

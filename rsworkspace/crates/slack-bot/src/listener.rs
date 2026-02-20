@@ -528,6 +528,17 @@ pub async fn handle_push_event(
             }
         }
 
+        SlackEventCallbackBody::LinkShared(ev) => {
+            let channel = ev.channel.0.clone();
+            let message_ts = ev.message_ts.0.clone();
+            let urls: Vec<String> = ev.links.iter().map(|l| l.url.to_string()).collect();
+            let bot_token = state.bot_token.clone();
+            let http_client = state.http_client.clone();
+            tokio::spawn(async move {
+                unfurl_links(&bot_token, &http_client, &channel, &message_ts, &urls).await;
+            });
+        }
+
         _ => {
             // Unhandled event types.  Note: pin_added / pin_removed events never
             // reach this arm because slack-morphism v2.17 fails to deserialise
@@ -1316,4 +1327,142 @@ mod tests {
         );
         assert!(result, "gating should still be ON with no patterns");
     }
+}
+
+/// Send unfurl payloads to Slack for a set of URLs found in a `link_shared` event.
+async fn unfurl_links(
+    bot_token: &str,
+    http_client: &HttpClient,
+    channel: &str,
+    message_ts: &str,
+    urls: &[String],
+) {
+    let mut unfurls = serde_json::Map::new();
+    for url in urls {
+        let (title, description) = fetch_url_metadata(http_client, url).await;
+        unfurls.insert(
+            url.clone(),
+            serde_json::json!({
+                "title": title,
+                "text": description,
+            }),
+        );
+    }
+    if unfurls.is_empty() {
+        return;
+    }
+
+    let body = serde_json::json!({
+        "channel": channel,
+        "ts": message_ts,
+        "unfurls": unfurls,
+    });
+
+    match http_client
+        .post("https://slack.com/api/chat.unfurl")
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(v) if v["ok"].as_bool() == Some(true) => {
+                tracing::debug!(channel, message_ts, "chat.unfurl succeeded");
+            }
+            Ok(v) => {
+                tracing::warn!(
+                    error = v["error"].as_str().unwrap_or("unknown"),
+                    "chat.unfurl returned ok=false"
+                );
+            }
+            Err(e) => tracing::warn!(error = %e, "Failed to parse chat.unfurl response"),
+        },
+        Err(e) => tracing::warn!(error = %e, "HTTP error calling chat.unfurl"),
+    }
+}
+
+/// Fetch a URL and extract its `<title>` and meta description.
+async fn fetch_url_metadata(http_client: &HttpClient, url: &str) -> (String, String) {
+    let resp = match http_client
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; TrogonBot/1.0)")
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return (url.to_string(), String::new()),
+    };
+    let html = match resp.text().await {
+        Ok(h) => h,
+        Err(_) => return (url.to_string(), String::new()),
+    };
+
+    let title = extract_between(&html, "<title>", "</title>")
+        .unwrap_or_else(|| url.to_string());
+
+    // Try <meta name="description" content="...">
+    // We search for the pattern in lowercased HTML, then extract from the original.
+    let description = extract_meta_description(&html).unwrap_or_default();
+
+    (title.trim().to_string(), description.trim().to_string())
+}
+
+/// Extract the substring between `open` and `close` in `html` (case-insensitive open tag match).
+fn extract_between(html: &str, open: &str, close: &str) -> Option<String> {
+    let html_lower = html.to_lowercase();
+    let open_lower = open.to_lowercase();
+    let close_lower = close.to_lowercase();
+    let start = html_lower.find(&open_lower)? + open.len();
+    let end = html_lower[start..].find(&close_lower)?;
+    Some(html[start..start + end].to_string())
+}
+
+/// Extract the content of a `<meta name="description" content="...">` tag.
+fn extract_meta_description(html: &str) -> Option<String> {
+    let html_lower = html.to_lowercase();
+    // Find a <meta ... containing name="description" or name='description'
+    let mut search_from = 0;
+    while let Some(tag_start) = html_lower[search_from..].find("<meta") {
+        let abs_tag_start = search_from + tag_start;
+        // Find the end of this tag
+        let tag_end = html_lower[abs_tag_start..]
+            .find('>')
+            .map(|e| abs_tag_start + e + 1)
+            .unwrap_or(html_lower.len());
+        let tag_lower = &html_lower[abs_tag_start..tag_end];
+        let tag_orig = &html[abs_tag_start..tag_end];
+
+        if tag_lower.contains(r#"name="description""#) || tag_lower.contains("name='description'") {
+            // Extract content="..." or content='...'
+            if let Some(val) = extract_attr_value(tag_orig, "content") {
+                return Some(val);
+            }
+        }
+        search_from = tag_end;
+    }
+    None
+}
+
+/// Extract an attribute value from a tag string (handles both quote styles).
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let tag_lower = tag.to_lowercase();
+    // Try double-quoted value: attr="..."
+    let needle_dq = format!("{}=\"", attr);
+    if let Some(pos) = tag_lower.find(&needle_dq) {
+        let start = pos + needle_dq.len();
+        let end = tag[start..].find('"')?;
+        return Some(tag[start..start + end].to_string());
+    }
+    // Try single-quoted value: attr='...'
+    // Build the needle as a String to avoid raw character literal parsing issues.
+    let sq: char = '\'';
+    let needle_sq = format!("{}={}", attr, sq);
+    if let Some(pos) = tag_lower.find(&needle_sq) {
+        let start = pos + needle_sq.len();
+        let end = tag[start..].find(sq)?;
+        return Some(tag[start..start + end].to_string());
+    }
+    None
 }

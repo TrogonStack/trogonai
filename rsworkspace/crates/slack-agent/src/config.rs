@@ -3,6 +3,7 @@ use std::path::Path;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::ReadFile;
+use slack_types::events::SlackSuggestedPrompt;
 
 /// Controls who is allowed to send the bot direct messages.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +165,11 @@ pub struct SlackAgentConfig {
     /// Markdown file instead of sent as inline text. 0 / unset = disabled.
     /// Read from SLACK_UPLOAD_THRESHOLD_CHARS.
     pub upload_threshold_chars: Option<usize>,
+
+    /// Suggested prompts to show in the Slack assistant thread UI.
+    /// Parsed from SLACK_SUGGESTED_PROMPTS as "Title1:Message1,Title2:Message2".
+    /// Empty or missing = no suggested prompts.
+    pub suggested_prompts: Vec<SlackSuggestedPrompt>,
 }
 
 impl SlackAgentConfig {
@@ -356,6 +362,25 @@ impl SlackAgentConfig {
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|&n| n > 0);
 
+        let suggested_prompts = env
+            .var("SLACK_SUGGESTED_PROMPTS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|entry| {
+                        let colon = entry.find(':')?;
+                        let title = entry[..colon].trim().to_string();
+                        let message = entry[colon + 1..].trim().to_string();
+                        if title.is_empty() || message.is_empty() {
+                            return None;
+                        }
+                        Some(SlackSuggestedPrompt { title, message })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -388,6 +413,7 @@ impl SlackAgentConfig {
             no_typing_channels,
             dm_pair_channel,
             upload_threshold_chars,
+            suggested_prompts,
         }
     }
 
@@ -1084,5 +1110,35 @@ mod tests {
         env.set("SLACK_UPLOAD_THRESHOLD_CHARS", "3000");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.upload_threshold_chars, Some(3000));
+    }
+
+    // ── suggested_prompts ─────────────────────────────────────────────────────
+
+    #[test]
+    fn suggested_prompts_defaults_to_empty() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.suggested_prompts.is_empty());
+    }
+
+    #[test]
+    fn suggested_prompts_single_entry() {
+        let env = base_env();
+        env.set("SLACK_SUGGESTED_PROMPTS", "Hello:Say hello");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.suggested_prompts.len(), 1);
+        assert_eq!(config.suggested_prompts[0].title, "Hello");
+        assert_eq!(config.suggested_prompts[0].message, "Say hello");
+    }
+
+    #[test]
+    fn suggested_prompts_multiple_entries() {
+        let env = base_env();
+        env.set("SLACK_SUGGESTED_PROMPTS", "Greet:Say hello,Help:What can you do?");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.suggested_prompts.len(), 2);
+        assert_eq!(config.suggested_prompts[0].title, "Greet");
+        assert_eq!(config.suggested_prompts[0].message, "Say hello");
+        assert_eq!(config.suggested_prompts[1].title, "Help");
+        assert_eq!(config.suggested_prompts[1].message, "What can you do?");
     }
 }
