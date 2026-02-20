@@ -100,4 +100,43 @@ mod tests {
         env.set("SLACK_MENTION_GATING", "true");
         assert!(SlackBotConfig::from_env(&env).mention_gating);
     }
+
+    #[test]
+    fn mention_gating_default_is_true() {
+        assert!(SlackBotConfig::from_env(&base_env()).mention_gating);
+    }
+
+    #[test]
+    fn mention_gating_any_other_value_is_true() {
+        let env = base_env();
+        env.set("SLACK_MENTION_GATING", "yes");
+        assert!(SlackBotConfig::from_env(&env).mention_gating);
+    }
+
+    #[test]
+    fn bot_user_id_set() {
+        let env = base_env();
+        env.set("SLACK_BOT_USER_ID", "UBOT123");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.bot_user_id.as_deref(), Some("UBOT123"));
+    }
+
+    #[test]
+    fn bot_user_id_not_set_is_none() {
+        assert!(SlackBotConfig::from_env(&base_env()).bot_user_id.is_none());
+    }
+
+    #[test]
+    fn health_port_custom() {
+        let env = base_env();
+        env.set("HEALTH_PORT", "9999");
+        assert_eq!(SlackBotConfig::from_env(&env).health_port, 9999);
+    }
+
+    #[test]
+    fn health_port_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("HEALTH_PORT", "bad");
+        assert_eq!(SlackBotConfig::from_env(&env).health_port, 8080);
+    }
 }

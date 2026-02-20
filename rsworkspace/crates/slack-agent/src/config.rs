@@ -1,5 +1,7 @@
+use std::path::Path;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
+use trogon_std::fs::ReadFile;
 
 /// Controls who is allowed to send the bot direct messages.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,12 +166,27 @@ impl SlackAgentConfig {
             channel_allowlist,
         }
     }
+
+    /// Resolve the effective system prompt using the given filesystem abstraction.
+    ///
+    /// When `claude_system_prompt_file` is set, its contents (trimmed) take
+    /// precedence over `claude_system_prompt`. Falls back to `claude_system_prompt`
+    /// if the file is absent or unreadable.
+    pub fn resolve_system_prompt<F: ReadFile>(&self, fs: &F) -> Option<String> {
+        self.claude_system_prompt_file
+            .as_deref()
+            .and_then(|path| fs.read_to_string(Path::new(path)).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| self.claude_system_prompt.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use trogon_std::env::InMemoryEnv;
+    use trogon_std::fs::MemFs;
 
     #[test]
     fn reply_to_mode_from_str() {
@@ -283,5 +300,167 @@ mod tests {
         env.set("NATS_URL", "nats://localhost:4222");
         let config = SlackAgentConfig::from_env(&env);
         assert!(config.channel_allowlist.is_empty());
+    }
+
+    // ── resolve_system_prompt (MemFs) ─────────────────────────────────────────
+
+    fn base_env() -> InMemoryEnv {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env
+    }
+
+    #[test]
+    fn resolve_prompt_reads_file_via_memfs() {
+        let env = base_env();
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "/prompt.txt");
+        let config = SlackAgentConfig::from_env(&env);
+
+        let fs = MemFs::new();
+        fs.insert("/prompt.txt", "You are a pirate assistant.\n  ");
+
+        assert_eq!(
+            config.resolve_system_prompt(&fs).as_deref(),
+            Some("You are a pirate assistant.")
+        );
+    }
+
+    #[test]
+    fn resolve_prompt_file_takes_precedence_over_inline() {
+        let env = base_env();
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "/prompt.txt");
+        env.set("CLAUDE_SYSTEM_PROMPT", "inline prompt");
+        let config = SlackAgentConfig::from_env(&env);
+
+        let fs = MemFs::new();
+        fs.insert("/prompt.txt", "file prompt");
+
+        assert_eq!(
+            config.resolve_system_prompt(&fs).as_deref(),
+            Some("file prompt")
+        );
+    }
+
+    #[test]
+    fn resolve_prompt_falls_back_to_inline_when_file_missing() {
+        let env = base_env();
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "/nonexistent.txt");
+        env.set("CLAUDE_SYSTEM_PROMPT", "fallback prompt");
+        let config = SlackAgentConfig::from_env(&env);
+
+        let fs = MemFs::new();
+
+        assert_eq!(
+            config.resolve_system_prompt(&fs).as_deref(),
+            Some("fallback prompt")
+        );
+    }
+
+    #[test]
+    fn resolve_prompt_returns_none_when_neither_set() {
+        let env = base_env();
+        let config = SlackAgentConfig::from_env(&env);
+        let fs = MemFs::new();
+        assert!(config.resolve_system_prompt(&fs).is_none());
+    }
+
+    #[test]
+    fn resolve_prompt_empty_file_falls_back_to_inline() {
+        let env = base_env();
+        env.set("CLAUDE_SYSTEM_PROMPT_FILE", "/empty.txt");
+        env.set("CLAUDE_SYSTEM_PROMPT", "inline fallback");
+        let config = SlackAgentConfig::from_env(&env);
+
+        let fs = MemFs::new();
+        fs.insert("/empty.txt", "   \n  ");
+
+        assert_eq!(
+            config.resolve_system_prompt(&fs).as_deref(),
+            Some("inline fallback")
+        );
+    }
+
+    #[test]
+    fn resolve_prompt_inline_only() {
+        let env = base_env();
+        env.set("CLAUDE_SYSTEM_PROMPT", "You are helpful.");
+        let config = SlackAgentConfig::from_env(&env);
+        let fs = MemFs::new();
+        assert_eq!(
+            config.resolve_system_prompt(&fs).as_deref(),
+            Some("You are helpful.")
+        );
+    }
+
+    // ── Additional InMemoryEnv config tests ───────────────────────────────────
+
+    #[test]
+    fn welcome_message_set() {
+        let env = base_env();
+        env.set("SLACK_WELCOME_MESSAGE", "Welcome!");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.welcome_message.as_deref(), Some("Welcome!"));
+    }
+
+    #[test]
+    fn welcome_message_not_set_is_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.welcome_message.is_none());
+    }
+
+    #[test]
+    fn empty_welcome_message_treated_as_none() {
+        let env = base_env();
+        env.set("SLACK_WELCOME_MESSAGE", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.welcome_message.is_none());
+    }
+
+    #[test]
+    fn claude_max_tokens_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("CLAUDE_MAX_TOKENS", "not-a-number");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_max_tokens, 8192);
+    }
+
+    #[test]
+    fn claude_max_history_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("CLAUDE_MAX_HISTORY", "abc");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.claude_max_history, 40);
+    }
+
+    #[test]
+    fn health_port_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("HEALTH_PORT", "not-a-port");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.health_port, 8081);
+    }
+
+    #[test]
+    fn reply_to_mode_all() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE", "all");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode, ReplyToMode::All);
+    }
+
+    #[test]
+    fn anthropic_api_key_empty_string_treated_as_none() {
+        let env = base_env();
+        env.set("ANTHROPIC_API_KEY", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.anthropic_api_key.is_none());
+    }
+
+    #[test]
+    fn channel_allowlist_trims_whitespace() {
+        let env = base_env();
+        env.set("SLACK_CHANNEL_ALLOWLIST", " C1 , C2 , C3 ");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.channel_allowlist, vec!["C1", "C2", "C3"]);
     }
 }

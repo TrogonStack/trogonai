@@ -36,6 +36,7 @@ use std::time::Duration;
 use tokio::task::JoinSet;
 use trogon_nats::connect;
 use trogon_std::env::SystemEnv;
+use trogon_std::fs::SystemFs;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -91,17 +92,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut view_submission_msgs = view_submission_consumer.messages().await?;
 
     // Resolve the effective system prompt: file takes precedence over inline text.
-    let system_prompt = config
-        .claude_system_prompt_file
-        .as_ref()
-        .and_then(|path| match std::fs::read_to_string(path) {
-            Ok(content) => Some(content.trim().to_string()),
-            Err(e) => {
-                tracing::error!(path = %path, error = %e, "Failed to read CLAUDE_SYSTEM_PROMPT_FILE");
-                None
-            }
-        })
-        .or(config.claude_system_prompt.clone());
+    if let Some(ref path) = config.claude_system_prompt_file {
+        if !std::path::Path::new(path).exists() {
+            tracing::warn!(path = %path, "CLAUDE_SYSTEM_PROMPT_FILE does not exist, falling back to inline prompt");
+        }
+    }
+    let system_prompt = config.resolve_system_prompt(&SystemFs);
 
     // Build Claude client (optional — only if API key is configured).
     let claude = config.anthropic_api_key.as_ref().map(|key| {
