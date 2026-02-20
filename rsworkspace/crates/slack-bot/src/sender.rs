@@ -3,8 +3,8 @@ use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
-    SlackOutboundMessage, SlackReactionAction, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackOutboundMessage, SlackReactionAction, SlackSetStatusRequest, SlackStreamAppendMessage,
+    SlackStreamStopMessage, SlackViewOpenRequest, SlackViewPublishRequest,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -665,6 +665,93 @@ pub async fn run_view_publish_loop(
 
         if let Err(e) = msg.ack().await {
             tracing::error!(error = %e, "Failed to ACK view_publish message");
+        }
+    }
+}
+
+pub async fn run_set_status_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create set_status message stream");
+            return;
+        }
+    };
+    let url = format!("{SLACK_API_BASE}/api/assistant.threads.setStatus");
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on set_status consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackSetStatusRequest>(&msg.payload) {
+            Ok(req) => {
+                let mut body = serde_json::Map::new();
+                body.insert(
+                    "channel_id".into(),
+                    serde_json::Value::String(req.channel_id.clone()),
+                );
+                body.insert(
+                    "thread_ts".into(),
+                    serde_json::Value::String(req.thread_ts.clone()),
+                );
+                if let Some(ref status) = req.status {
+                    body.insert(
+                        "status".into(),
+                        serde_json::Value::String(status.clone()),
+                    );
+                } else {
+                    body.insert(
+                        "status".into(),
+                        serde_json::Value::String(String::new()),
+                    );
+                }
+
+                match http_client
+                    .post(&url)
+                    .bearer_auth(&bot_token)
+                    .json(&serde_json::Value::Object(body))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(body) if !body["ok"].as_bool().unwrap_or(false) => {
+                            tracing::error!(
+                                api_error = body["error"].as_str().unwrap_or("unknown"),
+                                "assistant.threads.setStatus failed"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "Failed to parse assistant.threads.setStatus response"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "HTTP error calling assistant.threads.setStatus"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackSetStatusRequest");
+            }
+        }
+
+        if let Err(e) = msg.ack().await {
+            tracing::error!(error = %e, "Failed to ACK set_status message");
         }
     }
 }

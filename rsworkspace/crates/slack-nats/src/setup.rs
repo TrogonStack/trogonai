@@ -6,14 +6,13 @@ use std::time::Duration;
 pub const STREAM_NAME: &str = "SLACK";
 
 /// Subjects covered by the stream.
-/// `slack.outbound.stream.start` is intentionally excluded — that subject uses
-/// Core NATS request/reply and must not be persisted.
+/// `slack.outbound.stream.start` uses Core NATS request/reply (raw client
+/// publish) and therefore never lands in the JetStream stream even though
+/// `slack.outbound.>` matches it in theory — Core NATS messages are not
+/// persisted to JetStream streams.
 const STREAM_SUBJECTS: &[&str] = &[
     "slack.inbound.>",
-    "slack.outbound.message",
-    "slack.outbound.stream.append",
-    "slack.outbound.stream.stop",
-    "slack.outbound.reaction",
+    "slack.outbound.>",
 ];
 
 /// Create (or verify) the `SLACK` JetStream stream.

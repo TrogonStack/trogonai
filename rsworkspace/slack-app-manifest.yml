@@ -9,7 +9,7 @@ display_information:
 
 features:
   app_home:
-    home_tab_enabled: false
+    home_tab_enabled: true
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
@@ -43,6 +43,12 @@ oauth_config:
       # ── Pins ───────────────────────────────────────────────────────────────
       - pins:read             # List pins in channels
       - pins:write            # Add / remove pins
+      # ── Files / Assistant / Customisation / Users / Emoji ──────────────────
+      - files:read            # Download files attached to messages
+      - assistant:write       # Typing indicators and streaming (Agents & AI Apps)
+      - chat:write.customize  # Custom username/icon per message
+      - users:read            # Read user profile info
+      - emoji:read            # Read custom emoji directory
 
 settings:
   # Socket Mode: the bot connects outbound — no public URL required.

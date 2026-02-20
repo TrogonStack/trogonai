@@ -294,6 +294,41 @@ pub struct SlackViewSubmissionEvent {
     pub values: serde_json::Value,
 }
 
+// ── View closed ───────────────────────────────────────────────────────────────
+
+/// A modal view was dismissed (X or Cancel) without submitting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackViewClosedEvent {
+    pub user_id: String,
+    pub trigger_id: String,
+    pub view_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_id: Option<String>,
+    /// Block Kit state values at the time of closing.
+    pub values: serde_json::Value,
+}
+
+// ── Pins ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PinEventKind {
+    Added,
+    Removed,
+}
+
+/// A message was pinned or unpinned in a channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackPinEvent {
+    pub kind: PinEventKind,
+    pub channel: String,
+    pub user: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_ts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_type: Option<String>,
+    pub event_ts: String,
+}
+
 // ── View outbound ─────────────────────────────────────────────────────────────
 
 /// Instructs the bot to open a modal via `views.open`.
@@ -312,6 +347,20 @@ pub struct SlackViewPublishRequest {
     pub user_id: String,
     /// Full Block Kit view payload as JSON (see Slack `views.publish` docs).
     pub view: serde_json::Value,
+}
+
+// ── Typing status ─────────────────────────────────────────────────────────────
+
+/// Instructs the bot to set (or clear) the "is thinking…" status on an
+/// assistant thread via `assistant.threads.setStatus`.
+/// Requires `assistant:write` scope and "Agents and AI Apps" enabled in the app.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackSetStatusRequest {
+    pub channel_id: String,
+    pub thread_ts: String,
+    /// Status text. `None` clears the status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

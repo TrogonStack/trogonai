@@ -14,6 +14,9 @@ pub struct SlackBotConfig {
     /// bot is @mentioned or if the message is a thread reply. DMs always pass.
     /// Mirrors OpenClaw's `requireMention` default behaviour.
     pub mention_gating: bool,
+    /// When true, messages from bots are forwarded to NATS instead of being
+    /// silently dropped. Default: false.
+    pub allow_bots: bool,
     pub nats: NatsConfig,
     /// Port for the HTTP health check endpoint. Default: 8080.
     pub health_port: u16,
@@ -34,6 +37,10 @@ impl SlackBotConfig {
             .var("SLACK_MENTION_GATING")
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
+        let allow_bots = env
+            .var("SLACK_ALLOW_BOTS")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
         let nats = NatsConfig::from_env(env);
         let health_port = env
             .var("HEALTH_PORT")
@@ -46,6 +53,7 @@ impl SlackBotConfig {
             app_token,
             bot_user_id,
             mention_gating,
+            allow_bots,
             nats,
             health_port,
         }
@@ -138,5 +146,21 @@ mod tests {
         let env = base_env();
         env.set("HEALTH_PORT", "bad");
         assert_eq!(SlackBotConfig::from_env(&env).health_port, 8080);
+    }
+
+    #[test]
+    fn allow_bots_default_is_false() {
+        assert!(!SlackBotConfig::from_env(&base_env()).allow_bots);
+    }
+
+    #[test]
+    fn allow_bots_enabled() {
+        let env = base_env();
+        env.set("SLACK_ALLOW_BOTS", "true");
+        assert!(SlackBotConfig::from_env(&env).allow_bots);
+
+        let env2 = base_env();
+        env2.set("SLACK_ALLOW_BOTS", "1");
+        assert!(SlackBotConfig::from_env(&env2).allow_bots);
     }
 }

@@ -11,8 +11,8 @@ use config::SlackAgentConfig;
 use futures::StreamExt;
 use handler::{
     AgentContext, handle_app_home, handle_block_action, handle_channel, handle_inbound,
-    handle_member, handle_message_changed, handle_message_deleted, handle_reaction,
-    handle_slash_command, handle_thread_broadcast, handle_view_submission,
+    handle_member, handle_message_changed, handle_message_deleted, handle_pin, handle_reaction,
+    handle_slash_command, handle_thread_broadcast, handle_view_closed, handle_view_submission,
 };
 use health::start_health_server;
 use llm::ClaudeClient;
@@ -22,13 +22,15 @@ use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
     create_app_home_consumer, create_block_action_consumer, create_channel_consumer,
     create_inbound_consumer, create_member_consumer, create_message_changed_consumer,
-    create_message_deleted_consumer, create_reaction_consumer, create_slash_command_consumer,
-    create_thread_broadcast_consumer, create_view_submission_consumer,
+    create_message_deleted_consumer, create_pin_consumer, create_reaction_consumer,
+    create_slash_command_consumer, create_thread_broadcast_consumer,
+    create_view_closed_consumer, create_view_submission_consumer,
 };
 use slack_types::events::{
     SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
-    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent,
-    SlackSlashCommandEvent, SlackThreadBroadcastEvent, SlackViewSubmissionEvent,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent,
+    SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent,
+    SlackViewClosedEvent, SlackViewSubmissionEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -78,6 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let channel_consumer = create_channel_consumer(&js).await?;
     let app_home_consumer = create_app_home_consumer(&js).await?;
     let view_submission_consumer = create_view_submission_consumer(&js).await?;
+    let view_closed_consumer = create_view_closed_consumer(&js).await?;
+    let pin_consumer = create_pin_consumer(&js).await?;
 
     let mut inbound_msgs = inbound_consumer.messages().await?;
     let mut reaction_msgs = reaction_consumer.messages().await?;
@@ -90,12 +94,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut channel_msgs = channel_consumer.messages().await?;
     let mut app_home_msgs = app_home_consumer.messages().await?;
     let mut view_submission_msgs = view_submission_consumer.messages().await?;
+    let mut view_closed_msgs = view_closed_consumer.messages().await?;
+    let mut pin_msgs = pin_consumer.messages().await?;
 
     // Resolve the effective system prompt: file takes precedence over inline text.
-    if let Some(ref path) = config.claude_system_prompt_file {
-        if !std::path::Path::new(path).exists() {
-            tracing::warn!(path = %path, "CLAUDE_SYSTEM_PROMPT_FILE does not exist, falling back to inline prompt");
-        }
+    if let Some(ref path) = config.claude_system_prompt_file
+        && !std::path::Path::new(path).exists()
+    {
+        tracing::warn!(path = %path, "CLAUDE_SYSTEM_PROMPT_FILE does not exist, falling back to inline prompt");
     }
     let system_prompt = config.resolve_system_prompt(&SystemFs);
 
@@ -286,6 +292,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let _ = msg.ack().await;
                     }
                     Err(e) => tracing::error!(error = %e, "JetStream error on view_submission consumer"),
+                }
+            }
+            Some(result) = view_closed_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackViewClosedEvent>(&msg.payload) {
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_view_closed(ev, ctx).await });
+                            }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackViewClosedEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on view_closed consumer"),
+                }
+            }
+            Some(result) = pin_msgs.next() => {
+                match result {
+                    Ok(msg) => {
+                        match serde_json::from_slice::<SlackPinEvent>(&msg.payload) {
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tasks.spawn(async move { handle_pin(ev, ctx).await });
+                            }
+                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackPinEvent"),
+                        }
+                        let _ = msg.ack().await;
+                    }
+                    Err(e) => tracing::error!(error = %e, "JetStream error on pin consumer"),
                 }
             }
             _ = tokio::signal::ctrl_c() => {

@@ -4,13 +4,13 @@ use slack_morphism::prelude::*;
 use slack_nats::publisher::{
     publish_app_home, publish_block_action, publish_channel, publish_inbound, publish_member,
     publish_message_changed, publish_message_deleted, publish_reaction, publish_slash_command,
-    publish_thread_broadcast, publish_view_submission,
+    publish_thread_broadcast, publish_view_closed, publish_view_submission,
 };
 use slack_types::events::{
     ChannelEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
     SlackChannelEvent, SlackFile as OurSlackFile, SlackInboundMessage, SlackMemberEvent,
     SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackThreadBroadcastEvent, SlackViewSubmissionEvent,
+    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewSubmissionEvent,
 };
 use std::sync::Arc;
 
@@ -29,6 +29,9 @@ pub struct BotState {
     /// When true, channel/group messages require an @mention or be a thread
     /// reply before being published to NATS. Mirrors OpenClaw `requireMention`.
     pub mention_gating: bool,
+    /// When true, messages from bots are forwarded to NATS instead of being
+    /// silently dropped.
+    pub allow_bots: bool,
     /// Bot token used to authenticate file downloads from Slack's CDN.
     pub bot_token: String,
     /// HTTP client reused across file download requests.
@@ -50,8 +53,8 @@ pub async fn handle_push_event(
 
     match event.event {
         SlackEventCallbackBody::Message(msg) => {
-            // Drop messages from any bot (including ourselves).
-            if msg.sender.bot_id.is_some() {
+            // Drop messages from any bot (including ourselves) unless allow_bots is set.
+            if msg.sender.bot_id.is_some() && !state.allow_bots {
                 return Ok(());
             }
 
@@ -486,8 +489,10 @@ pub async fn handle_push_event(
 
         _ => {
             // Unhandled event types (including pin_added / pin_removed).
-            // slack_morphism v2.17 does not expose a typed variant for pin events,
-            // so they fall through here and are not routed to NATS.
+            // slack_morphism v2.17 does not expose typed variants for pin events
+            // in SlackEventCallbackBody, so they fall through here.
+            // TODO: When slack-morphism adds PinAdded/PinRemoved variants, handle
+            // them by constructing SlackPinEvent and calling publish_pin.
             tracing::debug!("Ignoring unhandled push event type");
         }
     }
@@ -553,6 +558,28 @@ pub async fn handle_interaction_event(
 
             if let Err(e) = publish_view_submission(&state.nats, &view_submission_ev).await {
                 tracing::error!(error = %e, "Failed to publish view_submission to NATS");
+            }
+        }
+
+        SlackInteractionEvent::ViewClosed(ev) => {
+            let user_id = ev.user.id.0.clone();
+            let trigger_id = ev.trigger_id.map(|t| t.0).unwrap_or_default();
+            let view_id = ev.view.state_params.id.0.clone();
+            let callback_id = match &ev.view.view {
+                SlackView::Modal(m) => m.callback_id.as_ref().map(|c| c.0.clone()),
+                SlackView::Home(_) => None,
+            };
+
+            let view_closed_ev = SlackViewClosedEvent {
+                user_id,
+                trigger_id,
+                view_id,
+                callback_id,
+                values: serde_json::Value::Null,
+            };
+
+            if let Err(e) = publish_view_closed(&state.nats, &view_closed_ev).await {
+                tracing::error!(error = %e, "Failed to publish view_closed to NATS");
             }
         }
 

@@ -5,8 +5,9 @@ use async_nats::jetstream::{
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
     SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
-    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
-    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION,
+    SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
+    SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
     SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_VIEW_OPEN,
     SLACK_OUTBOUND_VIEW_PUBLISH,
 };
@@ -153,4 +154,22 @@ pub async fn create_view_publish_consumer(
     js: &Context,
 ) -> Result<Consumer<pull::Config>, async_nats::Error> {
     make_consumer(js, "slack-bot-view-publish", SLACK_OUTBOUND_VIEW_PUBLISH).await
+}
+
+pub async fn create_view_closed_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-view-closed", SLACK_INBOUND_VIEW_CLOSED).await
+}
+
+pub async fn create_pin_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-agent-pin", SLACK_INBOUND_PIN).await
+}
+
+pub async fn create_set_status_consumer(
+    js: &Context,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(js, "slack-bot-set-status", SLACK_OUTBOUND_SET_STATUS).await
 }

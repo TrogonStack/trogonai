@@ -33,6 +33,12 @@ pub const SLACK_INBOUND_APP_HOME: &str = "slack.inbound.app_home";
 /// A modal view was submitted by a user.
 pub const SLACK_INBOUND_VIEW_SUBMISSION: &str = "slack.inbound.view_submission";
 
+/// A modal view was dismissed without submitting.
+pub const SLACK_INBOUND_VIEW_CLOSED: &str = "slack.inbound.view_closed";
+
+/// pin_added and pin_removed events.
+pub const SLACK_INBOUND_PIN: &str = "slack.inbound.pin";
+
 // ── Outbound (agent → NATS → slack-bot → Slack) ─────────────────────────────
 
 /// Simple one-shot responses (`chat.postMessage`).
@@ -58,6 +64,10 @@ pub const SLACK_OUTBOUND_VIEW_OPEN: &str = "slack.outbound.view.open";
 /// Publish (update) the App Home view (`views.publish`).
 pub const SLACK_OUTBOUND_VIEW_PUBLISH: &str = "slack.outbound.view.publish";
 
+/// Set or clear the "is thinking…" status on an assistant thread
+/// (`assistant.threads.setStatus`). Requires `assistant:write` scope.
+pub const SLACK_OUTBOUND_SET_STATUS: &str = "slack.outbound.set_status";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +86,8 @@ mod tests {
             SLACK_INBOUND_BLOCK_ACTION,
             SLACK_INBOUND_APP_HOME,
             SLACK_INBOUND_VIEW_SUBMISSION,
+            SLACK_INBOUND_VIEW_CLOSED,
+            SLACK_INBOUND_PIN,
         ];
         for s in subjects {
             assert!(!s.is_empty());
@@ -96,6 +108,7 @@ mod tests {
             SLACK_OUTBOUND_REACTION,
             SLACK_OUTBOUND_VIEW_OPEN,
             SLACK_OUTBOUND_VIEW_PUBLISH,
+            SLACK_OUTBOUND_SET_STATUS,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

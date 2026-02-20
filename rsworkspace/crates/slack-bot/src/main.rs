@@ -11,14 +11,15 @@ use listener::{
     BotState, error_handler, handle_command_event, handle_interaction_event, handle_push_event,
 };
 use sender::{
-    run_outbound_loop, run_reaction_action_loop, run_stream_append_loop, run_stream_stop_loop,
-    run_view_open_loop, run_view_publish_loop,
+    run_outbound_loop, run_reaction_action_loop, run_set_status_loop, run_stream_append_loop,
+    run_stream_stop_loop, run_view_open_loop, run_view_publish_loop,
 };
 use slack_morphism::prelude::*;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
-    create_outbound_consumer, create_reaction_action_consumer, create_stream_append_consumer,
-    create_stream_stop_consumer, create_view_open_consumer, create_view_publish_consumer,
+    create_outbound_consumer, create_reaction_action_consumer, create_set_status_consumer,
+    create_stream_append_consumer, create_stream_stop_consumer, create_view_open_consumer,
+    create_view_publish_consumer,
 };
 use slack_types::events::{SlackStreamStartRequest, SlackStreamStartResponse};
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
@@ -59,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let reaction_action_consumer = create_reaction_action_consumer(&js).await?;
     let view_open_consumer = create_view_open_consumer(&js).await?;
     let view_publish_consumer = create_view_publish_consumer(&js).await?;
+    let set_status_consumer = create_set_status_consumer(&js).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(SLACK_OUTBOUND_STREAM_START).await?;
@@ -70,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         nats: js.clone(),
         bot_user_id: config.bot_user_id.clone(),
         mention_gating: config.mention_gating,
+        allow_bots: config.allow_bots,
         bot_token: config.bot_token.clone(),
         http_client: reqwest::Client::new(),
     };
@@ -140,6 +143,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         async move { run_view_publish_loop(view_publish_consumer, bt, hc).await }
     });
     let view_publish_abort = view_publish_handle.abort_handle();
+
+    let set_status_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        async move { run_set_status_loop(set_status_consumer, bt, hc).await }
+    });
+    let set_status_abort = set_status_handle.abort_handle();
 
     // stream.start handler: Core NATS request/reply — stays on raw client.
     let stream_start_handle = tokio::spawn({
@@ -260,6 +270,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "View publish NATS loop panicked"),
             }
         }
+        res = set_status_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Set status NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Set status NATS loop panicked"),
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down");
         }
@@ -273,6 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     reaction_action_abort.abort();
     view_open_abort.abort();
     view_publish_abort.abort();
+    set_status_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;
     tracing::info!("Shutdown complete");
 

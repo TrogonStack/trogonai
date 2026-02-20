@@ -1,16 +1,17 @@
 use async_nats::Client as NatsClient;
 use async_nats::jetstream::Context as JsContext;
 use slack_nats::publisher::{
-    publish_outbound, publish_reaction_action, publish_stream_append, publish_stream_stop,
-    publish_view_open, publish_view_publish,
+    publish_outbound, publish_reaction_action, publish_set_status, publish_stream_append,
+    publish_stream_stop, publish_view_open, publish_view_publish,
 };
 use slack_types::events::{
     SessionType, SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackFile,
     SlackInboundMessage, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
-    SlackOutboundMessage, SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
-    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackViewOpenRequest,
-    SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
+    SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -179,8 +180,21 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
     // Extract manual reply-target directive; compute effective thread_ts.
     let (effective_text, reply_target_override) = extract_reply_target(&msg.text, &msg.ts);
-    let thread_ts = reply_target_override.or_else(|| {
-        resolve_reply_thread_ts(&ctx.config.reply_to_mode, &msg.ts, msg.thread_ts.as_deref())
+    let effective_reply_mode = match msg.session_type {
+        SessionType::Direct => ctx
+            .config
+            .reply_to_mode_dm
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
+        SessionType::Group => ctx
+            .config
+            .reply_to_mode_group
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
+        SessionType::Channel => &ctx.config.reply_to_mode,
+    };
+    let effective_thread_ts = reply_target_override.or_else(|| {
+        resolve_reply_thread_ts(effective_reply_mode, &msg.ts, msg.thread_ts.as_deref())
     });
 
     // Load per-user settings to optionally override model / system prompt.
@@ -215,18 +229,50 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 
     // 3. Load conversation history.
     let mut history = ctx.memory.load(&session_key).await;
+
+    // 3a. Seed thread history from parent channel session when starting a new thread.
+    if history.is_empty()
+        && msg.thread_ts.is_some()
+        && ctx.config.thread_initial_history_limit > 0
+    {
+        let parent_key = format!("slack:channel:{}", msg.channel);
+        let parent_history = ctx.memory.load(&parent_key).await;
+        if !parent_history.is_empty() {
+            let limit = ctx.config.thread_initial_history_limit;
+            let start = parent_history.len().saturating_sub(limit);
+            history = parent_history[start..].to_vec();
+            tracing::debug!(
+                count = history.len(),
+                "Seeded thread history from parent channel session"
+            );
+        }
+    }
+
     history.push(ConversationMessage {
         role: "user".to_string(),
         content: build_message_content(&effective_text, &msg.files),
         ts: Some(msg.ts.clone()),
     });
 
+    // 3b. Set "is thinking…" typing status (best-effort, only for threaded messages).
+    if let Some(ref ts) = effective_thread_ts {
+        let _ = publish_set_status(
+            &ctx.js,
+            &SlackSetStatusRequest {
+                channel_id: msg.channel.clone(),
+                thread_ts: ts.clone(),
+                status: Some("is thinking\u{2026}".to_string()),
+            },
+        )
+        .await;
+    }
+
     // 4. Determine the response text (streaming or fallback).
     let response_text = if let Some(claude) = claude {
         // 4a. Open a streaming placeholder on Slack (with timeout).
         let stream_ref = match tokio::time::timeout(
             STREAM_START_TIMEOUT,
-            request_stream_start(&ctx.nats, &msg.channel, thread_ts.as_deref()),
+            request_stream_start(&ctx.nats, &msg.channel, effective_thread_ts.as_deref()),
         )
         .await
         {
@@ -320,7 +366,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     &history,
                     &ctx.js,
                     &msg.channel,
-                    thread_ts.as_deref(),
+                    effective_thread_ts.as_deref(),
                 )
                 .await
             }
@@ -332,7 +378,7 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         let outbound = SlackOutboundMessage {
             channel: msg.channel.clone(),
             text: echo.clone(),
-            thread_ts,
+            thread_ts: effective_thread_ts.clone(),
             blocks: None,
             media_url: None,
             username: None,
@@ -343,6 +389,19 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         }
         echo
     };
+
+    // 4d. Clear typing status (best-effort).
+    if let Some(ref ts) = effective_thread_ts {
+        let _ = publish_set_status(
+            &ctx.js,
+            &SlackSetStatusRequest {
+                channel_id: msg.channel.clone(),
+                thread_ts: ts.clone(),
+                status: None,
+            },
+        )
+        .await;
+    }
 
     // 5. Persist updated history (only if we got a real response).
     if !response_text.is_empty() {
@@ -889,6 +948,26 @@ pub async fn handle_view_submission(ev: SlackViewSubmissionEvent, ctx: Arc<Agent
             tracing::debug!(callback_id = ?other, "Unhandled view submission");
         }
     }
+}
+
+pub async fn handle_view_closed(ev: SlackViewClosedEvent, _ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user_id = %ev.user_id,
+        view_id = %ev.view_id,
+        callback_id = ?ev.callback_id,
+        "View closed without submission"
+    );
+    // No action needed — just log. Future: could clean up pending state.
+}
+
+pub async fn handle_pin(ev: SlackPinEvent, _ctx: Arc<AgentContext>) {
+    tracing::info!(
+        kind = ?ev.kind,
+        channel = %ev.channel,
+        user = %ev.user,
+        item_ts = ?ev.item_ts,
+        "Pin event received"
+    );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

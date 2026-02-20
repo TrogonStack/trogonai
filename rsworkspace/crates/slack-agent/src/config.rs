@@ -83,6 +83,22 @@ pub struct SlackAgentConfig {
     /// DMs bypass this check. Read from SLACK_CHANNEL_ALLOWLIST env var as a
     /// comma-separated list of channel IDs.
     pub channel_allowlist: Vec<String>,
+
+    // ── Per-chat-type reply mode overrides ────────────────────────────────────
+    /// When set, overrides reply_to_mode for DM sessions.
+    pub reply_to_mode_dm: Option<ReplyToMode>,
+    /// When set, overrides reply_to_mode for group sessions.
+    pub reply_to_mode_group: Option<ReplyToMode>,
+
+    // ── Thread history ────────────────────────────────────────────────────────
+    /// Number of messages to load from the parent session when a new thread
+    /// starts. Default: 0 (disabled). Mirrors OpenClaw thread.initialHistoryLimit.
+    pub thread_initial_history_limit: usize,
+
+    // ── Bot message filtering ─────────────────────────────────────────────────
+    /// When true, messages from other bots are processed. Default: false.
+    #[allow(dead_code)]
+    pub allow_bots: bool,
 }
 
 impl SlackAgentConfig {
@@ -150,6 +166,30 @@ impl SlackAgentConfig {
             })
             .unwrap_or_default();
 
+        let reply_to_mode_dm = env
+            .var("SLACK_REPLY_TO_MODE_DM")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| ReplyToMode::from_str(&v));
+
+        let reply_to_mode_group = env
+            .var("SLACK_REPLY_TO_MODE_GROUP")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| ReplyToMode::from_str(&v));
+
+        let thread_initial_history_limit = env
+            .var("THREAD_INITIAL_HISTORY_LIMIT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let allow_bots = env
+            .var("SLACK_ALLOW_BOTS")
+            .ok()
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -164,6 +204,10 @@ impl SlackAgentConfig {
             welcome_message,
             dm_policy,
             channel_allowlist,
+            reply_to_mode_dm,
+            reply_to_mode_group,
+            thread_initial_history_limit,
+            allow_bots,
         }
     }
 
@@ -462,5 +506,103 @@ mod tests {
         env.set("SLACK_CHANNEL_ALLOWLIST", " C1 , C2 , C3 ");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.channel_allowlist, vec!["C1", "C2", "C3"]);
+    }
+
+    // ── New fields ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn reply_to_mode_dm_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.reply_to_mode_dm.is_none());
+    }
+
+    #[test]
+    fn reply_to_mode_dm_set() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_DM", "all");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode_dm, Some(ReplyToMode::All));
+    }
+
+    #[test]
+    fn reply_to_mode_dm_empty_treated_as_none() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_DM", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.reply_to_mode_dm.is_none());
+    }
+
+    #[test]
+    fn reply_to_mode_group_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.reply_to_mode_group.is_none());
+    }
+
+    #[test]
+    fn reply_to_mode_group_set() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_GROUP", "first");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.reply_to_mode_group, Some(ReplyToMode::First));
+    }
+
+    #[test]
+    fn reply_to_mode_group_empty_treated_as_none() {
+        let env = base_env();
+        env.set("SLACK_REPLY_TO_MODE_GROUP", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.reply_to_mode_group.is_none());
+    }
+
+    #[test]
+    fn thread_initial_history_limit_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.thread_initial_history_limit, 0);
+    }
+
+    #[test]
+    fn thread_initial_history_limit_set() {
+        let env = base_env();
+        env.set("THREAD_INITIAL_HISTORY_LIMIT", "10");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.thread_initial_history_limit, 10);
+    }
+
+    #[test]
+    fn thread_initial_history_limit_invalid_falls_back_to_zero() {
+        let env = base_env();
+        env.set("THREAD_INITIAL_HISTORY_LIMIT", "not-a-number");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.thread_initial_history_limit, 0);
+    }
+
+    #[test]
+    fn allow_bots_defaults_to_false() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(!config.allow_bots);
+    }
+
+    #[test]
+    fn allow_bots_true_string() {
+        let env = base_env();
+        env.set("SLACK_ALLOW_BOTS", "true");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.allow_bots);
+    }
+
+    #[test]
+    fn allow_bots_one_string() {
+        let env = base_env();
+        env.set("SLACK_ALLOW_BOTS", "1");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.allow_bots);
+    }
+
+    #[test]
+    fn allow_bots_false_string() {
+        let env = base_env();
+        env.set("SLACK_ALLOW_BOTS", "false");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(!config.allow_bots);
     }
 }

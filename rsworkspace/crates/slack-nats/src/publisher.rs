@@ -3,15 +3,17 @@ use serde::Serialize;
 use slack_types::events::{
     SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage,
     SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
-    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackViewOpenRequest,
-    SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackSetStatusRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL,
     SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED,
-    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
-    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION,
+    SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND,
+    SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION,
+    SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
     SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_VIEW_OPEN,
     SLACK_OUTBOUND_VIEW_PUBLISH,
 };
@@ -148,4 +150,25 @@ pub async fn publish_view_publish(
     req: &SlackViewPublishRequest,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_VIEW_PUBLISH, req).await
+}
+
+pub async fn publish_view_closed(
+    js: &Context,
+    event: &SlackViewClosedEvent,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_INBOUND_VIEW_CLOSED, event).await
+}
+
+pub async fn publish_pin(
+    js: &Context,
+    event: &SlackPinEvent,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_INBOUND_PIN, event).await
+}
+
+pub async fn publish_set_status(
+    js: &Context,
+    req: &SlackSetStatusRequest,
+) -> Result<(), async_nats::Error> {
+    js_publish(js, SLACK_OUTBOUND_SET_STATUS, req).await
 }
