@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::JSONRPC_INTERNAL_ERROR;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, PromptRequest, PromptResponse, Result, StopReason};
 use std::time::Duration;
@@ -63,7 +64,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
             .remove_waiter(&args.session_id);
         warn!(session_id = %args.session_id, error = %e, "Failed to publish prompt request");
         return Err(Error::new(
-            -32603,
+            JSONRPC_INTERNAL_ERROR,
             format!("Failed to publish prompt request: {}", e),
         ));
     }
@@ -73,11 +74,18 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
         Ok(Err(_)) => {
             warn!(session_id = %args.session_id, "Prompt response channel closed unexpectedly");
             bridge.metrics.record_error("prompt_channel_closed");
-            Ok(PromptResponse::new(StopReason::EndTurn))
+            Err(Error::new(
+                JSONRPC_INTERNAL_ERROR,
+                "Prompt response channel closed unexpectedly",
+            ))
         }
         Err(_) => {
             warn!(session_id = %args.session_id, "Prompt request timed out");
-            Ok(PromptResponse::new(StopReason::EndTurn))
+            bridge.metrics.record_error("prompt_timeout");
+            Err(Error::new(
+                JSONRPC_INTERNAL_ERROR,
+                "Prompt request timed out after 7200s",
+            ))
         }
     };
 

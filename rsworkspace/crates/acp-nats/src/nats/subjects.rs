@@ -37,7 +37,6 @@ pub mod agent {
         format!("{}.agent.ext.{}", prefix, method)
     }
 
-    #[allow(dead_code)]
     pub fn ext_session(prefix: &str, session_id: &str, method: &str) -> String {
         format!("{}.{}.agent.ext.{}", prefix, session_id, method)
     }
@@ -47,7 +46,6 @@ pub mod agent {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
 
-    #[allow(dead_code)]
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.agent.>", prefix)
@@ -63,7 +61,6 @@ pub mod agent {
     }
 }
 
-#[allow(dead_code)]
 pub mod client {
     pub fn fs_read_text_file(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.client.fs.read_text_file", prefix, session_id)
@@ -117,20 +114,8 @@ pub mod client {
             format!("{}.*.client.>", prefix)
         }
 
-        #[allow(dead_code)]
         pub fn session(prefix: &str, session_id: &str) -> String {
             format!("{}.{}.client.>", prefix, session_id)
         }
-    }
-}
-
-#[allow(dead_code)]
-pub mod wildcards {
-    pub fn all(prefix: &str) -> String {
-        format!("{}.>", prefix)
-    }
-
-    pub fn session(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.>", prefix, session_id)
     }
 }

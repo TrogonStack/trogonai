@@ -55,6 +55,9 @@ pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
 
     // Session ID is the part immediately before "client"
     let session_id = parts[client_index - 1].to_string();
+    if session_id.is_empty() {
+        return None;
+    }
 
     // Everything from "client" onwards is the suffix
     let suffix = parts[client_index..].join(".");
@@ -151,6 +154,11 @@ mod tests {
     fn test_parse_malformed_structure() {
         assert!(parse_client_subject("...").is_none());
         assert!(parse_client_subject("acp..client.method").is_none());
+    }
+
+    #[test]
+    fn test_parse_empty_session_id() {
+        assert!(parse_client_subject("acp..client.fs.read_text_file").is_none());
     }
 
     #[test]

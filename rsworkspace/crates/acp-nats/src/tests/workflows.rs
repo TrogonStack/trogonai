@@ -6,6 +6,7 @@
 use super::*;
 use crate::agent::Bridge;
 use crate::{FlushClient, PublishClient, RequestClient};
+use agent_client_protocol::{PromptResponse, StopReason};
 
 #[tokio::test]
 async fn test_bridge_with_mock_nats() {
@@ -337,4 +338,67 @@ async fn test_acp_handler_routing_verification() {
         "No handler for {}",
         session_subject
     );
+}
+
+#[tokio::test]
+async fn test_prompt_cancel_resolves_waiter() {
+    let bridge = Bridge::<MockNatsClient>::new(Some(MockNatsClient::new()), "acp".to_string());
+    let session_id: agent_client_protocol::SessionId =
+        "550e8400-e29b-41d4-a716-446655440010".into();
+
+    let rx = bridge
+        .pending_session_prompt_responses
+        .register_waiter(session_id.clone());
+
+    bridge
+        .pending_session_prompt_responses
+        .resolve_waiter(&session_id, PromptResponse::new(StopReason::Cancelled));
+
+    let response = rx.await.expect("Receiver should get the cancelled response");
+    assert_eq!(response.stop_reason, StopReason::Cancelled);
+}
+
+#[tokio::test]
+async fn test_prompt_response_resolves_waiter() {
+    let bridge = Bridge::<MockNatsClient>::new(Some(MockNatsClient::new()), "acp".to_string());
+    let session_id: agent_client_protocol::SessionId =
+        "550e8400-e29b-41d4-a716-446655440011".into();
+
+    let rx = bridge
+        .pending_session_prompt_responses
+        .register_waiter(session_id.clone());
+
+    bridge
+        .pending_session_prompt_responses
+        .resolve_waiter(&session_id, PromptResponse::new(StopReason::EndTurn));
+
+    let response = rx.await.expect("Receiver should get the response");
+    assert_eq!(response.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn test_duplicate_waiter_replaces_old() {
+    let bridge = Bridge::<MockNatsClient>::new(Some(MockNatsClient::new()), "acp".to_string());
+    let session_id: agent_client_protocol::SessionId =
+        "550e8400-e29b-41d4-a716-446655440012".into();
+
+    let rx_old = bridge
+        .pending_session_prompt_responses
+        .register_waiter(session_id.clone());
+
+    let rx_new = bridge
+        .pending_session_prompt_responses
+        .register_waiter(session_id.clone());
+
+    assert!(
+        rx_old.await.is_err(),
+        "Old receiver should see channel-closed error"
+    );
+
+    bridge
+        .pending_session_prompt_responses
+        .resolve_waiter(&session_id, PromptResponse::new(StopReason::EndTurn));
+
+    let response = rx_new.await.expect("New receiver should get the response");
+    assert_eq!(response.stop_reason, StopReason::EndTurn);
 }

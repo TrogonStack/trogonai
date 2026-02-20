@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
-use agent_client_protocol::{CancelNotification, Result};
+use agent_client_protocol::{CancelNotification, PromptResponse, Result, StopReason};
 use std::time::Instant;
 use tracing::{info, instrument, warn};
 
@@ -20,6 +20,13 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
     bridge
         .cancelled_sessions
         .mark_cancelled(args.session_id.clone());
+
+    bridge
+        .pending_session_prompt_responses
+        .resolve_waiter(
+            &args.session_id,
+            PromptResponse::new(StopReason::Cancelled),
+        );
 
     let mut success = true;
 

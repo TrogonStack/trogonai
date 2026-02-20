@@ -17,8 +17,10 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new() -> Self {
-        let meter = get_meter();
+        Self::with_meter(get_meter())
+    }
 
+    pub fn with_meter(meter: &Meter) -> Self {
         Self {
             requests_total: meter
                 .u64_counter("acp.requests.total")
@@ -91,25 +93,7 @@ mod tests {
         // Create a local meter instead of using global
         let meter = provider.meter("acp-io-bridge-nats-test");
 
-        let metrics = Metrics {
-            requests_total: meter
-                .u64_counter("acp.requests.total")
-                .with_description("Total number of ACP requests")
-                .build(),
-            request_duration: meter
-                .f64_histogram("acp.request.duration")
-                .with_description("Duration of ACP requests in seconds")
-                .with_unit("s")
-                .build(),
-            sessions_created: meter
-                .u64_counter("acp.sessions.created")
-                .with_description("Total number of sessions created")
-                .build(),
-            errors_total: meter
-                .u64_counter("acp.errors.total")
-                .with_description("Total number of errors")
-                .build(),
-        };
+        let metrics = Metrics::with_meter(&meter);
 
         (metrics, exporter, provider)
     }

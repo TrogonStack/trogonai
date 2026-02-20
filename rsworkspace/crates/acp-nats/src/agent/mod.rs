@@ -8,6 +8,7 @@ mod new_session;
 mod prompt;
 mod set_session_mode;
 
+use crate::JSONRPC_SERVER_ERROR;
 use crate::metrics::Metrics;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SessionReady, SubscribeClient, agent};
 use agent_client_protocol::{
@@ -16,19 +17,18 @@ use agent_client_protocol::{
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     Result, SessionId, SetSessionModeRequest, SetSessionModeResponse,
 };
+use futures::FutureExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 use tokio::sync::oneshot;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Pre-flight checks to avoid sending prompt requests for cancelled sessions.
-#[derive(Clone)]
-pub(crate) struct CancelledSessions(Rc<RefCell<HashSet<SessionId>>>);
+pub(crate) struct CancelledSessions(RefCell<HashSet<SessionId>>);
 
 impl CancelledSessions {
     pub fn new() -> Self {
-        Self(Rc::new(RefCell::new(HashSet::new())))
+        Self(RefCell::new(HashSet::new()))
     }
 
     pub fn is_cancelled(&self, session_id: &SessionId) -> bool {
@@ -47,19 +47,20 @@ impl CancelledSessions {
 /// Coordinates session/prompt request-response cycle via NATS publish-subscribe.
 /// When a `session/prompt` request is published, we store the sender and await the backend's
 /// `client.ext.session.prompt_response` notification.
-#[derive(Clone)]
 pub(crate) struct PendingSessionPromptResponseWaiters(
-    Rc<RefCell<HashMap<SessionId, oneshot::Sender<PromptResponse>>>>,
+    RefCell<HashMap<SessionId, oneshot::Sender<PromptResponse>>>,
 );
 
 impl PendingSessionPromptResponseWaiters {
     pub fn new() -> Self {
-        Self(Rc::new(RefCell::new(HashMap::new())))
+        Self(RefCell::new(HashMap::new()))
     }
 
     pub fn register_waiter(&self, session_id: SessionId) -> oneshot::Receiver<PromptResponse> {
         let (tx, rx) = oneshot::channel();
-        self.0.borrow_mut().insert(session_id, tx);
+        if let Some(_old) = self.0.borrow_mut().insert(session_id.clone(), tx) {
+            warn!(session_id = %session_id, "Replaced existing waiter for session — previous caller will see channel-closed error");
+        }
         rx
     }
 
@@ -99,7 +100,7 @@ impl<N: SubscribeClient + RequestClient + PublishClient + FlushClient> Bridge<N>
         self.nats.as_ref().ok_or_else(|| {
             self.metrics.record_error("nats_unavailable");
             Error::new(
-                -32000,
+                JSONRPC_SERVER_ERROR,
                 "NATS connection unavailable - bridge cannot function without NATS",
             )
         })
@@ -110,26 +111,33 @@ impl<N: SubscribeClient + RequestClient + PublishClient + FlushClient> Bridge<N>
         let prefix = self.acp_prefix.clone();
         let session_id = session_id.clone();
         tokio::task::spawn_local(async move {
-            let ready_subject = agent::ext_session_ready(&prefix, &session_id.to_string());
-            info!(session_id = %session_id, subject = %ready_subject, "Publishing session.ready");
+            let result = std::panic::AssertUnwindSafe(async {
+                let ready_subject = agent::ext_session_ready(&prefix, &session_id.to_string());
+                info!(session_id = %session_id, subject = %ready_subject, "Publishing session.ready");
 
-            let ready_message = SessionReady::new(session_id.to_string());
+                let ready_message = SessionReady::new(session_id.to_string());
 
-            let options = nats::PublishOptions::builder()
-                .publish_retry_policy(nats::RetryPolicy::standard())
-                .flush_policy(nats::FlushPolicy::standard())
-                .build();
+                let options = nats::PublishOptions::builder()
+                    .publish_retry_policy(nats::RetryPolicy::standard())
+                    .flush_policy(nats::FlushPolicy::standard())
+                    .build();
 
-            if let Err(e) =
-                nats::publish(&nats_clone, &ready_subject, &ready_message, options).await
-            {
-                warn!(
-                    error = %e,
-                    session_id = %session_id,
-                    "Failed to publish session.ready"
-                );
-            } else {
-                info!(session_id = %session_id, "Published session.ready");
+                if let Err(e) =
+                    nats::publish(&nats_clone, &ready_subject, &ready_message, options).await
+                {
+                    warn!(
+                        error = %e,
+                        session_id = %session_id,
+                        "Failed to publish session.ready"
+                    );
+                } else {
+                    info!(session_id = %session_id, "Published session.ready");
+                }
+            })
+            .catch_unwind()
+            .await;
+            if let Err(e) = result {
+                error!("Panic in spawn_session_ready: {:?}", e);
             }
         });
     }

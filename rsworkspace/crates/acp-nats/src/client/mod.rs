@@ -9,6 +9,7 @@ mod terminal_output;
 mod terminal_release;
 mod terminal_wait_for_exit;
 
+use crate::JSONRPC_INTERNAL_ERROR;
 use crate::agent::Bridge;
 use crate::nats::{
     ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, client,
@@ -16,7 +17,7 @@ use crate::nats::{
 };
 use agent_client_protocol::Client;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use std::rc::Rc;
 use tracing::{Span, error, info, instrument, warn};
 
@@ -50,15 +51,22 @@ pub async fn run<
 
         let bridge_clone = bridge.clone();
         tokio::task::spawn_local(async move {
-            handle_client_request(
-                &subject,
-                payload,
-                reply,
-                &nats,
-                client.as_ref(),
-                bridge_clone.as_ref(),
-            )
+            let result = std::panic::AssertUnwindSafe(async {
+                handle_client_request(
+                    &subject,
+                    payload,
+                    reply,
+                    &nats,
+                    client.as_ref(),
+                    bridge_clone.as_ref(),
+                )
+                .await;
+            })
+            .catch_unwind()
             .await;
+            if let Err(e) = result {
+                error!("Panic in client request handler: {:?}", e);
+            }
         });
     }
 
@@ -125,7 +133,7 @@ async fn handle_client_request<
             Err(e) => {
                 let error_response = serde_json::json!({
                     "error": {
-                        "code": -32603,
+                        "code": JSONRPC_INTERNAL_ERROR,
                         "message": e.to_string()
                     }
                 });
