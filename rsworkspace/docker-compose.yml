@@ -5,17 +5,33 @@ version: "3.9"
 #   SLACK_BOT_TOKEN   xoxb-...
 #   SLACK_APP_TOKEN   xapp-...
 # Optional:
-#   SLACK_BOT_USER_ID         UXXXXXXXX  (filters bot's own messages)
-#   SLACK_MENTION_GATING      false      (respond to all channel messages; default: true)
-#   SLACK_REPLY_TO_MODE       off | first | all  (default: off)
-#   SLACK_ACK_REACTION        eyes       (emoji added while processing; default: none)
-#   ANTHROPIC_API_KEY         sk-ant-... (enables Claude; without it the agent echoes)
-#   CLAUDE_MODEL              claude-sonnet-4-6  (default)
-#   CLAUDE_MAX_TOKENS         8192       (default)
-#   CLAUDE_SYSTEM_PROMPT      "You are a helpful assistant."
-#   CLAUDE_SYSTEM_PROMPT_FILE /run/secrets/prompt.txt  (takes precedence over inline)
-#   CLAUDE_MAX_HISTORY        40         (messages kept in KV; default)
-#   RUST_LOG                  info | debug | trace
+#   SLACK_BOT_USER_ID              UXXXXXXXX  (filters bot's own messages)
+#   SLACK_MENTION_GATING           false      (respond to all channel messages; default: true)
+#   SLACK_MENTION_GATING_CHANNELS  C123,C456  (channels where mention-gating is enforced)
+#   SLACK_NO_MENTION_CHANNELS      C123,C456  (channels where bot responds without mention)
+#   SLACK_ALLOW_BOTS               false      (allow bot messages to trigger the bot; default: false)
+#   SLACK_SIGNING_SECRET           abc123     (Slack signing secret for Events API verification)
+#   SLACK_EVENTS_PORT              3001       (port for the Events API HTTP listener; default: 3001)
+#   SLACK_API_RPS                  1.0        (Slack API requests-per-second limit; default: 1.0)
+#   SLACK_REPLY_TO_MODE            off | first | all  (default: off)
+#   SLACK_REPLY_TO_MODE_DM         off | first | all  (overrides SLACK_REPLY_TO_MODE for DMs)
+#   SLACK_REPLY_TO_MODE_GROUP      off | first | all  (overrides SLACK_REPLY_TO_MODE for group DMs)
+#   SLACK_ACK_REACTION             eyes       (emoji added while processing; default: none)
+#   SLACK_DM_POLICY                open       (who can DM the bot: open | allowlist; default: open)
+#   SLACK_CHANNEL_ALLOWLIST        C123,C456  (channels the bot will respond in; empty = all)
+#   SLACK_WELCOME_MESSAGE          "Hi!"      (message sent when a user opens a DM for the first time)
+#   SLACK_USER_RATE_LIMIT          0          (max requests per user per minute; 0 = unlimited)
+#   THREAD_INITIAL_HISTORY_LIMIT   0          (messages fetched from thread on first reply; 0 = none)
+#   ANTHROPIC_API_KEY              sk-ant-... (enables Claude; without it the agent echoes)
+#   CLAUDE_MODEL                   claude-sonnet-4-6  (default)
+#   CLAUDE_MAX_TOKENS              8192       (default)
+#   CLAUDE_SYSTEM_PROMPT           "You are a helpful assistant."
+#   CLAUDE_SYSTEM_PROMPT_FILE      /run/secrets/prompt.txt  (takes precedence over inline)
+#   CLAUDE_MAX_HISTORY             40         (messages kept in KV; default)
+#   CLAUDE_MAX_HISTORY_CHARS       0          (max total chars kept in history; 0 = unlimited)
+#   NATS_TOKEN                                (NATS authentication token)
+#   NATS_CREDS                                (path to NATS credentials file)
+#   RUST_LOG                       info | debug | trace
 
 services:
   nats:
@@ -42,11 +58,20 @@ services:
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
       SLACK_BOT_USER_ID: ${SLACK_BOT_USER_ID:-}
       SLACK_MENTION_GATING: ${SLACK_MENTION_GATING:-true}
+      SLACK_MENTION_GATING_CHANNELS: ${SLACK_MENTION_GATING_CHANNELS:-}
+      SLACK_NO_MENTION_CHANNELS: ${SLACK_NO_MENTION_CHANNELS:-}
+      SLACK_ALLOW_BOTS: ${SLACK_ALLOW_BOTS:-false}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_EVENTS_PORT: ${SLACK_EVENTS_PORT:-3001}
+      SLACK_API_RPS: ${SLACK_API_RPS:-1.0}
       HEALTH_PORT: 8080
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "8080:8080"
+      - "${SLACK_EVENTS_PORT:-3001}:${SLACK_EVENTS_PORT:-3001}"
     depends_on:
       nats:
         condition: service_healthy
@@ -63,14 +88,25 @@ services:
       dockerfile: crates/slack-agent/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
       SLACK_REPLY_TO_MODE: ${SLACK_REPLY_TO_MODE:-off}
+      SLACK_REPLY_TO_MODE_DM: ${SLACK_REPLY_TO_MODE_DM:-}
+      SLACK_REPLY_TO_MODE_GROUP: ${SLACK_REPLY_TO_MODE_GROUP:-}
       SLACK_ACK_REACTION: ${SLACK_ACK_REACTION:-}
+      SLACK_DM_POLICY: ${SLACK_DM_POLICY:-open}
+      SLACK_CHANNEL_ALLOWLIST: ${SLACK_CHANNEL_ALLOWLIST:-}
+      SLACK_WELCOME_MESSAGE: ${SLACK_WELCOME_MESSAGE:-}
+      SLACK_ALLOW_BOTS: ${SLACK_ALLOW_BOTS:-false}
+      SLACK_USER_RATE_LIMIT: ${SLACK_USER_RATE_LIMIT:-0}
+      THREAD_INITIAL_HISTORY_LIMIT: ${THREAD_INITIAL_HISTORY_LIMIT:-0}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}
       CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-8192}
       CLAUDE_SYSTEM_PROMPT: ${CLAUDE_SYSTEM_PROMPT:-}
       CLAUDE_SYSTEM_PROMPT_FILE: ${CLAUDE_SYSTEM_PROMPT_FILE:-}
       CLAUDE_MAX_HISTORY: ${CLAUDE_MAX_HISTORY:-40}
+      CLAUDE_MAX_HISTORY_CHARS: ${CLAUDE_MAX_HISTORY_CHARS:-0}
       HEALTH_PORT: 8081
       RUST_LOG: ${RUST_LOG:-info}
     ports:
