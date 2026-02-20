@@ -2,7 +2,7 @@ use async_nats::Client as NatsClient;
 use async_nats::jetstream::Context as JsContext;
 use slack_nats::publisher::{
     publish_outbound, publish_reaction_action, publish_set_status, publish_stream_append,
-    publish_stream_stop, publish_view_open, publish_view_publish,
+    publish_stream_stop, publish_upload_request, publish_view_open, publish_view_publish,
 };
 use slack_types::events::{
     PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
@@ -11,8 +11,8 @@ use slack_types::events::{
     SlackOutboundMessage, SlackPinEvent, SlackReactionAction, SlackReactionEvent,
     SlackSetStatusRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
     SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
-    SlackViewSubmissionEvent,
+    SlackThreadBroadcastEvent, SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest,
+    SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -478,11 +478,16 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                             }
                         };
 
-                        // 4c. Finalize with stream.stop.
+                        // 4c. If upload threshold exceeded, upload as file and replace
+                        //     the streamed message with a short notice.
+                        let stop_text =
+                            maybe_upload_response(&ctx.js, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
+
+                        // Finalize with stream.stop.
                         let stop = SlackStreamStopMessage {
                             channel: stream_start.channel.clone(),
                             ts: stream_start.ts.clone(),
-                            final_text: final_text.clone(),
+                            final_text: stop_text,
                             blocks: None,
                         };
                         if let Err(e) = publish_stream_stop(&ctx.js, &stop).await {
@@ -518,6 +523,7 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
                     &ctx.js,
                     &msg.channel,
                     effective_thread_ts.as_deref(),
+                    ctx.config.upload_threshold_chars,
                 )
                 .await
             }
@@ -651,6 +657,37 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     process_inbound(msg, ctx).await;
 }
 
+/// If `threshold` is set and `text` exceeds it, publishes a `SlackUploadRequest`
+/// and returns a short notice string. Otherwise returns `text` unchanged.
+async fn maybe_upload_response(
+    js: &JsContext,
+    text: &str,
+    threshold: Option<usize>,
+    channel: &str,
+    thread_ts: Option<&str>,
+) -> String {
+    let Some(limit) = threshold else {
+        return text.to_string();
+    };
+    if text.len() < limit {
+        return text.to_string();
+    }
+    let upload = SlackUploadRequest {
+        channel: channel.to_string(),
+        thread_ts: thread_ts.map(str::to_string),
+        filename: "response.md".to_string(),
+        content: text.to_string(),
+        title: None,
+    };
+    match publish_upload_request(js, &upload).await {
+        Ok(_) => "_(Response is too long — see attached file)_".to_string(),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to publish upload request — sending inline");
+            text.to_string()
+        }
+    }
+}
+
 /// Fallback: call Claude without streaming, send response as a regular message.
 async fn fallback_claude_response(
     claude: &ClaudeClient,
@@ -658,6 +695,7 @@ async fn fallback_claude_response(
     js: &JsContext,
     channel: &str,
     thread_ts: Option<&str>,
+    upload_threshold_chars: Option<usize>,
 ) -> String {
     match claude.stream_response(history.to_vec()).await {
         Ok((mut rx, handle)) => {
@@ -665,9 +703,10 @@ async fn fallback_claude_response(
             while rx.recv().await.is_some() {}
             match handle.await {
                 Ok(Ok(text)) => {
+                    let send_text = maybe_upload_response(js, &text, upload_threshold_chars, channel, thread_ts).await;
                     let outbound = SlackOutboundMessage {
                         channel: channel.to_string(),
-                        text: text.clone(),
+                        text: send_text,
                         thread_ts: thread_ts.map(str::to_string),
                         blocks: None,
                         media_url: None,

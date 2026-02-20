@@ -159,6 +159,11 @@ pub struct SlackAgentConfig {
     /// DMs use the paired channel's session_key instead of their own.
     /// Read from SLACK_DM_PAIR_CHANNEL (a single channel ID, e.g. "C01234ABCDE").
     pub dm_pair_channel: Option<String>,
+
+    /// When set, responses longer than this many characters are uploaded as a
+    /// Markdown file instead of sent as inline text. 0 / unset = disabled.
+    /// Read from SLACK_UPLOAD_THRESHOLD_CHARS.
+    pub upload_threshold_chars: Option<usize>,
 }
 
 impl SlackAgentConfig {
@@ -345,6 +350,12 @@ impl SlackAgentConfig {
             .ok()
             .filter(|v| !v.is_empty());
 
+        let upload_threshold_chars = env
+            .var("SLACK_UPLOAD_THRESHOLD_CHARS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -376,6 +387,7 @@ impl SlackAgentConfig {
             slack_seed_history_on_start,
             no_typing_channels,
             dm_pair_channel,
+            upload_threshold_chars,
         }
     }
 
@@ -1048,5 +1060,29 @@ mod tests {
         env.set("SLACK_DM_PAIR_CHANNEL", "C01234ABCDE");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.dm_pair_channel.as_deref(), Some("C01234ABCDE"));
+    }
+
+    // ── upload_threshold_chars ────────────────────────────────────────────────
+
+    #[test]
+    fn upload_threshold_defaults_to_none() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert!(config.upload_threshold_chars.is_none());
+    }
+
+    #[test]
+    fn upload_threshold_zero_is_disabled() {
+        let env = base_env();
+        env.set("SLACK_UPLOAD_THRESHOLD_CHARS", "0");
+        let config = SlackAgentConfig::from_env(&env);
+        assert!(config.upload_threshold_chars.is_none());
+    }
+
+    #[test]
+    fn upload_threshold_set() {
+        let env = base_env();
+        env.set("SLACK_UPLOAD_THRESHOLD_CHARS", "3000");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.upload_threshold_chars, Some(3000));
     }
 }
