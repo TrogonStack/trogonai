@@ -200,43 +200,15 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         "Processing inbound message"
     );
 
-    let session_key = msg
-        .session_key
-        .as_deref()
-        .unwrap_or(&msg.channel)
-        .to_string();
-
-    // DM pairing: override session_key to share history with the paired channel.
-    let session_key = if matches!(msg.session_type, SessionType::Direct) {
-        if let Some(ref pair_channel) = ctx.config.dm_pair_channel {
-            format!("slack:channel:{}", pair_channel)
-        } else {
-            session_key
-        }
-    } else {
-        session_key
-    };
-
-    // Feature: history_scope_parent — when enabled and we're in a thread,
-    // use the parent channel's session key instead of the thread-level key.
-    let session_key = if ctx.config.history_scope_parent && msg.thread_ts.is_some() {
-        // Strip the thread suffix by using the channel-level key.
-        if session_key.contains(":thread:") {
-            let parent = session_key[..session_key.find(":thread:").unwrap()].to_string();
-            parent
-        } else {
-            session_key
-        }
-    } else {
-        session_key
-    };
-
-    // Feature: dm_scope_main — collapse all DMs to a single shared session.
-    let session_key = if matches!(msg.session_type, SessionType::Direct) && ctx.config.dm_scope_main {
-        "slack:dm:main".to_string()
-    } else {
-        session_key
-    };
+    let base_session_key = msg.session_key.as_deref().unwrap_or(&msg.channel);
+    let session_key = compute_session_key_chain(
+        base_session_key,
+        &msg.session_type,
+        msg.thread_ts.as_deref(),
+        ctx.config.dm_pair_channel.as_deref(),
+        ctx.config.history_scope_parent,
+        ctx.config.dm_scope_main,
+    );
 
     // Prune session locks whose Arc is held only by the map (no task is using them).
     {
@@ -835,11 +807,107 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
 ///
 /// Performs early checks (DM policy, channel allowlist, user rate limit), then
 /// either debounces or calls `process_inbound` directly.
+// ── Pure gate-check helpers ───────────────────────────────────────────────────
+
+pub fn passes_dm_policy(policy: &DmPolicy, session_type: &SessionType) -> bool {
+    !(policy == &DmPolicy::Disabled && matches!(session_type, SessionType::Direct))
+}
+
+pub fn passes_channel_allowlist(
+    allowlist: &[String],
+    session_type: &SessionType,
+    channel: &str,
+) -> bool {
+    allowlist.is_empty()
+        || matches!(session_type, SessionType::Direct)
+        || allowlist.iter().any(|c| c == channel)
+}
+
+pub fn passes_group_dm_allowlist(
+    allowed: Option<&std::collections::HashSet<String>>,
+    session_type: &SessionType,
+    channel: &str,
+) -> bool {
+    if !matches!(session_type, SessionType::Group) {
+        return true;
+    }
+    allowed.map_or(true, |set| set.contains(channel))
+}
+
+pub fn passes_user_blocklist(blocklist: &[String], user: &str) -> bool {
+    !blocklist.iter().any(|id| id == user)
+}
+
+pub fn passes_user_allowlist(allowlist: &[String], user: &str) -> bool {
+    allowlist.is_empty() || allowlist.iter().any(|id| id == user)
+}
+
+pub fn passes_per_channel_user_allowlist(
+    channel_user_allowlists: &HashMap<String, Vec<String>>,
+    channel: &str,
+    user: &str,
+) -> bool {
+    match channel_user_allowlists.get(channel) {
+        Some(allowed) => allowed.iter().any(|id| id == user),
+        None => true,
+    }
+}
+
+pub fn passes_require_mention(
+    require: bool,
+    session_type: &SessionType,
+    bot_user_id: Option<&str>,
+    text: &str,
+) -> bool {
+    if !require || matches!(session_type, SessionType::Direct) {
+        return true;
+    }
+    bot_user_id
+        .map(|id| text.contains(&format!("<@{}>", id)))
+        .unwrap_or(false)
+}
+
+/// Applies DM-pair, history_scope_parent, and dm_scope_main transformations
+/// to a raw session key.
+pub fn compute_session_key_chain(
+    base: &str,
+    session_type: &SessionType,
+    thread_ts: Option<&str>,
+    dm_pair_channel: Option<&str>,
+    history_scope_parent: bool,
+    dm_scope_main: bool,
+) -> String {
+    // DM pairing: override session_key to share history with the paired channel.
+    let key = if matches!(session_type, SessionType::Direct) {
+        if let Some(pair) = dm_pair_channel {
+            format!("slack:channel:{}", pair)
+        } else {
+            base.to_string()
+        }
+    } else {
+        base.to_string()
+    };
+
+    // history_scope_parent: collapse thread key to parent channel key.
+    let key = if history_scope_parent && thread_ts.is_some() && key.contains(":thread:") {
+        key[..key.find(":thread:").unwrap()].to_string()
+    } else {
+        key
+    };
+
+    // dm_scope_main: collapse all DMs to a single shared session.
+    if matches!(session_type, SessionType::Direct) && dm_scope_main {
+        "slack:dm:main".to_string()
+    } else {
+        key
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     // DM policy check — silently ignore direct messages when disabled.
-    if ctx.config.dm_policy == DmPolicy::Disabled
-        && matches!(msg.session_type, SessionType::Direct)
-    {
+    if !passes_dm_policy(&ctx.config.dm_policy, &msg.session_type) {
         tracing::debug!(user = %msg.user, "DM disabled by policy, dropping message");
         return;
     }
@@ -912,65 +980,52 @@ Once approved, you'll be able to use me normally.",
     }
 
     // Channel allowlist check (DMs bypass this).
-    if !ctx.config.channel_allowlist.is_empty()
-        && !matches!(msg.session_type, SessionType::Direct)
-        && !ctx.config.channel_allowlist.contains(&msg.channel)
-    {
+    if !passes_channel_allowlist(&ctx.config.channel_allowlist, &msg.session_type, &msg.channel) {
         tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
         return;
     }
 
     // Group DM channel allowlist
-    if matches!(msg.session_type, SessionType::Group) {
-        if let Some(ref allowed) = ctx.config.group_dm_channels {
-            if !allowed.contains(&msg.channel) {
-                tracing::debug!(channel = %msg.channel, "Ignoring group DM (not in group_dm_channels allowlist)");
-                return;
-            }
-        }
+    if !passes_group_dm_allowlist(ctx.config.group_dm_channels.as_ref(), &msg.session_type, &msg.channel) {
+        tracing::debug!(channel = %msg.channel, "Ignoring group DM (not in group_dm_channels allowlist)");
+        return;
     }
 
     // User blocklist — silently drop blocked users.
-    if ctx.config.user_blocklist.iter().any(|id| id == &msg.user) {
+    if !passes_user_blocklist(&ctx.config.user_blocklist, &msg.user) {
         tracing::debug!(user = %msg.user, "User is blocklisted, dropping message");
         return;
     }
+
     // User allowlist — only process listed users when the list is non-empty.
-    if !ctx.config.user_allowlist.is_empty()
-        && !ctx.config.user_allowlist.iter().any(|id| id == &msg.user)
-    {
+    if !passes_user_allowlist(&ctx.config.user_allowlist, &msg.user) {
         tracing::debug!(user = %msg.user, "User not in allowlist, dropping message");
         return;
     }
 
     // Per-channel user allowlist — if the channel has an entry, only those users can interact.
-    if let Some(allowed_users) = ctx.config.channel_user_allowlists.get(&msg.channel) {
-        if !allowed_users.iter().any(|id| id == &msg.user) {
-            tracing::debug!(
-                channel = %msg.channel,
-                user = %msg.user,
-                "User not in per-channel allowlist, dropping message"
-            );
-            return;
-        }
+    if !passes_per_channel_user_allowlist(&ctx.config.channel_user_allowlists, &msg.channel, &msg.user) {
+        tracing::debug!(
+            channel = %msg.channel,
+            user = %msg.user,
+            "User not in per-channel allowlist, dropping message"
+        );
+        return;
     }
 
     // requireMention: only respond in channels/groups when the bot is @mentioned.
-    // DMs are always allowed through regardless.
-    if ctx.config.require_mention
-        && !matches!(msg.session_type, SessionType::Direct)
-    {
-        let mentioned = ctx.config.bot_user_id.as_deref()
-            .map(|bot_id| msg.text.contains(&format!("<@{}>", bot_id)))
-            .unwrap_or(false); // if bot_user_id unknown, can't detect mention → drop
-        if !mentioned {
-            tracing::debug!(
-                channel = %msg.channel,
-                user = %msg.user,
-                "require_mention: bot not mentioned, dropping message"
-            );
-            return;
-        }
+    if !passes_require_mention(
+        ctx.config.require_mention,
+        &msg.session_type,
+        ctx.config.bot_user_id.as_deref(),
+        &msg.text,
+    ) {
+        tracing::debug!(
+            channel = %msg.channel,
+            user = %msg.user,
+            "require_mention: bot not mentioned, dropping message"
+        );
+        return;
     }
 
     // Per-user rate limit check.
@@ -2264,6 +2319,344 @@ mod tests {
         let files_pos = result.find("[Attached files:").unwrap();
         let attachments_pos = result.find("[Attachments:").unwrap();
         assert!(files_pos < attachments_pos);
+    }
+
+    // ── passes_dm_policy ─────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_policy_disabled_blocks_direct() {
+        assert!(!passes_dm_policy(&DmPolicy::Disabled, &SessionType::Direct));
+    }
+
+    #[test]
+    fn dm_policy_disabled_allows_channel() {
+        assert!(passes_dm_policy(&DmPolicy::Disabled, &SessionType::Channel));
+    }
+
+    #[test]
+    fn dm_policy_disabled_allows_group() {
+        assert!(passes_dm_policy(&DmPolicy::Disabled, &SessionType::Group));
+    }
+
+    #[test]
+    fn dm_policy_open_allows_direct() {
+        assert!(passes_dm_policy(&DmPolicy::Open, &SessionType::Direct));
+    }
+
+    #[test]
+    fn dm_policy_pairing_allows_direct() {
+        // The pairing check is async (KV lookup); the pure policy gate just allows it.
+        assert!(passes_dm_policy(&DmPolicy::Pairing, &SessionType::Direct));
+    }
+
+    // ── passes_channel_allowlist ──────────────────────────────────────────────
+
+    #[test]
+    fn channel_allowlist_empty_always_passes() {
+        assert!(passes_channel_allowlist(&[], &SessionType::Channel, "C1"));
+        assert!(passes_channel_allowlist(&[], &SessionType::Group, "G1"));
+    }
+
+    #[test]
+    fn channel_allowlist_dm_bypasses_check() {
+        let list = vec!["C2".to_string()];
+        assert!(passes_channel_allowlist(&list, &SessionType::Direct, "D999"));
+    }
+
+    #[test]
+    fn channel_allowlist_allows_matching_channel() {
+        let list = vec!["C1".to_string(), "C2".to_string()];
+        assert!(passes_channel_allowlist(&list, &SessionType::Channel, "C1"));
+        assert!(passes_channel_allowlist(&list, &SessionType::Channel, "C2"));
+    }
+
+    #[test]
+    fn channel_allowlist_blocks_unlisted_channel() {
+        let list = vec!["C1".to_string()];
+        assert!(!passes_channel_allowlist(&list, &SessionType::Channel, "C999"));
+    }
+
+    // ── passes_group_dm_allowlist ─────────────────────────────────────────────
+
+    #[test]
+    fn group_dm_allowlist_non_group_always_passes() {
+        let set: std::collections::HashSet<String> = ["G1".to_string()].into();
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Channel, "C1"));
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Direct, "D1"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_none_allows_all_groups() {
+        assert!(passes_group_dm_allowlist(None, &SessionType::Group, "G999"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_allows_listed_group() {
+        let set: std::collections::HashSet<String> = ["G1".to_string(), "G2".to_string()].into();
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G1"));
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G2"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_blocks_unlisted_group() {
+        let set: std::collections::HashSet<String> = ["G1".to_string()].into();
+        assert!(!passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G999"));
+    }
+
+    // ── passes_user_blocklist ─────────────────────────────────────────────────
+
+    #[test]
+    fn user_blocklist_empty_allows_all() {
+        assert!(passes_user_blocklist(&[], "U1"));
+    }
+
+    #[test]
+    fn user_blocklist_blocks_listed_user() {
+        let list = vec!["U1".to_string(), "U2".to_string()];
+        assert!(!passes_user_blocklist(&list, "U1"));
+        assert!(!passes_user_blocklist(&list, "U2"));
+    }
+
+    #[test]
+    fn user_blocklist_allows_unlisted_user() {
+        let list = vec!["U1".to_string()];
+        assert!(passes_user_blocklist(&list, "U999"));
+    }
+
+    // ── passes_user_allowlist ─────────────────────────────────────────────────
+
+    #[test]
+    fn user_allowlist_empty_allows_all() {
+        assert!(passes_user_allowlist(&[], "U1"));
+        assert!(passes_user_allowlist(&[], "anyone"));
+    }
+
+    #[test]
+    fn user_allowlist_allows_listed_user() {
+        let list = vec!["U1".to_string(), "U2".to_string()];
+        assert!(passes_user_allowlist(&list, "U1"));
+        assert!(passes_user_allowlist(&list, "U2"));
+    }
+
+    #[test]
+    fn user_allowlist_blocks_unlisted_user() {
+        let list = vec!["U1".to_string()];
+        assert!(!passes_user_allowlist(&list, "U999"));
+    }
+
+    // ── passes_per_channel_user_allowlist ─────────────────────────────────────
+
+    #[test]
+    fn per_channel_user_allowlist_no_entry_allows_all() {
+        let map: HashMap<String, Vec<String>> = HashMap::new();
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U1"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_allows_listed_user() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string(), "U2".to_string()]);
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U1"));
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U2"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_blocks_unlisted_user() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string()]);
+        assert!(!passes_per_channel_user_allowlist(&map, "C1", "U999"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_other_channel_unaffected() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string()]);
+        // C2 has no entry → allow everyone in C2.
+        assert!(passes_per_channel_user_allowlist(&map, "C2", "U999"));
+    }
+
+    // ── passes_require_mention ────────────────────────────────────────────────
+
+    #[test]
+    fn require_mention_false_always_passes() {
+        assert!(passes_require_mention(false, &SessionType::Channel, Some("UBOT"), "hello"));
+        assert!(passes_require_mention(false, &SessionType::Channel, None, "hello"));
+    }
+
+    #[test]
+    fn require_mention_dm_bypasses_check() {
+        assert!(passes_require_mention(true, &SessionType::Direct, Some("UBOT"), "hello"));
+    }
+
+    #[test]
+    fn require_mention_with_mention_passes() {
+        assert!(passes_require_mention(
+            true,
+            &SessionType::Channel,
+            Some("UBOT"),
+            "hey <@UBOT> help me",
+        ));
+    }
+
+    #[test]
+    fn require_mention_without_mention_blocked() {
+        assert!(!passes_require_mention(
+            true,
+            &SessionType::Channel,
+            Some("UBOT"),
+            "hello everyone",
+        ));
+    }
+
+    #[test]
+    fn require_mention_no_bot_user_id_blocks() {
+        // If require_mention=true but bot_user_id unknown, can't detect mention → block.
+        assert!(!passes_require_mention(true, &SessionType::Channel, None, "hello <@anyone>"));
+    }
+
+    #[test]
+    fn require_mention_group_requires_mention() {
+        assert!(!passes_require_mention(true, &SessionType::Group, Some("UBOT"), "plain text"));
+        assert!(passes_require_mention(true, &SessionType::Group, Some("UBOT"), "<@UBOT> hi"));
+    }
+
+    // ── compute_session_key_chain ─────────────────────────────────────────────
+
+    #[test]
+    fn session_key_chain_passthrough_channel() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_dm_no_transforms() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:dm:U1");
+    }
+
+    #[test]
+    fn session_key_chain_dm_pair_channel_override() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            Some("C_PAIRED"),
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C_PAIRED");
+    }
+
+    #[test]
+    fn session_key_chain_dm_pair_does_not_affect_channel_session() {
+        // dm_pair_channel only applies to DMs
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            Some("C_PAIRED"),
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_strips_thread_suffix() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            Some("1.0"),
+            None,
+            true,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_no_thread_ts_no_change() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            None, // thread_ts absent → no strip
+            None,
+            true,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1:thread:1.0");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_false_no_change() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            Some("1.0"),
+            None,
+            false, // disabled
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1:thread:1.0");
+    }
+
+    #[test]
+    fn session_key_chain_dm_scope_main_collapses_dms() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            None,
+            false,
+            true,
+        );
+        assert_eq!(key, "slack:dm:main");
+    }
+
+    #[test]
+    fn session_key_chain_dm_scope_main_does_not_affect_channel() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            None,
+            false,
+            true, // dm_scope_main only applies to DMs
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_all_transforms_dm() {
+        // dm_pair_channel is applied first, then history_scope_parent, then dm_scope_main.
+        // dm_pair makes it a channel key → dm_scope_main won't trigger (not Direct after).
+        // But the type is still Direct, so dm_scope_main checks session_type.
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            Some("C_PAIRED"),
+            false,
+            true, // dm_scope_main — but session_type is Direct, so this wins?
+        );
+        // After dm_pair: "slack:channel:C_PAIRED"
+        // history_scope_parent: no :thread: in key and thread_ts=None → no change
+        // dm_scope_main: session_type == Direct → "slack:dm:main"
+        assert_eq!(key, "slack:dm:main");
     }
 
     // ── extract_reply_target ──────────────────────────────────────────────────
