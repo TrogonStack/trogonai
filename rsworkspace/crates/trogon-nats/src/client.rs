@@ -85,3 +85,68 @@ impl FlushClient for NatsAsyncClient {
         self.flush().await
     }
 }
+
+// ── JetStream Context ─────────────────────────────────────────────────────────
+
+/// Newtype wrapper around `async_nats::Error` (`Box<dyn Error + Send + Sync>`)
+/// that satisfies the `Error + Send + Sync` bound required by the client traits.
+#[derive(Debug)]
+pub struct JetStreamError(pub async_nats::Error);
+
+impl std::fmt::Display for JetStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Error for JetStreamError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
+    }
+}
+
+impl PublishClient for async_nats::jetstream::Context {
+    type PublishError = JetStreamError;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        _headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<(), Self::PublishError> {
+        self.publish(subject, payload)
+            .await
+            .map_err(|e| JetStreamError(e.into()))?
+            .await
+            .map_err(|e| JetStreamError(e.into()))?;
+        Ok(())
+    }
+}
+
+// ── Arc blanket impls ─────────────────────────────────────────────────────────
+
+impl<T: PublishClient> PublishClient for std::sync::Arc<T> {
+    type PublishError = T::PublishError;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<(), Self::PublishError> {
+        self.as_ref().publish_with_headers(subject, headers, payload).await
+    }
+}
+
+impl<T: RequestClient> RequestClient for std::sync::Arc<T> {
+    type RequestError = T::RequestError;
+
+    async fn request_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Message, Self::RequestError> {
+        self.as_ref().request_with_headers(subject, headers, payload).await
+    }
+}
