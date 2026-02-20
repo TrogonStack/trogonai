@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::JSONRPC_INTERNAL_ERROR;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, NewSessionRequest, NewSessionResponse, Result};
 use std::time::Instant;
@@ -25,7 +26,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
         &args,
     )
     .await
-    .map_err(|e| Error::new(-32603, e.to_string()));
+    .map_err(|e| Error::new(JSONRPC_INTERNAL_ERROR, e.to_string()));
 
     if let Ok(ref response) = result {
         Span::current().record("session_id", response.session_id.to_string().as_str());

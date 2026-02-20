@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::JSONRPC_INTERNAL_ERROR;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, Result, SetSessionModeRequest, SetSessionModeResponse};
 use std::time::Instant;
@@ -23,7 +24,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
     let result =
         nats::request::<N, SetSessionModeRequest, SetSessionModeResponse>(nats, &subject, &args)
             .await
-            .map_err(|e| Error::new(-32603, e.to_string()));
+            .map_err(|e| Error::new(JSONRPC_INTERNAL_ERROR, e.to_string()));
 
     bridge.metrics.record_request(
         "set_session_mode",

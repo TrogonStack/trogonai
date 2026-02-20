@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::JSONRPC_INTERNAL_ERROR;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, LoadSessionRequest, LoadSessionResponse, Result};
 use std::time::Instant;
@@ -22,7 +23,7 @@ pub async fn handle<N: SubscribeClient + RequestClient + PublishClient + FlushCl
 
     let result = nats::request::<N, LoadSessionRequest, LoadSessionResponse>(nats, &subject, &args)
         .await
-        .map_err(|e| Error::new(-32603, e.to_string()));
+        .map_err(|e| Error::new(JSONRPC_INTERNAL_ERROR, e.to_string()));
 
     if result.is_ok() {
         bridge.spawn_session_ready(nats, &args.session_id);
