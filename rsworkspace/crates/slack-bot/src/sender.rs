@@ -14,6 +14,8 @@ use crate::format;
 /// We use a conservative global delay to stay safely below the limit.
 const POST_MESSAGE_DELAY: Duration = Duration::from_millis(1_100);
 
+const SLACK_API_BASE: &str = "https://slack.com";
+
 pub async fn run_outbound_loop(
     consumer: Consumer<pull::Config>,
     slack_client: Arc<SlackHyperClient>,
@@ -64,6 +66,7 @@ pub async fn run_outbound_loop(
                         thread_ts.as_ref(),
                         &converted_text,
                         media_url,
+                        SLACK_API_BASE,
                     )
                     .await
                     {
@@ -383,10 +386,23 @@ pub async fn run_reaction_action_loop(
 
 // ── File upload ───────────────────────────────────────────────────────────────
 
+/// Derive a filename from the last path segment of a URL, stripping query params.
+fn extract_upload_filename(url: &str) -> String {
+    url.rsplit('/')
+        .next()
+        .and_then(|s| s.split('?').next())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("file")
+        .to_string()
+}
+
 /// Upload a file to Slack using the two-step API introduced in 2023:
 /// 1. `files.getUploadURLExternal` — obtain a pre-signed upload URL + file ID
 /// 2. PUT the raw bytes to that URL
 /// 3. `files.completeUploadExternal` — associate the file with a channel
+///
+/// `api_base` should be `"https://slack.com"` in production; it is exposed for
+/// testing against a local mock server.
 ///
 /// On success the file appears as a native Slack attachment; the caller should
 /// skip the plain-text fallback post.  On failure the error is returned so the
@@ -398,6 +414,7 @@ async fn upload_file_to_slack(
     thread_ts: Option<&SlackTs>,
     text: &str,
     media_url: &str,
+    api_base: &str,
 ) -> Result<(), String> {
     // 1. Download the file from the media URL.
     let download = http
@@ -406,13 +423,7 @@ async fn upload_file_to_slack(
         .await
         .map_err(|e| format!("download request: {e}"))?;
 
-    let filename = media_url
-        .rsplit('/')
-        .next()
-        .and_then(|s| s.split('?').next())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("file")
-        .to_string();
+    let filename = extract_upload_filename(media_url);
 
     let content_type = download
         .headers()
@@ -426,18 +437,37 @@ async fn upload_file_to_slack(
         .await
         .map_err(|e| format!("download body: {e}"))?;
     let length = bytes.len();
+    let length_str = length.to_string();
 
-    // 2. Ask Slack for a pre-signed upload URL.
-    let get_url: serde_json::Value = http
-        .post("https://slack.com/api/files.getUploadURLExternal")
-        .bearer_auth(token)
-        .form(&[("filename", filename.as_str()), ("length", &length.to_string())])
-        .send()
-        .await
-        .map_err(|e| format!("getUploadURLExternal request: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("getUploadURLExternal parse: {e}"))?;
+    // 2. Ask Slack for a pre-signed upload URL (retry once on rate limit).
+    let get_url_url = format!("{api_base}/api/files.getUploadURLExternal");
+    let make_get_url_req = || {
+        http.post(&get_url_url)
+            .bearer_auth(token)
+            .form(&[("filename", filename.as_str()), ("length", length_str.as_str())])
+    };
+    let get_url: serde_json::Value = {
+        let r: serde_json::Value = make_get_url_req()
+            .send()
+            .await
+            .map_err(|e| format!("getUploadURLExternal request: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("getUploadURLExternal parse: {e}"))?;
+        if !r["ok"].as_bool().unwrap_or(false) && r["error"].as_str() == Some("ratelimited") {
+            tracing::warn!("Slack rate limit on getUploadURLExternal, retrying after 5 s");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            make_get_url_req()
+                .send()
+                .await
+                .map_err(|e| format!("getUploadURLExternal retry request: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("getUploadURLExternal retry parse: {e}"))?
+        } else {
+            r
+        }
+    };
 
     if !get_url["ok"].as_bool().unwrap_or(false) {
         return Err(format!(
@@ -463,7 +493,7 @@ async fn upload_file_to_slack(
         .await
         .map_err(|e| format!("upload PUT: {e}"))?;
 
-    // 4. Complete the upload and associate it with the channel.
+    // 4. Complete the upload and associate it with the channel (retry once on rate limit).
     let mut body = serde_json::Map::new();
     body.insert("files".into(), serde_json::json!([{"id": file_id}]));
     body.insert(
@@ -483,16 +513,34 @@ async fn upload_file_to_slack(
         );
     }
 
-    let complete: serde_json::Value = http
-        .post("https://slack.com/api/files.completeUploadExternal")
-        .bearer_auth(token)
-        .json(&serde_json::Value::Object(body))
-        .send()
-        .await
-        .map_err(|e| format!("completeUploadExternal request: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("completeUploadExternal parse: {e}"))?;
+    let complete_url = format!("{api_base}/api/files.completeUploadExternal");
+    let complete: serde_json::Value = {
+        let r: serde_json::Value = http
+            .post(&complete_url)
+            .bearer_auth(token)
+            .json(&serde_json::Value::Object(body.clone()))
+            .send()
+            .await
+            .map_err(|e| format!("completeUploadExternal request: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("completeUploadExternal parse: {e}"))?;
+        if !r["ok"].as_bool().unwrap_or(false) && r["error"].as_str() == Some("ratelimited") {
+            tracing::warn!("Slack rate limit on completeUploadExternal, retrying after 5 s");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            http.post(&complete_url)
+                .bearer_auth(token)
+                .json(&serde_json::Value::Object(body))
+                .send()
+                .await
+                .map_err(|e| format!("completeUploadExternal retry request: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("completeUploadExternal retry parse: {e}"))?
+        } else {
+            r
+        }
+    };
 
     if !complete["ok"].as_bool().unwrap_or(false) {
         return Err(format!(
@@ -502,4 +550,227 @@ async fn upload_file_to_slack(
     }
 
     Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn channel(id: &str) -> SlackChannelId {
+        SlackChannelId(id.to_string())
+    }
+
+    // ── extract_upload_filename ───────────────────────────────────────────────
+
+    #[test]
+    fn filename_basic_path() {
+        assert_eq!(extract_upload_filename("https://example.com/foo/bar.png"), "bar.png");
+    }
+
+    #[test]
+    fn filename_strips_query() {
+        assert_eq!(
+            extract_upload_filename("https://cdn.example.com/image.jpg?X-Amz-Expires=300"),
+            "image.jpg"
+        );
+    }
+
+    #[test]
+    fn filename_trailing_slash_falls_back() {
+        assert_eq!(extract_upload_filename("https://example.com/path/"), "file");
+    }
+
+    #[test]
+    fn filename_no_path_falls_back() {
+        assert_eq!(extract_upload_filename("https://example.com"), "example.com");
+    }
+
+    // ── upload_file_to_slack (wiremock) ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn upload_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/media/photo.png"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"PNGDATA".as_ref())
+                    .insert_header("content-type", "image/png"),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-slot", server.uri()),
+                "file_id": "FTEST"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/upload-slot"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})),
+            )
+            .mount(&server)
+            .await;
+
+        let result = upload_file_to_slack(
+            &HttpClient::new(),
+            "xoxb-test",
+            &channel("C123"),
+            None,
+            "look at this",
+            &format!("{}/media/photo.png", server.uri()),
+            &server.uri(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn upload_with_thread_ts_and_empty_text() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/f.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello".as_ref()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/slot", server.uri()),
+                "file_id": "F2"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/slot"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})),
+            )
+            .mount(&server)
+            .await;
+
+        let ts = SlackTs("1234567890.000100".to_string());
+        let result = upload_file_to_slack(
+            &HttpClient::new(),
+            "xoxb-test",
+            &channel("C456"),
+            Some(&ts),
+            "",
+            &format!("{}/f.txt", server.uri()),
+            &server.uri(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn upload_geturl_error_propagated() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/file.bin"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"data".as_ref()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"ok": false, "error": "not_allowed"}),
+            ))
+            .mount(&server)
+            .await;
+
+        let result = upload_file_to_slack(
+            &HttpClient::new(),
+            "xoxb-test",
+            &channel("C123"),
+            None,
+            "",
+            &format!("{}/file.bin", server.uri()),
+            &server.uri(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not_allowed"), "expected not_allowed in error");
+    }
+
+    #[tokio::test]
+    async fn upload_complete_error_propagated() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"x".as_ref()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/slot", server.uri()),
+                "file_id": "F3"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path("/slot"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"ok": false, "error": "invalid_auth"}),
+            ))
+            .mount(&server)
+            .await;
+
+        let result = upload_file_to_slack(
+            &HttpClient::new(),
+            "xoxb-test",
+            &channel("C123"),
+            None,
+            "",
+            &format!("{}/f.bin", server.uri()),
+            &server.uri(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid_auth"), "expected invalid_auth in error");
+    }
 }

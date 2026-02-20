@@ -23,3 +23,4 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 
 [dev-dependencies]
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
+wiremock = "0.6"
