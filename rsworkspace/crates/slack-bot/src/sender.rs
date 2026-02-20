@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::format;
+use crate::rate_limit::RateLimiter;
 
 /// Slack rate limit for `chat.postMessage`: ~1 request/second per channel.
 /// We use a conservative global delay to stay safely below the limit.
@@ -22,6 +23,7 @@ pub async fn run_outbound_loop(
     slack_client: Arc<SlackHyperClient>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -68,6 +70,7 @@ pub async fn run_outbound_loop(
                         &converted_text,
                         media_url,
                         SLACK_API_BASE,
+                        &rate_limiter,
                     )
                     .await
                     {
@@ -177,6 +180,7 @@ pub async fn run_stream_append_loop(
     consumer: Consumer<pull::Config>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -203,6 +207,7 @@ pub async fn run_stream_append_loop(
                     "message_ts": append.ts,
                     "content": append.text,
                 });
+                rate_limiter.acquire().await;
                 match http_client
                     .post(&url)
                     .bearer_auth(&bot_token)
@@ -240,6 +245,7 @@ pub async fn run_stream_stop_loop(
     consumer: Consumer<pull::Config>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -265,6 +271,7 @@ pub async fn run_stream_stop_loop(
                     "channel": stop.channel,
                     "message_ts": stop.ts,
                 });
+                rate_limiter.acquire().await;
                 match http_client
                     .post(&url)
                     .bearer_auth(&bot_token)
@@ -303,6 +310,7 @@ pub async fn run_reaction_action_loop(
     consumer: Consumer<pull::Config>,
     slack_client: Arc<SlackHyperClient>,
     bot_token: String,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -329,6 +337,7 @@ pub async fn run_reaction_action_loop(
                 let name = SlackReactionName(action.reaction.clone());
                 let timestamp = SlackTs(action.ts.clone());
 
+                rate_limiter.acquire().await;
                 let outcome = if action.add {
                     session
                         .reactions_add(&SlackApiReactionsAddRequest {
@@ -402,8 +411,10 @@ async fn upload_file_to_slack(
     text: &str,
     media_url: &str,
     api_base: &str,
+    rate_limiter: &RateLimiter,
 ) -> Result<(), String> {
     // 1. Download the file from the media URL.
+    rate_limiter.acquire().await;
     let download = http
         .get(media_url)
         .send()
@@ -434,6 +445,7 @@ async fn upload_file_to_slack(
             .form(&[("filename", filename.as_str()), ("length", length_str.as_str())])
     };
     let get_url: serde_json::Value = {
+        rate_limiter.acquire().await;
         let r: serde_json::Value = make_get_url_req()
             .send()
             .await
@@ -444,6 +456,7 @@ async fn upload_file_to_slack(
         if !r["ok"].as_bool().unwrap_or(false) && r["error"].as_str() == Some("ratelimited") {
             tracing::warn!("Slack rate limit on getUploadURLExternal, retrying after 5 s");
             tokio::time::sleep(Duration::from_secs(5)).await;
+            rate_limiter.acquire().await;
             make_get_url_req()
                 .send()
                 .await
@@ -473,6 +486,7 @@ async fn upload_file_to_slack(
         .to_string();
 
     // 3. PUT the raw bytes to the pre-signed URL.
+    rate_limiter.acquire().await;
     http.put(&upload_url)
         .header(reqwest::header::CONTENT_TYPE, &content_type)
         .body(bytes)
@@ -502,6 +516,7 @@ async fn upload_file_to_slack(
 
     let complete_url = format!("{api_base}/api/files.completeUploadExternal");
     let complete: serde_json::Value = {
+        rate_limiter.acquire().await;
         let r: serde_json::Value = http
             .post(&complete_url)
             .bearer_auth(token)
@@ -515,6 +530,7 @@ async fn upload_file_to_slack(
         if !r["ok"].as_bool().unwrap_or(false) && r["error"].as_str() == Some("ratelimited") {
             tracing::warn!("Slack rate limit on completeUploadExternal, retrying after 5 s");
             tokio::time::sleep(Duration::from_secs(5)).await;
+            rate_limiter.acquire().await;
             http.post(&complete_url)
                 .bearer_auth(token)
                 .json(&serde_json::Value::Object(body))
@@ -545,6 +561,7 @@ pub async fn run_view_open_loop(
     consumer: Consumer<pull::Config>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -566,6 +583,7 @@ pub async fn run_view_open_loop(
 
         match serde_json::from_slice::<SlackViewOpenRequest>(&msg.payload) {
             Ok(req) => {
+                rate_limiter.acquire().await;
                 match http_client
                     .post(&url)
                     .bearer_auth(&bot_token)
@@ -601,6 +619,7 @@ pub async fn run_view_publish_loop(
     consumer: Consumer<pull::Config>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -622,6 +641,7 @@ pub async fn run_view_publish_loop(
 
         match serde_json::from_slice::<SlackViewPublishRequest>(&msg.payload) {
             Ok(req) => {
+                rate_limiter.acquire().await;
                 match http_client
                     .post(&url)
                     .bearer_auth(&bot_token)
@@ -659,6 +679,7 @@ pub async fn run_set_status_loop(
     consumer: Consumer<pull::Config>,
     bot_token: String,
     http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     let mut messages = match consumer.messages().await {
         Ok(m) => m,
@@ -701,6 +722,7 @@ pub async fn run_set_status_loop(
                     );
                 }
 
+                rate_limiter.acquire().await;
                 match http_client
                     .post(&url)
                     .bearer_auth(&bot_token)
@@ -827,6 +849,7 @@ mod tests {
             "look at this",
             &format!("{}/media/photo.png", server.uri()),
             &server.uri(),
+            &RateLimiter::new(100.0),
         )
         .await;
 
@@ -876,6 +899,7 @@ mod tests {
             "",
             &format!("{}/f.txt", server.uri()),
             &server.uri(),
+            &RateLimiter::new(100.0),
         )
         .await;
 
@@ -908,6 +932,7 @@ mod tests {
             "",
             &format!("{}/file.bin", server.uri()),
             &server.uri(),
+            &RateLimiter::new(100.0),
         )
         .await;
 
@@ -957,6 +982,7 @@ mod tests {
             "",
             &format!("{}/f.bin", server.uri()),
             &server.uri(),
+            &RateLimiter::new(100.0),
         )
         .await;
 

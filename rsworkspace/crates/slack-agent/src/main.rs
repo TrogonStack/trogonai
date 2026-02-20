@@ -10,9 +10,10 @@ use async_nats::jetstream;
 use config::SlackAgentConfig;
 use futures::StreamExt;
 use handler::{
-    AgentContext, handle_app_home, handle_block_action, handle_channel, handle_inbound,
-    handle_member, handle_message_changed, handle_message_deleted, handle_pin, handle_reaction,
-    handle_slash_command, handle_thread_broadcast, handle_view_closed, handle_view_submission,
+    AgentContext, UserRateLimiter, handle_app_home, handle_block_action, handle_channel,
+    handle_inbound, handle_member, handle_message_changed, handle_message_deleted, handle_pin,
+    handle_reaction, handle_slash_command, handle_thread_broadcast, handle_view_closed,
+    handle_view_submission,
 };
 use health::start_health_server;
 use llm::ClaudeClient;
@@ -132,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         base_system_prompt: system_prompt,
         session_locks: Mutex::new(HashMap::new()),
         http_client: reqwest::Client::new(),
+        user_rate_limiter: UserRateLimiter::new(config.user_rate_limit),
     });
 
     tracing::info!("Slack agent running. Press Ctrl+C to stop.");

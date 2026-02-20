@@ -103,6 +103,11 @@ pub struct SlackAgentConfig {
     /// When true, messages from other bots are processed. Default: false.
     #[allow(dead_code)]
     pub allow_bots: bool,
+
+    // ── Rate limiting ─────────────────────────────────────────────────────────
+    /// Max messages per user per minute. 0 = disabled (default).
+    /// Configurable via SLACK_USER_RATE_LIMIT.
+    pub user_rate_limit: u32,
 }
 
 impl SlackAgentConfig {
@@ -200,6 +205,12 @@ impl SlackAgentConfig {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
+        let user_rate_limit = env
+            .var("SLACK_USER_RATE_LIMIT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         Self {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
@@ -219,6 +230,7 @@ impl SlackAgentConfig {
             reply_to_mode_group,
             thread_initial_history_limit,
             allow_bots,
+            user_rate_limit,
         }
     }
 
@@ -647,5 +659,29 @@ mod tests {
         env.set("CLAUDE_MAX_HISTORY_CHARS", "0");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.claude_max_history_chars, 0);
+    }
+
+    // ── user_rate_limit ────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_rate_limit_defaults_to_zero() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.user_rate_limit, 0);
+    }
+
+    #[test]
+    fn user_rate_limit_set_to_ten() {
+        let env = base_env();
+        env.set("SLACK_USER_RATE_LIMIT", "10");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.user_rate_limit, 10);
+    }
+
+    #[test]
+    fn user_rate_limit_invalid_falls_back_to_zero() {
+        let env = base_env();
+        env.set("SLACK_USER_RATE_LIMIT", "not-a-number");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.user_rate_limit, 0);
     }
 }

@@ -17,7 +17,7 @@ use slack_types::events::{
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig};
 use crate::llm::ClaudeClient;
@@ -27,6 +27,43 @@ use crate::views::{build_app_home_view, build_settings_modal};
 
 /// Timeout for the `stream.start` Core NATS request/reply round-trip.
 const STREAM_START_TIMEOUT: Duration = Duration::from_secs(10);
+
+// ── Per-user rate limiter ─────────────────────────────────────────────────────
+
+/// Tracks per-user message counts within a sliding 60-second window.
+pub struct UserRateLimiter {
+    limit: u32, // 0 = disabled
+    /// Maps user_id -> list of Instant timestamps within the current window.
+    window: Mutex<HashMap<String, Vec<Instant>>>,
+}
+
+impl UserRateLimiter {
+    pub fn new(limit: u32) -> Self {
+        Self {
+            limit,
+            window: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Returns true if the user is allowed (within limit), false if rate-limited.
+    /// Also cleans up timestamps older than 60 seconds.
+    fn check_and_record(&self, user_id: &str) -> bool {
+        if self.limit == 0 {
+            return true;
+        }
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        let mut map = self.window.lock().unwrap();
+        let timestamps = map.entry(user_id.to_string()).or_default();
+        // Remove entries older than 60 seconds.
+        timestamps.retain(|t| now.duration_since(*t) < window);
+        if timestamps.len() >= self.limit as usize {
+            return false;
+        }
+        timestamps.push(now);
+        true
+    }
+}
 
 /// Shared state passed to every handler call.
 pub struct AgentContext {
@@ -44,6 +81,8 @@ pub struct AgentContext {
     pub session_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Reusable HTTP client for Slack response_url webhooks.
     pub http_client: reqwest::Client,
+    /// Per-user sliding-window rate limiter for inbound messages.
+    pub user_rate_limiter: UserRateLimiter,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -156,6 +195,12 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         && !ctx.config.channel_allowlist.contains(&msg.channel)
     {
         tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
+        return;
+    }
+
+    // Per-user rate limit check.
+    if !ctx.user_rate_limiter.check_and_record(&msg.user) {
+        tracing::warn!(user = %msg.user, "Rate limit exceeded, dropping message");
         return;
     }
 
@@ -1076,6 +1121,46 @@ fn extract_reply_target(text: &str, current_ts: &str) -> (String, Option<String>
 mod tests {
     use super::*;
     use crate::config::ReplyToMode;
+
+    // ── UserRateLimiter ───────────────────────────────────────────────────────
+
+    #[test]
+    fn rate_limiter_disabled_when_zero() {
+        let rl = UserRateLimiter::new(0);
+        for _ in 0..100 {
+            assert!(rl.check_and_record("U1"), "limit=0 should always allow");
+        }
+    }
+
+    #[test]
+    fn rate_limiter_allows_within_limit() {
+        let rl = UserRateLimiter::new(3);
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+    }
+
+    #[test]
+    fn rate_limiter_blocks_when_over_limit() {
+        let rl = UserRateLimiter::new(3);
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(!rl.check_and_record("U1"), "4th call should be blocked");
+    }
+
+    #[test]
+    fn rate_limiter_different_users_independent() {
+        let rl = UserRateLimiter::new(2);
+        assert!(rl.check_and_record("A"));
+        assert!(rl.check_and_record("A"));
+        // A is now at limit.
+        assert!(!rl.check_and_record("A"), "A should be blocked");
+        // B should still be allowed.
+        assert!(rl.check_and_record("B"), "B should be unaffected by A's limit");
+        assert!(rl.check_and_record("B"), "B's 2nd call should be allowed");
+        assert!(!rl.check_and_record("B"), "B's 3rd call should be blocked");
+    }
 
     // ── derive_session_key_for_event ──────────────────────────────────────────
 

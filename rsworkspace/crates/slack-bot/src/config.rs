@@ -33,6 +33,9 @@ pub struct SlackBotConfig {
     /// Port for the raw HTTP Events API webhook server (for pin events).
     /// Default: 3001.
     pub events_port: u16,
+    /// Max outbound Slack API requests per second. Default: 1.0.
+    /// Configurable via SLACK_API_RPS. Clamped to [0.1, 50.0].
+    pub slack_api_rps: f32,
 }
 
 impl SlackBotConfig {
@@ -75,6 +78,12 @@ impl SlackBotConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(3001);
+        let slack_api_rps = env
+            .var("SLACK_API_RPS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.1, 50.0);
 
         Self {
             bot_token,
@@ -88,6 +97,7 @@ impl SlackBotConfig {
             health_port,
             signing_secret,
             events_port,
+            slack_api_rps,
         }
     }
 }
@@ -246,5 +256,43 @@ mod tests {
         assert!(config.no_mention_channels.contains("C444"));
         assert!(config.no_mention_channels.contains("C555"));
         assert_eq!(config.no_mention_channels.len(), 2);
+    }
+
+    #[test]
+    fn slack_api_rps_default_is_1() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert!((config.slack_api_rps - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn slack_api_rps_custom_value() {
+        let env = base_env();
+        env.set("SLACK_API_RPS", "5.0");
+        let config = SlackBotConfig::from_env(&env);
+        assert!((config.slack_api_rps - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn slack_api_rps_invalid_falls_back_to_default() {
+        let env = base_env();
+        env.set("SLACK_API_RPS", "not_a_number");
+        let config = SlackBotConfig::from_env(&env);
+        assert!((config.slack_api_rps - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn slack_api_rps_clamped_to_max() {
+        let env = base_env();
+        env.set("SLACK_API_RPS", "9999.0");
+        let config = SlackBotConfig::from_env(&env);
+        assert!((config.slack_api_rps - 50.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn slack_api_rps_clamped_to_min() {
+        let env = base_env();
+        env.set("SLACK_API_RPS", "0.0");
+        let config = SlackBotConfig::from_env(&env);
+        assert!((config.slack_api_rps - 0.1).abs() < f32::EPSILON);
     }
 }

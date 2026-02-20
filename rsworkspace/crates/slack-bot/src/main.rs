@@ -2,6 +2,7 @@ mod config;
 mod format;
 mod health;
 mod listener;
+mod rate_limit;
 mod sender;
 mod webhook;
 
@@ -22,6 +23,7 @@ use slack_nats::subscriber::{
     create_stream_append_consumer, create_stream_stop_consumer, create_view_open_consumer,
     create_view_publish_consumer,
 };
+use rate_limit::RateLimiter;
 use slack_types::events::{SlackStreamStartRequest, SlackStreamStartResponse};
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::sync::Arc;
@@ -40,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let config = SlackBotConfig::from_env(&SystemEnv);
+    let rate_limiter = Arc::new(RateLimiter::new(config.slack_api_rps));
 
     tracing::info!(port = config.health_port, "Starting health check server...");
     tokio::spawn(health::start_health_server(config.health_port));
@@ -114,49 +117,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let sc = slack_client.clone();
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_outbound_loop(outbound_consumer, sc, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_outbound_loop(outbound_consumer, sc, bt, hc, rl).await }
     });
     let outbound_abort = outbound_handle.abort_handle();
 
     let stream_append_handle = tokio::spawn({
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_stream_append_loop(stream_append_consumer, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_stream_append_loop(stream_append_consumer, bt, hc, rl).await }
     });
     let stream_append_abort = stream_append_handle.abort_handle();
 
     let stream_stop_handle = tokio::spawn({
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_stream_stop_loop(stream_stop_consumer, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_stream_stop_loop(stream_stop_consumer, bt, hc, rl).await }
     });
     let stream_stop_abort = stream_stop_handle.abort_handle();
 
     let reaction_action_handle = tokio::spawn({
         let sc = slack_client.clone();
         let bt = bot_token.clone();
-        async move { run_reaction_action_loop(reaction_action_consumer, sc, bt).await }
+        let rl = rate_limiter.clone();
+        async move { run_reaction_action_loop(reaction_action_consumer, sc, bt, rl).await }
     });
     let reaction_action_abort = reaction_action_handle.abort_handle();
 
     let view_open_handle = tokio::spawn({
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_view_open_loop(view_open_consumer, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_view_open_loop(view_open_consumer, bt, hc, rl).await }
     });
     let view_open_abort = view_open_handle.abort_handle();
 
     let view_publish_handle = tokio::spawn({
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_view_publish_loop(view_publish_consumer, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_view_publish_loop(view_publish_consumer, bt, hc, rl).await }
     });
     let view_publish_abort = view_publish_handle.abort_handle();
 
     let set_status_handle = tokio::spawn({
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
-        async move { run_set_status_loop(set_status_consumer, bt, hc).await }
+        let rl = rate_limiter.clone();
+        async move { run_set_status_loop(set_status_consumer, bt, hc, rl).await }
     });
     let set_status_abort = set_status_handle.abort_handle();
 
@@ -165,6 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let nc = nats_client.clone();
         let bt = bot_token.clone();
         let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
         async move {
             while let Some(msg) = stream_start_sub.next().await {
                 let reply_to = match msg.reply {
@@ -183,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             body.insert("thread_ts".into(), serde_json::Value::String(tts.clone()));
                         }
 
+                        rl.acquire().await;
                         match hc
                             .post("https://slack.com/api/chat.startStream")
                             .bearer_auth(&bt)
