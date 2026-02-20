@@ -3,6 +3,7 @@ mod format;
 mod health;
 mod listener;
 mod sender;
+mod webhook;
 
 use async_nats::jetstream;
 use config::SlackBotConfig;
@@ -43,7 +44,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!(port = config.health_port, "Starting health check server...");
     tokio::spawn(health::start_health_server(config.health_port));
 
-    tracing::info!("Connecting to NATS...");
     let nats_client = connect(&config.nats)
         .await
         .map_err(|e| format!("{:?}", e))?;
@@ -52,6 +52,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!("Setting up JetStream stream...");
     let js = Arc::new(jetstream::new((*nats_client).clone()));
     ensure_slack_stream(&js).await?;
+
+    tracing::info!(port = config.events_port, "Starting Slack Events webhook server...");
+    tokio::spawn(webhook::start_webhook_server(
+        config.events_port,
+        config.signing_secret.clone(),
+        js.clone(),
+    ));
 
     tracing::info!("Creating JetStream consumers...");
     let outbound_consumer = create_outbound_consumer(&js).await?;

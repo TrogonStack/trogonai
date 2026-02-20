@@ -12,7 +12,8 @@ use slack_types::events::{
     SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
     SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewSubmissionEvent,
 };
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 /// Maximum size of a file whose content will be downloaded and forwarded
 /// to the agent. Files larger than this are passed as metadata only.
@@ -37,6 +38,10 @@ pub struct BotState {
     /// HTTP client reused across file download requests.
     pub http_client: reqwest::Client,
 }
+
+/// Module-level display name cache shared across all Socket Mode callbacks.
+static USER_DISPLAY_NAME_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub async fn handle_push_event(
     event: SlackPushEventCallback,
@@ -261,6 +266,9 @@ pub async fn handle_push_event(
                     let files =
                         fetch_file_contents(raw_files, &state.bot_token, &state.http_client).await;
                     let attachments = extract_attachments(msg.content.as_ref());
+                    let display_name =
+                        lookup_display_name(&user, &state.bot_token, &state.http_client)
+                            .await;
 
                     let inbound = SlackInboundMessage {
                         channel: channel_id,
@@ -275,6 +283,7 @@ pub async fn handle_push_event(
                         session_key,
                         files,
                         attachments,
+                        display_name,
                     };
 
                     if let Err(e) = publish_inbound(&state.nats, &inbound).await {
@@ -304,6 +313,13 @@ pub async fn handle_push_event(
                 thread_ts.as_deref(),
             );
 
+            let raw_files = extract_files(Some(&mention.content));
+            let files =
+                fetch_file_contents(raw_files, &state.bot_token, &state.http_client).await;
+            let display_name =
+                lookup_display_name(&user, &state.bot_token, &state.http_client)
+                    .await;
+
             tracing::debug!(
                 channel = %channel_id,
                 user = %user,
@@ -322,8 +338,9 @@ pub async fn handle_push_event(
                 session_type: SessionType::Channel,
                 source: Some("app_mention".to_string()),
                 session_key,
-                files: vec![],
+                files,
                 attachments: vec![],
+                display_name,
             };
 
             if let Err(e) = publish_inbound(&state.nats, &inbound).await {
@@ -755,6 +772,69 @@ pub fn error_handler(
 ) -> HttpStatusCode {
     tracing::error!(error = %err, "Slack socket mode error");
     HttpStatusCode::OK
+}
+
+/// Look up a user's display name via the Slack `users.info` API.
+///
+/// Results are cached in the module-level `USER_DISPLAY_NAME_CACHE` to avoid
+/// repeated API calls. Returns `None` if the API call fails or the user has
+/// no name set.
+async fn lookup_display_name(
+    user_id: &str,
+    bot_token: &str,
+    http_client: &HttpClient,
+) -> Option<String> {
+    // Fast path: cache hit.
+    {
+        let cache = USER_DISPLAY_NAME_CACHE.lock().expect("user cache lock poisoned");
+        if let Some(name) = cache.get(user_id) {
+            return Some(name.clone());
+        }
+    }
+
+    // Slow path: call users.info.
+    let url = format!("https://slack.com/api/users.info?user={user_id}");
+    let resp: serde_json::Value = match http_client
+        .get(&url)
+        .bearer_auth(bot_token)
+        .send()
+        .await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to parse users.info response");
+                return None;
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, user = %user_id, "HTTP error calling users.info");
+            return None;
+        }
+    };
+
+    if !resp["ok"].as_bool().unwrap_or(false) {
+        tracing::warn!(
+            api_error = resp["error"].as_str().unwrap_or("unknown"),
+            user = %user_id,
+            "users.info failed"
+        );
+        return None;
+    }
+
+    // Prefer profile.display_name, then real_name, then name.
+    let name = resp["user"]["profile"]["display_name"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| resp["user"]["real_name"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| resp["user"]["name"].as_str().filter(|s| !s.is_empty()))
+        .map(str::to_string)?;
+
+    USER_DISPLAY_NAME_CACHE
+        .lock()
+        .expect("user cache lock poisoned")
+        .insert(user_id.to_string(), name.clone());
+    Some(name)
 }
 
 #[cfg(test)]

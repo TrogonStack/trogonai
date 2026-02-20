@@ -68,6 +68,10 @@ pub struct SlackInboundMessage {
     pub files: Vec<SlackFile>,
     #[serde(default)]
     pub attachments: Vec<SlackAttachment>,
+    /// Resolved display name of the user (populated by slack-bot via users.info).
+    /// Absent for old messages or when the lookup fails.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// A message that was edited. Carries both old and new text.
@@ -384,11 +388,27 @@ mod tests {
             session_key: Some("slack:channel:C123:thread:1234567890.000".into()),
             files: vec![],
             attachments: vec![],
+            display_name: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: SlackInboundMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.channel, "C123");
         assert_eq!(decoded.text, "hello");
+    }
+
+    #[test]
+    fn inbound_message_display_name_backward_compat() {
+        // Old messages without display_name should deserialise with None.
+        let json = r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel"}"#;
+        let msg: SlackInboundMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.display_name.is_none());
+    }
+
+    #[test]
+    fn inbound_message_display_name_roundtrip() {
+        let json = r#"{"channel":"C1","user":"U1","text":"hi","ts":"1.2","session_type":"Channel","display_name":"John Doe"}"#;
+        let msg: SlackInboundMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.display_name.as_deref(), Some("John Doe"));
     }
 
     #[test]

@@ -9,7 +9,11 @@ path = "src/main.rs"
 
 [dependencies]
 async-nats = "0.45.0"
+axum = "0.7"
 futures = "0.3"
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
 slack-morphism = { version = "2", features = ["hyper"] }
 slack-nats = { path = "../slack-nats" }
 slack-types = { path = "../slack-types" }

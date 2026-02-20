@@ -248,9 +248,14 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         }
     }
 
+    // Prefix message with the user's display name so Claude knows who's speaking.
+    let content_text = match msg.display_name.as_deref() {
+        Some(name) if !name.is_empty() => format!("[{name}]: {effective_text}"),
+        _ => effective_text.to_string(),
+    };
     history.push(ConversationMessage {
         role: "user".to_string(),
-        content: build_message_content(&effective_text, &msg.files),
+        content: build_message_content(&content_text, &msg.files),
         ts: Some(msg.ts.clone()),
     });
 
@@ -648,6 +653,7 @@ pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
                 session_key: Some(session_key),
                 files: vec![],
                 attachments: vec![],
+                display_name: None,
             };
             handle_inbound(inbound, ctx).await;
         }
@@ -805,6 +811,7 @@ pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent, ctx: Arc<Age
         session_key: Some(session_key),
         files: vec![],
         attachments: vec![],
+        display_name: None,
     };
     handle_inbound(inbound, ctx).await;
 }

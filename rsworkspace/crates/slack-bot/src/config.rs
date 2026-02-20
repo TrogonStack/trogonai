@@ -20,6 +20,12 @@ pub struct SlackBotConfig {
     pub nats: NatsConfig,
     /// Port for the HTTP health check endpoint. Default: 8080.
     pub health_port: u16,
+    /// Slack signing secret for verifying webhook requests.
+    /// When set, all webhook requests are signature-verified.
+    pub signing_secret: Option<String>,
+    /// Port for the raw HTTP Events API webhook server (for pin events).
+    /// Default: 3001.
+    pub events_port: u16,
 }
 
 impl SlackBotConfig {
@@ -47,6 +53,12 @@ impl SlackBotConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(8080);
+        let signing_secret = env.var("SLACK_SIGNING_SECRET").ok();
+        let events_port = env
+            .var("SLACK_EVENTS_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3001);
 
         Self {
             bot_token,
@@ -56,6 +68,8 @@ impl SlackBotConfig {
             allow_bots,
             nats,
             health_port,
+            signing_secret,
+            events_port,
         }
     }
 }
@@ -162,5 +176,29 @@ mod tests {
         let env2 = base_env();
         env2.set("SLACK_ALLOW_BOTS", "1");
         assert!(SlackBotConfig::from_env(&env2).allow_bots);
+    }
+
+    #[test]
+    fn signing_secret_not_set_is_none() {
+        assert!(SlackBotConfig::from_env(&base_env()).signing_secret.is_none());
+    }
+
+    #[test]
+    fn signing_secret_set() {
+        let env = base_env();
+        env.set("SLACK_SIGNING_SECRET", "secret123");
+        assert_eq!(SlackBotConfig::from_env(&env).signing_secret.as_deref(), Some("secret123"));
+    }
+
+    #[test]
+    fn events_port_default() {
+        assert_eq!(SlackBotConfig::from_env(&base_env()).events_port, 3001);
+    }
+
+    #[test]
+    fn events_port_custom() {
+        let env = base_env();
+        env.set("SLACK_EVENTS_PORT", "4001");
+        assert_eq!(SlackBotConfig::from_env(&env).events_port, 4001);
     }
 }
