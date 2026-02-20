@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
@@ -14,6 +15,12 @@ pub struct SlackBotConfig {
     /// bot is @mentioned or if the message is a thread reply. DMs always pass.
     /// Mirrors OpenClaw's `requireMention` default behaviour.
     pub mention_gating: bool,
+    /// Channels where mention gating is always ON, regardless of `mention_gating`.
+    /// Comma-separated channel IDs in `SLACK_MENTION_GATING_CHANNELS`.
+    pub mention_gating_channels: HashSet<String>,
+    /// Channels where mention gating is always OFF, regardless of `mention_gating`.
+    /// Comma-separated channel IDs in `SLACK_NO_MENTION_CHANNELS`.
+    pub no_mention_channels: HashSet<String>,
     /// When true, messages from bots are forwarded to NATS instead of being
     /// silently dropped. Default: false.
     pub allow_bots: bool,
@@ -43,6 +50,15 @@ impl SlackBotConfig {
             .var("SLACK_MENTION_GATING")
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
+        // Per-channel overrides: comma-separated channel ID lists.
+        let mention_gating_channels = env
+            .var("SLACK_MENTION_GATING_CHANNELS")
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default();
+        let no_mention_channels = env
+            .var("SLACK_NO_MENTION_CHANNELS")
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default();
         let allow_bots = env
             .var("SLACK_ALLOW_BOTS")
             .map(|v| v == "true" || v == "1")
@@ -65,6 +81,8 @@ impl SlackBotConfig {
             app_token,
             bot_user_id,
             mention_gating,
+            mention_gating_channels,
+            no_mention_channels,
             allow_bots,
             nats,
             health_port,
@@ -200,5 +218,33 @@ mod tests {
         let env = base_env();
         env.set("SLACK_EVENTS_PORT", "4001");
         assert_eq!(SlackBotConfig::from_env(&env).events_port, 4001);
+    }
+
+    #[test]
+    fn mention_gating_channels_default_empty() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert!(config.mention_gating_channels.is_empty());
+        assert!(config.no_mention_channels.is_empty());
+    }
+
+    #[test]
+    fn mention_gating_channels_parsed() {
+        let env = base_env();
+        env.set("SLACK_MENTION_GATING_CHANNELS", "C111,C222, C333 ");
+        let config = SlackBotConfig::from_env(&env);
+        assert!(config.mention_gating_channels.contains("C111"));
+        assert!(config.mention_gating_channels.contains("C222"));
+        assert!(config.mention_gating_channels.contains("C333"));
+        assert_eq!(config.mention_gating_channels.len(), 3);
+    }
+
+    #[test]
+    fn no_mention_channels_parsed() {
+        let env = base_env();
+        env.set("SLACK_NO_MENTION_CHANNELS", "C444,C555");
+        let config = SlackBotConfig::from_env(&env);
+        assert!(config.no_mention_channels.contains("C444"));
+        assert!(config.no_mention_channels.contains("C555"));
+        assert_eq!(config.no_mention_channels.len(), 2);
     }
 }

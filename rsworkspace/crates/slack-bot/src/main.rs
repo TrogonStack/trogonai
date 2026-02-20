@@ -79,6 +79,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         nats: js.clone(),
         bot_user_id: config.bot_user_id.clone(),
         mention_gating: config.mention_gating,
+        mention_gating_channels: config.mention_gating_channels.clone(),
+        no_mention_channels: config.no_mention_channels.clone(),
         allow_bots: config.allow_bots,
         bot_token: config.bot_token.clone(),
         http_client: reqwest::Client::new(),

@@ -12,7 +12,7 @@ use slack_types::events::{
     SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
     SlackThreadBroadcastEvent, SlackViewClosedEvent, SlackViewSubmissionEvent,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
 
 /// Maximum size of a file whose content will be downloaded and forwarded
@@ -34,6 +34,10 @@ pub struct BotState {
     /// When true, channel/group messages require an @mention or be a thread
     /// reply before being published to NATS. Mirrors OpenClaw `requireMention`.
     pub mention_gating: bool,
+    /// Channels where mention gating is always ON regardless of `mention_gating`.
+    pub mention_gating_channels: HashSet<String>,
+    /// Channels where mention gating is always OFF regardless of `mention_gating`.
+    pub no_mention_channels: HashSet<String>,
     /// When true, messages from bots are forwarded to NATS instead of being
     /// silently dropped.
     pub allow_bots: bool,
@@ -235,14 +239,15 @@ pub async fn handle_push_event(
                         };
 
                     // Mention-gating (OpenClaw: requireMention = true by default).
-                    // Rules:
-                    //   - DMs always pass through.
-                    //   - Thread replies always pass through (bot is already in the thread).
-                    //   - Channels/groups: require explicit @mention when gating is on.
-                    if state.mention_gating
-                        && !matches!(session_type, SessionType::Direct)
-                        && thread_ts.is_none()
-                    {
+                    // Per-channel overrides take precedence over the global flag.
+                    if resolve_mention_gating(
+                        &session_type,
+                        &channel_id,
+                        thread_ts.as_deref(),
+                        state.mention_gating,
+                        &state.mention_gating_channels,
+                        &state.no_mention_channels,
+                    ) {
                         match &state.bot_user_id {
                             Some(bot_uid) => {
                                 // Gate on raw_text: the stripped `text` no longer
@@ -950,6 +955,33 @@ async fn fetch_custom_emoji(
     }
 }
 
+/// Determine whether mention gating is active for a given channel/session.
+///
+/// Priority order:
+/// 1. DMs and thread replies → never gated.
+/// 2. `no_mention_channels` → gating OFF.
+/// 3. `mention_gating_channels` → gating ON.
+/// 4. Global `mention_gating` flag.
+fn resolve_mention_gating(
+    session_type: &SessionType,
+    channel_id: &str,
+    thread_ts: Option<&str>,
+    mention_gating: bool,
+    mention_gating_channels: &HashSet<String>,
+    no_mention_channels: &HashSet<String>,
+) -> bool {
+    if matches!(session_type, SessionType::Direct) || thread_ts.is_some() {
+        return false;
+    }
+    if no_mention_channels.contains(channel_id) {
+        return false;
+    }
+    if mention_gating_channels.contains(channel_id) {
+        return true;
+    }
+    mention_gating
+}
+
 /// Replace `:name:` emoji shortcodes that appear in the workspace's custom
 /// emoji list with `:name: [custom emoji]` so Claude can identify them.
 fn annotate_custom_emoji(text: &str, custom_emoji: &HashMap<String, String>) -> String {
@@ -1038,6 +1070,62 @@ mod tests {
             compute_session_key(&SessionType::Group, "G1", "U1", Some("9.0")),
             Some("slack:group:G1:thread:9.0".to_string())
         );
+    }
+
+    // ── resolve_mention_gating ────────────────────────────────────────────────
+
+    fn make_sets(channels: &[&str]) -> HashSet<String> {
+        channels.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn gating_dm_always_off() {
+        assert!(!resolve_mention_gating(
+            &SessionType::Direct, "C1", None, true, &make_sets(&["C1"]), &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn gating_thread_reply_always_off() {
+        assert!(!resolve_mention_gating(
+            &SessionType::Channel, "C1", Some("123.0"), true, &HashSet::new(), &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn gating_no_mention_channel_overrides_global_on() {
+        assert!(!resolve_mention_gating(
+            &SessionType::Channel, "C1", None, true, &HashSet::new(), &make_sets(&["C1"])
+        ));
+    }
+
+    #[test]
+    fn gating_mention_gating_channel_overrides_global_off() {
+        assert!(resolve_mention_gating(
+            &SessionType::Channel, "C1", None, false, &make_sets(&["C1"]), &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn gating_falls_back_to_global_true() {
+        assert!(resolve_mention_gating(
+            &SessionType::Channel, "C2", None, true, &make_sets(&["C1"]), &make_sets(&["C3"])
+        ));
+    }
+
+    #[test]
+    fn gating_falls_back_to_global_false() {
+        assert!(!resolve_mention_gating(
+            &SessionType::Channel, "C2", None, false, &make_sets(&["C1"]), &make_sets(&["C3"])
+        ));
+    }
+
+    #[test]
+    fn gating_no_mention_takes_precedence_over_gating_channel() {
+        // If a channel is in both sets, no_mention_channels wins (checked first).
+        assert!(!resolve_mention_gating(
+            &SessionType::Channel, "C1", None, true, &make_sets(&["C1"]), &make_sets(&["C1"])
+        ));
     }
 
     // ── annotate_custom_emoji ─────────────────────────────────────────────────
