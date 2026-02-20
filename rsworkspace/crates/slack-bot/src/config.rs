@@ -51,3 +51,53 @@ impl SlackBotConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_std::env::InMemoryEnv;
+
+    fn base_env() -> InMemoryEnv {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://localhost:4222");
+        env.set("SLACK_BOT_TOKEN", "xoxb-test");
+        env.set("SLACK_APP_TOKEN", "xapp-test");
+        env
+    }
+
+    #[test]
+    fn from_env_defaults() {
+        let config = SlackBotConfig::from_env(&base_env());
+        assert_eq!(config.bot_token, "xoxb-test");
+        assert_eq!(config.app_token, "xapp-test");
+        assert!(config.bot_user_id.is_none());
+        assert!(config.mention_gating);
+        assert_eq!(config.health_port, 8080);
+    }
+
+    #[test]
+    fn from_env_custom_values() {
+        let env = base_env();
+        env.set("SLACK_BOT_USER_ID", "UBOT001");
+        env.set("SLACK_MENTION_GATING", "false");
+        env.set("HEALTH_PORT", "9090");
+        let config = SlackBotConfig::from_env(&env);
+        assert_eq!(config.bot_user_id.as_deref(), Some("UBOT001"));
+        assert!(!config.mention_gating);
+        assert_eq!(config.health_port, 9090);
+    }
+
+    #[test]
+    fn mention_gating_disabled_via_zero() {
+        let env = base_env();
+        env.set("SLACK_MENTION_GATING", "0");
+        assert!(!SlackBotConfig::from_env(&env).mention_gating);
+    }
+
+    #[test]
+    fn mention_gating_enabled_when_set_to_true() {
+        let env = base_env();
+        env.set("SLACK_MENTION_GATING", "true");
+        assert!(SlackBotConfig::from_env(&env).mention_gating);
+    }
+}

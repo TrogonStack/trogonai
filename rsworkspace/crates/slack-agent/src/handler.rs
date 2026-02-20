@@ -4,11 +4,11 @@ use slack_nats::publisher::{
     publish_outbound, publish_reaction_action, publish_stream_append, publish_stream_stop,
 };
 use slack_types::events::{
-    SlackBlockActionEvent, SlackChannelEvent, SlackFile, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
-    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent,
+    SessionType, SlackBlockActionEvent, SlackChannelEvent, SlackFile, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
+    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent,
+    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
+    SlackStreamStopMessage, SlackThreadBroadcastEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ pub struct AgentContext {
     pub config: SlackAgentConfig,
     /// Per-session mutex to serialise history read/write for the same session.
     pub session_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Reusable HTTP client for Slack response_url webhooks.
+    pub http_client: reqwest::Client,
 }
 
 // ── Helper: resolve thread_ts ─────────────────────────────────────────────────
@@ -122,6 +124,12 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
         .as_deref()
         .unwrap_or(&msg.channel)
         .to_string();
+
+    // Prune session locks whose Arc is held only by the map (no task is using them).
+    {
+        let mut locks = ctx.session_locks.lock().unwrap();
+        locks.retain(|_, arc| Arc::strong_count(arc) > 1);
+    }
 
     let thread_ts =
         resolve_reply_thread_ts(&ctx.config.reply_to_mode, &msg.ts, msg.thread_ts.as_deref());
@@ -247,9 +255,22 @@ pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
             }
         }
     } else {
-        // No Claude configured — echo.
+        // No Claude configured — echo back to Slack.
         tracing::warn!("ANTHROPIC_API_KEY not set — echoing message");
-        format!("Echo: {}", msg.text)
+        let echo = format!("Echo: {}", msg.text);
+        let outbound = SlackOutboundMessage {
+            channel: msg.channel.clone(),
+            text: echo.clone(),
+            thread_ts,
+            blocks: None,
+            media_url: None,
+            username: None,
+            icon_url: None,
+        };
+        if let Err(e) = publish_outbound(&ctx.js, &outbound).await {
+            tracing::error!(error = %e, "Failed to publish echo outbound");
+        }
+        echo
     };
 
     // 5. Persist updated history (only if we got a real response).
@@ -338,7 +359,12 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         // Also evict the per-session lock so memory is fully reset.
         ctx.session_locks.lock().unwrap().remove(&session_key);
         tracing::info!(channel = %ev.channel_id, "Conversation history cleared via slash command");
-        post_response_url(&ev.response_url, "Conversation history cleared.").await;
+        post_response_url(
+            &ctx.http_client,
+            &ev.response_url,
+            "Conversation history cleared.",
+        )
+        .await;
         return;
     }
 
@@ -374,18 +400,17 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
     };
 
     // POST the response to the Slack response_url webhook.
-    post_response_url(&ev.response_url, &response_text).await;
+    post_response_url(&ctx.http_client, &ev.response_url, &response_text).await;
 }
 
 /// POST a delayed response to a Slack `response_url`.
-async fn post_response_url(response_url: &str, text: &str) {
+async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &str) {
     #[derive(serde::Serialize)]
     struct SlackResponseUrlPayload<'a> {
         text: &'a str,
         response_type: &'a str,
     }
 
-    let client = reqwest::Client::new();
     let payload = SlackResponseUrlPayload {
         text,
         response_type: "in_channel",
@@ -426,13 +451,31 @@ pub async fn handle_message_deleted(ev: SlackMessageDeletedEvent) {
     );
 }
 
-pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent) {
+pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent, ctx: Arc<AgentContext>) {
     tracing::info!(
         channel = %ev.channel,
         user = %ev.user,
         thread_ts = %ev.thread_ts,
-        "Received thread_broadcast event"
+        "Received thread_broadcast event — routing to inbound handler"
     );
+    // A thread broadcast is a thread reply also sent to the channel.
+    // Route it through the normal inbound pipeline so Claude can respond.
+    let session_key = format!("slack:channel:{}:thread:{}", ev.channel, ev.thread_ts);
+    let inbound = SlackInboundMessage {
+        channel: ev.channel,
+        user: ev.user,
+        text: ev.text,
+        ts: ev.ts,
+        event_ts: ev.event_ts,
+        thread_ts: Some(ev.thread_ts),
+        parent_user_id: None,
+        session_type: SessionType::Channel,
+        source: Some("thread_broadcast".to_string()),
+        session_key: Some(session_key),
+        files: vec![],
+        attachments: vec![],
+    };
+    handle_inbound(inbound, ctx).await;
 }
 
 pub async fn handle_pin(ev: SlackPinEvent) {

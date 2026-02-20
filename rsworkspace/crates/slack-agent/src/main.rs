@@ -106,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         memory,
         config: config.clone(),
         session_locks: Mutex::new(HashMap::new()),
+        http_client: reqwest::Client::new(),
     });
 
     tracing::info!("Slack agent running. Press Ctrl+C to stop.");
@@ -206,7 +207,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match result {
                     Ok(msg) => {
                         match serde_json::from_slice::<SlackThreadBroadcastEvent>(&msg.payload) {
-                            Ok(ev) => { handle_thread_broadcast(ev).await; }
+                            Ok(ev) => {
+                                let ctx = Arc::clone(&ctx);
+                                tokio::spawn(async move { handle_thread_broadcast(ev, ctx).await });
+                            }
                             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackThreadBroadcastEvent"),
                         }
                         let _ = msg.ack().await;
