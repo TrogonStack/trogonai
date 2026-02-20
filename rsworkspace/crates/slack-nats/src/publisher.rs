@@ -2,16 +2,15 @@ use async_nats::jetstream::Context;
 use serde::Serialize;
 use slack_types::events::{
     SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
-    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
-    SlackStreamStopMessage, SlackThreadBroadcastEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackReactionAction,
+    SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent,
 };
 use slack_types::subjects::{
     SLACK_INBOUND, SLACK_INBOUND_BLOCK_ACTION, SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER,
-    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN,
-    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
-    SLACK_OUTBOUND, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND,
-    SLACK_OUTBOUND_STREAM_STOP,
+    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_REACTION,
+    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_OUTBOUND,
+    SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP,
 };
 
 async fn js_publish<T: Serialize>(
@@ -101,10 +100,6 @@ pub async fn publish_stream_stop(
     msg: &SlackStreamStopMessage,
 ) -> Result<(), async_nats::Error> {
     js_publish(js, SLACK_OUTBOUND_STREAM_STOP, msg).await
-}
-
-pub async fn publish_pin(js: &Context, ev: &SlackPinEvent) -> Result<(), async_nats::Error> {
-    js_publish(js, SLACK_INBOUND_PIN, ev).await
 }
 
 pub async fn publish_block_action(

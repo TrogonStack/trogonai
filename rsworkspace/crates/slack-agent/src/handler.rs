@@ -6,9 +6,9 @@ use slack_nats::publisher::{
 use slack_types::events::{
     SessionType, SlackBlockActionEvent, SlackChannelEvent, SlackFile, SlackInboundMessage,
     SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
-    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent,
-    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
-    SlackStreamStopMessage, SlackThreadBroadcastEvent,
+    SlackReactionAction, SlackReactionEvent, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStartRequest, SlackStreamStartResponse, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent,
 };
 use slack_types::subjects::SLACK_OUTBOUND_STREAM_START;
 use std::collections::HashMap;
@@ -566,16 +566,6 @@ pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent, ctx: Arc<Age
     handle_inbound(inbound, ctx).await;
 }
 
-pub async fn handle_pin(ev: SlackPinEvent) {
-    tracing::info!(
-        channel = %ev.channel,
-        user = %ev.user,
-        added = %ev.added,
-        item_ts = ?ev.item_ts,
-        "Received pin event"
-    );
-}
-
 pub async fn handle_block_action(ev: SlackBlockActionEvent) {
     tracing::info!(
         action_id = %ev.action_id,
@@ -633,6 +623,53 @@ fn build_message_content(text: &str, files: &[SlackFile]) -> String {
 mod tests {
     use super::*;
     use crate::config::ReplyToMode;
+
+    // ── derive_session_key_for_event ──────────────────────────────────────────
+
+    #[test]
+    fn session_key_dm_with_user() {
+        assert_eq!(
+            derive_session_key_for_event("D123", Some("U1"), None),
+            Some("slack:dm:U1".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_dm_without_user_returns_none() {
+        assert_eq!(derive_session_key_for_event("D123", None, None), None);
+    }
+
+    #[test]
+    fn session_key_group_no_thread() {
+        assert_eq!(
+            derive_session_key_for_event("G123", Some("U1"), None),
+            Some("slack:group:G123".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_group_with_thread() {
+        assert_eq!(
+            derive_session_key_for_event("G123", None, Some("1.0")),
+            Some("slack:group:G123:thread:1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_no_thread() {
+        assert_eq!(
+            derive_session_key_for_event("C123", None, None),
+            Some("slack:channel:C123".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_with_thread() {
+        assert_eq!(
+            derive_session_key_for_event("C123", None, Some("9.0")),
+            Some("slack:channel:C123:thread:9.0".to_string())
+        );
+    }
 
     // ── resolve_reply_thread_ts ───────────────────────────────────────────────
 

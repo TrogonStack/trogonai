@@ -225,20 +225,6 @@ pub struct SlackStreamStopMessage {
     pub blocks: Option<serde_json::Value>,
 }
 
-// ── Pins ─────────────────────────────────────────────────────────────────────
-
-/// A message was pinned to or unpinned from a channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlackPinEvent {
-    pub channel: String,
-    pub user: String,
-    /// Timestamp of the pinned message (when the item is a message).
-    pub item_ts: Option<String>,
-    /// `true` = pin_added, `false` = pin_removed.
-    pub added: bool,
-    pub event_ts: String,
-}
-
 // ── Block actions ─────────────────────────────────────────────────────────────
 
 /// A Block Kit interactive element was triggered (button click, select, etc.).

@@ -9,8 +9,8 @@ use config::SlackAgentConfig;
 use futures::StreamExt;
 use handler::{
     AgentContext, handle_block_action, handle_channel, handle_inbound, handle_member,
-    handle_message_changed, handle_message_deleted, handle_pin, handle_reaction,
-    handle_slash_command, handle_thread_broadcast,
+    handle_message_changed, handle_message_deleted, handle_reaction, handle_slash_command,
+    handle_thread_broadcast,
 };
 use health::start_health_server;
 use llm::ClaudeClient;
@@ -19,13 +19,12 @@ use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
     create_block_action_consumer, create_channel_consumer, create_inbound_consumer,
     create_member_consumer, create_message_changed_consumer, create_message_deleted_consumer,
-    create_pin_consumer, create_reaction_consumer, create_slash_command_consumer,
-    create_thread_broadcast_consumer,
+    create_reaction_consumer, create_slash_command_consumer, create_thread_broadcast_consumer,
 };
 use slack_types::events::{
     SlackBlockActionEvent, SlackChannelEvent, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent, SlackReactionEvent,
-    SlackSlashCommandEvent, SlackThreadBroadcastEvent,
+    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackReactionEvent, SlackSlashCommandEvent,
+    SlackThreadBroadcastEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -67,7 +66,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let changed_consumer = create_message_changed_consumer(&js).await?;
     let deleted_consumer = create_message_deleted_consumer(&js).await?;
     let slash_consumer = create_slash_command_consumer(&js).await?;
-    let pin_consumer = create_pin_consumer(&js).await?;
     let block_action_consumer = create_block_action_consumer(&js).await?;
     let thread_broadcast_consumer = create_thread_broadcast_consumer(&js).await?;
     let member_consumer = create_member_consumer(&js).await?;
@@ -78,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut changed_msgs = changed_consumer.messages().await?;
     let mut deleted_msgs = deleted_consumer.messages().await?;
     let mut slash_msgs = slash_consumer.messages().await?;
-    let mut pin_msgs = pin_consumer.messages().await?;
     let mut block_action_msgs = block_action_consumer.messages().await?;
     let mut thread_broadcast_msgs = thread_broadcast_consumer.messages().await?;
     let mut member_msgs = member_consumer.messages().await?;
@@ -195,18 +192,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let _ = msg.ack().await;
                     }
                     Err(e) => tracing::error!(error = %e, "JetStream error on slash_command consumer"),
-                }
-            }
-            Some(result) = pin_msgs.next() => {
-                match result {
-                    Ok(msg) => {
-                        match serde_json::from_slice::<SlackPinEvent>(&msg.payload) {
-                            Ok(ev) => { handle_pin(ev).await; }
-                            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackPinEvent"),
-                        }
-                        let _ = msg.ack().await;
-                    }
-                    Err(e) => tracing::error!(error = %e, "JetStream error on pin consumer"),
                 }
             }
             Some(result) = block_action_msgs.next() => {

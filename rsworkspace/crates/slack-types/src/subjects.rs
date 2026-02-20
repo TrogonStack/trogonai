@@ -24,9 +24,6 @@ pub const SLACK_INBOUND_CHANNEL: &str = "slack.inbound.channel";
 /// Slash command invocations.
 pub const SLACK_INBOUND_SLASH_COMMAND: &str = "slack.inbound.slash_command";
 
-/// pin_added and pin_removed events.
-pub const SLACK_INBOUND_PIN: &str = "slack.inbound.pin";
-
 /// Block Kit interactive component events (button clicks, selects, etc.).
 pub const SLACK_INBOUND_BLOCK_ACTION: &str = "slack.inbound.block_action";
 
@@ -64,7 +61,6 @@ mod tests {
             SLACK_INBOUND_MEMBER,
             SLACK_INBOUND_CHANNEL,
             SLACK_INBOUND_SLASH_COMMAND,
-            SLACK_INBOUND_PIN,
             SLACK_INBOUND_BLOCK_ACTION,
         ];
         for s in subjects {
