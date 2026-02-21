@@ -1090,6 +1090,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "llm-deepseek"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "futures",
+ "llm-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "llm-gemini"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "futures",
+ "llm-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "llm-openai"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "futures",
+ "llm-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "llm-types"
 version = "0.1.0"
 dependencies = [

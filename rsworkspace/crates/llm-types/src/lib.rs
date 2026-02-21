@@ -3,8 +3,16 @@ use serde::{Deserialize, Serialize};
 // ── Subjects ──────────────────────────────────────────────────────────────────
 
 /// Core NATS subject for Anthropic/Claude LLM requests.
-/// Agents publish here; the llm-anthropic worker subscribes.
 pub const LLM_REQUEST_ANTHROPIC: &str = "llm.request.prompt.anthropic";
+
+/// Core NATS subject for OpenAI LLM requests.
+pub const LLM_REQUEST_OPENAI: &str = "llm.request.prompt.openai";
+
+/// Core NATS subject for Google Gemini LLM requests.
+pub const LLM_REQUEST_GEMINI: &str = "llm.request.prompt.gemini";
+
+/// Core NATS subject for DeepSeek LLM requests.
+pub const LLM_REQUEST_DEEPSEEK: &str = "llm.request.prompt.deepseek";
 
 /// Inserts an optional account-ID namespace into an LLM subject.
 /// `"llm.request.prompt.anthropic"` → `"llm.ws1.request.prompt.anthropic"`
