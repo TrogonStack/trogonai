@@ -6,10 +6,11 @@ use slack_types::events::{
     SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
     SlackPinEvent, SlackProactiveMessage, SlackReactionAction, SlackReactionEvent,
     SlackReadMessagesRequest, SlackReadMessagesResponse, SlackReadRepliesRequest,
-    SlackReadRepliesResponse, SlackSetStatusRequest, SlackSetSuggestedPromptsRequest,
-    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackThreadBroadcastEvent, SlackUnfurlRequest, SlackUpdateMessage, SlackUploadRequest,
-    SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackReadRepliesResponse, SlackResponseUrlMessage, SlackSetStatusRequest,
+    SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent, SlackStreamAppendMessage,
+    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUnfurlRequest, SlackUpdateMessage,
+    SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     for_account, SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION,
@@ -20,10 +21,11 @@ use slack_types::subjects::{
     SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
     SLACK_OUTBOUND_GET_EMOJI, SLACK_OUTBOUND_GET_USER, SLACK_OUTBOUND_LIST_CONVERSATIONS,
     SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_PROACTIVE, SLACK_OUTBOUND_REACTION,
-    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_SET_STATUS,
-    SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
-    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UNFURL, SLACK_OUTBOUND_UPDATE,
-    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_RESPONSE_URL,
+    SLACK_OUTBOUND_SET_STATUS, SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS,
+    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UNFURL,
+    SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN,
+    SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 use trogon_nats::{PublishClient, RequestClient};
 
@@ -503,6 +505,19 @@ where
         .await
         .map_err(|e| e.to_string())?;
     serde_json::from_slice(&response.payload).map_err(|e| e.to_string())
+}
+
+/// Publish a response_url message — instructs the bot to POST to the Slack webhook URL.
+pub async fn publish_response_url<C>(
+    js: &C,
+    account_id: Option<&str>,
+    msg: &SlackResponseUrlMessage,
+) -> Result<(), async_nats::Error>
+where
+    C: PublishClient,
+    C::PublishError: 'static,
+{
+    js_publish(js, &for_account(SLACK_OUTBOUND_RESPONSE_URL, account_id), msg).await
 }
 
 /// List channels/conversations from the bot via Core NATS request/reply.

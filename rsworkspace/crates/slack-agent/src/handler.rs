@@ -2,18 +2,20 @@ use async_nats::Client as NatsClient;
 use async_nats::jetstream::Context as JsContext;
 use slack_nats::publisher::{
     publish_delete_file, publish_ephemeral_message, publish_outbound, publish_reaction_action,
-    publish_set_status, publish_set_suggested_prompts, publish_stream_append, publish_stream_stop,
-    publish_upload_request, publish_view_open, publish_view_publish,
+    publish_response_url, publish_set_status, publish_set_suggested_prompts,
+    publish_stream_append, publish_stream_stop, publish_upload_request, publish_view_open,
+    publish_view_publish,
 };
 use slack_types::events::{
     PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
     SlackChannelEvent, SlackDeleteFile, SlackEphemeralMessage, SlackFile, SlackInboundMessage,
     SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
     SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackReadRepliesRequest,
-    SlackSetStatusRequest, SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent,
-    SlackStreamAppendMessage, SlackStreamStartRequest, SlackStreamStartResponse,
-    SlackStreamStopMessage, SlackThreadBroadcastEvent, SlackUploadRequest, SlackViewClosedEvent,
-    SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackResponseUrlMessage, SlackSetStatusRequest, SlackSetSuggestedPromptsRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStartRequest,
+    SlackStreamStartResponse, SlackStreamStopMessage, SlackThreadBroadcastEvent,
+    SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{for_account, SLACK_OUTBOUND_STREAM_START};
 use std::collections::HashMap;
@@ -80,8 +82,6 @@ pub struct AgentContext {
     pub base_system_prompt: Option<String>,
     /// Per-session mutex to serialise history read/write for the same session.
     pub session_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// Reusable HTTP client for Slack response_url webhooks.
-    pub http_client: reqwest::Client,
     /// Per-user sliding-window rate limiter for inbound messages.
     pub user_rate_limiter: UserRateLimiter,
     /// Debounce window in milliseconds (0 = disabled).
@@ -1179,13 +1179,15 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
     if text.is_empty() && !ctx.config.slash_command_options.is_empty() {
         let options = &ctx.config.slash_command_options;
         let blocks = build_slash_menu_blocks(options);
-        post_response_url_with_blocks(
-            &ctx.http_client,
-            &ev.response_url,
-            "Choose an option:",
-            &blocks,
-            ctx.config.slash_command_ephemeral,
-        ).await;
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: "Choose an option:".to_string(),
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: Some(blocks),
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url blocks to NATS");
+        }
         return;
     }
 
@@ -1207,13 +1209,15 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         // Also evict the per-session lock so memory is fully reset.
         ctx.session_locks.lock().unwrap().remove(&session_key);
         tracing::info!(channel = %ev.channel_id, "Conversation history cleared via slash command");
-        post_response_url(
-            &ctx.http_client,
-            &ev.response_url,
-            "Conversation history cleared.",
-            ctx.config.slash_command_ephemeral,
-        )
-        .await;
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: "Conversation history cleared.".to_string(),
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: None,
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+        }
         return;
     } else if text.eq_ignore_ascii_case("new") {
         // Clear both possible session keys for this user/channel.
@@ -1227,7 +1231,15 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
             locks.remove(&dm_key);
         }
         let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
-        post_response_url(&ctx.http_client, &ev.response_url, &greeting, ctx.config.slash_command_ephemeral).await;
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: greeting,
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: None,
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+        }
         return;
     }
 
@@ -1259,16 +1271,33 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
                                 }
                             }
                         }
-                        if let Some(user_id) = found_user {
+                        let reply_text = if let Some(user_id) = found_user {
                             let _ = store.put(&user_id, "approved".into()).await;
-                            post_response_url(&ctx.http_client, &ev.response_url, "User approved.", ctx.config.slash_command_ephemeral).await;
+                            "User approved.".to_string()
                         } else {
-                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.", ctx.config.slash_command_ephemeral).await;
+                            "No user found with that code.".to_string()
+                        };
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: reply_text,
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
                         }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to list pairing store keys");
-                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.", ctx.config.slash_command_ephemeral).await;
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: "Error accessing pairing store.".to_string(),
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e2) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e2, "Failed to publish response_url to NATS");
+                        }
                     }
                 }
             } else {
@@ -1289,21 +1318,46 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
                                 }
                             }
                         }
-                        if let Some(user_id) = found_user {
+                        let reply_text = if let Some(user_id) = found_user {
                             let _ = store.delete(&user_id).await;
-                            post_response_url(&ctx.http_client, &ev.response_url, "User rejected.", ctx.config.slash_command_ephemeral).await;
+                            "User rejected.".to_string()
                         } else {
-                            post_response_url(&ctx.http_client, &ev.response_url, "No user found with that code.", ctx.config.slash_command_ephemeral).await;
+                            "No user found with that code.".to_string()
+                        };
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: reply_text,
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
                         }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to list pairing store keys");
-                        post_response_url(&ctx.http_client, &ev.response_url, "Error accessing pairing store.", ctx.config.slash_command_ephemeral).await;
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: "Error accessing pairing store.".to_string(),
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e2) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e2, "Failed to publish response_url to NATS");
+                        }
                     }
                 }
             }
         } else {
-            post_response_url(&ctx.http_client, &ev.response_url, "Pairing is not enabled.", ctx.config.slash_command_ephemeral).await;
+            let msg = SlackResponseUrlMessage {
+                response_url: ev.response_url.clone(),
+                text: "Pairing is not enabled.".to_string(),
+                ephemeral: ctx.config.slash_command_ephemeral,
+                blocks: None,
+            };
+            if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+            }
         }
         return;
     }
@@ -1360,29 +1414,15 @@ pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentCont
         format!("Command `{}` received: {}", ev.command, text)
     };
 
-    // POST the response to the Slack response_url webhook.
-    post_response_url(&ctx.http_client, &ev.response_url, &response_text, ctx.config.slash_command_ephemeral).await;
-}
-
-/// POST a delayed response to a Slack `response_url`.
-///
-/// `ephemeral` controls the `response_type` field:
-/// - `true`  → `"ephemeral"` (only visible to the invoking user)
-/// - `false` → `"in_channel"` (visible to everyone in the channel)
-async fn post_response_url(client: &reqwest::Client, response_url: &str, text: &str, ephemeral: bool) {
-    #[derive(serde::Serialize)]
-    struct SlackResponseUrlPayload<'a> {
-        text: &'a str,
-        response_type: &'a str,
-    }
-
-    let response_type = if ephemeral { "ephemeral" } else { "in_channel" };
-    let payload = SlackResponseUrlPayload {
-        text,
-        response_type,
+    // Publish the response to NATS — the bot will POST to the Slack response_url webhook.
+    let msg = SlackResponseUrlMessage {
+        response_url: ev.response_url.clone(),
+        text: response_text,
+        ephemeral: ctx.config.slash_command_ephemeral,
+        blocks: None,
     };
-    if let Err(e) = client.post(response_url).json(&payload).send().await {
-        tracing::error!(error = %e, url = %response_url, "Failed to POST to response_url");
+    if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+        tracing::warn!(error = %e, "Failed to publish response_url to NATS");
     }
 }
 
@@ -1419,30 +1459,6 @@ fn build_slash_menu_blocks(options: &[crate::config::SlashCommandOption]) -> Str
                 "action_id": "slash_option_select"
             }]
         }]).to_string()
-    }
-}
-
-/// POST a delayed response with Block Kit blocks to a Slack `response_url`.
-async fn post_response_url_with_blocks(
-    client: &reqwest::Client,
-    response_url: &str,
-    text: &str,
-    blocks: &str,
-    ephemeral: bool,
-) {
-    let response_type = if ephemeral { "ephemeral" } else { "in_channel" };
-    let body = serde_json::json!({
-        "response_type": response_type,
-        "text": text,
-        "blocks": serde_json::from_str::<serde_json::Value>(blocks).unwrap_or(serde_json::Value::Null),
-    });
-    if let Err(e) = client
-        .post(response_url)
-        .json(&body)
-        .send()
-        .await
-    {
-        tracing::error!(error = %e, url = %response_url, "Failed to POST blocks to response_url");
     }
 }
 

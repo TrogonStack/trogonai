@@ -169,7 +169,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config: config.clone(),
         base_system_prompt: system_prompt,
         session_locks: Mutex::new(HashMap::new()),
-        http_client: reqwest::Client::new(),
         user_rate_limiter: UserRateLimiter::new(config.user_rate_limit),
         debounce_ms: config.debounce_ms,
         session_debounce: tokio::sync::Mutex::new(HashMap::new()),

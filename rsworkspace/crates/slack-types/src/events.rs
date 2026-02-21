@@ -606,6 +606,26 @@ pub struct SlackGetEmojiResponse {
     pub error: Option<String>,
 }
 
+// ── Slash command response_url ────────────────────────────────────────────────
+
+/// Instructs the bot to POST a delayed response to a Slack `response_url` webhook.
+///
+/// Slash command response_url webhooks accept up to 5 messages within 30 minutes.
+/// `ephemeral` controls the `response_type` field:
+/// - `true`  → `"ephemeral"` (only visible to the invoking user)
+/// - `false` → `"in_channel"` (visible to everyone in the channel)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackResponseUrlMessage {
+    /// The Slack-provided `response_url` from the original slash command event.
+    pub response_url: String,
+    pub text: String,
+    #[serde(default)]
+    pub ephemeral: bool,
+    /// Optional Block Kit blocks JSON string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<String>,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

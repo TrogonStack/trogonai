@@ -4,7 +4,7 @@ use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_types::events::{
     SlackDeleteFile, SlackDeleteMessage, SlackEphemeralMessage, SlackOutboundMessage,
-    SlackProactiveMessage, SlackReactionAction, SlackSetStatusRequest,
+    SlackProactiveMessage, SlackReactionAction, SlackResponseUrlMessage, SlackSetStatusRequest,
     SlackSetSuggestedPromptsRequest, SlackStreamAppendMessage, SlackStreamStopMessage,
     SlackUnfurlRequest, SlackUpdateMessage, SlackViewOpenRequest, SlackViewPublishRequest,
 };
@@ -1830,6 +1830,81 @@ pub async fn run_unfurl_loop(
                 }
             }
             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackUnfurlRequest"),
+        }
+
+        let _ = msg.ack().await;
+    }
+}
+
+/// Consume `SlackResponseUrlMessage` messages and POST each one to the Slack
+/// `response_url` webhook provided by the original slash command invocation.
+pub async fn run_response_url_loop(
+    consumer: Consumer<pull::Config>,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create response_url consumer stream");
+            return;
+        }
+    };
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on response_url consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackResponseUrlMessage>(&msg.payload) {
+            Ok(req) => {
+                #[derive(serde::Serialize)]
+                struct Payload<'a> {
+                    text: &'a str,
+                    response_type: &'a str,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    blocks: Option<serde_json::Value>,
+                }
+
+                let response_type = if req.ephemeral { "ephemeral" } else { "in_channel" };
+                let blocks: Option<serde_json::Value> = req
+                    .blocks
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+
+                let payload = Payload {
+                    text: &req.text,
+                    response_type,
+                    blocks,
+                };
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(&req.response_url)
+                    .json(&payload)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if !resp.status().is_success() => {
+                        tracing::warn!(
+                            status = %resp.status(),
+                            url = %req.response_url,
+                            "Slack response_url POST returned non-2xx"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!(error = %e, url = %req.response_url, "Failed to POST to response_url");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize SlackResponseUrlMessage");
+            }
         }
 
         let _ = msg.ack().await;

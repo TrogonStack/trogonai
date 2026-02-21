@@ -14,18 +14,19 @@ use listener::{
 };
 use sender::{
     run_delete_file_loop, run_delete_loop, run_ephemeral_loop, run_outbound_loop,
-    run_proactive_loop, run_reaction_action_loop, run_set_status_loop, run_stream_append_loop,
-    run_stream_stop_loop, run_suggested_prompts_loop, run_unfurl_loop, run_update_loop,
-    run_upload_loop, run_view_open_loop, run_view_publish_loop,
+    run_proactive_loop, run_reaction_action_loop, run_response_url_loop, run_set_status_loop,
+    run_stream_append_loop, run_stream_stop_loop, run_suggested_prompts_loop, run_unfurl_loop,
+    run_update_loop, run_upload_loop, run_view_open_loop, run_view_publish_loop,
 };
 use slack_morphism::prelude::*;
 use slack_nats::setup::ensure_slack_stream;
 use slack_nats::subscriber::{
     create_delete_consumer, create_delete_file_consumer, create_ephemeral_consumer,
     create_outbound_consumer, create_proactive_consumer, create_reaction_action_consumer,
-    create_set_status_consumer, create_stream_append_consumer, create_stream_stop_consumer,
-    create_suggested_prompts_consumer, create_unfurl_consumer, create_update_consumer,
-    create_upload_consumer, create_view_open_consumer, create_view_publish_consumer,
+    create_response_url_consumer, create_set_status_consumer, create_stream_append_consumer,
+    create_stream_stop_consumer, create_suggested_prompts_consumer, create_unfurl_consumer,
+    create_update_consumer, create_upload_consumer, create_view_open_consumer,
+    create_view_publish_consumer,
 };
 use rate_limit::RateLimiter;
 use slack_types::events::{
@@ -104,6 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let ephemeral_consumer = create_ephemeral_consumer(&js, account_id).await?;
     let delete_file_consumer = create_delete_file_consumer(&js, account_id).await?;
     let unfurl_consumer = create_unfurl_consumer(&js, account_id).await?;
+    let response_url_consumer = create_response_url_consumer(&js, account_id).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_STREAM_START, account_id)).await?;
@@ -296,6 +298,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         async move { run_unfurl_loop(unfurl_consumer, bt, hc, rl).await }
     });
     let unfurl_abort = unfurl_handle.abort_handle();
+
+    let response_url_handle = tokio::spawn({
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_response_url_loop(response_url_consumer, hc, rl).await }
+    });
+    let response_url_abort = response_url_handle.abort_handle();
 
     // get_user handler: Core NATS request/reply — calls users.info.
     let get_user_handle = tokio::spawn({
@@ -1186,6 +1195,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "Unfurl NATS loop panicked"),
             }
         }
+        res = response_url_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Response URL NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Response URL NATS loop panicked"),
+            }
+        }
         res = get_user_handle => {
             match res {
                 Ok(()) => tracing::warn!("Get user NATS loop exited"),
@@ -1224,6 +1239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     list_users_abort.abort();
     list_conversations_abort.abort();
     unfurl_abort.abort();
+    response_url_abort.abort();
     get_user_abort.abort();
     get_emoji_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;

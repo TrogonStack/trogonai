@@ -493,6 +493,35 @@ async fn handle_link_shared_event(state: &WebhookState, event: &serde_json::Valu
     }
 }
 
+async fn unfurl_links(
+    bot_token: &str,
+    http_client: &reqwest::Client,
+    channel: &str,
+    message_ts: &str,
+    urls: &[String],
+) {
+    let mut unfurls = serde_json::Map::new();
+    for url in urls {
+        unfurls.insert(
+            url.clone(),
+            serde_json::json!({ "title": url, "text": "" }),
+        );
+    }
+
+    let body = serde_json::json!({
+        "channel": channel,
+        "ts": message_ts,
+        "unfurls": unfurls,
+    });
+
+    let _ = http_client
+        .post("https://slack.com/api/chat.unfurl")
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .json(&body)
+        .send()
+        .await;
+}
+
 async fn handle_pin_event(
     state: &WebhookState,
     event: &serde_json::Value,
@@ -842,34 +871,6 @@ async fn lookup_display_name(
         .map(String::from)
 }
 
-async fn unfurl_links(
-    bot_token: &str,
-    http_client: &reqwest::Client,
-    channel: &str,
-    message_ts: &str,
-    urls: &[String],
-) {
-    let mut unfurls = serde_json::Map::new();
-    for url in urls {
-        unfurls.insert(
-            url.clone(),
-            serde_json::json!({ "title": url, "text": "" }),
-        );
-    }
-
-    let body = serde_json::json!({
-        "channel": channel,
-        "ts": message_ts,
-        "unfurls": unfurls,
-    });
-
-    let _ = http_client
-        .post("https://slack.com/api/chat.unfurl")
-        .header("Authorization", format!("Bearer {}", bot_token))
-        .json(&body)
-        .send()
-        .await;
-}
 
 #[cfg(test)]
 mod tests {

@@ -115,6 +115,10 @@ pub const SLACK_OUTBOUND_GET_USER: &str = "slack.outbound.get_user";
 /// Fetch the workspace custom emoji map (`emoji.list`). Core NATS request/reply.
 pub const SLACK_OUTBOUND_GET_EMOJI: &str = "slack.outbound.get_emoji";
 
+/// POST a delayed response to a slash command `response_url` webhook.
+/// JetStream pub/sub — the bot POSTs directly to the Slack-provided URL.
+pub const SLACK_OUTBOUND_RESPONSE_URL: &str = "slack.outbound.response_url";
+
 
 
 /// Inserts an optional account-ID namespace into a Slack NATS subject.
@@ -195,6 +199,7 @@ mod tests {
             SLACK_OUTBOUND_UNFURL,
             SLACK_OUTBOUND_GET_USER,
             SLACK_OUTBOUND_GET_EMOJI,
+            SLACK_OUTBOUND_RESPONSE_URL,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {
