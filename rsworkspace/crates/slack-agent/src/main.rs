@@ -16,7 +16,7 @@ use handler::{
     handle_view_submission,
 };
 use health::start_health_server;
-use llm::ClaudeClient;
+use llm::LlmNatsClient;
 use memory::ConversationMemory;
 use user_settings::UserSettingsStore;
 use slack_nats::setup::ensure_slack_stream;
@@ -145,22 +145,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let system_prompt = config.resolve_system_prompt(&SystemFs);
 
-    // Build Claude client (optional — only if API key is configured).
-    let claude = config.anthropic_api_key.as_ref().map(|key| {
-        tracing::info!(model = %config.claude_model, "Claude client configured");
-        ClaudeClient::new(
-            key.clone(),
-            config.claude_model.clone(),
-            config.claude_max_tokens,
-            system_prompt.clone(),
-        )
-    });
-
-    if claude.is_none() {
-        tracing::warn!(
-            "ANTHROPIC_API_KEY not set — agent will echo messages instead of calling Claude"
-        );
-    }
+    // Build LLM NATS client — routes requests to the llm-anthropic worker via NATS.
+    tracing::info!(model = %config.claude_model, "LLM client configured (via NATS)");
+    let claude = Some(LlmNatsClient::new(
+        nats_raw.clone(),
+        config.claude_model.clone(),
+        config.claude_max_tokens,
+        system_prompt.clone(),
+        config.account_id.clone(),
+    ));
 
     let ctx = Arc::new(AgentContext {
         js: js.clone(),

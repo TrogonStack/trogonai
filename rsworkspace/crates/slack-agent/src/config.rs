@@ -90,8 +90,6 @@ pub struct SlackAgentConfig {
     pub ack_reaction: Option<String>,
 
     // ── Claude / Anthropic ────────────────────────────────────────────────
-    /// Anthropic API key. Required for AI responses.
-    pub anthropic_api_key: Option<String>,
     /// Claude model ID. Default: "claude-sonnet-4-6".
     pub claude_model: String,
     /// Maximum output tokens per response. Default: 8192.
@@ -289,8 +287,6 @@ impl SlackAgentConfig {
             .unwrap_or(ReplyToMode::Off);
 
         let ack_reaction = env.var("SLACK_ACK_REACTION").ok().filter(|v| !v.is_empty());
-
-        let anthropic_api_key = env.var("ANTHROPIC_API_KEY").ok().filter(|v| !v.is_empty());
 
         let claude_model = env
             .var("CLAUDE_MODEL")
@@ -641,7 +637,6 @@ impl SlackAgentConfig {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
             ack_reaction,
-            anthropic_api_key,
             claude_model,
             claude_max_tokens,
             claude_system_prompt,
@@ -727,7 +722,6 @@ mod tests {
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.reply_to_mode, ReplyToMode::Off);
         assert!(config.ack_reaction.is_none());
-        assert!(config.anthropic_api_key.is_none());
         assert_eq!(config.claude_model, "claude-sonnet-4-6");
         assert_eq!(config.claude_max_tokens, 8192);
         assert_eq!(config.claude_max_history, 40);
@@ -740,7 +734,6 @@ mod tests {
         env.set("NATS_URL", "nats://localhost:4222");
         env.set("SLACK_REPLY_TO_MODE", "first");
         env.set("SLACK_ACK_REACTION", "eyes");
-        env.set("ANTHROPIC_API_KEY", "sk-ant-test");
         env.set("CLAUDE_MODEL", "claude-opus-4-6");
         env.set("CLAUDE_MAX_TOKENS", "4096");
         env.set("CLAUDE_MAX_HISTORY", "20");
@@ -748,7 +741,6 @@ mod tests {
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.reply_to_mode, ReplyToMode::First);
         assert_eq!(config.ack_reaction.as_deref(), Some("eyes"));
-        assert_eq!(config.anthropic_api_key.as_deref(), Some("sk-ant-test"));
         assert_eq!(config.claude_model, "claude-opus-4-6");
         assert_eq!(config.claude_max_tokens, 4096);
         assert_eq!(config.claude_max_history, 20);
@@ -969,14 +961,6 @@ mod tests {
         env.set("SLACK_REPLY_TO_MODE", "all");
         let config = SlackAgentConfig::from_env(&env);
         assert_eq!(config.reply_to_mode, ReplyToMode::All);
-    }
-
-    #[test]
-    fn anthropic_api_key_empty_string_treated_as_none() {
-        let env = base_env();
-        env.set("ANTHROPIC_API_KEY", "");
-        let config = SlackAgentConfig::from_env(&env);
-        assert!(config.anthropic_api_key.is_none());
     }
 
     #[test]

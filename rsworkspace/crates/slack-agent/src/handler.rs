@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig, SlashCommandOption, StreamMode};
-use crate::llm::ClaudeClient;
+use crate::llm::LlmNatsClient;
 use crate::memory::{ConversationMemory, ConversationMessage};
 use crate::user_settings::{UserSettings, UserSettingsStore};
 use crate::views::{build_app_home_view, build_settings_modal};
@@ -71,7 +71,7 @@ pub struct AgentContext {
     pub js: Arc<JsContext>,
     /// Raw Core NATS client — used for request/reply (stream.start).
     pub nats: NatsClient,
-    pub claude: Option<ClaudeClient>,
+    pub claude: Option<LlmNatsClient>,
     pub memory: ConversationMemory,
     /// Per-user settings (model, system prompt) backed by NATS KV.
     pub user_settings: UserSettingsStore,
@@ -245,20 +245,16 @@ async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
     // Per-channel system prompt: takes precedence over global base, but not user setting.
     let channel_prompt: Option<String> = ctx.config.channel_system_prompts.get(&msg.channel).cloned();
 
-    let user_claude: Option<ClaudeClient> =
+    let user_claude: Option<LlmNatsClient> =
         if user_settings.model.is_some() || user_settings.system_prompt.is_some() || channel_prompt.is_some() {
-            ctx.config.anthropic_api_key.as_ref().map(|key| {
-                let model = user_settings
-                    .model
-                    .as_deref()
-                    .unwrap_or(&ctx.config.claude_model)
-                    .to_string();
+            ctx.claude.as_ref().map(|base| {
+                let model = user_settings.model.clone();
                 let prompt = user_settings
                     .system_prompt
                     .clone()
                     .or(channel_prompt)
                     .or_else(|| ctx.base_system_prompt.clone());
-                ClaudeClient::new(key.clone(), model, ctx.config.claude_max_tokens, prompt)
+                base.with_overrides(model, Some(prompt))
             })
         } else {
             None
@@ -1104,7 +1100,7 @@ async fn maybe_upload_response(
 
 /// Fallback: call Claude without streaming, send response as a regular message.
 async fn fallback_claude_response(
-    claude: &ClaudeClient,
+    claude: &LlmNatsClient,
     history: &[ConversationMessage],
     js: &JsContext,
     account_id: Option<&str>,
