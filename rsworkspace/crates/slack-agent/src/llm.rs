@@ -293,4 +293,157 @@ mod tests {
         let cloned = original.clone();
         assert_eq!(cloned.model, original.model);
     }
+
+    // ── ApiMessage::from ──────────────────────────────────────────────────────
+
+    use crate::memory::{ConversationMessage, ImageData};
+
+    fn text_msg(role: &str, content: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+            ts: None,
+            images: vec![],
+        }
+    }
+
+    fn img_msg(role: &str, content: &str, images: Vec<ImageData>) -> ConversationMessage {
+        ConversationMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+            ts: None,
+            images,
+        }
+    }
+
+    fn png_image(data: &str) -> ImageData {
+        ImageData {
+            media_type: "image/png".to_string(),
+            base64: data.to_string(),
+        }
+    }
+
+    #[test]
+    fn api_message_text_only_produces_string_content() {
+        let msg = text_msg("user", "hello world");
+        let api = ApiMessage::from(&msg);
+        assert_eq!(api.role, "user");
+        assert_eq!(api.content, serde_json::Value::String("hello world".to_string()));
+    }
+
+    #[test]
+    fn api_message_assistant_role_preserved() {
+        let msg = text_msg("assistant", "I can help");
+        let api = ApiMessage::from(&msg);
+        assert_eq!(api.role, "assistant");
+        assert_eq!(api.content, serde_json::Value::String("I can help".to_string()));
+    }
+
+    #[test]
+    fn api_message_empty_text_produces_empty_string_content() {
+        let msg = text_msg("user", "");
+        let api = ApiMessage::from(&msg);
+        assert_eq!(api.content, serde_json::Value::String(String::new()));
+    }
+
+    #[test]
+    fn api_message_with_image_produces_array_content() {
+        let msg = img_msg("user", "see this", vec![png_image("abc123")]);
+        let api = ApiMessage::from(&msg);
+        assert!(api.content.is_array());
+        let arr = api.content.as_array().unwrap();
+        // image block + text block
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn api_message_image_block_comes_before_text() {
+        let msg = img_msg("user", "describe this image", vec![png_image("base64data")]);
+        let api = ApiMessage::from(&msg);
+        let arr = api.content.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "image");
+        assert_eq!(arr[1]["type"], "text");
+        assert_eq!(arr[1]["text"], "describe this image");
+    }
+
+    #[test]
+    fn api_message_image_block_has_correct_structure() {
+        let msg = img_msg("user", "hi", vec![png_image("encoded_bytes")]);
+        let api = ApiMessage::from(&msg);
+        let arr = api.content.as_array().unwrap();
+        let img = &arr[0];
+        assert_eq!(img["type"], "image");
+        assert_eq!(img["source"]["type"], "base64");
+        assert_eq!(img["source"]["media_type"], "image/png");
+        assert_eq!(img["source"]["data"], "encoded_bytes");
+    }
+
+    #[test]
+    fn api_message_image_with_empty_text_omits_text_block() {
+        let msg = img_msg("user", "", vec![png_image("abc")]);
+        let api = ApiMessage::from(&msg);
+        let arr = api.content.as_array().unwrap();
+        // Only image block — no text block for empty content.
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "image");
+    }
+
+    #[test]
+    fn api_message_multiple_images_all_appear_before_text() {
+        let images = vec![
+            ImageData { media_type: "image/jpeg".to_string(), base64: "jpg1".to_string() },
+            ImageData { media_type: "image/png".to_string(), base64: "png2".to_string() },
+        ];
+        let msg = img_msg("user", "compare these", images);
+        let api = ApiMessage::from(&msg);
+        let arr = api.content.as_array().unwrap();
+        assert_eq!(arr.len(), 3); // 2 images + 1 text
+        assert_eq!(arr[0]["type"], "image");
+        assert_eq!(arr[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[1]["source"]["media_type"], "image/png");
+        assert_eq!(arr[2]["type"], "text");
+    }
+
+    #[test]
+    fn messages_request_serializes_with_stream_true() {
+        // Verify the wire format sent to Claude has stream=true.
+        let req = MessagesRequest {
+            model: "claude-sonnet-4-6",
+            max_tokens: 4096,
+            messages: vec![ApiMessage::from(&text_msg("user", "hi"))],
+            stream: true,
+            system: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"stream\":true"));
+        assert!(json.contains("\"model\":\"claude-sonnet-4-6\""));
+        assert!(json.contains("\"max_tokens\":4096"));
+    }
+
+    #[test]
+    fn messages_request_system_prompt_included_when_set() {
+        let req = MessagesRequest {
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 1024,
+            messages: vec![],
+            stream: true,
+            system: Some("Be concise"),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"system\":\"Be concise\""));
+    }
+
+    #[test]
+    fn messages_request_system_omitted_when_none() {
+        let req = MessagesRequest {
+            model: "m",
+            max_tokens: 100,
+            messages: vec![],
+            stream: true,
+            system: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("system"));
+    }
 }

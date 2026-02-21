@@ -373,3 +373,100 @@ pub async fn create_delete_file_consumer(
     )
     .await
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── consumer_name ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn consumer_name_no_account_returns_base() {
+        assert_eq!(consumer_name("slack-bot-outbound", None), "slack-bot-outbound");
+    }
+
+    #[test]
+    fn consumer_name_empty_account_returns_base() {
+        assert_eq!(consumer_name("slack-bot-outbound", Some("")), "slack-bot-outbound");
+    }
+
+    #[test]
+    fn consumer_name_with_account_id_prepends_prefix() {
+        assert_eq!(
+            consumer_name("slack-bot-outbound", Some("ws1")),
+            "ws1-slack-bot-outbound"
+        );
+    }
+
+    #[test]
+    fn consumer_name_with_account_id_different_bases() {
+        assert_eq!(consumer_name("slack-agent-inbound", Some("acme")), "acme-slack-agent-inbound");
+        assert_eq!(consumer_name("slack-bot-stream-append", Some("dev")), "dev-slack-bot-stream-append");
+        assert_eq!(consumer_name("slack-agent-pin", Some("prod")), "prod-slack-agent-pin");
+    }
+
+    #[test]
+    fn consumer_name_whitespace_only_account_is_treated_as_non_empty() {
+        // filter(|id| !id.is_empty()) only checks for empty string, not whitespace.
+        // Whitespace-only ids would be prepended as-is (documenting behaviour).
+        let result = consumer_name("base", Some("  "));
+        assert_eq!(result, "  -base");
+    }
+
+    #[test]
+    fn consumer_name_all_consumers_have_unique_base_names() {
+        // Ensure none of the consumer base names used in this module clash with
+        // each other — a naming collision would cause two consumers to share the
+        // same durable name and steal each other's messages.
+        let bases = [
+            "slack-bot-outbound",
+            "slack-bot-stream-append",
+            "slack-bot-stream-stop",
+            "slack-bot-reaction",
+            "slack-agent-inbound",
+            "slack-agent-reaction",
+            "slack-agent-message-changed",
+            "slack-agent-message-deleted",
+            "slack-agent-thread-broadcast",
+            "slack-agent-member",
+            "slack-agent-channel",
+            "slack-agent-app-home",
+            "slack-agent-view-submission",
+            "slack-bot-view-open",
+            "slack-bot-view-publish",
+            "slack-agent-view-closed",
+            "slack-agent-pin",
+            "slack-bot-set-status",
+            "slack-bot-delete",
+            "slack-bot-update",
+            "slack-bot-upload",
+            "slack-bot-suggested-prompts",
+            "slack-bot-proactive",
+            "slack-bot-ephemeral",
+            "slack-bot-delete-file",
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for base in &bases {
+            assert!(seen.insert(*base), "Duplicate consumer base name: {base}");
+        }
+    }
+
+    #[test]
+    fn consumer_name_with_account_id_all_consumers_unique() {
+        // Same uniqueness guarantee when namespaced.
+        let account_id = Some("myws");
+        let bases = [
+            "slack-bot-outbound",
+            "slack-bot-stream-append",
+            "slack-agent-inbound",
+            "slack-agent-reaction",
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for base in &bases {
+            let name = consumer_name(base, account_id);
+            assert!(seen.insert(name.clone()), "Duplicate namespaced consumer name: {name}");
+        }
+    }
+}

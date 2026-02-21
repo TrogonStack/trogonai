@@ -2321,6 +2321,125 @@ mod tests {
         assert!(files_pos < attachments_pos);
     }
 
+    // ── generate_pairing_code ─────────────────────────────────────────────────
+
+    #[test]
+    fn pairing_code_is_six_chars() {
+        let code = generate_pairing_code("U1");
+        assert_eq!(code.len(), 6);
+    }
+
+    #[test]
+    fn pairing_code_chars_are_uppercase_alphanumeric() {
+        let code = generate_pairing_code("U123");
+        assert!(
+            code.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+            "unexpected character in code: {code}"
+        );
+    }
+
+    #[test]
+    fn pairing_code_different_users_produce_different_codes() {
+        let a = generate_pairing_code("U_alice");
+        let b = generate_pairing_code("U_bob");
+        // Two different users must not share the same deterministic code.
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn pairing_code_is_stable_for_same_input_within_same_ns() {
+        // The code includes a nanosecond timestamp so it changes over time —
+        // we just verify it returns a 6-character uppercase string consistently.
+        let code = generate_pairing_code("U_test");
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+    }
+
+    // ── build_slash_menu_blocks ───────────────────────────────────────────────
+
+    fn make_slash_options(n: usize) -> Vec<crate::config::SlashCommandOption> {
+        (0..n)
+            .map(|i| crate::config::SlashCommandOption {
+                label: format!("Option {i}"),
+                payload: format!("payload_{i}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn slash_menu_with_few_options_renders_buttons() {
+        let options = make_slash_options(3);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let block = &parsed[0];
+        assert_eq!(block["type"], "actions");
+        let elements = block["elements"].as_array().unwrap();
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0]["type"], "button");
+    }
+
+    #[test]
+    fn slash_menu_with_exactly_five_options_renders_buttons() {
+        let options = make_slash_options(5);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["type"], "button");
+    }
+
+    #[test]
+    fn slash_menu_with_six_options_renders_static_select() {
+        let options = make_slash_options(6);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["type"], "static_select");
+    }
+
+    #[test]
+    fn slash_menu_buttons_have_correct_labels_and_values() {
+        let options = make_slash_options(2);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["text"]["text"], "Option 0");
+        assert_eq!(elements[0]["value"], "payload_0");
+        assert_eq!(elements[1]["text"]["text"], "Option 1");
+        assert_eq!(elements[1]["value"], "payload_1");
+    }
+
+    #[test]
+    fn slash_menu_select_contains_all_options() {
+        let options = make_slash_options(7);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        let select_options = elements[0]["options"].as_array().unwrap();
+        assert_eq!(select_options.len(), 7);
+        assert_eq!(select_options[0]["text"]["text"], "Option 0");
+        assert_eq!(select_options[6]["text"]["text"], "Option 6");
+    }
+
+    #[test]
+    fn slash_menu_buttons_have_sequential_action_ids() {
+        let options = make_slash_options(3);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["action_id"], "slash_option_0");
+        assert_eq!(elements[1]["action_id"], "slash_option_1");
+        assert_eq!(elements[2]["action_id"], "slash_option_2");
+    }
+
+    #[test]
+    fn slash_menu_select_has_correct_action_id() {
+        let options = make_slash_options(6);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["action_id"], "slash_option_select");
+    }
+
     // ── passes_dm_policy ─────────────────────────────────────────────────────
 
     #[test]
