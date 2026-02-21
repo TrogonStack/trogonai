@@ -4,11 +4,122 @@ services:
   nats:
     image: nats:latest
     container_name: nats
-    command: 
+    command:
       - "--jetstream"
       - "--store_dir=/data"
+      - "--http_port=8222"
     volumes:
       - nats_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  slack-bot:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: crates/slack-bot/Dockerfile
+    environment:
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      SLACK_BOT_USER_ID: ${SLACK_BOT_USER_ID:-}
+      SLACK_MENTION_GATING: ${SLACK_MENTION_GATING:-true}
+      SLACK_MENTION_GATING_CHANNELS: ${SLACK_MENTION_GATING_CHANNELS:-}
+      SLACK_NO_MENTION_CHANNELS: ${SLACK_NO_MENTION_CHANNELS:-}
+      SLACK_ALLOW_BOTS: ${SLACK_ALLOW_BOTS:-false}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_EVENTS_PORT: ${SLACK_EVENTS_PORT:-3001}
+      SLACK_API_RPS: ${SLACK_API_RPS:-1.0}
+      SLACK_MEDIA_MAX_MB: ${SLACK_MEDIA_MAX_MB:-20}
+      SLACK_MENTION_PATTERNS: ${SLACK_MENTION_PATTERNS:-}
+      SLACK_TEXT_CHUNK_LIMIT: ${SLACK_TEXT_CHUNK_LIMIT:-4000}
+      SLACK_CHUNK_MODE: ${SLACK_CHUNK_MODE:-chars}
+      SLACK_USER_TOKEN: ${SLACK_USER_TOKEN:-}
+      HEALTH_PORT: 8080
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  slack-agent:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: crates/slack-agent/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      SLACK_REPLY_TO_MODE: ${SLACK_REPLY_TO_MODE:-off}
+      SLACK_REPLY_TO_MODE_DM: ${SLACK_REPLY_TO_MODE_DM:-}
+      SLACK_REPLY_TO_MODE_GROUP: ${SLACK_REPLY_TO_MODE_GROUP:-}
+      SLACK_REPLY_TO_MODE_CHANNEL: ${SLACK_REPLY_TO_MODE_CHANNEL:-}
+      SLACK_ACK_REACTION: ${SLACK_ACK_REACTION:-}
+      SLACK_DM_POLICY: ${SLACK_DM_POLICY:-open}
+      SLACK_CHANNEL_ALLOWLIST: ${SLACK_CHANNEL_ALLOWLIST:-}
+      SLACK_USER_ALLOWLIST: ${SLACK_USER_ALLOWLIST:-}
+      SLACK_USER_BLOCKLIST: ${SLACK_USER_BLOCKLIST:-}
+      SLACK_WELCOME_MESSAGE: ${SLACK_WELCOME_MESSAGE:-}
+      SLACK_ALLOW_BOTS: ${SLACK_ALLOW_BOTS:-false}
+      SLACK_USER_RATE_LIMIT: ${SLACK_USER_RATE_LIMIT:-0}
+      SLACK_DEBOUNCE_MS: ${SLACK_DEBOUNCE_MS:-0}
+      SLACK_REACTION_NOTIFICATIONS: ${SLACK_REACTION_NOTIFICATIONS:-false}
+      SLACK_MAX_CONCURRENT_SESSIONS: ${SLACK_MAX_CONCURRENT_SESSIONS:-0}
+      SLACK_UPLOAD_THRESHOLD_CHARS: ${SLACK_UPLOAD_THRESHOLD_CHARS:-0}
+      SLACK_SEED_HISTORY_ON_START: ${SLACK_SEED_HISTORY_ON_START:-0}
+      SLACK_NO_TYPING_CHANNELS: ${SLACK_NO_TYPING_CHANNELS:-}
+      SLACK_DM_PAIR_CHANNEL: ${SLACK_DM_PAIR_CHANNEL:-}
+      SLACK_SUGGESTED_PROMPTS: ${SLACK_SUGGESTED_PROMPTS:-}
+      SLACK_STREAM_MODE: ${SLACK_STREAM_MODE:-partial}
+      SLACK_REQUIRE_MENTION: ${SLACK_REQUIRE_MENTION:-false}
+      SLACK_DM_SCOPE: ${SLACK_DM_SCOPE:-}
+      SLACK_HISTORY_SCOPE: ${SLACK_HISTORY_SCOPE:-}
+      SLACK_INHERIT_PARENT: ${SLACK_INHERIT_PARENT:-false}
+      SLACK_SLASH_COMMAND_NAME: ${SLACK_SLASH_COMMAND_NAME:-}
+      SLACK_SLASH_COMMAND_EPHEMERAL: ${SLACK_SLASH_COMMAND_EPHEMERAL:-true}
+      SLACK_SLASH_COMMAND_OPTIONS: ${SLACK_SLASH_COMMAND_OPTIONS:-}
+      CHANNEL_SYSTEM_PROMPTS: ${CHANNEL_SYSTEM_PROMPTS:-}
+      CHANNEL_USER_ALLOWLISTS: ${CHANNEL_USER_ALLOWLISTS:-}
+      CHANNEL_ACK_REACTIONS: ${CHANNEL_ACK_REACTIONS:-}
+      THREAD_INITIAL_HISTORY_LIMIT: ${THREAD_INITIAL_HISTORY_LIMIT:-0}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}
+      CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-8192}
+      CLAUDE_SYSTEM_PROMPT: ${CLAUDE_SYSTEM_PROMPT:-}
+      CLAUDE_SYSTEM_PROMPT_FILE: ${CLAUDE_SYSTEM_PROMPT_FILE:-}
+      CLAUDE_RETRY_ATTEMPTS: ${CLAUDE_RETRY_ATTEMPTS:-3}
+      CLAUDE_MAX_HISTORY: ${CLAUDE_MAX_HISTORY:-40}
+      CLAUDE_MAX_HISTORY_CHARS: ${CLAUDE_MAX_HISTORY_CHARS:-0}
+      HEALTH_PORT: 8081
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  llm-anthropic:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: crates/llm-anthropic/Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_DEFAULT_MODEL: ${ANTHROPIC_DEFAULT_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_DEFAULT_MAX_TOKENS: ${ANTHROPIC_DEFAULT_MAX_TOKENS:-8192}
+      ANTHROPIC_RETRY_ATTEMPTS: ${ANTHROPIC_RETRY_ATTEMPTS:-3}
+      ACCOUNT_ID: ${SLACK_ACCOUNT_ID:-}
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   nats_data:
