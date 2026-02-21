@@ -1,27 +1,29 @@
 use serde::Serialize;
 use slack_types::events::{
     SlackAppHomeOpenedEvent, SlackBlockActionEvent, SlackChannelEvent, SlackDeleteFile,
-    SlackDeleteMessage, SlackEphemeralMessage, SlackInboundMessage, SlackMemberEvent,
-    SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage, SlackPinEvent,
-    SlackProactiveMessage, SlackReactionAction, SlackReactionEvent, SlackReadMessagesRequest,
-    SlackReadMessagesResponse, SlackReadRepliesRequest, SlackReadRepliesResponse,
-    SlackSetStatusRequest, SlackSetSuggestedPromptsRequest, SlackSlashCommandEvent,
-    SlackStreamAppendMessage, SlackStreamStopMessage, SlackThreadBroadcastEvent,
-    SlackUpdateMessage, SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest,
-    SlackViewPublishRequest, SlackViewSubmissionEvent,
+    SlackDeleteMessage, SlackEphemeralMessage, SlackGetEmojiRequest, SlackGetEmojiResponse,
+    SlackGetUserRequest, SlackGetUserResponse, SlackInboundMessage, SlackLinkSharedEvent,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
+    SlackPinEvent, SlackProactiveMessage, SlackReactionAction, SlackReactionEvent,
+    SlackReadMessagesRequest, SlackReadMessagesResponse, SlackReadRepliesRequest,
+    SlackReadRepliesResponse, SlackSetStatusRequest, SlackSetSuggestedPromptsRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStopMessage,
+    SlackThreadBroadcastEvent, SlackUnfurlRequest, SlackUpdateMessage, SlackUploadRequest,
+    SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest, SlackViewSubmissionEvent,
 };
 use slack_types::subjects::{
     for_account, SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION,
-    SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED,
-    SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION,
-    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED,
-    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE,
-    SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL, SLACK_OUTBOUND_LIST_CONVERSATIONS,
+    SLACK_INBOUND_CHANNEL, SLACK_INBOUND_LINK_SHARED, SLACK_INBOUND_MEMBER,
+    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN,
+    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
+    SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND,
+    SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
+    SLACK_OUTBOUND_GET_EMOJI, SLACK_OUTBOUND_GET_USER, SLACK_OUTBOUND_LIST_CONVERSATIONS,
     SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_PROACTIVE, SLACK_OUTBOUND_REACTION,
     SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_SET_STATUS,
     SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
-    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD,
-    SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UNFURL, SLACK_OUTBOUND_UPDATE,
+    SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 use trogon_nats::{PublishClient, RequestClient};
 
@@ -418,6 +420,70 @@ where
     C::PublishError: 'static,
 {
     js_publish(js, &for_account(SLACK_OUTBOUND_DELETE_FILE, account_id), req).await
+}
+
+/// Publish a `link_shared` event (one or more URLs shared in a message).
+pub async fn publish_link_shared<C>(
+    js: &C,
+    account_id: Option<&str>,
+    ev: &SlackLinkSharedEvent,
+) -> Result<(), async_nats::Error>
+where
+    C: PublishClient,
+    C::PublishError: 'static,
+{
+    js_publish(js, &for_account(SLACK_INBOUND_LINK_SHARED, account_id), ev).await
+}
+
+/// Publish an unfurl request — instructs the bot to call `chat.unfurl`.
+pub async fn publish_unfurl<C>(
+    js: &C,
+    account_id: Option<&str>,
+    req: &SlackUnfurlRequest,
+) -> Result<(), async_nats::Error>
+where
+    C: PublishClient,
+    C::PublishError: 'static,
+{
+    js_publish(js, &for_account(SLACK_OUTBOUND_UNFURL, account_id), req).await
+}
+
+/// Fetch a single user's profile from the bot via Core NATS request/reply.
+pub async fn request_get_user<C>(
+    client: &C,
+    account_id: Option<&str>,
+    req: &SlackGetUserRequest,
+) -> Result<SlackGetUserResponse, String>
+where
+    C: RequestClient,
+    C::RequestError: 'static,
+{
+    let subject = for_account(SLACK_OUTBOUND_GET_USER, account_id);
+    let payload = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let response = client
+        .request_with_headers(subject, async_nats::HeaderMap::new(), payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&response.payload).map_err(|e| e.to_string())
+}
+
+/// Fetch the workspace custom emoji map from the bot via Core NATS request/reply.
+pub async fn request_get_emoji<C>(
+    client: &C,
+    account_id: Option<&str>,
+    req: &SlackGetEmojiRequest,
+) -> Result<SlackGetEmojiResponse, String>
+where
+    C: RequestClient,
+    C::RequestError: 'static,
+{
+    let subject = for_account(SLACK_OUTBOUND_GET_EMOJI, account_id);
+    let payload = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let response = client
+        .request_with_headers(subject, async_nats::HeaderMap::new(), payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&response.payload).map_err(|e| e.to_string())
 }
 
 /// List workspace users from the bot via Core NATS request/reply.

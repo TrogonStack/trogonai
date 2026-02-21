@@ -528,6 +528,84 @@ pub struct SlackDeleteFile {
     pub file_id: String,
 }
 
+// ── Link sharing ─────────────────────────────────────────────────────────────
+
+/// A `link_shared` event — one or more URLs were posted in a message.
+/// The agent can respond with a `SlackUnfurlRequest` to attach rich previews.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackLinkSharedEvent {
+    pub channel: String,
+    /// Timestamp of the message that contained the links.
+    pub message_ts: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_ts: Option<String>,
+    /// The list of URLs found in the message.
+    pub links: Vec<String>,
+}
+
+/// Instructs the bot to call `chat.unfurl` with the provided payloads.
+///
+/// `unfurls` maps each URL (from the original `link_shared` event) to its
+/// preview payload.  Any URL not present in the map is left unattached.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUnfurlRequest {
+    pub channel: String,
+    /// Timestamp of the message that contained the links.
+    pub ts: String,
+    /// URL → unfurl payload mapping sent verbatim to `chat.unfurl`.
+    pub unfurls: std::collections::HashMap<String, SlackUnfurlPayload>,
+}
+
+/// Rich preview content for a single URL passed to `chat.unfurl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUnfurlPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+}
+
+// ── Single user lookup ────────────────────────────────────────────────────────
+
+/// Request to fetch a single user's profile via `users.info`.
+/// Core NATS request/reply — send to `SLACK_OUTBOUND_GET_USER`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackGetUserRequest {
+    pub user_id: String,
+}
+
+/// Response from `users.info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackGetUserResponse {
+    pub ok: bool,
+    /// The resolved user profile.  `None` when `ok` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<SlackListUsersUser>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// ── Emoji list ────────────────────────────────────────────────────────────────
+
+/// Request to fetch the workspace custom emoji map via `emoji.list`.
+/// Core NATS request/reply — send to `SLACK_OUTBOUND_GET_EMOJI`.
+/// No request fields are required; the bot returns all custom emoji.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackGetEmojiRequest {}
+
+/// Response from `emoji.list`.
+/// `emoji` maps shortcode names to their image URL (or an `alias:name` value).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackGetEmojiResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub emoji: std::collections::HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

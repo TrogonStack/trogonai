@@ -4,13 +4,14 @@ use async_nats::jetstream::{
 };
 use slack_types::subjects::{
     for_account, SLACK_INBOUND, SLACK_INBOUND_APP_HOME, SLACK_INBOUND_BLOCK_ACTION,
-    SLACK_INBOUND_CHANNEL, SLACK_INBOUND_MEMBER, SLACK_INBOUND_MESSAGE_CHANGED,
-    SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN, SLACK_INBOUND_REACTION,
-    SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST, SLACK_INBOUND_VIEW_CLOSED,
-    SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND, SLACK_OUTBOUND_DELETE,
-    SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL, SLACK_OUTBOUND_PROACTIVE,
-    SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS, SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS,
-    SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UPDATE,
+    SLACK_INBOUND_CHANNEL, SLACK_INBOUND_LINK_SHARED, SLACK_INBOUND_MEMBER,
+    SLACK_INBOUND_MESSAGE_CHANGED, SLACK_INBOUND_MESSAGE_DELETED, SLACK_INBOUND_PIN,
+    SLACK_INBOUND_REACTION, SLACK_INBOUND_SLASH_COMMAND, SLACK_INBOUND_THREAD_BROADCAST,
+    SLACK_INBOUND_VIEW_CLOSED, SLACK_INBOUND_VIEW_SUBMISSION, SLACK_OUTBOUND,
+    SLACK_OUTBOUND_DELETE, SLACK_OUTBOUND_DELETE_FILE, SLACK_OUTBOUND_EPHEMERAL,
+    SLACK_OUTBOUND_PROACTIVE, SLACK_OUTBOUND_REACTION, SLACK_OUTBOUND_SET_STATUS,
+    SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS, SLACK_OUTBOUND_STREAM_APPEND,
+    SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UNFURL, SLACK_OUTBOUND_UPDATE,
     SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN, SLACK_OUTBOUND_VIEW_PUBLISH,
 };
 
@@ -374,6 +375,32 @@ pub async fn create_delete_file_consumer(
     .await
 }
 
+/// JetStream consumer for `link_shared` events (inbound — used by the agent).
+pub async fn create_link_shared_consumer(
+    js: &Context,
+    account_id: Option<&str>,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        &consumer_name("slack-agent-link-shared", account_id),
+        &for_account(SLACK_INBOUND_LINK_SHARED, account_id),
+    )
+    .await
+}
+
+/// JetStream consumer for unfurl requests (outbound — used by the bot).
+pub async fn create_unfurl_consumer(
+    js: &Context,
+    account_id: Option<&str>,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        &consumer_name("slack-bot-unfurl", account_id),
+        &for_account(SLACK_OUTBOUND_UNFURL, account_id),
+    )
+    .await
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -446,6 +473,8 @@ mod tests {
             "slack-bot-proactive",
             "slack-bot-ephemeral",
             "slack-bot-delete-file",
+            "slack-agent-link-shared",
+            "slack-bot-unfurl",
         ];
         let mut seen = std::collections::HashSet::new();
         for base in &bases {

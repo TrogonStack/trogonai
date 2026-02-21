@@ -102,6 +102,19 @@ pub const SLACK_OUTBOUND_LIST_USERS: &str = "slack.outbound.list_users";
 /// List channels/conversations (`conversations.list`). Core NATS request/reply.
 pub const SLACK_OUTBOUND_LIST_CONVERSATIONS: &str = "slack.outbound.list_conversations";
 
+/// One or more URLs were shared in a Slack message (`link_shared` event).
+/// Agent may respond by publishing a `SlackUnfurlRequest` to `SLACK_OUTBOUND_UNFURL`.
+pub const SLACK_INBOUND_LINK_SHARED: &str = "slack.inbound.link_shared";
+
+/// Instruct the bot to attach rich URL previews via `chat.unfurl`. JetStream pub/sub.
+pub const SLACK_OUTBOUND_UNFURL: &str = "slack.outbound.unfurl";
+
+/// Fetch a single user's profile (`users.info`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_GET_USER: &str = "slack.outbound.get_user";
+
+/// Fetch the workspace custom emoji map (`emoji.list`). Core NATS request/reply.
+pub const SLACK_OUTBOUND_GET_EMOJI: &str = "slack.outbound.get_emoji";
+
 
 
 /// Inserts an optional account-ID namespace into a Slack NATS subject.
@@ -146,6 +159,7 @@ mod tests {
             SLACK_INBOUND_VIEW_SUBMISSION,
             SLACK_INBOUND_VIEW_CLOSED,
             SLACK_INBOUND_PIN,
+            SLACK_INBOUND_LINK_SHARED,
         ];
         for s in subjects {
             assert!(!s.is_empty());
@@ -178,6 +192,9 @@ mod tests {
             SLACK_OUTBOUND_DELETE_FILE,
             SLACK_OUTBOUND_LIST_USERS,
             SLACK_OUTBOUND_LIST_CONVERSATIONS,
+            SLACK_OUTBOUND_UNFURL,
+            SLACK_OUTBOUND_GET_USER,
+            SLACK_OUTBOUND_GET_EMOJI,
         ];
         let mut seen = std::collections::HashSet::new();
         for s in subjects {

@@ -14,8 +14,8 @@ use listener::{
 };
 use sender::{
     run_delete_file_loop, run_delete_loop, run_ephemeral_loop, run_outbound_loop,
-    run_proactive_loop, run_reaction_action_loop, run_set_status_loop,
-    run_stream_append_loop, run_stream_stop_loop, run_suggested_prompts_loop, run_update_loop,
+    run_proactive_loop, run_reaction_action_loop, run_set_status_loop, run_stream_append_loop,
+    run_stream_stop_loop, run_suggested_prompts_loop, run_unfurl_loop, run_update_loop,
     run_upload_loop, run_view_open_loop, run_view_publish_loop,
 };
 use slack_morphism::prelude::*;
@@ -24,20 +24,21 @@ use slack_nats::subscriber::{
     create_delete_consumer, create_delete_file_consumer, create_ephemeral_consumer,
     create_outbound_consumer, create_proactive_consumer, create_reaction_action_consumer,
     create_set_status_consumer, create_stream_append_consumer, create_stream_stop_consumer,
-    create_suggested_prompts_consumer, create_update_consumer, create_upload_consumer,
-    create_view_open_consumer, create_view_publish_consumer,
+    create_suggested_prompts_consumer, create_unfurl_consumer, create_update_consumer,
+    create_upload_consumer, create_view_open_consumer, create_view_publish_consumer,
 };
 use rate_limit::RateLimiter;
 use slack_types::events::{
+    SlackGetEmojiRequest, SlackGetEmojiResponse, SlackGetUserRequest, SlackGetUserResponse,
     SlackListConversationsChannel, SlackListConversationsRequest, SlackListConversationsResponse,
     SlackListUsersRequest, SlackListUsersResponse, SlackListUsersUser, SlackReadMessage,
-    SlackReadMessagesRequest, SlackReadMessagesResponse,
-    SlackReadRepliesRequest, SlackReadRepliesResponse, SlackStreamStartRequest,
-    SlackStreamStartResponse,
+    SlackReadMessagesRequest, SlackReadMessagesResponse, SlackReadRepliesRequest,
+    SlackReadRepliesResponse, SlackStreamStartRequest, SlackStreamStartResponse,
 };
 use slack_types::subjects::{
-    for_account, SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS,
-    SLACK_OUTBOUND_READ_MESSAGES, SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
+    for_account, SLACK_OUTBOUND_GET_EMOJI, SLACK_OUTBOUND_GET_USER,
+    SLACK_OUTBOUND_LIST_CONVERSATIONS, SLACK_OUTBOUND_LIST_USERS, SLACK_OUTBOUND_READ_MESSAGES,
+    SLACK_OUTBOUND_READ_REPLIES, SLACK_OUTBOUND_STREAM_START,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let proactive_consumer = create_proactive_consumer(&js, account_id).await?;
     let ephemeral_consumer = create_ephemeral_consumer(&js, account_id).await?;
     let delete_file_consumer = create_delete_file_consumer(&js, account_id).await?;
+    let unfurl_consumer = create_unfurl_consumer(&js, account_id).await?;
 
     // stream.start uses Core NATS request/reply — subscribe on the raw client.
     let mut stream_start_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_STREAM_START, account_id)).await?;
@@ -109,6 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut read_replies_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_READ_REPLIES, account_id)).await?;
     let mut list_users_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_LIST_USERS, account_id)).await?;
     let mut list_conversations_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_LIST_CONVERSATIONS, account_id)).await?;
+    let mut get_user_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_GET_USER, account_id)).await?;
+    let mut get_emoji_sub = nats_client.subscribe(for_account(SLACK_OUTBOUND_GET_EMOJI, account_id)).await?;
 
     // slack_client is needed for outbound/proactive loops in both modes.
     let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
@@ -284,6 +288,176 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         async move { run_upload_loop(upload_consumer, bt, hc, rl, nc).await }
     });
     let upload_abort = upload_handle.abort_handle();
+
+    let unfurl_handle = tokio::spawn({
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move { run_unfurl_loop(unfurl_consumer, bt, hc, rl).await }
+    });
+    let unfurl_abort = unfurl_handle.abort_handle();
+
+    // get_user handler: Core NATS request/reply — calls users.info.
+    let get_user_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = get_user_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("get_user message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                match serde_json::from_slice::<SlackGetUserRequest>(&msg.payload) {
+                    Ok(req) => {
+                        let url = format!("https://slack.com/api/users.info?user={}", req.user_id);
+                        rl.acquire().await;
+                        match hc.get(&url).bearer_auth(&bt).send().await {
+                            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                                    let u = &api_resp["user"];
+                                    let user = SlackListUsersUser {
+                                        id: u["id"].as_str().unwrap_or("").to_string(),
+                                        name: u["name"].as_str().unwrap_or("").to_string(),
+                                        real_name: u["real_name"].as_str().map(String::from),
+                                        display_name: u["profile"]["display_name"]
+                                            .as_str()
+                                            .filter(|s| !s.is_empty())
+                                            .or_else(|| u["profile"]["real_name"].as_str())
+                                            .map(String::from),
+                                        is_bot: u["is_bot"].as_bool().unwrap_or(false),
+                                        deleted: u["deleted"].as_bool().unwrap_or(false),
+                                    };
+                                    let response = SlackGetUserResponse {
+                                        ok: true,
+                                        user: Some(user),
+                                        error: None,
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Ok(api_resp) => {
+                                    tracing::warn!(
+                                        api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                        user_id = %req.user_id,
+                                        "users.info failed"
+                                    );
+                                    let response = SlackGetUserResponse {
+                                        ok: false,
+                                        user: None,
+                                        error: Some(
+                                            api_resp["error"]
+                                                .as_str()
+                                                .unwrap_or("unknown")
+                                                .to_string(),
+                                        ),
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&response) {
+                                        let _ = nc.publish(reply_to, bytes.into()).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, "Failed to parse users.info response");
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(error = %e, "HTTP error calling users.info");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to deserialize SlackGetUserRequest");
+                    }
+                }
+            }
+        }
+    });
+    let get_user_abort = get_user_handle.abort_handle();
+
+    // get_emoji handler: Core NATS request/reply — calls emoji.list.
+    let get_emoji_handle = tokio::spawn({
+        let nc = nats_client.clone();
+        let bt = bot_token.clone();
+        let hc = Arc::new(reqwest::Client::new());
+        let rl = rate_limiter.clone();
+        async move {
+            while let Some(msg) = get_emoji_sub.next().await {
+                let reply_to = match msg.reply {
+                    Some(ref r) => r.clone(),
+                    None => {
+                        tracing::warn!("get_emoji message has no reply subject, ignoring");
+                        continue;
+                    }
+                };
+
+                // Deserialize request (empty struct — just a trigger).
+                let _req = match serde_json::from_slice::<SlackGetEmojiRequest>(&msg.payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to deserialize SlackGetEmojiRequest");
+                        continue;
+                    }
+                };
+
+                rl.acquire().await;
+                match hc
+                    .get("https://slack.com/api/emoji.list")
+                    .bearer_auth(&bt)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(api_resp) if api_resp["ok"].as_bool().unwrap_or(false) => {
+                            let emoji: std::collections::HashMap<String, String> = api_resp
+                                ["emoji"]
+                                .as_object()
+                                .map(|obj| {
+                                    obj.iter()
+                                        .filter_map(|(k, v)| {
+                                            v.as_str().map(|s| (k.clone(), s.to_string()))
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let response = SlackGetEmojiResponse { ok: true, emoji, error: None };
+                            if let Ok(bytes) = serde_json::to_vec(&response) {
+                                let _ = nc.publish(reply_to, bytes.into()).await;
+                            }
+                        }
+                        Ok(api_resp) => {
+                            tracing::warn!(
+                                api_error = api_resp["error"].as_str().unwrap_or("unknown"),
+                                "emoji.list failed"
+                            );
+                            let response = SlackGetEmojiResponse {
+                                ok: false,
+                                emoji: Default::default(),
+                                error: Some(
+                                    api_resp["error"].as_str().unwrap_or("unknown").to_string(),
+                                ),
+                            };
+                            if let Ok(bytes) = serde_json::to_vec(&response) {
+                                let _ = nc.publish(reply_to, bytes.into()).await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to parse emoji.list response");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTP error calling emoji.list");
+                    }
+                }
+            }
+        }
+    });
+    let get_emoji_abort = get_emoji_handle.abort_handle();
 
     // stream.start handler: Core NATS request/reply — stays on raw client.
     let stream_start_handle = tokio::spawn({
@@ -1006,6 +1180,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Err(e) => tracing::error!(error = %e, "List conversations NATS loop panicked"),
             }
         }
+        res = unfurl_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Unfurl NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Unfurl NATS loop panicked"),
+            }
+        }
+        res = get_user_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Get user NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Get user NATS loop panicked"),
+            }
+        }
+        res = get_emoji_handle => {
+            match res {
+                Ok(()) => tracing::warn!("Get emoji NATS loop exited"),
+                Err(e) => tracing::error!(error = %e, "Get emoji NATS loop panicked"),
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down");
         }
@@ -1031,6 +1223,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     delete_file_abort.abort();
     list_users_abort.abort();
     list_conversations_abort.abort();
+    unfurl_abort.abort();
+    get_user_abort.abort();
+    get_emoji_abort.abort();
     tokio::time::sleep(Duration::from_millis(200)).await;
     tracing::info!("Shutdown complete");
 

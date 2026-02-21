@@ -3,16 +3,17 @@ use reqwest::Client as HttpClient;
 use slack_morphism::prelude::*;
 use slack_morphism::errors::SlackClientError;
 use slack_nats::publisher::{
-    publish_app_home, publish_block_action, publish_channel, publish_inbound, publish_member,
-    publish_message_changed, publish_message_deleted, publish_pin, publish_reaction,
-    publish_slash_command, publish_thread_broadcast, publish_view_closed, publish_view_submission,
+    publish_app_home, publish_block_action, publish_channel, publish_inbound, publish_link_shared,
+    publish_member, publish_message_changed, publish_message_deleted, publish_pin,
+    publish_reaction, publish_slash_command, publish_thread_broadcast, publish_view_closed,
+    publish_view_submission,
 };
 use slack_types::events::{
     ChannelEventKind, PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment,
     SlackBlockActionEvent, SlackChannelEvent, SlackFile as OurSlackFile, SlackInboundMessage,
-    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackPinEvent,
-    SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent, SlackViewClosedEvent,
-    SlackViewSubmissionEvent,
+    SlackLinkSharedEvent, SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent,
+    SlackPinEvent, SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent,
+    SlackViewClosedEvent, SlackViewSubmissionEvent,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -533,14 +534,17 @@ pub async fn handle_push_event(
         }
 
         SlackEventCallbackBody::LinkShared(ev) => {
-            let channel = ev.channel.0.clone();
-            let message_ts = ev.message_ts.0.clone();
-            let urls: Vec<String> = ev.links.iter().map(|l| l.url.to_string()).collect();
-            let bot_token = state.bot_token.clone();
-            let http_client = state.http_client.clone();
-            tokio::spawn(async move {
-                unfurl_links(&bot_token, &http_client, &channel, &message_ts, &urls).await;
-            });
+            let link_ev = SlackLinkSharedEvent {
+                channel: ev.channel.0.clone(),
+                message_ts: ev.message_ts.0.clone(),
+                event_ts: None,
+                links: ev.links.iter().map(|l| l.url.to_string()).collect(),
+            };
+            if let Err(e) =
+                publish_link_shared(&state.nats, state.account_id.as_deref(), &link_ev).await
+            {
+                tracing::error!(error = %e, "Failed to publish link_shared to NATS");
+            }
         }
 
         _ => {

@@ -6,7 +6,7 @@ use slack_types::events::{
     SlackDeleteFile, SlackDeleteMessage, SlackEphemeralMessage, SlackOutboundMessage,
     SlackProactiveMessage, SlackReactionAction, SlackSetStatusRequest,
     SlackSetSuggestedPromptsRequest, SlackStreamAppendMessage, SlackStreamStopMessage,
-    SlackUpdateMessage, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackUnfurlRequest, SlackUpdateMessage, SlackViewOpenRequest, SlackViewPublishRequest,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -1758,6 +1758,78 @@ pub async fn run_upload_loop(
                 }
             }
             Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackUploadRequest"),
+        }
+
+        let _ = msg.ack().await;
+    }
+}
+
+/// Consume `SlackUnfurlRequest` messages and call `chat.unfurl` for each one.
+pub async fn run_unfurl_loop(
+    consumer: Consumer<pull::Config>,
+    bot_token: String,
+    http_client: Arc<HttpClient>,
+    rate_limiter: Arc<RateLimiter>,
+) {
+    let mut messages = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create unfurl consumer stream");
+            return;
+        }
+    };
+
+    while let Some(result) = messages.next().await {
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "JetStream error on unfurl consumer");
+                continue;
+            }
+        };
+
+        match serde_json::from_slice::<SlackUnfurlRequest>(&msg.payload) {
+            Ok(req) => {
+                // Build the unfurls JSON object expected by chat.unfurl.
+                let unfurls: serde_json::Value = serde_json::Value::Object(
+                    req.unfurls
+                        .iter()
+                        .map(|(url, payload)| {
+                            (url.clone(), serde_json::to_value(payload).unwrap_or_default())
+                        })
+                        .collect(),
+                );
+
+                let body = serde_json::json!({
+                    "channel": req.channel,
+                    "ts": req.ts,
+                    "unfurls": unfurls,
+                });
+
+                rate_limiter.acquire().await;
+                match http_client
+                    .post(format!("{SLACK_API_BASE}/api/chat.unfurl"))
+                    .bearer_auth(&bot_token)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(v) if v["ok"].as_bool() == Some(true) => {
+                            tracing::debug!(channel = %req.channel, ts = %req.ts, "chat.unfurl succeeded");
+                        }
+                        Ok(v) => {
+                            tracing::warn!(
+                                error = v["error"].as_str().unwrap_or("unknown"),
+                                "chat.unfurl returned ok=false"
+                            );
+                        }
+                        Err(e) => tracing::warn!(error = %e, "Failed to parse chat.unfurl response"),
+                    },
+                    Err(e) => tracing::warn!(error = %e, "HTTP error calling chat.unfurl"),
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "Failed to deserialize SlackUnfurlRequest"),
         }
 
         let _ = msg.ack().await;
