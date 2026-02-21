@@ -4,7 +4,17 @@ version: "3.9"
 # Required env vars (copy .env.example → .env):
 #   SLACK_BOT_TOKEN   xoxb-...
 #   SLACK_APP_TOKEN   xapp-...
-# Optional:
+#   ANTHROPIC_API_KEY sk-ant-...   (required by llm-anthropic; omit if using a different LLM)
+#
+# LLM provider selection:
+#   LLM_PROVIDER   anthropic (default) | openai | gemini | deepseek
+#
+#   To use a non-default provider, set LLM_PROVIDER and start the matching worker:
+#     docker compose --profile openai    up   (requires OPENAI_API_KEY)
+#     docker compose --profile gemini    up   (requires GEMINI_API_KEY)
+#     docker compose --profile deepseek  up   (requires DEEPSEEK_API_KEY)
+#
+# Optional env vars:
 #   SLACK_BOT_USER_ID              UXXXXXXXX  (filters bot's own messages; auto-detected)
 #   SLACK_MENTION_GATING           false      (respond to all channel messages; default: true)
 #   SLACK_MENTION_GATING_CHANNELS  C123,C456  (channels where mention-gating is enforced)
@@ -30,20 +40,36 @@ version: "3.9"
 #   SLACK_DM_PAIR_CHANNEL          C123       (channel to pair with DM sessions)
 #   SLACK_SUGGESTED_PROMPTS        "Title:Message,Title2:Message2"  (suggested prompts for UI)
 #   THREAD_INITIAL_HISTORY_LIMIT   0          (messages fetched from thread on first reply; 0 = none)
-#   ANTHROPIC_API_KEY              sk-ant-... (enables Claude; without it the agent echoes)
-#   CLAUDE_MODEL                   claude-sonnet-4-6  (default)
+#   CLAUDE_MODEL                   claude-sonnet-4-6  (model sent in LLM requests; default)
 #   CLAUDE_MAX_TOKENS              8192       (default)
 #   CLAUDE_SYSTEM_PROMPT           "You are a helpful assistant."
 #   CLAUDE_SYSTEM_PROMPT_FILE      /run/secrets/prompt.txt  (takes precedence over inline)
 #   CLAUDE_RETRY_ATTEMPTS          3          (retry attempts on transient errors)
 #   CLAUDE_MAX_HISTORY             40         (messages kept in KV; default)
 #   CLAUDE_MAX_HISTORY_CHARS       0          (max total chars kept in history; 0 = unlimited)
-#   SLACK_MAX_CONCURRENT_SESSIONS  0          (concurrent Claude API calls; 0 = unlimited)
+#   SLACK_MAX_CONCURRENT_SESSIONS  0          (concurrent LLM API calls; 0 = unlimited)
 #   SLACK_UPLOAD_THRESHOLD_CHARS   3000       (upload as file if longer than this)
 #   CHANNEL_SYSTEM_PROMPTS         "C123=prompt,C456=other prompt"  (per-channel overrides)
 #   NATS_TOKEN                                (NATS authentication token)
 #   NATS_CREDS                                (path to NATS credentials file)
 #   RUST_LOG                       info | debug | trace
+#
+# LLM worker env vars (per provider):
+#   ANTHROPIC_DEFAULT_MODEL        claude-sonnet-4-6  (worker default; overridden per-request by CLAUDE_MODEL)
+#   ANTHROPIC_DEFAULT_MAX_TOKENS   8192
+#   ANTHROPIC_RETRY_ATTEMPTS       3
+#   OPENAI_API_KEY                 sk-...
+#   OPENAI_DEFAULT_MODEL           gpt-4o
+#   OPENAI_DEFAULT_MAX_TOKENS      8192
+#   OPENAI_RETRY_ATTEMPTS          3
+#   GEMINI_API_KEY                 AIza...
+#   GEMINI_DEFAULT_MODEL           gemini-2.0-flash
+#   GEMINI_DEFAULT_MAX_TOKENS      8192
+#   GEMINI_RETRY_ATTEMPTS          3
+#   DEEPSEEK_API_KEY               sk-...
+#   DEEPSEEK_DEFAULT_MODEL         deepseek-chat
+#   DEEPSEEK_DEFAULT_MAX_TOKENS    8192
+#   DEEPSEEK_RETRY_ATTEMPTS        3
 
 services:
   nats:
@@ -107,9 +133,11 @@ services:
       NATS_URL: nats://nats:4222
       NATS_TOKEN: ${NATS_TOKEN:-}
       NATS_CREDS: ${NATS_CREDS:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       SLACK_REPLY_TO_MODE: ${SLACK_REPLY_TO_MODE:-off}
       SLACK_REPLY_TO_MODE_DM: ${SLACK_REPLY_TO_MODE_DM:-}
       SLACK_REPLY_TO_MODE_GROUP: ${SLACK_REPLY_TO_MODE_GROUP:-}
+      SLACK_REPLY_TO_MODE_CHANNEL: ${SLACK_REPLY_TO_MODE_CHANNEL:-}
       SLACK_ACK_REACTION: ${SLACK_ACK_REACTION:-}
       SLACK_DM_POLICY: ${SLACK_DM_POLICY:-open}
       SLACK_CHANNEL_ALLOWLIST: ${SLACK_CHANNEL_ALLOWLIST:-}
@@ -126,9 +154,18 @@ services:
       SLACK_NO_TYPING_CHANNELS: ${SLACK_NO_TYPING_CHANNELS:-}
       SLACK_DM_PAIR_CHANNEL: ${SLACK_DM_PAIR_CHANNEL:-}
       SLACK_SUGGESTED_PROMPTS: ${SLACK_SUGGESTED_PROMPTS:-}
+      SLACK_STREAM_MODE: ${SLACK_STREAM_MODE:-partial}
+      SLACK_REQUIRE_MENTION: ${SLACK_REQUIRE_MENTION:-false}
+      SLACK_DM_SCOPE: ${SLACK_DM_SCOPE:-}
+      SLACK_HISTORY_SCOPE: ${SLACK_HISTORY_SCOPE:-}
+      SLACK_INHERIT_PARENT: ${SLACK_INHERIT_PARENT:-false}
+      SLACK_SLASH_COMMAND_NAME: ${SLACK_SLASH_COMMAND_NAME:-}
+      SLACK_SLASH_COMMAND_EPHEMERAL: ${SLACK_SLASH_COMMAND_EPHEMERAL:-true}
+      SLACK_SLASH_COMMAND_OPTIONS: ${SLACK_SLASH_COMMAND_OPTIONS:-}
       CHANNEL_SYSTEM_PROMPTS: ${CHANNEL_SYSTEM_PROMPTS:-}
+      CHANNEL_USER_ALLOWLISTS: ${CHANNEL_USER_ALLOWLISTS:-}
+      CHANNEL_ACK_REACTIONS: ${CHANNEL_ACK_REACTIONS:-}
       THREAD_INITIAL_HISTORY_LIMIT: ${THREAD_INITIAL_HISTORY_LIMIT:-0}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-6}
       CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-8192}
       CLAUDE_SYSTEM_PROMPT: ${CLAUDE_SYSTEM_PROMPT:-}
@@ -149,6 +186,89 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  # ── LLM workers ───────────────────────────────────────────────────────────────
+  # llm-anthropic is the default provider and starts with the base stack.
+  # Other providers are opt-in via --profile.
+
+  llm-anthropic:
+    build:
+      context: .
+      dockerfile: crates/llm-anthropic/Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_DEFAULT_MODEL: ${ANTHROPIC_DEFAULT_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_DEFAULT_MAX_TOKENS: ${ANTHROPIC_DEFAULT_MAX_TOKENS:-8192}
+      ANTHROPIC_RETRY_ATTEMPTS: ${ANTHROPIC_RETRY_ATTEMPTS:-3}
+      ACCOUNT_ID: ${SLACK_ACCOUNT_ID:-}
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  llm-openai:
+    build:
+      context: .
+      dockerfile: crates/llm-openai/Dockerfile
+    profiles: [openai]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4o}
+      OPENAI_DEFAULT_MAX_TOKENS: ${OPENAI_DEFAULT_MAX_TOKENS:-8192}
+      OPENAI_RETRY_ATTEMPTS: ${OPENAI_RETRY_ATTEMPTS:-3}
+      ACCOUNT_ID: ${SLACK_ACCOUNT_ID:-}
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  llm-gemini:
+    build:
+      context: .
+      dockerfile: crates/llm-gemini/Dockerfile
+    profiles: [gemini]
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_DEFAULT_MODEL: ${GEMINI_DEFAULT_MODEL:-gemini-2.0-flash}
+      GEMINI_DEFAULT_MAX_TOKENS: ${GEMINI_DEFAULT_MAX_TOKENS:-8192}
+      GEMINI_RETRY_ATTEMPTS: ${GEMINI_RETRY_ATTEMPTS:-3}
+      ACCOUNT_ID: ${SLACK_ACCOUNT_ID:-}
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  llm-deepseek:
+    build:
+      context: .
+      dockerfile: crates/llm-deepseek/Dockerfile
+    profiles: [deepseek]
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_DEFAULT_MODEL: ${DEEPSEEK_DEFAULT_MODEL:-deepseek-chat}
+      DEEPSEEK_DEFAULT_MAX_TOKENS: ${DEEPSEEK_DEFAULT_MAX_TOKENS:-8192}
+      DEEPSEEK_RETRY_ATTEMPTS: ${DEEPSEEK_RETRY_ATTEMPTS:-3}
+      ACCOUNT_ID: ${SLACK_ACCOUNT_ID:-}
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-}
+      NATS_CREDS: ${NATS_CREDS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   nats-data:
