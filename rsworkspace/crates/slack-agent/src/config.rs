@@ -89,6 +89,13 @@ pub struct SlackAgentConfig {
     /// Example: "eyes". Leave unset to disable.
     pub ack_reaction: Option<String>,
 
+    // ── LLM provider ──────────────────────────────────────────────────────
+    /// LLM provider to route requests to via NATS.
+    /// Determines the NATS subject: `llm.request.prompt.{provider}`.
+    /// Env: `LLM_PROVIDER`. Default: `"anthropic"`.
+    /// Supported values: `"anthropic"`, `"openai"`, `"gemini"`, `"deepseek"`.
+    pub llm_provider: String,
+
     // ── Claude / Anthropic ────────────────────────────────────────────────
     /// Claude model ID. Default: "claude-sonnet-4-6".
     pub claude_model: String,
@@ -287,6 +294,12 @@ impl SlackAgentConfig {
             .unwrap_or(ReplyToMode::Off);
 
         let ack_reaction = env.var("SLACK_ACK_REACTION").ok().filter(|v| !v.is_empty());
+
+        let llm_provider = env
+            .var("LLM_PROVIDER")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "anthropic".to_string());
 
         let claude_model = env
             .var("CLAUDE_MODEL")
@@ -637,6 +650,7 @@ impl SlackAgentConfig {
             nats: NatsConfig::from_env(env),
             reply_to_mode,
             ack_reaction,
+            llm_provider,
             claude_model,
             claude_max_tokens,
             claude_system_prompt,
@@ -705,6 +719,28 @@ mod tests {
     use super::*;
     use trogon_std::env::InMemoryEnv;
     use trogon_std::fs::MemFs;
+
+    #[test]
+    fn llm_provider_defaults_to_anthropic() {
+        let config = SlackAgentConfig::from_env(&base_env());
+        assert_eq!(config.llm_provider, "anthropic");
+    }
+
+    #[test]
+    fn llm_provider_set_to_openai() {
+        let env = base_env();
+        env.set("LLM_PROVIDER", "openai");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.llm_provider, "openai");
+    }
+
+    #[test]
+    fn llm_provider_empty_falls_back_to_anthropic() {
+        let env = base_env();
+        env.set("LLM_PROVIDER", "");
+        let config = SlackAgentConfig::from_env(&env);
+        assert_eq!(config.llm_provider, "anthropic");
+    }
 
     #[test]
     fn reply_to_mode_from_str() {

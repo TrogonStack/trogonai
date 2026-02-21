@@ -17,6 +17,7 @@ use handler::{
 };
 use health::start_health_server;
 use llm::LlmNatsClient;
+use llm_types::llm_subject_for_account;
 use memory::ConversationMemory;
 use user_settings::UserSettingsStore;
 use slack_nats::setup::ensure_slack_stream;
@@ -145,14 +146,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let system_prompt = config.resolve_system_prompt(&SystemFs);
 
-    // Build LLM NATS client — routes requests to the llm-anthropic worker via NATS.
-    tracing::info!(model = %config.claude_model, "LLM client configured (via NATS)");
+    // Build LLM NATS client — routes requests to the configured provider worker via NATS.
+    let llm_subject = llm_subject_for_account(
+        &format!("llm.request.prompt.{}", config.llm_provider),
+        account_id,
+    );
+    tracing::info!(provider = %config.llm_provider, model = %config.claude_model, subject = %llm_subject, "LLM client configured (via NATS)");
     let claude = Some(LlmNatsClient::new(
         nats_raw.clone(),
+        llm_subject,
         config.claude_model.clone(),
         config.claude_max_tokens,
         system_prompt.clone(),
-        config.account_id.clone(),
     ));
 
     let ctx = Arc::new(AgentContext {

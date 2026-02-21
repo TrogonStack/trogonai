@@ -1,33 +1,34 @@
 use async_nats::Client as NatsClient;
 use futures::StreamExt;
-use llm_types::{LlmMessage, LlmPromptRequest, LlmStreamChunk, llm_subject_for_account, LLM_REQUEST_ANTHROPIC};
+use llm_types::{LlmMessage, LlmPromptRequest, LlmStreamChunk};
 use tokio::sync::mpsc;
 
 use crate::memory::ConversationMessage;
 
 /// NATS-based LLM client.
 ///
-/// Publishes `LlmPromptRequest` to `llm.request.prompt.anthropic` and streams
-/// `LlmStreamChunk` responses back through a NATS inbox, preserving the same
-/// `stream_response` interface as the previous HTTP client.
+/// Publishes `LlmPromptRequest` to the pre-configured NATS subject
+/// (e.g. `llm.request.prompt.anthropic`) and streams `LlmStreamChunk`
+/// responses back through a NATS inbox.
 #[derive(Clone)]
 pub struct LlmNatsClient {
     pub nats: NatsClient,
+    /// NATS subject to publish requests to (already account-namespaced).
+    pub subject: String,
     pub model: String,
     pub max_tokens: u32,
     pub system_prompt: Option<String>,
-    pub account_id: Option<String>,
 }
 
 impl LlmNatsClient {
     pub fn new(
         nats: NatsClient,
+        subject: String,
         model: String,
         max_tokens: u32,
         system_prompt: Option<String>,
-        account_id: Option<String>,
     ) -> Self {
-        Self { nats, model, max_tokens, system_prompt, account_id }
+        Self { nats, subject, model, max_tokens, system_prompt }
     }
 
     /// Return a derived client with per-user overrides applied.
@@ -39,13 +40,13 @@ impl LlmNatsClient {
     ) -> Self {
         Self {
             nats: self.nats.clone(),
+            subject: self.subject.clone(),
             model: model.unwrap_or_else(|| self.model.clone()),
             max_tokens: self.max_tokens,
             system_prompt: match system_prompt {
                 Some(p) => p,
                 None => self.system_prompt.clone(),
             },
-            account_id: self.account_id.clone(),
         }
     }
 
@@ -76,9 +77,6 @@ impl LlmNatsClient {
         // Convert memory messages → LlmMessage (provider-agnostic format).
         let llm_messages: Vec<LlmMessage> = messages.iter().map(llm_message_from).collect();
 
-        let subject =
-            llm_subject_for_account(LLM_REQUEST_ANTHROPIC, self.account_id.as_deref());
-
         let req = LlmPromptRequest {
             messages: llm_messages,
             system: self.system_prompt.clone(),
@@ -90,7 +88,7 @@ impl LlmNatsClient {
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize: {e}"))?;
 
         self.nats
-            .publish(subject, payload.into())
+            .publish(self.subject.clone(), payload.into())
             .await
             .map_err(|e| format!("NATS publish failed: {e}"))?;
 
