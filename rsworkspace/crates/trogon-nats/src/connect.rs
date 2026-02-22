@@ -73,6 +73,7 @@ fn apply_reconnect_options(opts: ConnectOptions, connection_timeout: Duration) -
         .event_callback(|event| async move { handle_event(event).await })
 }
 
+/// Connect to NATS with automatic reconnection and event handling.
 #[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(
     config: &NatsConfig,
