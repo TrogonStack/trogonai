@@ -16,3 +16,4 @@ For distributed CRON scheduling, use the `trogon-cron` crate which provides:
 - OTel trace context is injected in tick message headers automatically
 - Integration tests in `tests/integration.rs` (run with `NATS_TEST_URL=... cargo test -- --include-ignored`)
 - Binary: `trogon-cron serve` / `trogon-cron job list|add|get|remove|enable|disable`
+- `test-support` feature exposes `MockTickPublisher` (records published ticks) and `MockLeaderLock` (controllable via `deny_acquire()`/`deny_renew()`) for unit testing without a real NATS server

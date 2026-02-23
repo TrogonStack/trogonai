@@ -181,6 +181,93 @@ mod tests {
     use super::*;
     use crate::config::{Action, Schedule};
 
+    // ── execute() tests ───────────────────────────────────────────────────────
+
+    #[cfg(feature = "test-support")]
+    mod execute_tests {
+        use std::sync::atomic::Ordering;
+
+        use super::*;
+        use crate::mocks::MockTickPublisher;
+
+        fn publish_job_state(id: &str) -> JobState {
+            build_job_state(JobConfig {
+                id: id.to_string(),
+                schedule: Schedule::Interval { interval_sec: 60 },
+                action: Action::Publish { subject: format!("cron.{id}") },
+                enabled: true,
+                payload: None,
+            })
+            .unwrap()
+        }
+
+        #[tokio::test]
+        async fn publishes_one_tick_per_call() {
+            let publisher = MockTickPublisher::new();
+            let state = publish_job_state("smoke");
+
+            execute(&publisher, &state, Utc::now()).await;
+
+            assert_eq!(publisher.tick_count(), 1);
+            assert_eq!(publisher.ticks()[0].subject, "cron.smoke");
+        }
+
+        #[tokio::test]
+        async fn tick_payload_contains_correct_job_id() {
+            let publisher = MockTickPublisher::new();
+            let state = publish_job_state("heartbeat");
+
+            execute(&publisher, &state, Utc::now()).await;
+
+            let tick: crate::config::TickPayload =
+                serde_json::from_slice(&publisher.ticks()[0].payload).unwrap();
+            assert_eq!(tick.job_id, "heartbeat");
+            assert!(!tick.execution_id.is_empty());
+        }
+
+        #[tokio::test]
+        async fn each_call_gets_unique_execution_id() {
+            let publisher = MockTickPublisher::new();
+            let state = publish_job_state("report");
+            let now = Utc::now();
+
+            execute(&publisher, &state, now).await;
+            execute(&publisher, &state, now).await;
+
+            let ticks = publisher.ticks();
+            let t1: crate::config::TickPayload = serde_json::from_slice(&ticks[0].payload).unwrap();
+            let t2: crate::config::TickPayload = serde_json::from_slice(&ticks[1].payload).unwrap();
+            assert_ne!(t1.execution_id, t2.execution_id);
+        }
+
+        #[tokio::test]
+        async fn spawn_skips_when_already_running() {
+            let publisher = MockTickPublisher::new();
+            let state = build_job_state(JobConfig {
+                id: "proc".to_string(),
+                schedule: Schedule::Interval { interval_sec: 60 },
+                action: Action::Spawn {
+                    bin: "/usr/bin/true".to_string(),
+                    args: vec![],
+                    concurrent: false,
+                    timeout_sec: None,
+                },
+                enabled: true,
+                payload: None,
+            })
+            .unwrap();
+
+            // Simulate a previous invocation still running.
+            state.is_running.store(true, Ordering::SeqCst);
+            execute(&publisher, &state, Utc::now()).await;
+
+            // execute() returned early — is_running was not cleared.
+            assert!(state.is_running.load(Ordering::SeqCst));
+        }
+    }
+
+    // ── scheduling logic tests ────────────────────────────────────────────────
+
     fn publish_job(id: &str, interval_sec: u64) -> JobConfig {
         JobConfig {
             id: id.to_string(),
