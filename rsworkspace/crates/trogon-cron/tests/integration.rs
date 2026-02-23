@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use async_nats::jetstream::{self, consumer};
 use futures::StreamExt;
 use trogon_cron::{Action, CronClient, JobConfig, Schedule, Scheduler};
 
@@ -18,6 +19,38 @@ async fn connect() -> async_nats::Client {
     async_nats::connect(test_url())
         .await
         .expect("Failed to connect to NATS — is NATS_TEST_URL set and NATS running?")
+}
+
+/// Connect and return both the NATS client and a JetStream context.
+/// Also ensures the CRON_TICKS stream exists so consumers can be
+/// created before the scheduler starts.
+async fn connect_js() -> (async_nats::Client, jetstream::Context) {
+    let nats = connect().await;
+    let js = jetstream::new(nats.clone());
+    trogon_cron::kv::get_or_create_ticks_stream(&js)
+        .await
+        .expect("Failed to create CRON_TICKS stream");
+    (nats, js)
+}
+
+/// Create an ephemeral JetStream pull consumer on CRON_TICKS filtered to
+/// `subject` and return a continuous message stream.
+async fn cron_messages(
+    js: &jetstream::Context,
+    subject: String,
+) -> impl futures::Stream<Item = Result<jetstream::Message, consumer::pull::MessagesError>> {
+    js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await
+        .expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::pull::Config {
+            filter_subject: subject,
+            ..Default::default()
+        })
+        .await
+        .expect("Failed to create consumer")
+        .messages()
+        .await
+        .expect("Failed to start message stream")
 }
 
 fn unique_id(prefix: &str) -> String {
@@ -112,13 +145,15 @@ async fn test_enable_disable_job() {
 #[tokio::test]
 #[ignore = "requires NATS at NATS_TEST_URL"]
 async fn test_interval_job_fires() {
-    let nats = connect().await;
+    let (nats, js) = connect_js().await;
     let client = CronClient::new(nats.clone()).await.unwrap();
     let id = unique_id("test-fire");
-    let subject = format!("test.fire.{id}");
+    // Subject must start with `cron.` to be captured by the CRON_TICKS stream.
+    let subject = format!("cron.fire.{id}");
 
-    // Subscribe before registering the job
-    let mut sub = nats.subscribe(subject.clone()).await.unwrap();
+    // Subscribe via JetStream pull consumer — backed by CRON_TICKS stream,
+    // so ticks are persisted and delivered at-least-once.
+    let mut sub = cron_messages(&js, subject.clone()).await;
 
     let job = JobConfig {
         id: id.clone(),
@@ -139,7 +174,8 @@ async fn test_interval_job_fires() {
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
         .expect("Timed out waiting for tick — scheduler may not have fired")
-        .expect("Subscription closed unexpectedly");
+        .expect("Subscription closed unexpectedly")
+        .expect("JetStream message error");
 
     // Verify payload structure
     let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
@@ -155,13 +191,13 @@ async fn test_interval_job_fires() {
 #[tokio::test]
 #[ignore = "requires NATS at NATS_TEST_URL"]
 async fn test_hot_reload_job_config() {
-    let nats = connect().await;
+    let (nats, js) = connect_js().await;
     let client = CronClient::new(nats.clone()).await.unwrap();
     let id = unique_id("test-reload");
-    let subject_v1 = format!("test.reload.v1.{id}");
-    let subject_v2 = format!("test.reload.v2.{id}");
+    let subject_v1 = format!("cron.reload-v1.{id}");
+    let subject_v2 = format!("cron.reload-v2.{id}");
 
-    let mut sub_v2 = nats.subscribe(subject_v2.clone()).await.unwrap();
+    let mut sub_v2 = cron_messages(&js, subject_v2.clone()).await;
 
     // Register v1 job
     client.register_job(&JobConfig {
@@ -194,7 +230,8 @@ async fn test_hot_reload_job_config() {
     let msg = tokio::time::timeout(Duration::from_secs(5), sub_v2.next())
         .await
         .expect("Timed out — scheduler did not pick up updated config")
-        .expect("Subscription closed");
+        .expect("Subscription closed")
+        .expect("JetStream message error");
 
     let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
     assert_eq!(payload["job_id"], id.as_str());
@@ -206,12 +243,12 @@ async fn test_hot_reload_job_config() {
 #[tokio::test]
 #[ignore = "requires NATS at NATS_TEST_URL"]
 async fn test_disabled_job_does_not_fire() {
-    let nats = connect().await;
+    let (nats, js) = connect_js().await;
     let client = CronClient::new(nats.clone()).await.unwrap();
     let id = unique_id("test-disabled");
-    let subject = format!("test.disabled.{id}");
+    let subject = format!("cron.disabled.{id}");
 
-    let mut sub = nats.subscribe(subject.clone()).await.unwrap();
+    let mut sub = cron_messages(&js, subject.clone()).await;
 
     client.register_job(&JobConfig {
         id: id.clone(),
@@ -227,7 +264,7 @@ async fn test_disabled_job_does_not_fire() {
     });
 
     // Wait 3 seconds — should receive NO ticks
-    let result = tokio::time::timeout(Duration::from_secs(3), sub.next()).await;
+    let result: Result<_, _> = tokio::time::timeout(Duration::from_secs(3), sub.next()).await;
     assert!(result.is_err(), "Disabled job should not fire");
 
     handle.abort();

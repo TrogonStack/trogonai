@@ -14,6 +14,8 @@ For distributed CRON scheduling, use the `trogon-cron` crate which provides:
 - Two action types: `publish` (NATS subject) or `spawn` (process with optional timeout and concurrency guard)
 - Tick payloads include `job_id`, `fired_at`, `execution_id`, and optional `payload` forwarded from the job config
 - OTel trace context is injected in tick message headers automatically
+- Ticks are published to the `CRON_TICKS` JetStream stream (subjects: `cron.>`, max_age: 1h) for at-least-once delivery; job action subjects must start with `cron.`
+- Workers subscribe by creating a durable consumer on `CRON_TICKS` filtered to their subject (e.g. `cron.backup`); ticks missed during downtime are replayed up to 1 hour later
 - Integration tests in `tests/integration.rs` (run with `NATS_TEST_URL=... cargo test -- --include-ignored`)
 - Binary: `trogon-cron serve` / `trogon-cron job list|add|get|remove|enable|disable`
 - `test-support` feature exposes `MockTickPublisher` (records published ticks) and `MockLeaderLock` (controllable via `deny_acquire()`/`deny_renew()`) for unit testing without a real NATS server
