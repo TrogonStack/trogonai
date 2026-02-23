@@ -6,7 +6,7 @@
 //! |---------|----------|------------|------|
 //! | Directories | [`HomeDir`], [`ConfigDir`], [`CacheDir`], [`DataDir`], [`DataLocalDir`], [`StateDir`] | [`SystemDirs`] | `FixedDirs`* |
 //! | Env vars | [`ReadEnv`] | [`SystemEnv`] | `InMemoryEnv`* |
-//! | Filesystem | [`ReadFile`], [`WriteFile`], [`ExistsFile`] | [`SystemFs`] | `MemFs`* |
+//! | Filesystem | [`ReadFile`], [`WriteFile`], [`ExistsFile`], [`CreateDirAll`], [`OpenAppendFile`] | [`SystemFs`] | `MemFs`* |
 //! | Time | [`GetNow`], [`GetElapsed`] | [`SystemClock`] | `MockClock`* |
 //!
 //! *Available with `#[cfg(test)]` or the `"test-support"` feature.
@@ -34,5 +34,5 @@ pub mod time;
 
 pub use dirs::{CacheDir, ConfigDir, DataDir, DataLocalDir, HomeDir, StateDir, SystemDirs};
 pub use env::{ReadEnv, SystemEnv};
-pub use fs::{ExistsFile, ReadFile, SystemFs, WriteFile};
+pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, WriteFile};
 pub use time::{GetElapsed, GetNow, SystemClock};
