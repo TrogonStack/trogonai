@@ -9,7 +9,8 @@ use uuid::Uuid;
 use crate::{
     error::CronError,
     executor::{JobState, build_job_state, execute},
-    kv::{self, get_or_create_config_bucket, get_or_create_leader_bucket, load_jobs_and_watch},
+    kv::{self, get_or_create_config_bucket, get_or_create_leader_bucket,
+         get_or_create_ticks_stream, load_jobs_and_watch},
     leader::LeaderElection,
     nats_impls::NatsLeaderLock,
 };
@@ -33,9 +34,10 @@ impl Scheduler {
     pub async fn run(self) -> Result<(), CronError> {
         let js = jetstream::new(self.nats.clone());
 
-        // 1. Get/create KV buckets.
+        // 1. Get/create KV buckets and tick stream.
         let config_kv = get_or_create_config_bucket(&js).await?;
         let leader_kv = get_or_create_leader_bucket(&js).await?;
+        get_or_create_ticks_stream(&js).await?;
 
         // 2. Activate KV watch BEFORE loading jobs to avoid missing changes.
         let (initial_jobs, mut config_watcher) = load_jobs_and_watch(&config_kv).await?;
@@ -76,7 +78,7 @@ impl Scheduler {
                         let now = Utc::now();
                         for state in jobs.values_mut() {
                             if state.should_fire(now) {
-                                execute(&self.nats, state, now).await;
+                                execute(&js, state, now).await;
                                 state.last_fired = Some(now);
                                 state.compute_next_fire(now);
                             }

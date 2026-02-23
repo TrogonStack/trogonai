@@ -1,19 +1,28 @@
-use async_nats::jetstream::kv;
+use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
 
 use crate::{error::CronError, kv::LEADER_KEY, traits::{LeaderLock, TickPublisher}};
 
-/// Concrete `TickPublisher` backed by an `async_nats::Client`.
-impl TickPublisher for async_nats::Client {
-    type Error = async_nats::client::PublishError;
+/// Concrete `TickPublisher` backed by a JetStream context.
+///
+/// Ticks are published into the `CRON_TICKS` stream (must exist before calling),
+/// giving workers at-least-once delivery: a worker that was briefly down will
+/// receive missed ticks when it reconnects via a durable consumer.
+impl TickPublisher for jetstream::Context {
+    type Error = CronError;
 
     async fn publish_tick(
         &self,
         subject: String,
         headers: async_nats::HeaderMap,
         payload: Bytes,
-    ) -> Result<(), Self::Error> {
-        self.publish_with_headers(subject, headers, payload).await
+    ) -> Result<(), CronError> {
+        self.publish_with_headers(subject, headers, payload)
+            .await
+            .map_err(|e| CronError::Publish(e.to_string()))?
+            .await
+            .map_err(|e| CronError::Publish(e.to_string()))?;
+        Ok(())
     }
 }
 

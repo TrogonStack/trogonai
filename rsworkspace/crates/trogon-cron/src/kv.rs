@@ -1,4 +1,4 @@
-use async_nats::jetstream::{self, kv};
+use async_nats::jetstream::{self, kv, stream};
 use futures::StreamExt;
 use std::time::Duration;
 
@@ -9,6 +9,9 @@ pub const LEADER_BUCKET: &str = "cron_leader";
 pub const LEADER_KEY: &str = "lock";
 pub const JOBS_WATCH_PATTERN: &str = "jobs.*";
 pub const JOBS_KEY_PREFIX: &str = "jobs.";
+pub const TICKS_STREAM: &str = "CRON_TICKS";
+/// Wildcard subject that captures all cron tick subjects (e.g. `cron.backup`, `cron.report`).
+const TICKS_SUBJECT_PATTERN: &str = "cron.>";
 
 pub async fn get_or_create_config_bucket(
     js: &jetstream::Context,
@@ -38,6 +41,29 @@ pub async fn get_or_create_leader_bucket(
         },
     )
     .await
+}
+
+/// Ensure the `CRON_TICKS` JetStream stream exists.
+///
+/// The stream captures every `cron.>` subject so workers can create durable
+/// consumers and receive ticks even after a brief downtime (at-least-once).
+/// Ticks older than 1 hour are discarded to prevent flooding workers that
+/// were down for an extended period.
+pub async fn get_or_create_ticks_stream(js: &jetstream::Context) -> Result<(), CronError> {
+    let config = stream::Config {
+        name: TICKS_STREAM.to_string(),
+        subjects: vec![TICKS_SUBJECT_PATTERN.to_string()],
+        max_age: Duration::from_secs(3600),
+        ..Default::default()
+    };
+    match js.create_stream(config).await {
+        Ok(_) => Ok(()),
+        Err(_) => js
+            .get_stream(TICKS_STREAM)
+            .await
+            .map(|_| ())
+            .map_err(|e| CronError::Kv(e.to_string())),
+    }
 }
 
 async fn get_or_create(js: &jetstream::Context, config: kv::Config) -> Result<kv::Store, CronError> {
