@@ -129,6 +129,11 @@ fn spawn_process(
 
 /// Build a `JobState` from a `JobConfig`, pre-parsing cron expressions.
 pub fn build_job_state(config: JobConfig) -> Result<JobState, CronError> {
+    build_job_state_at(config, Utc::now())
+}
+
+/// Build a `JobState` from a `JobConfig` at a specific time (useful for testing).
+pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobState, CronError> {
     use std::str::FromStr;
 
     let parsed_cron = match &config.schedule {
@@ -144,7 +149,6 @@ pub fn build_job_state(config: JobConfig) -> Result<JobState, CronError> {
         _ => None,
     };
 
-    let now = Utc::now();
     let mut state = JobState {
         config,
         next_fire: None,
@@ -162,4 +166,82 @@ pub fn build_job_state(config: JobConfig) -> Result<JobState, CronError> {
         }
     }
     Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Action, Schedule};
+
+    fn publish_job(id: &str, interval_sec: u64) -> JobConfig {
+        JobConfig {
+            id: id.to_string(),
+            schedule: Schedule::Interval { interval_sec },
+            action: Action::Publish { subject: format!("cron.{id}") },
+            enabled: true,
+            payload: None,
+        }
+    }
+
+    #[test]
+    fn interval_job_fires_immediately_on_load() {
+        let state = build_job_state(publish_job("health", 30)).unwrap();
+        let now = Utc::now();
+        assert!(state.should_fire(now));
+    }
+
+    #[test]
+    fn interval_job_does_not_fire_before_interval() {
+        let now = Utc::now();
+        let mut state = build_job_state_at(publish_job("health", 30), now).unwrap();
+        // Simulate the job just fired
+        state.last_fired = Some(now);
+        state.compute_next_fire(now);
+        // 1 second later — should NOT fire yet (interval is 30s)
+        let one_sec_later = now + chrono::Duration::seconds(1);
+        assert!(!state.should_fire(one_sec_later));
+    }
+
+    #[test]
+    fn interval_job_fires_after_interval() {
+        let now = Utc::now();
+        let mut state = build_job_state_at(publish_job("health", 30), now).unwrap();
+        state.last_fired = Some(now);
+        state.compute_next_fire(now);
+        let thirty_sec_later = now + chrono::Duration::seconds(30);
+        assert!(state.should_fire(thirty_sec_later));
+    }
+
+    #[test]
+    fn disabled_job_never_fires() {
+        let mut config = publish_job("health", 1);
+        config.enabled = false;
+        let state = build_job_state(config).unwrap();
+        assert!(!state.should_fire(Utc::now()));
+    }
+
+    #[test]
+    fn cron_job_builds_with_valid_expression() {
+        let config = JobConfig {
+            id: "hourly".to_string(),
+            schedule: Schedule::Cron { expr: "0 0 * * * *".to_string() },
+            action: Action::Publish { subject: "cron.hourly".to_string() },
+            enabled: true,
+            payload: None,
+        };
+        let state = build_job_state(config).unwrap();
+        assert!(state.next_fire.is_some());
+    }
+
+    #[test]
+    fn cron_job_fails_with_invalid_expression() {
+        let config = JobConfig {
+            id: "bad".to_string(),
+            schedule: Schedule::Cron { expr: "not-a-cron".to_string() },
+            action: Action::Publish { subject: "cron.bad".to_string() },
+            enabled: true,
+            payload: None,
+        };
+        assert!(build_job_state(config).is_err());
+    }
 }

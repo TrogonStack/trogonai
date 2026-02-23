@@ -44,6 +44,7 @@
 //! }
 //! ```
 
+pub mod client;
 pub mod config;
 pub mod error;
 pub mod executor;
@@ -51,6 +52,7 @@ pub mod kv;
 pub mod leader;
 pub mod scheduler;
 
+pub use client::CronClient;
 pub use config::{Action, JobConfig, Schedule, TickPayload};
 pub use error::CronError;
 pub use scheduler::Scheduler;
