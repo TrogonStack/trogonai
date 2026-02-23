@@ -70,7 +70,7 @@ impl<L: LeaderLock> LeaderElection<L> {
     async fn maybe_renew(&mut self) {
         let should_renew = self
             .last_renewed
-            .map_or(true, |t| t.elapsed() >= RENEW_INTERVAL);
+            .is_none_or(|t| t.elapsed() >= RENEW_INTERVAL);
 
         if !should_renew {
             return;

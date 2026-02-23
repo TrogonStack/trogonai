@@ -66,7 +66,7 @@ async fn main() {
             }
         }
         Some(Command::Job { action }) => {
-            let client = CronClient::new(nats).await.unwrap_or_else(|e| die(e));
+            let client = CronClient::new(nats).await.unwrap_or_else(die);
             handle_job(client, action).await;
         }
     }
@@ -95,12 +95,12 @@ async fn handle_job(client: CronClient, action: JobAction) {
 }
 
 async fn cmd_list(client: CronClient) {
-    let jobs = client.list_jobs().await.unwrap_or_else(|e| die(e));
+    let jobs = client.list_jobs().await.unwrap_or_else(die);
     if jobs.is_empty() {
         println!("No jobs registered.");
         return;
     }
-    println!("{:<30} {:<10} {}", "ID", "STATUS", "SCHEDULE");
+    println!("{:<30} {:<10} SCHEDULE", "ID", "STATUS");
     println!("{}", "-".repeat(60));
     for job in jobs {
         let status = if job.enabled { "enabled" } else { "disabled" };
@@ -113,7 +113,7 @@ async fn cmd_list(client: CronClient) {
 }
 
 async fn cmd_get(client: CronClient, id: &str) {
-    match client.get_job(id).await.unwrap_or_else(|e| die(e)) {
+    match client.get_job(id).await.unwrap_or_else(die) {
         Some(job) => println!("{}", serde_json::to_string_pretty(&job).unwrap()),
         None => {
             eprintln!("Job '{id}' not found");
@@ -127,7 +127,7 @@ async fn cmd_add(client: CronClient, file: &str) {
         let mut buf = String::new();
         std::io::stdin()
             .read_to_string(&mut buf)
-            .unwrap_or_else(|e| die(e));
+            .unwrap_or_else(die);
         buf
     } else {
         std::fs::read_to_string(file).unwrap_or_else(|e| {
@@ -141,12 +141,12 @@ async fn cmd_add(client: CronClient, file: &str) {
         std::process::exit(1);
     });
     let id = config.id.clone();
-    client.register_job(&config).await.unwrap_or_else(|e| die(e));
+    client.register_job(&config).await.unwrap_or_else(die);
     println!("Job '{id}' registered.");
 }
 
 async fn cmd_remove(client: CronClient, id: &str) {
-    client.remove_job(id).await.unwrap_or_else(|e| die(e));
+    client.remove_job(id).await.unwrap_or_else(die);
     println!("Job '{id}' removed.");
 }
 
@@ -154,7 +154,7 @@ async fn cmd_set_enabled(client: CronClient, id: &str, enabled: bool) {
     client
         .set_enabled(id, enabled)
         .await
-        .unwrap_or_else(|e| die(e));
+        .unwrap_or_else(die);
     let state = if enabled { "enabled" } else { "disabled" };
     println!("Job '{id}' {state}.");
 }

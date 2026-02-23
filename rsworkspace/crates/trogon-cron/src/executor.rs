@@ -26,7 +26,7 @@ pub struct JobState {
 
 impl JobState {
     pub fn should_fire(&self, now: DateTime<Utc>) -> bool {
-        self.config.enabled && self.next_fire.map_or(false, |t| now >= t)
+        self.config.enabled && self.next_fire.is_some_and(|t| now >= t)
     }
 
     /// Recompute `next_fire` after a job fires or when the config is (re)loaded.
