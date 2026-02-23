@@ -1,0 +1,135 @@
+ Informacion extraida con Claude
+ CRON Job con NATS                                                                                                                                                    
+                                                                                                                                                                       
+  ┌─────────────────────────────────────────────────────────┐                                                                                                          
+  │                     CRON Definitions                     │                                                                                                         
+  │  "0 * * * *"  → subject: cron.backup                   │
+  │  "*/5 * * * *" → subject: cron.health-check            │                                                                                                           
+  │  "0 0 * * *"  → subject: cron.report                   │                                                                                                           
+  └───────────────────────┬─────────────────────────────────┘
+                          │
+                          ▼
+                ┌─────────────────┐
+                │    Scheduler    │
+                │  (reads crons,  │
+                │  fires on time) │
+                └────────┬────────┘
+                         │ publish
+                         ▼
+                ┌─────────────────┐
+                │      NATS       │
+                └────────┬────────┘
+                         │
+            ┌────────────┼────────────┐
+            ▼            ▼            ▼
+     ┌────────────┐ ┌──────────┐ ┌──────────┐
+     │  Worker A  │ │ Worker B │ │ Worker C │
+     │  (backup)  │ │ (health) │ │ (report) │
+     └────────────┘ └──────────┘ └──────────┘
+
+  Flujo
+
+  1. Defines el job con un schedule y un subject NATS
+  2. El Scheduler evalúa el schedule y cuando toca, publica en el subject
+  3. El Worker está suscrito al subject y ejecuta la tarea
+
+  Ejemplo de definición
+
+  [[jobs]]
+  name    = "backup"
+  schedule = "0 * * * *"
+  subject  = "cron.backup"
+  payload  = { db = "main" }
+
+  Mensaje que llega al Worker
+
+  {
+    "job": "backup",
+    "fired_at": "2026-02-23T10:00:00Z",
+    "payload": { "db": "main" }
+  }
+
+
+Flujo de trabajo                                                                                                                                                     
+                                          
+  ┌─────────────────────────────────────────────────────────┐                                                                                                          
+  │                  1. DEFINES EL JOB                       │                                                                                                         
+  │                                                          │                                                                                                         
+  │  schedule = "0 * * * *"                                  │                                                                                                         
+  │  subject  = "cron.backup"                                │
+  │  payload  = { db: "main" }                               │                                                                                                         
+  └───────────────────────┬─────────────────────────────────┘                                                                                                          
+                          │
+                          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                  2. SCHEDULER                            │
+  │                                                          │
+  │  - Lee las definiciones                                  │
+  │  - Evalúa el tiempo (cron expression)                    │
+  │  - Cuando toca → publica mensaje en NATS                 │
+  └───────────────────────┬─────────────────────────────────┘
+                          │ publish("cron.backup", payload)
+                          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                    3. NATS                               │
+  │                                                          │
+  │  Recibe el mensaje y lo distribuye                       │
+  │  a los suscritos al subject                              │
+  └───────────────────────┬─────────────────────────────────┘
+                          │ subscribe("cron.backup")
+                          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                  4. WORKER                               │
+  │                                                          │
+  │  - Recibe el mensaje                                     │
+  │  - Ejecuta la tarea (backup, report, etc.)               │
+  │  - Responde con resultado (opcional)                     │
+  └─────────────────────────────────────────────────────────┘
+
+  En resumen
+
+  ┌──────┬───────────┬──────────────────────────────────────┐
+  │ Paso │   Quién   │               Qué hace               │
+  ├──────┼───────────┼──────────────────────────────────────┤
+  │ 1    │ Tú        │ Defines schedule + subject + payload │
+  ├──────┼───────────┼──────────────────────────────────────┤
+  │ 2    │ Scheduler │ Dispara el mensaje a la hora exacta  │
+  ├──────┼───────────┼──────────────────────────────────────┤
+  │ 3    │ NATS      │ Enruta el mensaje al worker correcto │
+  ├──────┼───────────┼──────────────────────────────────────┤
+  │ 4    │ Worker    │ Ejecuta la tarea                     │
+  └──────┴───────────┴──────────────────────────────────────┘
+
+  El worker no sabe nada de cron, solo escucha un subject de NATS y actúa. Eso lo hace muy flexible.
+  
+  
+  El payload es la información extra que el scheduler le manda al worker para que sepa con qué datos ejecutar la tarea.                                                
+                                                                                                                                                                       
+  Scheduler publica:                                                                                                                                                   
+  {                                                                                                                                                                    
+    "job": "backup",                                                                                                                                                   
+    "fired_at": "2026-02-23T10:00:00Z",                                                                                                                                
+    "payload": { "db": "main", "path": "/backups" }  ← esto es el payload
+  }                                                                                                                                                                    
+                                                                                                                                                                       
+  Sin payload:
+  - El worker solo sabe que tiene que correr
+  - Tiene que tener toda la config hardcodeada adentro
+
+  Con payload:
+  - El worker recibe datos dinámicos
+  - Puedes usar el mismo worker para diferentes configuraciones
+
+  Ejemplo práctico:
+
+  job 1: subject="cron.backup" payload={ db: "main" }
+  job 2: subject="cron.backup" payload={ db: "analytics" }
+
+  El mismo worker cron.backup hace backup de diferentes bases de datos dependiendo del payload que recibe. No necesitas dos workers distintos.
+
+  En resumen: el payload es opcional pero muy útil para hacer los workers reutilizables.
+  
+  
+
+  
+
