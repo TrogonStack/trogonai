@@ -82,9 +82,12 @@ async fn get_or_create(js: &jetstream::Context, config: kv::Config) -> Result<kv
 pub async fn load_jobs_and_watch(
     kv: &kv::Store,
 ) -> Result<(Vec<JobConfig>, kv::Watch), CronError> {
-    // Start watch BEFORE reading so we don't miss updates that arrive during loading.
+    // `watch_with_history` uses DeliverPolicy::LastPerSubject so the watcher
+    // delivers the current value of every matching key as an initial snapshot,
+    // then continues streaming live updates.  Plain `watch()` uses
+    // DeliverPolicy::New and would skip all pre-existing entries.
     let mut watcher = kv
-        .watch(JOBS_WATCH_PATTERN)
+        .watch_with_history(JOBS_WATCH_PATTERN)
         .await
         .map_err(|e| CronError::Kv(e.to_string()))?;
 

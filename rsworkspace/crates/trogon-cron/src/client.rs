@@ -1,12 +1,11 @@
 use async_nats::jetstream;
 use async_nats::jetstream::kv::Operation;
+use futures::StreamExt;
 
 use crate::{
     config::JobConfig,
     error::CronError,
-    kv::{
-        CONFIG_BUCKET, JOBS_KEY_PREFIX, get_or_create_config_bucket, load_jobs_and_watch,
-    },
+    kv::{CONFIG_BUCKET, JOBS_KEY_PREFIX, get_or_create_config_bucket},
 };
 
 /// Client for registering and managing CRON job configs in NATS KV.
@@ -115,8 +114,26 @@ impl CronClient {
 
     /// List all currently active job configs.
     pub async fn list_jobs(&self) -> Result<Vec<JobConfig>, CronError> {
-        let kv = get_or_create_config_bucket(&self.js).await?;
-        let (jobs, _watcher) = load_jobs_and_watch(&kv).await?;
+        let kv = self
+            .js
+            .get_key_value(CONFIG_BUCKET)
+            .await
+            .map_err(|e| CronError::Kv(e.to_string()))?;
+
+        let mut keys = kv
+            .keys()
+            .await
+            .map_err(|e| CronError::Kv(e.to_string()))?;
+
+        let mut jobs = Vec::new();
+        while let Some(result) = keys.next().await {
+            let key = result.map_err(|e| CronError::Kv(e.to_string()))?;
+            if let Some(value) = kv.get(&key).await.map_err(|e| CronError::Kv(e.to_string()))? {
+                if let Ok(config) = serde_json::from_slice::<JobConfig>(&value) {
+                    jobs.push(config);
+                }
+            }
+        }
         Ok(jobs)
     }
 }

@@ -11,6 +11,9 @@ use async_nats::jetstream::{self, consumer};
 use futures::StreamExt;
 use trogon_cron::{Action, CronClient, JobConfig, Schedule, Scheduler};
 
+// Type alias so callers don't need to spell out the push consumer stream type.
+type CronStream = consumer::push::Messages;
+
 fn test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
 }
@@ -33,17 +36,30 @@ async fn connect_js() -> (async_nats::Client, jetstream::Context) {
     (nats, js)
 }
 
-/// Create an ephemeral JetStream pull consumer on CRON_TICKS filtered to
-/// `subject` and return a continuous message stream.
+/// Subscribe to `subject` via a JetStream push consumer on CRON_TICKS.
+///
+/// `push::Config::messages()` creates the Core NATS subscription **eagerly** inside
+/// the async fn before returning — so by the time `cron_messages` resolves the inbox
+/// is already registered with the server.  Any ticks the scheduler publishes after
+/// this point are delivered directly to the subscriber with no race window.
+///
+/// This contrasts with pull consumers (where the `MSG.NEXT` fetch is deferred until
+/// the first `poll_next` call) and ordered push consumers (which also lazily set up
+/// the subscription), both of which can miss a tick that fires before polling begins.
 async fn cron_messages(
+    nats: &async_nats::Client,
     js: &jetstream::Context,
     subject: String,
-) -> impl futures::Stream<Item = Result<jetstream::Message, consumer::pull::MessagesError>> {
+) -> CronStream {
+    let inbox = nats.new_inbox();
     js.get_stream(trogon_cron::kv::TICKS_STREAM)
         .await
         .expect("CRON_TICKS stream not found")
-        .create_consumer(consumer::pull::Config {
+        .create_consumer(consumer::push::Config {
+            deliver_subject: inbox,
             filter_subject: subject,
+            deliver_policy: consumer::DeliverPolicy::All,
+            ack_policy: consumer::AckPolicy::None,
             ..Default::default()
         })
         .await
@@ -60,6 +76,16 @@ fn unique_id(prefix: &str) -> String {
         .unwrap()
         .subsec_nanos();
     format!("{prefix}-{ts}")
+}
+
+/// Delete the leader lock so the next scheduler can acquire leadership immediately.
+/// Without this, an aborted scheduler leaves a stale lock for up to 10 s (the KV TTL),
+/// which would cause the following test's scheduler to fail to become leader within the
+/// 5-second test timeout.
+async fn reset_leader_lock(js: &jetstream::Context) {
+    if let Ok(kv) = js.get_key_value(trogon_cron::kv::LEADER_BUCKET).await {
+        let _ = kv.purge(trogon_cron::kv::LEADER_KEY).await;
+    }
 }
 
 // ── CronClient CRUD ──────────────────────────────────────────────────────────
@@ -151,9 +177,7 @@ async fn test_interval_job_fires() {
     // Subject must start with `cron.` to be captured by the CRON_TICKS stream.
     let subject = format!("cron.fire.{id}");
 
-    // Subscribe via JetStream pull consumer — backed by CRON_TICKS stream,
-    // so ticks are persisted and delivered at-least-once.
-    let mut sub = cron_messages(&js, subject.clone()).await;
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
 
     let job = JobConfig {
         id: id.clone(),
@@ -163,6 +187,10 @@ async fn test_interval_job_fires() {
         payload: Some(serde_json::json!({ "test": true })),
     };
     client.register_job(&job).await.unwrap();
+
+    // Clear any stale leader lock from a previous test so this scheduler can become
+    // leader immediately rather than waiting up to 10 s for the TTL to expire.
+    reset_leader_lock(&js).await;
 
     // Run scheduler in the background
     let scheduler_nats = nats.clone();
@@ -197,7 +225,7 @@ async fn test_hot_reload_job_config() {
     let subject_v1 = format!("cron.reload-v1.{id}");
     let subject_v2 = format!("cron.reload-v2.{id}");
 
-    let mut sub_v2 = cron_messages(&js, subject_v2.clone()).await;
+    let mut sub_v2 = cron_messages(&nats, &js, subject_v2.clone()).await;
 
     // Register v1 job
     client.register_job(&JobConfig {
@@ -207,6 +235,9 @@ async fn test_hot_reload_job_config() {
         enabled: true,
         payload: None,
     }).await.unwrap();
+
+    // Clear any stale leader lock so this scheduler acquires leadership immediately.
+    reset_leader_lock(&js).await;
 
     // Start scheduler
     let scheduler_nats = nats.clone();
@@ -248,7 +279,7 @@ async fn test_disabled_job_does_not_fire() {
     let id = unique_id("test-disabled");
     let subject = format!("cron.disabled.{id}");
 
-    let mut sub = cron_messages(&js, subject.clone()).await;
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
 
     client.register_job(&JobConfig {
         id: id.clone(),
@@ -257,6 +288,9 @@ async fn test_disabled_job_does_not_fire() {
         enabled: false,
         payload: None,
     }).await.unwrap();
+
+    // Clear any stale leader lock so this scheduler acquires leadership immediately.
+    reset_leader_lock(&js).await;
 
     let scheduler_nats = nats.clone();
     let handle = tokio::spawn(async move {
