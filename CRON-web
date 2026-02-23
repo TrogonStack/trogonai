@@ -1,0 +1,104 @@
+Una tarea cron es una operación automatizada programada para ejecutarse en horas o intervalos específicos en sistemas basados en Unix, incluidos Linux y macOS. El término «cron» proviene de «chronos», la palabra griega para tiempo, y representa una de las herramientas más fundamentales de automatización de tareas en la informática moderna.
+
+Las tareas cron permiten a administradores de sistemas y desarrolladores programar operaciones repetitivas sin intervención manual —desde copias de seguridad de bases de datos y rotación de registros hasta generación de informes y mantenimiento del sistema. Al definir cuándo y con qué frecuencia debe ejecutarse una tarea, las tareas cron garantizan que las operaciones críticas se ejecuten de forma coherente y fiable, formando así la columna vertebral de las operaciones automatizadas en millones de servidores en todo el mundo.
+
+Ya sea ejecutar un script de limpieza simple cada día a medianoche u orquestar canalizaciones de datos complejas entre varios sistemas, las tareas cron proporcionan la infraestructura de programación que mantiene las operaciones digitales en funcionamiento las 24 horas del día.
+
+Componentes principales de las tareas cron
+
+(crond) : El servicio en segundo plano que funciona de manera continua y comprueba la tabla de programación cada minuto para determinar qué tareas deben ejecutarse.
+
+Crontab (tabla cron) : El archivo de configuración donde los usuarios definen sus tareas programadas; cada línea representa una tarea separada y su planificación.
+
+Expresión cron : El formato de especificación temporal compuesto por cinco o seis campos (minuto, hora, día del mes, mes, día de la semana y, opcionalmente, año) que define cuándo debe ejecutarse una tarea.
+
+Comando de la tarea : El script, programa o comando que se ejecuta cuando llega el momento programado.
+
+Comprender la sintaxis de las expresiones cron
+
+Las expresiones cron usan un formato de cinco campos para especificar la programación:
+
+* * * * * command-to-execute
+
+│ │ │ │ │
+
+│ │ │ │ └─── Día de la semana (0-7, tanto 0 como 7 representan domingo)
+
+│ │ │ └────── Mes (1-12)
+
+│ │ └───────── Día del mes (1-31)
+
+│ └──────────── Hora (0-23)
+
+└─────────────── Minuto (0-59)
+
+Ejemplos comunes:
+
+    0 2 * * * – Ejecutar diariamente a las 02:00
+    */15 * * * * – Ejecutar cada 15 minutos
+    0 0 * * 0 – Ejecutar semanalmente los domingos a medianoche
+    0 9-17 * * 1-5 – Ejecutar cada hora de 9:00 a 17:00 en días laborables
+    
+
+
+Los operadores utilizados en las expresiones cron permiten definir horarios complejos y específicos:
+
+Asterisco (*): Representa todos los valores posibles para un campo.
+
+Coma (,): Permite especificar una lista de valores.
+
+Guión (-): Define un rango de valores.
+
+Barra inclinada (/): Indica intervalos o pasos a seguir dentro de un rango.
+
+
+
+Para poder definir los cron jobs para un usuario usamos el comando siguiente:
+
+crontab -e
+
+Esto nos abrirá el archivo de los cron jobs en un editor de texto usable por terminal. Los trabajos se tienen que definir en una sintaxis que veremos un poco más adelante.
+
+Revisar cron jobs activos por usuario
+
+Si en cualquier momento necesitas saber qué tareas tienes en un momento dado configuradas puedes usar el comando:
+
+crontab -l
+
+Esto nos permitirá listar las tareas actuales de un usuario. 
+
+Ejemplos de cron jobs reales y prácticos
+
+Lo mejor para poder entender la sintaxis de los cron jobs es mostrar algunos ejemplos típicos. Los siguientes ejemplos prácticos serían casos reales de uso de las tareas del cron.
+
+0 2 * * * /home/user/backup.sh
+
+El comando anterior serviría para ejecutar un script llamado backup.sh cada día a las 2 de la mañana.
+
+0 * * * * rm -rf /tmp/*
+
+Esta segunda programación indicaría que se tienen que limpiar archivos temporales (borrando lo que hay en la carpeta /tmp), cada hora.
+
+El comando anterior lo usarías para actualizar paquetes de un servidor Ubuntu, o cualquier otro basado en Debian, todos los domingos a las 4 de la mañana
+
+Para crear una aplicación tipo Cron Job con NATS, lo más eficiente es utilizar NATS JetStream para la persistencia y la programación de mensajes, en lugar de intentar forzar el "Core NATS" a manejar tiempos. JetStream permite definir políticas de retención, entregas garantizadas y, mediante el uso de KV (Key-Value) o durabilidad, programar tareas periódicas. 
+Pasos para Crear un Cron Job con NATS
+
+    Instalar NATS y JetStream: Asegúrese de tener un servidor NATS configurado con JetStream habilitado, por ejemplo, usando Docker: docker run -p 4222:4222 -ti nats:latest -js.
+    Configurar un Stream: Defina un stream en JetStream donde se publicarán los mensajes de "trabajo" (ej. tasks_stream).
+    Productor (Cron Job): Una aplicación cliente publica un mensaje en el stream tasks_stream a intervalos regulares, simulando el cron job (ej. usando la librería node-cron en Node.js o cron en Go para disparar la publicación).
+    Consumidor (Trabajador): Una aplicación se suscribe al stream utilizando un consumidor duradero (Durable Consumer). Este trabajador procesará el mensaje. NATS asegura que, si el trabajador cae, al reiniciar procesará el mensaje pendiente. 
+
+Ejemplo Básico (Concepto en Go/Node)
+
+    Productor: nc.Publish("cron.job.update", []byte("ejecutar_tarea")) (Llamado cada X tiempo).
+    Consumidor: js.PullSubscribe("cron.job.update", "durable-worker") (Procesa el mensaje).
+    
+    
+    
+Alternativa NATS KV
+
+El CRON externo actualiza una clave en NATS KV
+El worker escucha los cambios en esa clave y ejecuta la tarea cada vez que el valor cambia 
+
+Esta solucion permite que la programacion y la ejecucion esten desacopladas, distriuidas totalmente por NATS
