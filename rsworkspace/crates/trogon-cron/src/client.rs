@@ -45,7 +45,41 @@ impl CronClient {
     }
 
     /// Register or update a job. Existing jobs with the same `id` are overwritten.
+    ///
+    /// Structural constraints on `Action::Spawn` configs are validated here so
+    /// callers get an immediate error rather than a silent scheduler-side skip.
+    /// Filesystem checks (file exists, is executable) are intentionally omitted
+    /// because the client may run on a different host than the scheduler.
     pub async fn register_job(&self, config: &JobConfig) -> Result<(), CronError> {
+        if let crate::config::Action::Publish { subject } = &config.action {
+            if !subject.starts_with("cron.") {
+                return Err(CronError::InvalidJobConfig {
+                    reason: format!(
+                        "publish subject must start with 'cron.', got: {subject}"
+                    ),
+                });
+            }
+        }
+        if let crate::config::Action::Spawn { bin, args, timeout_sec, .. } = &config.action {
+            if !std::path::Path::new(bin).is_absolute() {
+                return Err(CronError::InvalidJobConfig {
+                    reason: format!("bin must be an absolute path, got: {bin}"),
+                });
+            }
+            for arg in args {
+                if arg.contains('\0') {
+                    return Err(CronError::InvalidJobConfig {
+                        reason: format!("argument contains null byte: {arg:?}"),
+                    });
+                }
+            }
+            if timeout_sec.is_some_and(|s| s == 0) {
+                return Err(CronError::InvalidJobConfig {
+                    reason: "timeout_sec must be >= 1 when set".into(),
+                });
+            }
+        }
+
         let kv = self
             .js
             .get_key_value(CONFIG_BUCKET)

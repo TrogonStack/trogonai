@@ -67,8 +67,8 @@ impl Scheduler {
 
         loop {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Shutdown signal received");
+                _ = shutdown_signal() => {
+                    tracing::info!("Shutdown signal received, releasing leader lock");
                     leader.release().await;
                     break;
                 }
@@ -103,6 +103,34 @@ impl Scheduler {
     }
 }
 
+/// Resolves when the process receives a shutdown signal (SIGINT or SIGTERM).
+///
+/// On Unix both signals are handled so container orchestrators (`docker stop`,
+/// Kubernetes pod termination) trigger a clean leader-lock release.
+/// On non-Unix only Ctrl-C (SIGINT) is available.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let sigterm = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c  => {}
+        _ = sigterm => {}
+    }
+}
+
 fn handle_config_change(
     jobs: &mut HashMap<String, JobState>,
     entry: async_nats::jetstream::kv::Entry,
@@ -119,7 +147,12 @@ fn handle_config_change(
         Operation::Put => {
             match serde_json::from_slice(&entry.value) {
                 Ok(config) => match build_job_state(config) {
-                    Ok(state) => {
+                    Ok(mut state) => {
+                        // Preserve is_running from the old state so any in-flight spawned
+                        // process remains visible to the scheduler after a hot-reload.
+                        if let Some(old) = jobs.get(&id) {
+                            state.is_running = std::sync::Arc::clone(&old.is_running);
+                        }
                         tracing::info!(job_id = %id, "Job config updated");
                         jobs.insert(id, state);
                     }

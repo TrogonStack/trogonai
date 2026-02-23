@@ -4,6 +4,7 @@ pub enum CronError {
     Publish(String),
     Serde(serde_json::Error),
     InvalidCronExpression { expr: String, reason: String },
+    InvalidJobConfig { reason: String },
     Io(std::io::Error),
 }
 
@@ -16,6 +17,7 @@ impl std::fmt::Display for CronError {
             Self::InvalidCronExpression { expr, reason } => {
                 write!(f, "Invalid cron expression '{expr}': {reason}")
             }
+            Self::InvalidJobConfig { reason } => write!(f, "Invalid job config: {reason}"),
             Self::Io(e) => write!(f, "IO error: {e}"),
         }
     }

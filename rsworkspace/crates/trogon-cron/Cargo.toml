@@ -13,6 +13,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 cron = "0.12"
 futures = "0.3"
+nix = { version = "0.29", features = ["signal"] }
 opentelemetry = "0.31.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
