@@ -25,15 +25,19 @@
 //! assert!(config.contains("8080"));
 //! ```
 
+mod create_dir_all;
 mod exists_file;
 mod mem;
+mod open_append_file;
 mod read_file;
 mod system;
 mod write_file;
 
+pub use create_dir_all::CreateDirAll;
 pub use exists_file::ExistsFile;
 #[cfg(any(test, feature = "test-support"))]
-pub use mem::MemFs;
+pub use mem::{MemAppendWriter, MemFs};
+pub use open_append_file::OpenAppendFile;
 pub use read_file::ReadFile;
 pub use system::SystemFs;
 pub use write_file::WriteFile;
