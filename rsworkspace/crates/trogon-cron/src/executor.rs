@@ -76,13 +76,20 @@ pub async fn execute(nats: &async_nats::Client, state: &JobState, now: DateTime<
 }
 
 async fn publish(nats: &async_nats::Client, subject: &str, tick: &TickPayload) {
-    match serde_json::to_vec(tick) {
-        Ok(payload) => {
-            if let Err(e) = nats.publish(subject.to_string(), payload.into()).await {
-                tracing::error!(subject, error = %e, "Failed to publish tick");
-            }
+    let payload = match serde_json::to_vec(tick) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to serialize tick payload");
+            return;
         }
-        Err(e) => tracing::error!(error = %e, "Failed to serialize tick payload"),
+    };
+    // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
+    let headers = trogon_nats::messaging::headers_with_trace_context();
+    if let Err(e) = nats
+        .publish_with_headers(subject.to_string(), headers, payload.into())
+        .await
+    {
+        tracing::error!(subject, error = %e, "Failed to publish tick");
     }
 }
 
