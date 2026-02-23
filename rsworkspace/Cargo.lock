@@ -1672,6 +1672,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-std",
  "uuid",
 ]
 

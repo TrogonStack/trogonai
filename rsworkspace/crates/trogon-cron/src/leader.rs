@@ -1,22 +1,23 @@
-use async_nats::jetstream::kv;
 use bytes::Bytes;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
+use crate::traits::LeaderLock;
+
 const RENEW_INTERVAL: Duration = Duration::from_secs(5);
 
-pub struct LeaderElection {
-    kv: kv::Store,
+pub struct LeaderElection<L: LeaderLock> {
+    lock: L,
     node_id: String,
     is_leader: bool,
     last_renewed: Option<Instant>,
     current_revision: Option<u64>,
 }
 
-impl LeaderElection {
-    pub fn new(kv: kv::Store, node_id: String) -> Self {
+impl<L: LeaderLock> LeaderElection<L> {
+    pub fn new(lock: L, node_id: String) -> Self {
         Self {
-            kv,
+            lock,
             node_id,
             is_leader: false,
             last_renewed: None,
@@ -38,13 +39,12 @@ impl LeaderElection {
         self.is_leader
     }
 
-    /// Release the lock on clean shutdown so the next leader is elected immediately
-    /// instead of waiting for the TTL to expire.
+    /// Release the lock on clean shutdown so the next leader is elected immediately.
     pub async fn release(&mut self) {
         if !self.is_leader {
             return;
         }
-        match self.kv.delete(crate::kv::LEADER_KEY).await {
+        match self.lock.release().await {
             Ok(_) => info!(node_id = %self.node_id, "Released CRON leader lock"),
             Err(e) => warn!(node_id = %self.node_id, error = %e, "Failed to release leader lock"),
         }
@@ -54,7 +54,7 @@ impl LeaderElection {
 
     async fn try_acquire(&mut self) {
         let value = Bytes::from(self.node_id.clone());
-        match self.kv.create(crate::kv::LEADER_KEY, value).await {
+        match self.lock.try_acquire(value).await {
             Ok(revision) => {
                 self.is_leader = true;
                 self.current_revision = Some(revision);
@@ -62,7 +62,7 @@ impl LeaderElection {
                 info!(node_id = %self.node_id, "Became CRON leader");
             }
             Err(_) => {
-                // Another node holds the lock — this is expected, not an error.
+                // Another node holds the lock — expected, not an error.
             }
         }
     }
@@ -82,16 +82,76 @@ impl LeaderElection {
         };
 
         let value = Bytes::from(self.node_id.clone());
-        match self.kv.update(crate::kv::LEADER_KEY, value, revision).await {
+        match self.lock.renew(value, revision).await {
             Ok(new_rev) => {
                 self.current_revision = Some(new_rev);
                 self.last_renewed = Some(Instant::now());
             }
             Err(e) => {
-                warn!(node_id = %self.node_id, error = %e, "Lost CRON leadership (update failed)");
+                warn!(node_id = %self.node_id, error = %e, "Lost CRON leadership (renew failed)");
                 self.is_leader = false;
                 self.current_revision = None;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "test-support")]
+    mod with_mocks {
+        use super::super::*;
+        use crate::mocks::MockLeaderLock;
+
+        #[tokio::test]
+        async fn acquires_leadership_when_lock_is_free() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock, "node-1".to_string());
+
+            assert!(!election.is_leader());
+            let became_leader = election.ensure_leader().await;
+            assert!(became_leader);
+            assert!(election.is_leader());
+        }
+
+        #[tokio::test]
+        async fn stays_follower_when_lock_is_denied() {
+            let lock = MockLeaderLock::new();
+            lock.deny_acquire();
+            let mut election = LeaderElection::new(lock, "node-2".to_string());
+
+            let became_leader = election.ensure_leader().await;
+            assert!(!became_leader);
+            assert!(!election.is_leader());
+        }
+
+        #[tokio::test]
+        async fn loses_leadership_when_renew_fails() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock.clone(), "node-3".to_string());
+
+            // Acquire leadership
+            election.ensure_leader().await;
+            assert!(election.is_leader());
+
+            // Force immediate renew by clearing last_renewed
+            election.last_renewed = None;
+
+            // Deny renewal — simulates lost leadership (e.g. clock skew, NATS partition)
+            lock.deny_renew();
+            election.ensure_leader().await;
+            assert!(!election.is_leader());
+        }
+
+        #[tokio::test]
+        async fn release_clears_leader_state() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock, "node-4".to_string());
+            election.ensure_leader().await;
+            assert!(election.is_leader());
+
+            election.release().await;
+            assert!(!election.is_leader());
         }
     }
 }

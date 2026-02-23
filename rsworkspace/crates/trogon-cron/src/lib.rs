@@ -50,9 +50,16 @@ pub mod error;
 pub mod executor;
 pub mod kv;
 pub mod leader;
+pub mod nats_impls;
 pub mod scheduler;
+pub mod traits;
+
+#[cfg(feature = "test-support")]
+pub mod mocks;
 
 pub use client::CronClient;
 pub use config::{Action, JobConfig, Schedule, TickPayload};
 pub use error::CronError;
+pub use nats_impls::NatsLeaderLock;
 pub use scheduler::Scheduler;
+pub use traits::{LeaderLock, TickPublisher};

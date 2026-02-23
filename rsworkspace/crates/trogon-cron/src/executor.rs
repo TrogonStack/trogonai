@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     config::{Action, JobConfig, TickPayload},
     error::CronError,
+    traits::TickPublisher,
 };
 
 /// Per-job runtime state tracked by the scheduler.
@@ -43,8 +44,8 @@ impl JobState {
     }
 }
 
-/// Fire a job: publish to NATS or spawn a process.
-pub async fn execute(nats: &async_nats::Client, state: &JobState, now: DateTime<Utc>) {
+/// Fire a job: publish to NATS (via `TickPublisher`) or spawn a process.
+pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: DateTime<Utc>) {
     let tick = TickPayload {
         job_id: state.config.id.clone(),
         fired_at: now,
@@ -53,7 +54,7 @@ pub async fn execute(nats: &async_nats::Client, state: &JobState, now: DateTime<
     };
 
     match &state.config.action {
-        Action::Publish { subject } => publish(nats, subject, &tick).await,
+        Action::Publish { subject } => publish(publisher, subject, &tick).await,
         Action::Spawn {
             bin,
             args,
@@ -75,7 +76,7 @@ pub async fn execute(nats: &async_nats::Client, state: &JobState, now: DateTime<
     }
 }
 
-async fn publish(nats: &async_nats::Client, subject: &str, tick: &TickPayload) {
+async fn publish<P: TickPublisher>(publisher: &P, subject: &str, tick: &TickPayload) {
     let payload = match serde_json::to_vec(tick) {
         Ok(p) => p,
         Err(e) => {
@@ -85,8 +86,8 @@ async fn publish(nats: &async_nats::Client, subject: &str, tick: &TickPayload) {
     };
     // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
     let headers = trogon_nats::messaging::headers_with_trace_context();
-    if let Err(e) = nats
-        .publish_with_headers(subject.to_string(), headers, payload.into())
+    if let Err(e) = publisher
+        .publish_tick(subject.to_string(), headers, payload.into())
         .await
     {
         tracing::error!(subject, error = %e, "Failed to publish tick");

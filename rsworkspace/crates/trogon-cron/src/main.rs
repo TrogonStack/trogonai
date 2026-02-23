@@ -2,6 +2,8 @@ use std::io::Read;
 
 use clap::{Parser, Subcommand};
 use trogon_cron::{CronClient, JobConfig, Schedule, Scheduler};
+use trogon_nats::{NatsConfig, connect as nats_connect};
+use trogon_std::env::SystemEnv;
 
 /// Distributed CRON scheduler over NATS.
 #[derive(Parser)]
@@ -71,9 +73,12 @@ async fn main() {
 }
 
 async fn connect(url: &str) -> async_nats::Client {
-    tracing::debug!(nats_url = %url, "Connecting to NATS");
-    async_nats::connect(url).await.unwrap_or_else(|e| {
-        eprintln!("Failed to connect to NATS at {url}: {e}");
+    let config = NatsConfig {
+        servers: vec![url.to_string()],
+        auth: NatsConfig::from_env(&SystemEnv).auth,
+    };
+    nats_connect(&config).await.unwrap_or_else(|e| {
+        eprintln!("Failed to connect to NATS: {e}");
         std::process::exit(1);
     })
 }

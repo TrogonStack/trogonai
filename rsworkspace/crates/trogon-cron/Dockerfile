@@ -1,32 +1,27 @@
-# ── Build stage ──────────────────────────────────────────────────────────────
-FROM rust:1.83-slim AS builder
+# Build context: rsworkspace/
+# docker build -f crates/trogon-cron/Dockerfile -t trogon-cron .
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-
+# ── Chef stage ────────────────────────────────────────────────────────────────
+FROM rust:1.83-slim AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /app
 
-# Cache dependencies before copying source
-COPY Cargo.toml Cargo.lock* ./
-# Stub out workspace members so cargo can resolve the graph
-COPY crates/trogon-std/Cargo.toml   crates/trogon-std/Cargo.toml
-COPY crates/trogon-nats/Cargo.toml  crates/trogon-nats/Cargo.toml
-COPY crates/trogon-cron/Cargo.toml  crates/trogon-cron/Cargo.toml
-RUN mkdir -p crates/trogon-std/src  && echo "pub fn _stub() {}" > crates/trogon-std/src/lib.rs
-RUN mkdir -p crates/trogon-nats/src && echo "pub fn _stub() {}" > crates/trogon-nats/src/lib.rs
-RUN mkdir -p crates/trogon-cron/src && echo "pub fn _stub() {}" > crates/trogon-cron/src/lib.rs \
-    && echo "fn main() {}" > crates/trogon-cron/src/main.rs
-RUN cargo build --release -p trogon-cron && rm -rf crates/*/src
+# ── Planner stage ─────────────────────────────────────────────────────────────
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# Build for real
-COPY crates/ crates/
-RUN touch crates/trogon-cron/src/main.rs crates/trogon-cron/src/lib.rs
+# ── Builder stage ─────────────────────────────────────────────────────────────
+FROM chef AS builder
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
 RUN cargo build --release -p trogon-cron
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
-
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-
 COPY --from=builder /app/target/release/trogon-cron /usr/local/bin/trogon-cron
 
 ENV NATS_URL=nats://localhost:4222

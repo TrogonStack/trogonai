@@ -11,6 +11,7 @@ use crate::{
     executor::{JobState, build_job_state, execute},
     kv::{self, get_or_create_config_bucket, get_or_create_leader_bucket, load_jobs_and_watch},
     leader::LeaderElection,
+    nats_impls::NatsLeaderLock,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_millis(500);
@@ -57,7 +58,7 @@ impl Scheduler {
         }
 
         // 4. Leader election.
-        let mut leader = LeaderElection::new(leader_kv, self.node_id.clone());
+        let mut leader = LeaderElection::new(NatsLeaderLock::new(leader_kv), self.node_id.clone());
 
         // 5. Main loop.
         let mut tick = tokio::time::interval(TICK_INTERVAL);
