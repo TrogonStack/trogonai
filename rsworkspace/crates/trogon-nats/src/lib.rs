@@ -14,11 +14,12 @@
 //! ```rust,no_run
 //! use trogon_nats::{NatsConfig, connect};
 //! use trogon_std::env::SystemEnv;
+//! use std::time::Duration;
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let config = NatsConfig::from_env(&SystemEnv);
-//!     let client = connect(&config).await.expect("Failed to connect");
+//!     let client = connect(&config, Duration::from_secs(10)).await.expect("Failed to connect");
 //! }
 //! ```
 //!
