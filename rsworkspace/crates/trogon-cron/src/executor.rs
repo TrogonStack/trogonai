@@ -82,7 +82,7 @@ impl JobState {
     }
 }
 
-/// Compute exponential backoff duration.
+/// Compute exponential backoff duration (deterministic, used in unit tests).
 ///
 /// Returns `base_sec * 2^(attempt-1)`, capped at `base_sec * 32` (five doublings max).
 /// `attempt` starts at 1 for the first retry.
@@ -91,6 +91,18 @@ fn retry_backoff(base_sec: u64, attempt: u32) -> Duration {
     let exponent = (attempt - 1).min(5);
     let multiplier = 1u64 << exponent; // 1, 2, 4, 8, 16, 32
     Duration::from_secs(base_sec * multiplier)
+}
+
+/// Exponential backoff with ±20 % random jitter.
+///
+/// Jitter prevents thundering-herd: when many jobs fail simultaneously (e.g.
+/// NATS restart), their retries are spread across a window instead of all
+/// firing at exactly the same instant.
+fn retry_backoff_with_jitter(base_sec: u64, attempt: u32) -> Duration {
+    let base = retry_backoff(base_sec, attempt);
+    // factor ∈ [0.8, 1.2) → ±20 % spread
+    let factor = 0.8 + rand::random::<f64>() * 0.4;
+    Duration::from_millis((base.as_millis() as f64 * factor) as u64)
 }
 
 /// Dead-letter payload published to `cron.errors` after all retries are exhausted.
@@ -162,7 +174,13 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
 
     match &state.config.action {
         Action::Publish { subject } => {
-            publish(publisher, subject, &tick, max_retries, retry_backoff_sec).await
+            // Spawn in a background task so publish retries do not block the
+            // scheduler loop or delay leader-heartbeat renewal.
+            let publisher = publisher.clone();
+            let subject = subject.clone();
+            tokio::spawn(async move {
+                publish(publisher, subject, tick, max_retries, retry_backoff_sec).await;
+            });
         }
         Action::Spawn {
             bin,
@@ -190,13 +208,13 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
 }
 
 async fn publish<P: TickPublisher>(
-    publisher: &P,
-    subject: &str,
-    tick: &TickPayload,
+    publisher: P,
+    subject: String,
+    tick: TickPayload,
     max_retries: u32,
     retry_backoff_sec: u64,
 ) {
-    let payload = match serde_json::to_vec(tick) {
+    let payload = match serde_json::to_vec(&tick) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(error = %e, "Failed to serialize tick payload");
@@ -211,19 +229,19 @@ async fn publish<P: TickPublisher>(
         // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
         let headers = trogon_nats::messaging::headers_with_trace_context();
         match publisher
-            .publish_tick(subject.to_string(), headers, payload.clone().into())
+            .publish_tick(subject.clone(), headers, payload.clone().into())
             .await
         {
             Ok(()) => return,
             Err(e) => {
                 last_error = e.to_string();
                 if attempt < total_attempts {
-                    let delay = retry_backoff(retry_backoff_sec, attempt);
+                    let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
                     tracing::warn!(
                         subject,
                         attempt,
                         max_retries,
-                        delay_secs = delay.as_secs(),
+                        delay_ms = delay.as_millis(),
                         error = %e,
                         "Publish failed, retrying"
                     );
@@ -240,7 +258,7 @@ async fn publish<P: TickPublisher>(
         "Publish failed after all retries"
     );
     if max_retries > 0 {
-        publish_dead_letter(publisher, tick, "publish", total_attempts, last_error).await;
+        publish_dead_letter(&publisher, &tick, "publish", total_attempts, last_error).await;
     }
 }
 
@@ -268,13 +286,13 @@ fn spawn_process<P: TickPublisher>(
         'retry: for attempt in 0..total_attempts {
             // Delay before retry attempts (not before the first attempt).
             if attempt > 0 {
-                let delay = retry_backoff(retry_backoff_sec, attempt);
+                let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
                 tracing::warn!(
                     bin = %bin,
                     job_id = %tick.job_id,
                     attempt,
                     max_retries,
-                    delay_secs = delay.as_secs(),
+                    delay_ms = delay.as_millis(),
                     "Spawn failed, retrying"
                 );
                 tokio::time::sleep(delay).await;

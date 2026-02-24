@@ -189,7 +189,7 @@ mod tests {
 }
 
 /// Message published to NATS when a job fires.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TickPayload {
     pub job_id: String,
     pub fired_at: DateTime<Utc>,
