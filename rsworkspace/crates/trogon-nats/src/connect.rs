@@ -73,7 +73,6 @@ fn apply_reconnect_options(opts: ConnectOptions, connection_timeout: Duration) -
         .event_callback(|event| async move { handle_event(event).await })
 }
 
-/// Connect to NATS with automatic reconnection and event handling.
 #[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(
     config: &NatsConfig,
@@ -163,11 +162,11 @@ mod tests {
 
     #[test]
     fn test_reconnect_delay_exponential_backoff() {
-        assert_eq!(reconnect_delay(0).as_secs(), 1); // 2^0 = 1
-        assert_eq!(reconnect_delay(1).as_secs(), 2); // 2^1 = 2
-        assert_eq!(reconnect_delay(2).as_secs(), 4); // 2^2 = 4
-        assert_eq!(reconnect_delay(3).as_secs(), 8); // 2^3 = 8
-        assert_eq!(reconnect_delay(4).as_secs(), 16); // 2^4 = 16
+        assert_eq!(reconnect_delay(0).as_secs(), 1);
+        assert_eq!(reconnect_delay(1).as_secs(), 2);
+        assert_eq!(reconnect_delay(2).as_secs(), 4);
+        assert_eq!(reconnect_delay(3).as_secs(), 8);
+        assert_eq!(reconnect_delay(4).as_secs(), 16);
     }
 
     #[test]
