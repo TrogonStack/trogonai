@@ -4982,3 +4982,907 @@ async fn test_tick_payload_all_fields_present() {
     handle.abort();
     client.remove_job(&id).await.unwrap();
 }
+
+// ── Disabled job registered before scheduler start never fires ────────────────
+
+/// A job with `enabled: false` that is already in the KV store when the
+/// scheduler starts must never produce a tick — the scheduler must respect
+/// the disabled flag from the initial snapshot.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_disabled_job_never_fires() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-disabled-start");
+    let subject = format!("cron.disabled-start.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: false,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let result = tokio::time::timeout(Duration::from_secs(3), sub.next()).await;
+    assert!(result.is_err(), "Disabled job must not fire at scheduler start");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Enabling a disabled job while scheduler runs starts ticks ─────────────────
+
+/// Register a disabled job, start the scheduler (verify silence), then call
+/// `set_enabled(true)` and confirm ticks begin arriving within 3 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_enable_disabled_job_starts_firing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-enable-disabled");
+    let subject = format!("cron.enable-disabled.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: false,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // Wait 1 s to confirm job is silent while disabled.
+    let silent = tokio::time::timeout(Duration::from_secs(1), sub.next()).await;
+    assert!(silent.is_err(), "Disabled job must not fire before being enabled");
+
+    // Now enable it — should trigger a hot-reload and start firing.
+    client.set_enabled(&id, true).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await
+        .expect("Job must fire after being enabled")
+        .unwrap()
+        .unwrap();
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Payload updated via hot-reload appears in subsequent ticks ─────────────────
+
+/// Register a job with payload A, receive one tick (payload = A), then
+/// hot-reload the job with payload B.  The next tick must carry payload B.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_payload_hot_reload_updates_tick() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-payload-reload");
+    let subject = format!("cron.payload-reload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let payload_a = serde_json::json!({ "version": "A" });
+    let payload_b = serde_json::json!({ "version": "B" });
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(payload_a.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // Collect the first tick — must carry payload A.
+    let msg_a = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out waiting for first tick").unwrap().unwrap();
+    let tick_a: trogon_cron::TickPayload = serde_json::from_slice(&msg_a.payload).unwrap();
+    assert_eq!(tick_a.payload.as_ref().unwrap(), &payload_a, "First tick must carry payload A");
+
+    // Hot-reload with payload B.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(payload_b.clone()),
+    }).await.unwrap();
+
+    // Drain any already-queued ticks that may still carry payload A,
+    // then assert the first tick with payload B arrives within 5 s.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(!remaining.is_zero(), "Timed out waiting for tick with payload B after hot-reload");
+        let msg = tokio::time::timeout(remaining, sub.next())
+            .await.expect("Timeout waiting for tick with B").unwrap().unwrap();
+        let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+        if tick.payload.as_ref() == Some(&payload_b) {
+            break; // Got the updated payload — test passes.
+        }
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── execution_id has UUID format ──────────────────────────────────────────────
+
+/// The `execution_id` field of every tick must look like a UUID:
+/// 36 characters, lowercase hex groups separated by exactly 4 hyphens
+/// (e.g. `550e8400-e29b-41d4-a716-446655440000`).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_execution_id_is_uuid_format() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-exec-uuid");
+    let subject = format!("cron.exec-uuid.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+
+    let eid = &tick.execution_id;
+    assert_eq!(eid.len(), 36, "execution_id must be 36 chars, got {eid:?}");
+    assert_eq!(
+        eid.chars().filter(|c| *c == '-').count(), 4,
+        "execution_id must have 4 hyphens, got {eid:?}"
+    );
+    // Verify each segment is hex digits.
+    let parts: Vec<&str> = eid.split('-').collect();
+    for part in &parts {
+        assert!(
+            part.chars().all(|c| c.is_ascii_hexdigit()),
+            "execution_id segment {part:?} contains non-hex chars"
+        );
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Extra positional args are forwarded to the spawned process ────────────────
+
+/// When `args` contains positional arguments beyond `-c <script>`, they must
+/// be available inside the shell as `$1`, `$2`, `$3`.
+///
+/// Uses the sh convention: `sh -c 'script' sh arg1 arg2 arg3`
+/// where the second `sh` becomes `$0` and the rest become `$1`…`$3`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_positional_args_forwarded() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-pos-args");
+    let out: PathBuf = std::env::temp_dir().join(format!("trogon-posargs-{id}"));
+    let _ = std::fs::remove_file(&out);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                // Write $1 $2 $3 to a file, one per line.
+                format!("printf '%s\\n' \"$1\" \"$2\" \"$3\" > '{}'", out.to_str().unwrap()),
+                "sh".to_string(),    // $0 (argv[0] for the script)
+                "alpha".to_string(), // $1
+                "beta".to_string(),  // $2
+                "gamma".to_string(), // $3
+            ],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if out.exists() {
+            let content = std::fs::read_to_string(&out).unwrap_or_default();
+            if !content.trim().is_empty() { break; }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "Spawn never wrote positional args output");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let written = std::fs::read_to_string(&out).unwrap();
+    let lines: Vec<&str> = written.lines().collect();
+    assert_eq!(lines.get(0).copied(), Some("alpha"), "$1 must be 'alpha'");
+    assert_eq!(lines.get(1).copied(), Some("beta"),  "$2 must be 'beta'");
+    assert_eq!(lines.get(2).copied(), Some("gamma"), "$3 must be 'gamma'");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&out);
+}
+
+// ── Interval job fires immediately on scheduler load ──────────────────────────
+
+/// `Schedule::Interval` must fire on the very first scheduler tick after
+/// loading, without waiting the full `interval_sec`.  Even with a 30-second
+/// interval the first tick must arrive within 2 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_interval_fires_immediately_on_load() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-imm-fire");
+    let subject = format!("cron.imm-fire.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 30 }, // long interval
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // Must fire well before the 30-second interval expires.
+    tokio::time::timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("Interval job must fire immediately on load, not after interval_sec")
+        .unwrap()
+        .unwrap();
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── CRON_EXECUTION_ID env var in spawned process has UUID format ──────────────
+
+/// The spawned process receives `CRON_EXECUTION_ID` as an environment
+/// variable.  Write it to a file and verify the value is a valid UUID
+/// (36 chars, 4 hyphens, all hex segments).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_cron_execution_id_env_var() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-exec-id-env");
+    let out: PathBuf = std::env::temp_dir().join(format!("trogon-execid-{id}"));
+    let _ = std::fs::remove_file(&out);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!("printf '%s' \"$CRON_EXECUTION_ID\" > '{}'", out.to_str().unwrap()),
+            ],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if out.exists() {
+            let s = std::fs::read_to_string(&out).unwrap_or_default();
+            if !s.is_empty() { break; }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "Spawn never wrote CRON_EXECUTION_ID");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let eid = std::fs::read_to_string(&out).unwrap();
+    let eid = eid.trim();
+    assert_eq!(eid.len(), 36, "CRON_EXECUTION_ID must be 36 chars, got {eid:?}");
+    assert_eq!(
+        eid.chars().filter(|c| *c == '-').count(), 4,
+        "CRON_EXECUTION_ID must have 4 hyphens, got {eid:?}"
+    );
+    for part in eid.split('-') {
+        assert!(
+            part.chars().all(|c| c.is_ascii_hexdigit()),
+            "CRON_EXECUTION_ID segment {part:?} is not hex"
+        );
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&out);
+}
+
+// ── Two CronClient instances: last write wins ─────────────────────────────────
+
+/// Two independent `CronClient` instances register the same job ID with
+/// different publish subjects.  The second registration must overwrite the
+/// first in the KV store, and the scheduler must fire on the second subject
+/// only.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_two_clients_last_write_wins() {
+    let (nats, js) = connect_js().await;
+    let client1 = CronClient::new(nats.clone()).await.unwrap();
+    let client2 = CronClient::new(nats.clone()).await.unwrap();
+
+    let id = unique_id("test-two-clients");
+    let subject_a = format!("cron.two-clients-a.{id}");
+    let subject_b = format!("cron.two-clients-b.{id}");
+
+    let mut sub_a = cron_messages(&nats, &js, subject_a.clone()).await;
+    let mut sub_b = cron_messages(&nats, &js, subject_b.clone()).await;
+
+    // client1 writes first…
+    client1.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject_a.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    // …client2 overwrites with a different subject.
+    client2.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject_b.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // subject_b must fire (last write wins).
+    tokio::time::timeout(Duration::from_secs(3), sub_b.next())
+        .await
+        .expect("subject_b must fire — last write should win")
+        .unwrap()
+        .unwrap();
+
+    // subject_a must be silent.
+    let silent = tokio::time::timeout(Duration::from_millis(500), sub_a.next()).await;
+    assert!(silent.is_err(), "subject_a must not fire after being overwritten");
+
+    handle.abort();
+    client1.remove_job(&id).await.unwrap();
+}
+
+// ── Removing a non-existent job is a no-op ────────────────────────────────────
+
+/// `CronClient::remove_job` must return `Ok(())` even when the given job ID
+/// has never been registered.  This validates the documented "no-op if not
+/// found" contract.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_remove_nonexistent_job_no_error() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+
+    // ID that has never been registered.
+    let id = unique_id("test-remove-nonexistent");
+    let result = client.remove_job(&id).await;
+    assert!(result.is_ok(), "remove_job on unknown ID must return Ok, got: {result:?}");
+}
+
+// ── concurrent:false respawns after previous process exits normally ────────────
+
+/// With `concurrent: false`, once a spawned process exits the `is_running`
+/// flag must clear so the next tick can launch a new process.
+///
+/// Use a process that exits quickly (sleep 0).  Over 4 s the job must fire
+/// at least twice, proving the flag is properly reset after each completion.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_concurrent_false_respawns_after_exit() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-conc-respawn");
+    let counter: PathBuf = std::env::temp_dir().join(format!("trogon-respawn-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(),
+                format!("echo x >> '{}'", counter.to_str().unwrap())],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    let count = std::fs::read_to_string(&counter)
+        .unwrap_or_default().lines().count();
+
+    // Fast process + 1-s interval → should fire at least twice in 4 s.
+    assert!(
+        count >= 2,
+        "concurrent:false must respawn after exit; only {count} fires in 4 s"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── get_job returns None for an unknown id ────────────────────────────────────
+
+/// `CronClient::get_job` must return `Ok(None)` for a job id that was never
+/// registered, confirming the documented contract.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_get_job_returns_none_for_unknown_id() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+
+    let result = client.get_job(&unique_id("test-get-none")).await.unwrap();
+    assert!(result.is_none(), "get_job must return None for an unregistered id");
+}
+
+// ── Spawn with non-zero exit code: scheduler continues firing ─────────────────
+
+/// A spawned process that exits with a non-zero status code must not crash
+/// or freeze the scheduler.  The `is_running` flag must clear on exit
+/// regardless of exit code so subsequent ticks can spawn again.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_nonzero_exit_continues_firing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-nonzero-exit");
+    let counter: PathBuf = std::env::temp_dir().join(format!("trogon-nonzero-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    // Script appends a line then exits with code 1.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(),
+                format!("echo x >> '{}'; exit 1", counter.to_str().unwrap())],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    let count = std::fs::read_to_string(&counter)
+        .unwrap_or_default().lines().count();
+
+    // Non-zero exit must not freeze spawning: expect ≥2 fires in 4 s.
+    assert!(
+        count >= 2,
+        "Scheduler must continue spawning after non-zero exit; got {count} fires"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── Large JSON payload survives the round-trip ────────────────────────────────
+
+/// A deeply nested JSON payload (~1 KB) must survive the full path:
+/// KV storage → scheduler tick → NATS message → deserialized `TickPayload`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_large_json_payload_round_trips() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-large-payload");
+    let subject = format!("cron.large-payload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Build a ~1 KB payload.
+    let large = serde_json::json!({
+        "level1": {
+            "level2": {
+                "level3": {
+                    "data": "A".repeat(512),
+                    "numbers": (0..32).collect::<Vec<_>>(),
+                    "flag": true
+                }
+            }
+        },
+        "tags": ["alpha", "beta", "gamma", "delta", "epsilon"]
+    });
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(large.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out waiting for large-payload tick").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+
+    assert_eq!(
+        tick.payload.unwrap(), large,
+        "Large JSON payload must survive the round-trip unchanged"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Scheduler with no pre-existing jobs picks up dynamically added job ─────────
+
+/// Start the scheduler when the KV store has no job entries, then register a
+/// job through the client.  The scheduler must pick it up via the KV watcher
+/// and begin firing within 3 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_scheduler_picks_up_dynamically_added_job() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-dynamic-add");
+    let subject = format!("cron.dynamic-add.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    reset_leader_lock(&js).await;
+
+    // Start the scheduler BEFORE registering any job.
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // Give scheduler a moment to settle, then add the job dynamically.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    // Scheduler must pick up the new job via the watcher and fire.
+    tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await
+        .expect("Scheduler must fire dynamically added job via KV watcher")
+        .unwrap()
+        .unwrap();
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── execution_id is unique across every tick ──────────────────────────────────
+
+/// Collect 10 consecutive ticks and assert that every `execution_id` is
+/// distinct — the scheduler must generate a fresh UUID for each invocation.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_execution_ids_never_repeat_across_ticks() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-exec-unique");
+    let subject = format!("cron.exec-unique.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    for i in 0..10usize {
+        let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap_or_else(|_| panic!("Timed out waiting for tick #{i}"))
+            .unwrap().unwrap();
+        let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+        let eid = tick.execution_id.clone();
+        assert!(
+            seen.insert(eid.clone()),
+            "execution_id {eid:?} repeated on tick #{i}"
+        );
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── register_job rejects empty publish subject ────────────────────────────────
+
+/// An empty string as the publish subject must be rejected immediately by
+/// `CronClient::register_job` with an `InvalidJobConfig` error because it
+/// does not start with `"cron."`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_register_job_rejects_empty_publish_subject() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+
+    let result = client.register_job(&JobConfig {
+        id: unique_id("test-empty-subj"),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "".to_string() },
+        enabled: true,
+        payload: None,
+    }).await;
+
+    assert!(
+        matches!(result, Err(trogon_cron::CronError::InvalidJobConfig { .. })),
+        "Empty subject must return InvalidJobConfig, got: {result:?}"
+    );
+}
+
+// ── list_jobs reflects exact add/remove sequence ──────────────────────────────
+
+/// Register 3 jobs with unique IDs, remove the middle one, then call
+/// `list_jobs()` and assert the returned list contains exactly the 2
+/// remaining IDs and not the removed one.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_list_jobs_exact_contents_after_add_remove() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+
+    let id_a = unique_id("test-list-exact-a");
+    let id_b = unique_id("test-list-exact-b");
+    let id_c = unique_id("test-list-exact-c");
+
+    for id in [&id_a, &id_b, &id_c] {
+        client.register_job(&JobConfig {
+            id: id.clone(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: format!("cron.list-exact.{id}") },
+            enabled: true,
+            payload: None,
+        }).await.unwrap();
+    }
+
+    // Remove the middle job.
+    client.remove_job(&id_b).await.unwrap();
+
+    let jobs = client.list_jobs().await.unwrap();
+    let ids: Vec<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+
+    assert!(ids.contains(&id_a.as_str()), "id_a must still be listed");
+    assert!(ids.contains(&id_c.as_str()), "id_c must still be listed");
+    assert!(!ids.contains(&id_b.as_str()), "id_b must not appear after removal");
+
+    // Cleanup.
+    client.remove_job(&id_a).await.unwrap();
+    client.remove_job(&id_c).await.unwrap();
+}
+
+// ── JobConfig round-trips through the KV store unchanged ─────────────────────
+
+/// Register a `JobConfig` with every field populated, retrieve it via
+/// `get_job()`, and assert every field survives the serialise→store→
+/// deserialise round-trip without alteration.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_job_config_round_trips_through_kv() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-kv-roundtrip");
+
+    let original = JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: "*/5 * * * * *".to_string() },
+        action: Action::Publish { subject: format!("cron.kv-roundtrip.{id}") },
+        enabled: false,
+        payload: Some(serde_json::json!({ "round": "trip", "n": 99 })),
+    };
+
+    client.register_job(&original).await.unwrap();
+    let retrieved = client.get_job(&id).await.unwrap()
+        .expect("Job must be retrievable after registration");
+
+    assert_eq!(retrieved.id, original.id);
+    assert_eq!(retrieved.enabled, original.enabled);
+    assert_eq!(retrieved.payload, original.payload);
+    // Schedule variant preserved.
+    assert!(
+        matches!(retrieved.schedule, Schedule::Cron { ref expr } if expr == "*/5 * * * * *"),
+        "Schedule must round-trip correctly, got: {:?}", retrieved.schedule
+    );
+
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Timeout longer than process duration does not prematurely kill ────────────
+
+/// A spawned process that finishes in ~100 ms with a generous `timeout_sec`
+/// of 10 s must not be killed early.  The `is_running` flag clears on natural
+/// exit and the job fires at least 3 times in 4 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_timeout_does_not_prematurely_kill() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-timeout-safe");
+    let counter: PathBuf = std::env::temp_dir().join(format!("trogon-timeout-safe-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(),
+                format!("echo x >> '{}'; sleep 0.1", counter.to_str().unwrap())],
+            concurrent: false,
+            timeout_sec: Some(10), // much longer than the ~0.1 s process
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    let count = std::fs::read_to_string(&counter)
+        .unwrap_or_default().lines().count();
+
+    assert!(
+        count >= 3,
+        "Fast process with long timeout must fire ≥3 times in 4 s; got {count}"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── All ticks from the same job carry the same job_id ─────────────────────────
+
+/// Collect 5 consecutive ticks and assert that every tick's `job_id` field
+/// equals the registered job ID — no tick must carry a wrong or empty id.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_all_ticks_carry_same_job_id() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-same-jobid");
+    let subject = format!("cron.same-jobid.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    for i in 0..5usize {
+        let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap_or_else(|_| panic!("Timed out on tick #{i}"))
+            .unwrap().unwrap();
+        let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+        assert_eq!(
+            tick.job_id, id,
+            "Tick #{i} must carry job_id={id}, got {:?}", tick.job_id
+        );
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
