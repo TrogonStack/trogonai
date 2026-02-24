@@ -734,3 +734,273 @@ async fn test_spawn_timeout_kills_process() {
     let _ = std::fs::remove_file(&started);
     let _ = std::fs::remove_file(&done);
 }
+
+// ── Leader election failover ──────────────────────────────────────────────────
+
+/// Verify that when the active leader crashes (lock NOT released gracefully),
+/// a second scheduler acquires leadership after the TTL expires (≤ 10 s) and
+/// resumes firing ticks automatically.
+///
+/// This test intentionally does NOT call `reset_leader_lock` between the two
+/// schedulers — that is the whole point: the failover must work without manual
+/// intervention.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_leader_failover() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-failover");
+    let subject = format!("cron.failover.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // Start scheduler A — becomes the initial leader.
+    let nats_a = nats.clone();
+    let handle_a = tokio::spawn(async move {
+        Scheduler::new(nats_a).run().await.ok();
+    });
+
+    // Confirm A is leader and firing ticks.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Scheduler A never fired — not leader")
+        .unwrap()
+        .unwrap();
+
+    // Kill A — simulates a crash. Lock is NOT released; it must expire naturally.
+    handle_a.abort();
+
+    // Start scheduler B immediately. It must wait for the TTL to expire (≤ 10 s).
+    let nats_b = nats.clone();
+    let handle_b = tokio::spawn(async move {
+        Scheduler::new(nats_b).run().await.ok();
+    });
+
+    // Allow up to 15 s: worst-case TTL (10 s) + scheduler startup + one tick interval.
+    tokio::time::timeout(Duration::from_secs(15), sub.next())
+        .await
+        .expect("Scheduler B did not take over within 15 s after leader crash")
+        .unwrap()
+        .unwrap();
+
+    handle_b.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Graceful shutdown releases lock ──────────────────────────────────────────
+
+/// Verify that SIGTERM causes the scheduler to release the leader lock
+/// immediately, so the next scheduler takes over in < 3 s instead of waiting
+/// for the 10-second TTL.
+///
+/// Runs the real binary as a subprocess so SIGTERM can be sent via kill(2).
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_graceful_shutdown_releases_lock() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-shutdown");
+    let subject = format!("cron.shutdown.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // Spawn the real binary so SIGTERM targets only that OS process.
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let mut child = tokio::process::Command::new(bin)
+        .args(["serve"])
+        .env("NATS_URL", test_url())
+        .env("RUST_LOG", "error")
+        .spawn()
+        .expect("Failed to spawn trogon-cron binary");
+
+    // Wait for the binary to become leader and fire at least one tick.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Binary scheduler never fired — not leader")
+        .unwrap()
+        .unwrap();
+
+    // Send SIGTERM — scheduler releases the lock and exits cleanly.
+    let pid = child.id().expect("No PID");
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(pid as i32),
+        nix::sys::signal::Signal::SIGTERM,
+    ).expect("kill(SIGTERM) failed");
+
+    tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .expect("Binary did not exit within 5 s after SIGTERM")
+        .unwrap();
+
+    // Start a second scheduler. Because the lock was released, it must acquire
+    // leadership and fire within 3 s — NOT waiting up to 10 s for the TTL.
+    let nats2 = nats.clone();
+    let handle2 = tokio::spawn(async move {
+        Scheduler::new(nats2).run().await.ok();
+    });
+
+    tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await
+        .expect("Second scheduler did not acquire lock quickly — lock may not have been released on SIGTERM")
+        .unwrap()
+        .unwrap();
+
+    handle2.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Payload forwarding ────────────────────────────────────────────────────────
+
+/// Verify that the `payload` field from JobConfig is included verbatim in the
+/// TickPayload published to NATS, and that all standard fields are present.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_tick_payload_forwarded() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-payload");
+    let subject = format!("cron.payload.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let custom_payload = serde_json::json!({
+        "db": "main",
+        "region": "us-east-1",
+        "retries": 3
+    });
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(custom_payload.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Timed out waiting for tick")
+        .unwrap()
+        .unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, id, "job_id mismatch");
+    assert!(!tick.execution_id.is_empty(), "execution_id should be a non-empty UUID");
+    assert!(tick.payload.is_some(), "payload field should be present in tick");
+    assert_eq!(tick.payload.unwrap(), custom_payload, "payload content must match exactly");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── concurrent: true ─────────────────────────────────────────────────────────
+
+/// Verify that `concurrent: true` allows multiple invocations to overlap.
+///
+/// Each invocation sleeps 5 s after appending to a counter file.
+/// With `interval_sec: 1` and `concurrent: true`, after 4 s there must be
+/// at least 3 overlapping invocations running simultaneously.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_concurrent_true_allows_overlap() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-concurrent-true");
+    let counter: PathBuf = std::env::temp_dir().join(format!("trogon-cron-ctrue-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    // Each invocation appends a line then sleeps 5 s.
+    // With concurrent: true and interval 1s, multiple must start before any finish.
+    let script = format!("echo x >> '{}'; sleep 5", counter.to_str().unwrap());
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: true,
+            timeout_sec: Some(10),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // Wait 4 s — enough for ≥ 3 invocations at 1 s interval.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    let line_count = std::fs::read_to_string(&counter)
+        .unwrap_or_default()
+        .lines()
+        .count();
+
+    assert!(
+        line_count >= 3,
+        "concurrent: true should allow overlapping invocations; got {line_count}"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── Publish subject validation (network) ─────────────────────────────────────
+
+/// Verify that `register_job` rejects a publish job whose subject does not
+/// start with `cron.` — over a real NATS connection, not just in unit tests.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_register_job_rejects_non_cron_subject() {
+    let nats = connect().await;
+    let client = CronClient::new(nats).await.unwrap();
+
+    let result = client.register_job(&JobConfig {
+        id: unique_id("bad-subject"),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "events.backup".to_string() },
+        enabled: true,
+        payload: None,
+    }).await;
+
+    assert!(result.is_err(), "register_job should reject non-cron. subject");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("cron."),
+        "error message should mention 'cron.' prefix: {err}"
+    );
+}

@@ -26,6 +26,7 @@ trogon-std = { path = "../trogon-std" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+nix = { version = "0.29", features = ["signal"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [[bin]]
