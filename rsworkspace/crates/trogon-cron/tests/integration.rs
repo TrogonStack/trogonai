@@ -6960,7 +6960,7 @@ async fn test_spawn_retry_succeeds_on_second_attempt() {
         },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 2, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 2, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -7022,7 +7022,7 @@ async fn test_spawn_dead_letter_after_exhausted_retries() {
         },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 1, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 1, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -7069,7 +7069,7 @@ async fn test_retry_config_round_trips_through_kv() {
         action: Action::Publish { subject: format!("cron.{id}") },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 5, retry_backoff_sec: 3, max_retry_duration_sec: None }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 5, retry_backoff_sec: 3, max_backoff_sec: None, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     let fetched = client.get_job(&id).await.unwrap().expect("job must exist after register");
@@ -7119,7 +7119,7 @@ async fn test_spawn_dead_letter_respects_max_retry_duration() {
         payload: None,
         retry: Some(trogon_cron::RetryConfig {
             max_retries: 50,
-            retry_backoff_sec: 1,
+            retry_backoff_sec: 1, max_backoff_sec: None,
             max_retry_duration_sec: Some(3),
         }),
     }).await.unwrap();
@@ -7169,7 +7169,7 @@ async fn test_max_retry_duration_round_trips_through_kv() {
         payload: None,
         retry: Some(trogon_cron::RetryConfig {
             max_retries: 5,
-            retry_backoff_sec: 2,
+            retry_backoff_sec: 2, max_backoff_sec: None,
             max_retry_duration_sec: Some(120),
         }),
     }).await.unwrap();
@@ -7179,6 +7179,119 @@ async fn test_max_retry_duration_round_trips_through_kv() {
     assert_eq!(r.max_retries, 5);
     assert_eq!(r.retry_backoff_sec, 2);
     assert_eq!(r.max_retry_duration_sec, Some(120));
+
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── max_backoff_sec caps per-attempt delay ────────────────────────────────────
+
+/// With `retry_backoff_sec=30` but `max_backoff_sec=2`, every retry delay is
+/// capped at 2 s.  Without the cap, 3 retries of a failing spawn would take
+/// >60 s; with the cap the dead-letter should arrive in under 15 s.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_max_backoff_sec_caps_delay() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-maxbo");
+
+    let errors_consumer = js
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: "CRON_TICKS".to_string(),
+            subjects: vec!["cron.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .create_consumer(async_nats::jetstream::consumer::push::Config {
+            durable_name: Some(unique_id("c")),
+            deliver_subject: nats.new_inbox(),
+            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
+            filter_subject: "cron.errors".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut errors = errors_consumer.messages().await.unwrap();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 30,
+            max_backoff_sec: Some(2),
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // 3 retries × ≤2 s cap = ~6 s total; allow 15 s for flakiness.
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, attempts: u32 }
+
+    let start = tokio::time::Instant::now();
+    let deadline = start + Duration::from_secs(15);
+    let dl = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        let dl: DeadLetter = serde_json::from_slice(&msg.payload).unwrap();
+        if dl.job_id == id { break dl; }
+    };
+
+    // Without the cap, retry_backoff_sec=30 → first retry alone would take 30 s.
+    assert!(start.elapsed() < Duration::from_secs(14),
+        "max_backoff_sec did not cap delays; elapsed {:?}", start.elapsed());
+    assert_eq!(dl.attempts, 4, "expected 1 initial + 3 retries");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── max_backoff_sec round-trips through NATS KV ───────────────────────────────
+
+/// Register a job with `max_backoff_sec: Some(30)`, read it back via
+/// `get_job`, and assert the field survived the JSON ↔ KV round-trip.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_max_backoff_sec_round_trips_through_kv() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-maxbo-kv");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 5,
+            retry_backoff_sec: 2,
+            max_backoff_sec: Some(30),
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    let fetched = client.get_job(&id).await.unwrap().expect("job must exist");
+    let r = fetched.retry.expect("retry must be present");
+    assert_eq!(r.max_retries, 5);
+    assert_eq!(r.retry_backoff_sec, 2);
+    assert_eq!(r.max_backoff_sec, Some(30));
+    assert!(r.max_retry_duration_sec.is_none());
 
     client.remove_job(&id).await.unwrap();
 }

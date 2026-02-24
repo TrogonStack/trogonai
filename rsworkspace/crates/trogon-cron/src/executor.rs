@@ -98,11 +98,17 @@ fn retry_backoff(base_sec: u64, attempt: u32) -> Duration {
 /// Jitter prevents thundering-herd: when many jobs fail simultaneously (e.g.
 /// NATS restart), their retries are spread across a window instead of all
 /// firing at exactly the same instant.
-fn retry_backoff_with_jitter(base_sec: u64, attempt: u32) -> Duration {
+fn retry_backoff_with_jitter(base_sec: u64, attempt: u32, max_backoff: Option<Duration>) -> Duration {
     let base = retry_backoff(base_sec, attempt);
     // factor ∈ [0.8, 1.2) → ±20 % spread
     let factor = 0.8 + rand::random::<f64>() * 0.4;
-    Duration::from_millis((base.as_millis() as f64 * factor) as u64)
+    let delay = Duration::from_millis((base.as_millis() as f64 * factor) as u64);
+    // Apply explicit ceiling after jitter so the cap is strictly respected.
+    if let Some(max) = max_backoff {
+        delay.min(max)
+    } else {
+        delay
+    }
 }
 
 /// Dead-letter payload published to `cron.errors` after all retries are exhausted.
@@ -165,7 +171,7 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
         payload: state.config.payload.clone(),
     };
 
-    let (max_retries, retry_backoff_sec, max_retry_duration) = state
+    let (max_retries, retry_backoff_sec, max_retry_duration, max_backoff) = state
         .config
         .retry
         .as_ref()
@@ -173,8 +179,9 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
             r.max_retries,
             r.retry_backoff_sec.max(1),
             r.max_retry_duration_sec.map(Duration::from_secs),
+            r.max_backoff_sec.map(Duration::from_secs),
         ))
-        .unwrap_or((0, 1, None));
+        .unwrap_or((0, 1, None, None));
 
     match &state.config.action {
         Action::Publish { subject } => {
@@ -183,7 +190,7 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
             let publisher = publisher.clone();
             let subject = subject.clone();
             tokio::spawn(async move {
-                publish(publisher, subject, tick, max_retries, retry_backoff_sec, max_retry_duration).await;
+                publish(publisher, subject, tick, max_retries, retry_backoff_sec, max_retry_duration, max_backoff).await;
             });
         }
         Action::Spawn {
@@ -206,6 +213,7 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
                 max_retries,
                 retry_backoff_sec,
                 max_retry_duration,
+                max_backoff,
                 publisher.clone(),
             );
         }
@@ -219,6 +227,7 @@ async fn publish<P: TickPublisher>(
     max_retries: u32,
     retry_backoff_sec: u64,
     max_retry_duration: Option<Duration>,
+    max_backoff: Option<Duration>,
 ) {
     let payload = match serde_json::to_vec(&tick) {
         Ok(p) => p,
@@ -257,7 +266,7 @@ async fn publish<P: TickPublisher>(
                             break;
                         }
                     }
-                    let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
+                    let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt, max_backoff);
                     // Cap the sleep so we don't overshoot the duration budget.
                     let delay = if let Some(max_dur) = max_retry_duration {
                         delay.min(max_dur.saturating_sub(start.elapsed()))
@@ -299,6 +308,7 @@ fn spawn_process<P: TickPublisher>(
     max_retries: u32,
     retry_backoff_sec: u64,
     max_retry_duration: Option<Duration>,
+    max_backoff: Option<Duration>,
     publisher: P,
 ) {
     // Set is_running BEFORE entering the async task so the concurrent-guard in
@@ -330,7 +340,7 @@ fn spawn_process<P: TickPublisher>(
                         break 'retry;
                     }
                 }
-                let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
+                let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt, max_backoff);
                 // Cap the sleep so we don't overshoot the duration budget.
                 let delay = if let Some(max_dur) = max_retry_duration {
                     delay.min(max_dur.saturating_sub(start.elapsed()))
@@ -535,6 +545,11 @@ pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobSt
         if retry.max_retry_duration_sec == Some(0) {
             return Err(CronError::InvalidJobConfig {
                 reason: "max_retry_duration_sec must be >= 1 when set".into(),
+            });
+        }
+        if retry.max_backoff_sec == Some(0) {
+            return Err(CronError::InvalidJobConfig {
+                reason: "max_backoff_sec must be >= 1 when set".into(),
             });
         }
     }
@@ -810,7 +825,7 @@ mod tests {
             action: Action::Publish { subject: "cron.bad-retry".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 0, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 0, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("retry_backoff_sec"));
@@ -824,7 +839,7 @@ mod tests {
             action: Action::Publish { subject: "cron.good-retry".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         assert!(build_job_state(config).is_ok());
     }
@@ -837,7 +852,7 @@ mod tests {
             action: Action::Publish { subject: "cron.too-many".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 51, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 51, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("max_retries"));
@@ -851,7 +866,7 @@ mod tests {
             action: Action::Publish { subject: "cron.max50".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 50, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 50, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         assert!(build_job_state(config).is_ok());
     }
@@ -864,7 +879,7 @@ mod tests {
             action: Action::Publish { subject: "cron.bad-duration".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_retry_duration_sec: Some(0) }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: Some(0) }),
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("max_retry_duration_sec"));
@@ -878,7 +893,7 @@ mod tests {
             action: Action::Publish { subject: "cron.good-duration".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_retry_duration_sec: Some(30) }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: Some(30) }),
         };
         assert!(build_job_state(config).is_ok());
     }
@@ -907,4 +922,71 @@ mod tests {
         assert_eq!(retry_backoff(1, 7), Duration::from_secs(32));
         assert_eq!(retry_backoff(1, 100), Duration::from_secs(32));
     }
+    #[test]
+    fn max_backoff_sec_zero_is_rejected() {
+        let config = JobConfig {
+            id: "bad-maxbo".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.bad-maxbo".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig {
+                max_retries: 3,
+                retry_backoff_sec: 1,
+                max_backoff_sec: Some(0),
+                max_retry_duration_sec: None,
+            }),
+        };
+        let err = build_job_state(config).err().unwrap();
+        assert!(err.to_string().contains("max_backoff_sec"));
+    }
+
+    #[test]
+    fn max_backoff_sec_below_base_is_accepted() {
+        // max_backoff_sec < retry_backoff_sec is valid: the cap applies on every attempt,
+        // effectively making all delays equal to max_backoff_sec.
+        let config = JobConfig {
+            id: "maxbo-below-base".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.maxbo-below-base".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig {
+                max_retries: 3,
+                retry_backoff_sec: 30,
+                max_backoff_sec: Some(2),
+                max_retry_duration_sec: None,
+            }),
+        };
+        assert!(build_job_state(config).is_ok());
+    }
+
+    #[test]
+    fn max_backoff_sec_valid_is_accepted() {
+        let config = JobConfig {
+            id: "good-maxbo".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.good-maxbo".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig {
+                max_retries: 3,
+                retry_backoff_sec: 5,
+                max_backoff_sec: Some(30),
+                max_retry_duration_sec: None,
+            }),
+        };
+        assert!(build_job_state(config).is_ok());
+    }
+
+    #[test]
+    fn retry_backoff_with_jitter_respects_max_backoff() {
+        // With base=60 attempt=1 → base delay 60s; cap at 2s → delay must be <= 2s
+        let max = Duration::from_secs(2);
+        for _ in 0..20 {
+            let d = retry_backoff_with_jitter(60, 1, Some(max));
+            assert!(d <= max, "delay {d:?} exceeded max_backoff {max:?}");
+        }
+    }
+
 }
