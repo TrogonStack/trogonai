@@ -75,12 +75,16 @@ async fn cron_messages(
 }
 
 fn unique_id(prefix: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    // Use a full UUID v4 segment so IDs are globally unique across test runs.
+    // subsec_nanos would repeat on back-to-back runs (same nanosecond within a second),
+    // causing different test invocations to share the same KV key and counter file.
+    let short = uuid::Uuid::new_v4()
+        .to_string()
+        .split('-')
+        .next()
         .unwrap()
-        .subsec_nanos();
-    format!("{prefix}-{ts}")
+        .to_string();
+    format!("{prefix}-{short}")
 }
 
 /// Delete the leader lock so the next scheduler can acquire leadership immediately.
@@ -90,6 +94,21 @@ fn unique_id(prefix: &str) -> String {
 async fn reset_leader_lock(js: &jetstream::Context) {
     if let Ok(kv) = js.get_key_value(trogon_cron::kv::LEADER_BUCKET).await {
         let _ = kv.purge(trogon_cron::kv::LEADER_KEY).await;
+    }
+}
+
+/// Remove every job currently in the cron_configs bucket.
+///
+/// Called at the start of Spawn-based scheduler tests so that stale entries
+/// from previous (possibly failing) test runs do not interfere: without this,
+/// the scheduler loads all leftover jobs, spawns processes for each, and the
+/// sheer number of initial-snapshot entries can push the `load_jobs_and_watch`
+/// 500 ms deadline before the current test's job is delivered.
+async fn purge_all_jobs(client: &trogon_cron::CronClient) {
+    if let Ok(jobs) = client.list_jobs().await {
+        for job in jobs {
+            let _ = client.remove_job(&job.id).await;
+        }
     }
 }
 
@@ -2349,6 +2368,12 @@ async fn test_sigkill_escalation() {
 async fn test_concurrent_false_preserved_across_hot_reload() {
     let (nats, js) = connect_js().await;
     let client = CronClient::new(nats.clone()).await.unwrap();
+
+    // Remove all stale jobs from previous (possibly failing) runs so the scheduler
+    // starts with a clean slate and loads_jobs_and_watch completes within its 500 ms
+    // deadline (many leftover jobs can push the snapshot delivery past the deadline).
+    purge_all_jobs(&client).await;
+
     let id = unique_id("test-running-reload");
     let counter: PathBuf = std::env::temp_dir().join(format!("trogon-running-reload-{id}"));
     let _ = std::fs::remove_file(&counter);
@@ -6330,4 +6355,428 @@ async fn test_spawn_nonexistent_bin_scheduler_skips_gracefully() {
     handle.abort();
     client.remove_job(&bad_id).await.unwrap();
     client.remove_job(&good_id).await.unwrap();
+}
+
+// ── Integer payload round-trips correctly ─────────────────────────────────────
+
+/// `payload: Some(json!(42))` — a bare JSON integer — must survive the full
+/// KV → scheduler → NATS → deserialisation pipeline unchanged.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_payload_integer_round_trips() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-int-payload");
+    let subject = format!("cron.int-payload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let expected = serde_json::json!(42);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(expected.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.payload.unwrap(), expected, "Integer payload must round-trip unchanged");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Boolean payload round-trips correctly ─────────────────────────────────────
+
+/// `payload: Some(json!(true))` — a bare JSON boolean — must survive the
+/// full pipeline unchanged.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_payload_boolean_round_trips() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-bool-payload");
+    let subject = format!("cron.bool-payload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let expected = serde_json::json!(true);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(expected.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.payload.unwrap(), expected, "Boolean payload must round-trip unchanged");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Leader failover: standby scheduler takes over after leader crashes ─────────
+
+/// Start scheduler A (leader), confirm it fires, then abort it to simulate a
+/// crash.  Reset the leader lock and start scheduler B.  B must win the
+/// election and begin firing within 3 seconds — proving the standby failover
+/// path works end-to-end.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_leader_failover_standby_takes_over() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-failover");
+    let subject = format!("cron.failover.{id}");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // Start scheduler A and wait for it to become leader and fire.
+    let mut sub_a = cron_messages(&nats, &js, subject.clone()).await;
+    let nats_a = nats.clone();
+    let handle_a = tokio::spawn(async move { Scheduler::new(nats_a).run().await.ok(); });
+
+    tokio::time::timeout(Duration::from_secs(3), sub_a.next())
+        .await.expect("Scheduler A must fire before crash").unwrap().unwrap();
+
+    // Simulate leader crash.
+    handle_a.abort();
+
+    // Clear the stale lock so B can win immediately.
+    reset_leader_lock(&js).await;
+
+    // Start scheduler B (standby takes over).
+    let mut sub_b = cron_messages(&nats, &js, subject.clone()).await;
+    let nats_b = nats.clone();
+    let handle_b = tokio::spawn(async move { Scheduler::new(nats_b).run().await.ok(); });
+
+    tokio::time::timeout(Duration::from_secs(3), sub_b.next())
+        .await.expect("Scheduler B must take over after A crashes").unwrap().unwrap();
+
+    handle_b.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── concurrent:true spawns carry unique CRON_EXECUTION_IDs per invocation ──────
+
+/// With `concurrent: true` and a 3-second sleeping process on a 1-second
+/// interval, multiple invocations run simultaneously.  Each invocation writes
+/// its own `$CRON_EXECUTION_ID` to a shared file.  After 4 seconds the file
+/// must contain at least 2 distinct IDs, proving each spawn gets a fresh UUID.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_concurrent_true_spawns_have_unique_execution_ids() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-conc-execids");
+    let out: PathBuf = std::env::temp_dir().join(format!("trogon-conc-execids-{id}"));
+    let _ = std::fs::remove_file(&out);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(),
+                // Append execution_id then sleep so invocations overlap.
+                format!("echo \"$CRON_EXECUTION_ID\" >> '{}'; sleep 3", out.to_str().unwrap())],
+            concurrent: true,
+            timeout_sec: Some(10),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    let content = std::fs::read_to_string(&out).unwrap_or_default();
+    let ids: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+
+    assert!(ids.len() >= 2, "concurrent:true must spawn ≥2 invocations in 4 s; got {}", ids.len());
+    assert_eq!(ids.len(), unique.len(), "Every concurrent spawn must have a unique CRON_EXECUTION_ID");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&out);
+}
+
+// ── Cron */5 expression fires at most once per 5-second window ─────────────────
+
+/// `*/5 * * * * *` fires at seconds 0, 5, 10, 15 … of each minute.
+/// Collect two consecutive ticks and verify the gap between their `fired_at`
+/// timestamps is between 4 and 7 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cron_step_every_5_seconds() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-cron-5s");
+    let subject = format!("cron.cron5s.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: "*/5 * * * * *".to_string() },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(10), sub.next())
+        .await.expect("Timed out on first tick").unwrap().unwrap();
+    let msg2 = tokio::time::timeout(Duration::from_secs(10), sub.next())
+        .await.expect("Timed out on second tick").unwrap().unwrap();
+
+    let t1: trogon_cron::TickPayload = serde_json::from_slice(&msg1.payload).unwrap();
+    let t2: trogon_cron::TickPayload = serde_json::from_slice(&msg2.payload).unwrap();
+    let gap = (t2.fired_at - t1.fired_at).num_milliseconds().abs() as f64 / 1000.0;
+
+    assert!(
+        gap >= 4.0 && gap <= 7.0,
+        "*/5 cron should fire ~5 s apart, got {gap:.2} s"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Float payload round-trips correctly ───────────────────────────────────────
+
+/// `payload: Some(json!(3.14))` — a bare JSON floating-point number — must
+/// survive the full KV → scheduler → NATS pipeline unchanged.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_payload_float_round_trips() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-float-payload");
+    let subject = format!("cron.float-payload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let expected = serde_json::json!(3.14);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(expected.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.payload.unwrap(), expected, "Float payload must round-trip unchanged");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Bare string payload round-trips correctly ─────────────────────────────────
+
+/// `payload: Some(json!("hello world"))` — a JSON string scalar, not wrapped
+/// in an object — must survive the full pipeline unchanged.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_payload_bare_string_round_trips() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-str-payload");
+    let subject = format!("cron.str-payload.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let expected = serde_json::json!("hello world");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(expected.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.payload.unwrap(), expected, "Bare string payload must round-trip unchanged");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Disabling via register_job (not set_enabled) stops ticks ─────────────────
+
+/// Call `register_job` directly with `enabled: false` while the scheduler
+/// is running (as opposed to `set_enabled`).  This exercises the hot-reload
+/// path for the `enabled` field and must silence the job within 3 seconds.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_disable_via_register_job_stops_firing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-disable-via-register");
+    let subject = format!("cron.disable-reg.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let base_config = JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    };
+
+    client.register_job(&base_config).await.unwrap();
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Confirm job is firing.
+    tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Job must fire before disable").unwrap().unwrap();
+
+    // Disable by re-registering with enabled:false.
+    client.register_job(&JobConfig { enabled: false, ..base_config }).await.unwrap();
+
+    // Drain any in-flight tick, then assert silence.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while tokio::time::timeout(Duration::from_millis(100), sub.next()).await.is_ok() {}
+
+    let still_firing = tokio::time::timeout(Duration::from_secs(2), sub.next()).await;
+    assert!(still_firing.is_err(), "Job must stop firing after register_job with enabled:false");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── fired_at is close to the wall clock at the moment of receipt ──────────────
+
+/// The `fired_at` timestamp in a tick must be within 5 seconds of the
+/// actual wall-clock time when the message is received — confirming that
+/// the scheduler stamps ticks with the real current time, not a stale value.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_fired_at_close_to_wall_clock() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-fired-at-wall");
+    let subject = format!("cron.fired-at-wall.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let before = chrono::Utc::now();
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out").unwrap().unwrap();
+    let after = chrono::Utc::now();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+
+    assert!(
+        tick.fired_at >= before - chrono::Duration::seconds(1)
+            && tick.fired_at <= after + chrono::Duration::seconds(1),
+        "fired_at {:?} must be within the observation window [{before:?}, {after:?}]",
+        tick.fired_at
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Registering the same config twice is idempotent ──────────────────────────
+
+/// Calling `register_job` twice with identical configs must not cause double
+/// firing — the scheduler treats the second KV put as a hot-reload to the
+/// same state and fires exactly once per interval, not twice.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_register_same_config_twice_fires_once_per_tick() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-idempotent-reg");
+    let subject = format!("cron.idempotent-reg.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let config = JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    };
+
+    // Register twice with identical config.
+    client.register_job(&config).await.unwrap();
+    client.register_job(&config).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Collect ticks over 3 seconds — must not get 2 ticks per scheduler tick.
+    let mut count = 0usize;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while let Ok(Some(Ok(_))) = tokio::time::timeout(
+        deadline.saturating_duration_since(tokio::time::Instant::now()),
+        sub.next(),
+    ).await {
+        count += 1;
+    }
+
+    // 1-second interval over 3 s → expect 2–4 ticks total, NOT 4–8 (double-fire).
+    assert!(count <= 5, "Double-registration must not cause double-firing; got {count} ticks in 3 s");
+    assert!(count >= 1, "Job must still fire after double-registration; got {count} ticks");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
 }

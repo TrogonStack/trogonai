@@ -99,7 +99,8 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
             concurrent,
             timeout_sec,
         } => {
-            if !concurrent && state.is_running.load(Ordering::SeqCst) {
+            let is_run = state.is_running.load(Ordering::SeqCst);
+            if !concurrent && is_run {
                 tracing::debug!(job_id = %state.config.id, "Skipping tick — previous invocation still running");
                 return;
             }

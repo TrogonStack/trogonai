@@ -88,7 +88,9 @@ impl Scheduler {
 
                 entry = config_watcher.next() => {
                     match entry {
-                        Some(Ok(e)) => handle_config_change(&mut jobs, e),
+                        Some(Ok(e)) => {
+                            handle_config_change(&mut jobs, e);
+                        }
                         Some(Err(e)) => tracing::error!(error = %e, "Config watcher error"),
                         None => {
                             tracing::warn!("Config watcher stream ended");

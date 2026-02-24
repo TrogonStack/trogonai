@@ -123,7 +123,9 @@ pub async fn load_jobs_and_watch(
                     None => break,
                 }
             }
-            _ = &mut deadline => break, // bucket empty or no more entries
+            _ = &mut deadline => {
+                break; // bucket empty or no more entries
+            }
         }
     }
 
