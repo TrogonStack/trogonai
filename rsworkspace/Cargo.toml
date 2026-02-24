@@ -6,4 +6,6 @@ members = ["crates/*"]
 lto = "thin"
 strip = "symbols"
 codegen-units = 1
-panic = "abort"
+# Note: panic = "abort" removed because Cargo doesn't support per-package panic overrides.
+# Bridge crates use catch_unwind for panic isolation, which requires panic = "unwind".
+# All workspace crates will use unwinding in release builds for this reason.
