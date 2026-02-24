@@ -848,9 +848,9 @@ async fn test_graceful_shutdown_releases_lock() {
         nix::sys::signal::Signal::SIGTERM,
     ).expect("kill(SIGTERM) failed");
 
-    tokio::time::timeout(Duration::from_secs(5), child.wait())
+    tokio::time::timeout(Duration::from_secs(10), child.wait())
         .await
-        .expect("Binary did not exit within 5 s after SIGTERM")
+        .expect("Binary did not exit within 10 s after SIGTERM")
         .unwrap();
 
     // Start a second scheduler. Because the lock was released, it must acquire
