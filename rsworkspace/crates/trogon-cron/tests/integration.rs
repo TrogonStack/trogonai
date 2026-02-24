@@ -4705,3 +4705,280 @@ async fn test_concurrent_false_rate_limits_slow_process() {
     client.remove_job(&id).await.unwrap();
     let _ = std::fs::remove_file(&counter);
 }
+
+// ── concurrent:true does NOT rate-limit a slow process ───────────────────────
+
+/// With `concurrent: true` a new invocation can start even if the previous
+/// one is still running.  Use a 2-second sleeping process with a 1-second
+/// interval: over 8 s we expect ≥5 fires — roughly one per interval tick
+/// regardless of process duration.  This is the inverse of
+/// `test_concurrent_false_rate_limits_slow_process`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_concurrent_true_not_rate_limited() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-conc-true-rate");
+    let counter: PathBuf = std::env::temp_dir().join(format!("trogon-conc-true-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(),
+                format!("echo x >> '{}'; sleep 2", counter.to_str().unwrap())],
+            concurrent: true,
+            timeout_sec: Some(15),
+        },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    let count = std::fs::read_to_string(&counter)
+        .unwrap_or_default().lines().count();
+
+    // concurrent:true — new spawn every ~1 s regardless of the 2-s sleep.
+    // Expect at least 5 fires in 8 s (generous lower bound for CI).
+    assert!(count >= 5, "concurrent:true should not rate-limit; got only {count} fires in 8 s");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── Cron */3 expression fires every 3 seconds ─────────────────────────────────
+
+/// A cron expression `*/3 * * * * *` (every 3rd second) must produce ticks
+/// roughly 3 seconds apart.  Collect two consecutive ticks and check the
+/// wall-clock gap between their `fired_at` timestamps is between 2 and 5 s.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cron_every_3_seconds_timing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-cron-3s");
+    let subject = format!("cron.cron3s.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: "*/3 * * * * *".to_string() },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await.expect("Timed out waiting for first tick").unwrap().unwrap();
+    let msg2 = tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await.expect("Timed out waiting for second tick").unwrap().unwrap();
+
+    let tick1: trogon_cron::TickPayload = serde_json::from_slice(&msg1.payload).unwrap();
+    let tick2: trogon_cron::TickPayload = serde_json::from_slice(&msg2.payload).unwrap();
+
+    let t1 = tick1.fired_at;
+    let t2 = tick2.fired_at;
+    let gap_secs = (t2 - t1).num_milliseconds().abs() as f64 / 1000.0;
+
+    assert!(
+        gap_secs >= 2.0 && gap_secs <= 5.0,
+        "*/3 cron should fire ~3 s apart, got {gap_secs:.2} s"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Each spawn job writes its own correct CRON_JOB_ID ────────────────────────
+
+/// Register two spawn jobs.  Each writes `$CRON_JOB_ID` to a separate temp
+/// file.  After both fire, read each file and confirm it contains exactly the
+/// ID configured for that job — no cross-contamination.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_two_spawn_jobs_correct_job_ids() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+
+    let id_a = unique_id("test-jobid-a");
+    let id_b = unique_id("test-jobid-b");
+    let out_a: PathBuf = std::env::temp_dir().join(format!("trogon-jobid-a-{id_a}"));
+    let out_b: PathBuf = std::env::temp_dir().join(format!("trogon-jobid-b-{id_b}"));
+    let _ = std::fs::remove_file(&out_a);
+    let _ = std::fs::remove_file(&out_b);
+
+    for (id, out) in [(&id_a, &out_a), (&id_b, &out_b)] {
+        client.register_job(&JobConfig {
+            id: id.clone(),
+            schedule: Schedule::Interval { interval_sec: 1 },
+            action: Action::Spawn {
+                bin: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(),
+                    format!("printf '%s' \"$CRON_JOB_ID\" > '{}'", out.to_str().unwrap())],
+                concurrent: false,
+                timeout_sec: Some(5),
+            },
+            enabled: true,
+            payload: None,
+        }).await.unwrap();
+    }
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    loop {
+        if out_a.exists() && out_b.exists() {
+            let ca = std::fs::read_to_string(&out_a).unwrap_or_default();
+            let cb = std::fs::read_to_string(&out_b).unwrap_or_default();
+            if !ca.is_empty() && !cb.is_empty() { break; }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "Not both spawn jobs wrote their output in time");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let written_a = std::fs::read_to_string(&out_a).unwrap();
+    let written_b = std::fs::read_to_string(&out_b).unwrap();
+
+    assert_eq!(written_a.trim(), id_a, "Job A wrote wrong CRON_JOB_ID");
+    assert_eq!(written_b.trim(), id_b, "Job B wrote wrong CRON_JOB_ID");
+
+    handle.abort();
+    client.remove_job(&id_a).await.unwrap();
+    client.remove_job(&id_b).await.unwrap();
+    let _ = std::fs::remove_file(&out_a);
+    let _ = std::fs::remove_file(&out_b);
+}
+
+// ── fired_at timestamps are monotonically increasing ─────────────────────────
+
+/// Collect 5 consecutive ticks from an interval job and assert that each
+/// tick's `fired_at` timestamp is strictly after the previous one.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_interval_tick_timestamps_monotonic() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-ts-monotonic");
+    let subject = format!("cron.ts-monotonic.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let mut timestamps = Vec::new();
+    for i in 0..5usize {
+        let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap_or_else(|_| panic!("Timed out waiting for tick #{i}"))
+            .unwrap().unwrap();
+        let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+        timestamps.push(tick.fired_at);
+    }
+
+    for i in 1..timestamps.len() {
+        assert!(
+            timestamps[i] > timestamps[i - 1],
+            "fired_at not monotonically increasing: tick[{i}]={} <= tick[{}]={}",
+            timestamps[i], i - 1, timestamps[i - 1]
+        );
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── All TickPayload fields are present and correct in a single tick ───────────
+
+/// Fire exactly one tick and verify all four `TickPayload` fields:
+/// - `job_id` matches the registered job id
+/// - `fired_at` is a non-empty, valid RFC3339 string
+/// - `execution_id` is a non-empty UUID-like string
+/// - `payload` matches the registered payload value
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_tick_payload_all_fields_present() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-all-fields");
+    let subject = format!("cron.all-fields.{id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    let expected_payload = serde_json::json!({ "check": "all-fields", "n": 42 });
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(expected_payload.clone()),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await.expect("Timed out waiting for tick").unwrap().unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+
+    // job_id
+    assert_eq!(tick.job_id, id, "job_id mismatch");
+
+    // fired_at — must be a recent timestamp (within last 10 s)
+    let age = chrono::Utc::now().signed_duration_since(tick.fired_at);
+    assert!(
+        age.num_seconds().abs() < 10,
+        "fired_at is not recent: {:?}", tick.fired_at
+    );
+
+    // execution_id — non-empty
+    assert!(!tick.execution_id.is_empty(), "execution_id must not be empty");
+
+    // payload
+    assert_eq!(
+        tick.payload.as_ref().unwrap(), &expected_payload,
+        "payload mismatch"
+    );
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
