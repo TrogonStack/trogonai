@@ -1,0 +1,24 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"   # client connections
+      - "8222:8222"   # HTTP monitoring
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  trogon-cron:
+    build:
+      context: ../..
+      dockerfile: crates/trogon-cron/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: on-failure
