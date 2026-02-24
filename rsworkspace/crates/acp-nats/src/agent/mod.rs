@@ -1,57 +1,110 @@
-mod authenticate;
-mod bridge;
-mod cancel;
-mod close_session;
-mod ext_method;
-mod ext_notification;
-mod fork_session;
 mod initialize;
-pub(crate) mod js_request;
-mod list_sessions;
-mod load_session;
-mod logout;
-mod new_session;
-mod prompt;
-mod resume_session;
-mod set_session_config_option;
-mod set_session_mode;
-mod set_session_model;
-#[cfg(test)]
-pub(crate) mod test_support;
 
-pub use bridge::Bridge;
-pub use prompt::REQ_ID_HEADER;
+use crate::config::Config;
+use crate::nats::{FlushClient, PublishClient, RequestClient};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::{
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
+    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    Result, SetSessionModeRequest, SetSessionModeResponse,
+};
+
+pub struct Bridge<N: RequestClient + PublishClient + FlushClient> {
+    pub(crate) nats: N,
+    pub(crate) config: Config,
+}
+
+impl<N: RequestClient + PublishClient + FlushClient> Bridge<N> {
+    pub fn new(nats: N, config: Config) -> Self {
+        Self { nats, config }
+    }
+
+    pub(crate) fn nats(&self) -> &N {
+        &self.nats
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl<N: RequestClient + PublishClient + FlushClient> Agent for Bridge<N> {
+    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        initialize::handle(self, args).await
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> Result<NewSessionResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn load_session(&self, _args: LoadSessionRequest) -> Result<LoadSessionResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn set_session_mode(
+        &self,
+        _args: SetSessionModeRequest,
+    ) -> Result<SetSessionModeResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn ext_method(&self, _args: ExtRequest) -> Result<ExtResponse> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+
+    async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
+        Err(Error::new(
+            ErrorCode::InternalError.into(),
+            "not yet implemented",
+        ))
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use super::Bridge;
-    use crate::agent::test_support::MockJs;
     use crate::config::Config;
     use agent_client_protocol::{
-        Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
+        Agent, AuthenticateRequest, CancelNotification, ExtNotification, ExtRequest,
+        LoadSessionRequest, NewSessionRequest, PromptRequest, SetSessionModeRequest,
     };
-    use tokio::sync::mpsc;
     use trogon_nats::AdvancedMockNatsClient;
 
-    fn mock_bridge() -> (
-        AdvancedMockNatsClient,
-        MockJs,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
-    ) {
-        let mock = AdvancedMockNatsClient::new();
-        let js = MockJs::new();
-        let (tx, _rx) = mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::new(
-            mock.clone(),
-            js.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            Config::for_test("acp"),
-            tx,
-        );
-        (mock, js, bridge)
+    fn mock_bridge() -> Bridge<AdvancedMockNatsClient> {
+        Bridge::new(AdvancedMockNatsClient::new(), Config::for_test("acp"))
     }
 
     fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
@@ -59,65 +112,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_background_tasks_completes() {
-        let (_mock, _js, bridge) = mock_bridge();
-        bridge.spawn_background(tokio::spawn(async {}));
-        bridge.drain_background_tasks().await;
-        assert!(bridge.background_tasks.borrow().is_empty());
-    }
+    async fn stub_methods_return_not_implemented() {
+        let bridge = mock_bridge();
+        let msg = "not yet implemented";
 
-    #[tokio::test]
-    async fn prompt_via_agent_trait_returns_done() {
-        let (mock, js, bridge) = mock_bridge();
-
-        // cancel sub for core NATS
-        let _cancel_tx = mock.inject_messages();
-
-        // notification consumer
-        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-        js.consumer_factory.add_consumer(notif_consumer);
-
-        // response consumer
-        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-        js.consumer_factory.add_consumer(resp_consumer);
-
-        let response = PromptResponse::new(StopReason::EndTurn);
-        let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-            subject: "test".into(),
-            reply: None,
-            payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
-            headers: None,
-            status: None,
-            description: None,
-            length: 0,
-        });
-        resp_tx.unbounded_send(Ok(msg)).unwrap();
-
-        let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test]
-    async fn ext_method_returns_agent_unavailable_when_nats_fails() {
-        use agent_client_protocol::ErrorCode;
-
-        let (_mock, _js, bridge) = mock_bridge();
-        let err = bridge
-            .ext_method(ExtRequest::new("ext", empty_raw_value()))
-            .await
-            .unwrap_err();
-        assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
-    }
-
-    #[tokio::test]
-    async fn ext_notification_returns_ok_even_when_publish_fails() {
-        let (_mock, _js, bridge) = mock_bridge();
+        assert!(
+            bridge
+                .authenticate(AuthenticateRequest::new("test"))
+                .await
+                .is_err()
+        );
+        assert!(
+            bridge
+                .new_session(NewSessionRequest::new("."))
+                .await
+                .is_err()
+        );
+        assert!(
+            bridge
+                .load_session(LoadSessionRequest::new("s1", "."))
+                .await
+                .is_err()
+        );
+        assert!(
+            bridge
+                .set_session_mode(SetSessionModeRequest::new("s1", "m1"))
+                .await
+                .is_err()
+        );
+        assert!(
+            bridge
+                .prompt(PromptRequest::new("s1", vec![]))
+                .await
+                .is_err()
+        );
+        assert!(bridge.cancel(CancelNotification::new("s1")).await.is_err());
+        assert!(
+            bridge
+                .ext_method(ExtRequest::new("ext", empty_raw_value()))
+                .await
+                .is_err()
+        );
         assert!(
             bridge
                 .ext_notification(ExtNotification::new("ext", empty_raw_value()))
                 .await
-                .is_ok()
+                .is_err()
         );
+
+        let err = bridge
+            .authenticate(AuthenticateRequest::new("test"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains(msg));
     }
 }
