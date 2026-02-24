@@ -1004,3 +1004,231 @@ async fn test_register_job_rejects_non_cron_subject() {
         "error message should mention 'cron.' prefix: {err}"
     );
 }
+
+// ── CLI binary ────────────────────────────────────────────────────────────────
+
+/// Verify the full CLI lifecycle: add → list → get → disable → enable → remove.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_job_lifecycle() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let id = unique_id("test-cli");
+    let nats_url = test_url();
+    let subject = format!("cron.cli.{id}");
+
+    // Write job JSON to a temp file so we can pass it as a file argument.
+    let tmp = std::env::temp_dir().join(format!("trogon-cli-{id}.json"));
+    let job_json = serde_json::json!({
+        "id": id,
+        "schedule": { "type": "interval", "interval_sec": 60 },
+        "action": { "type": "publish", "subject": subject },
+        "enabled": true
+    }).to_string();
+    std::fs::write(&tmp, &job_json).unwrap();
+
+    // job add <file>
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", tmp.to_str().unwrap()])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success(), "job add failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&id));
+
+    // job list — job must appear
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "list"])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&id));
+
+    // job get — returns valid JSON with correct id and enabled: true
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "get", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["id"], id.as_str());
+    assert_eq!(json["enabled"], true);
+
+    // job disable
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "disable", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success());
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "get", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["enabled"], false, "job should be disabled");
+
+    // job enable
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "enable", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success());
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "get", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["enabled"], true, "job should be re-enabled");
+
+    // job remove
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "remove", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(out.status.success());
+
+    // job get after removal must exit with error
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "get", &id])
+        .env("RUST_LOG", "error")
+        .output().await.unwrap();
+    assert!(!out.status.success(), "job get should fail after removal");
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+// ── Invalid KV entry ignored ──────────────────────────────────────────────────
+
+/// Verify that a malformed JSON entry written directly to the KV bucket
+/// (bypassing register_job) is silently ignored by the scheduler, which
+/// continues to fire valid jobs normally.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_invalid_job_config_in_kv_is_ignored() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-invalid-kv");
+    let subject = format!("cron.invalid-kv.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Write malformed JSON directly to KV, bypassing register_job validation.
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    let bad_key = format!("{}bad-{id}", trogon_cron::kv::JOBS_KEY_PREFIX);
+    kv.put(bad_key.clone(), "{ not valid json !!!".into()).await.unwrap();
+
+    // Register a valid job alongside the bad entry.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    // The valid job must still fire — the bad entry must not crash the scheduler.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Scheduler crashed or ignored valid job due to invalid KV entry")
+        .unwrap()
+        .unwrap();
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = kv.delete(bad_key).await;
+}
+
+// ── Cron expression with step value ──────────────────────────────────────────
+
+/// Verify that a cron expression with a step value (`*/2 * * * * *`) is
+/// parsed and fired correctly — tests a more complex expression than `* * * * * *`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cron_step_expression_fires() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-cron-step");
+    let subject = format!("cron.step.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // */2 * * * * * fires every even second — tests step value parsing.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: "*/2 * * * * *".to_string() },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Cron expression */2 * * * * * never fired within 5 s")
+        .unwrap()
+        .unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, id);
+    assert!(!tick.execution_id.is_empty());
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── payload: None ─────────────────────────────────────────────────────────────
+
+/// Verify that when a job has no payload configured, the TickPayload published
+/// to NATS has `payload: null` (field absent in JSON) and all other fields
+/// are present and correct.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_tick_without_payload() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-no-payload");
+    let subject = format!("cron.nopayload.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move {
+        Scheduler::new(scheduler_nats).run().await.ok();
+    });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Timed out waiting for tick")
+        .unwrap()
+        .unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, id);
+    assert!(!tick.execution_id.is_empty(), "execution_id must be present");
+    assert!(tick.fired_at <= chrono::Utc::now(), "fired_at must be a past timestamp");
+    assert!(tick.payload.is_none(), "payload should be None when not configured");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
