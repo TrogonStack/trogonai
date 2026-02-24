@@ -1684,6 +1684,7 @@ dependencies = [
  "futures",
  "nix",
  "opentelemetry",
+ "rand",
  "serde",
  "serde_json",
  "tokio",

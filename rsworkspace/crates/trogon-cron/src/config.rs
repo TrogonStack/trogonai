@@ -34,16 +34,24 @@ pub enum Action {
 /// Optional retry policy for a job.
 ///
 /// When a job fails (non-zero exit code for Spawn, publish error for Publish),
-/// the scheduler retries up to `max_retries` times using exponential backoff
-/// starting at `retry_backoff_sec` seconds.  After exhausting all attempts the
-/// failure is published to `cron.errors`.
+/// the scheduler retries up to `max_retries` times (max 50) using exponential
+/// backoff starting at `retry_backoff_sec` seconds.  The cycle also stops early
+/// if `max_retry_duration_sec` is set and the elapsed time exceeds it — whichever
+/// limit is hit first wins.  After exhausting all attempts the failure is
+/// published to `cron.errors`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
-    /// Number of retry attempts after the first failure (0 = no retries).
+    /// Number of retry attempts after the first failure (0 = no retries, max 50).
     pub max_retries: u32,
-    /// Base delay in seconds before the first retry; doubles on each subsequent attempt.
+    /// Base delay in seconds before the first retry; doubles on each subsequent attempt,
+    /// capped at 32× the base.  Must be >= 1.
     #[serde(default = "default_retry_backoff_sec")]
     pub retry_backoff_sec: u64,
+    /// Total time budget in seconds for all retry attempts combined.
+    /// The cycle stops when either `max_retries` or this duration is reached,
+    /// whichever comes first.  Must be >= 1 when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retry_duration_sec: Option<u64>,
 }
 
 fn default_retry_backoff_sec() -> u64 {
@@ -52,7 +60,7 @@ fn default_retry_backoff_sec() -> u64 {
 
 impl Default for RetryConfig {
     fn default() -> Self {
-        Self { max_retries: 0, retry_backoff_sec: 1 }
+        Self { max_retries: 0, retry_backoff_sec: 1, max_retry_duration_sec: None }
     }
 }
 
@@ -176,7 +184,7 @@ mod tests {
             action: Action::Publish { subject: "cron.retrying".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5 }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5, max_retry_duration_sec: None }),
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"max_retries\":3"));

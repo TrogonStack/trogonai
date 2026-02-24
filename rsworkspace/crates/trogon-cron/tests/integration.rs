@@ -6960,7 +6960,7 @@ async fn test_spawn_retry_succeeds_on_second_attempt() {
         },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 2, retry_backoff_sec: 1 }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 2, retry_backoff_sec: 1, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -7022,7 +7022,7 @@ async fn test_spawn_dead_letter_after_exhausted_retries() {
         },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 1, retry_backoff_sec: 1 }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 1, retry_backoff_sec: 1, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -7069,13 +7069,116 @@ async fn test_retry_config_round_trips_through_kv() {
         action: Action::Publish { subject: format!("cron.{id}") },
         enabled: true,
         payload: None,
-        retry: Some(trogon_cron::RetryConfig { max_retries: 5, retry_backoff_sec: 3 }),
+        retry: Some(trogon_cron::RetryConfig { max_retries: 5, retry_backoff_sec: 3, max_retry_duration_sec: None }),
     }).await.unwrap();
 
     let fetched = client.get_job(&id).await.unwrap().expect("job must exist after register");
     let r = fetched.retry.expect("retry field must survive KV round-trip");
     assert_eq!(r.max_retries, 5);
     assert_eq!(r.retry_backoff_sec, 3);
+
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── max_retry_duration_sec stops retries before max_retries is reached ────────
+
+/// A spawn job with `max_retries: 50` but `max_retry_duration_sec: 3` always
+/// exits 1.  The duration cap must kick in and publish a dead-letter within
+/// a few seconds — long before the 50-retry limit would be reached.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_dead_letter_respects_max_retry_duration() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retry-dur");
+
+    // Use DeliverPolicy::New to avoid receiving dead-letters from other tests.
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "exit 1".to_string()],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 50,
+            retry_backoff_sec: 1,
+            max_retry_duration_sec: Some(3),
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Duration cap is 3 s → dead-letter must arrive well before the 50-retry limit.
+    // Allow 15 s total to avoid flakiness.
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, attempts: u32 }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let dl = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        let dl: DeadLetter = serde_json::from_slice(&msg.payload).unwrap();
+        if dl.job_id == id { break dl; }
+    };
+
+    // Must have stopped long before 50 retries.
+    assert!(dl.attempts < 50, "Duration cap must stop retries before reaching max_retries; got {} attempts", dl.attempts);
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── max_retry_duration_sec round-trips through NATS KV ───────────────────────
+
+/// Register a job with `max_retry_duration_sec: Some(120)`, read it back via
+/// `get_job`, and assert the field survived the JSON ↔ KV round-trip.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_max_retry_duration_round_trips_through_kv() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-dur-kv");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 5,
+            retry_backoff_sec: 2,
+            max_retry_duration_sec: Some(120),
+        }),
+    }).await.unwrap();
+
+    let fetched = client.get_job(&id).await.unwrap().expect("job must exist");
+    let r = fetched.retry.expect("retry must be present");
+    assert_eq!(r.max_retries, 5);
+    assert_eq!(r.retry_backoff_sec, 2);
+    assert_eq!(r.max_retry_duration_sec, Some(120));
 
     client.remove_job(&id).await.unwrap();
 }

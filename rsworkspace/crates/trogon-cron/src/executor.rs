@@ -165,12 +165,16 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
         payload: state.config.payload.clone(),
     };
 
-    let (max_retries, retry_backoff_sec) = state
+    let (max_retries, retry_backoff_sec, max_retry_duration) = state
         .config
         .retry
         .as_ref()
-        .map(|r| (r.max_retries, r.retry_backoff_sec.max(1)))
-        .unwrap_or((0, 1));
+        .map(|r| (
+            r.max_retries,
+            r.retry_backoff_sec.max(1),
+            r.max_retry_duration_sec.map(Duration::from_secs),
+        ))
+        .unwrap_or((0, 1, None));
 
     match &state.config.action {
         Action::Publish { subject } => {
@@ -179,7 +183,7 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
             let publisher = publisher.clone();
             let subject = subject.clone();
             tokio::spawn(async move {
-                publish(publisher, subject, tick, max_retries, retry_backoff_sec).await;
+                publish(publisher, subject, tick, max_retries, retry_backoff_sec, max_retry_duration).await;
             });
         }
         Action::Spawn {
@@ -201,6 +205,7 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
                 tick,
                 max_retries,
                 retry_backoff_sec,
+                max_retry_duration,
                 publisher.clone(),
             );
         }
@@ -213,6 +218,7 @@ async fn publish<P: TickPublisher>(
     tick: TickPayload,
     max_retries: u32,
     retry_backoff_sec: u64,
+    max_retry_duration: Option<Duration>,
 ) {
     let payload = match serde_json::to_vec(&tick) {
         Ok(p) => p,
@@ -224,8 +230,11 @@ async fn publish<P: TickPublisher>(
 
     let total_attempts = max_retries + 1;
     let mut last_error = String::new();
+    let mut actual_attempts = 0u32;
+    let start = tokio::time::Instant::now();
 
     for attempt in 1..=total_attempts {
+        actual_attempts = attempt;
         // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
         let headers = trogon_nats::messaging::headers_with_trace_context();
         match publisher
@@ -236,7 +245,25 @@ async fn publish<P: TickPublisher>(
             Err(e) => {
                 last_error = e.to_string();
                 if attempt < total_attempts {
+                    // Stop retrying if the total duration budget is exhausted.
+                    if let Some(max_dur) = max_retry_duration {
+                        if start.elapsed() >= max_dur {
+                            tracing::warn!(
+                                subject,
+                                attempt,
+                                elapsed_ms = start.elapsed().as_millis(),
+                                "Max retry duration exceeded, giving up"
+                            );
+                            break;
+                        }
+                    }
                     let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
+                    // Cap the sleep so we don't overshoot the duration budget.
+                    let delay = if let Some(max_dur) = max_retry_duration {
+                        delay.min(max_dur.saturating_sub(start.elapsed()))
+                    } else {
+                        delay
+                    };
                     tracing::warn!(
                         subject,
                         attempt,
@@ -258,7 +285,7 @@ async fn publish<P: TickPublisher>(
         "Publish failed after all retries"
     );
     if max_retries > 0 {
-        publish_dead_letter(&publisher, &tick, "publish", total_attempts, last_error).await;
+        publish_dead_letter(&publisher, &tick, "publish", actual_attempts, last_error).await;
     }
 }
 
@@ -271,6 +298,7 @@ fn spawn_process<P: TickPublisher>(
     tick: TickPayload,
     max_retries: u32,
     retry_backoff_sec: u64,
+    max_retry_duration: Option<Duration>,
     publisher: P,
 ) {
     // Set is_running BEFORE entering the async task so the concurrent-guard in
@@ -282,11 +310,33 @@ fn spawn_process<P: TickPublisher>(
         let total_attempts = max_retries + 1;
         let mut succeeded = false;
         let mut last_error = String::new();
+        let mut actual_attempts = 0u32;
+        let start = tokio::time::Instant::now();
 
         'retry: for attempt in 0..total_attempts {
+            actual_attempts += 1;
             // Delay before retry attempts (not before the first attempt).
             if attempt > 0 {
+                // Stop retrying if the total duration budget is exhausted.
+                if let Some(max_dur) = max_retry_duration {
+                    if start.elapsed() >= max_dur {
+                        tracing::warn!(
+                            bin = %bin,
+                            job_id = %tick.job_id,
+                            attempt,
+                            elapsed_ms = start.elapsed().as_millis(),
+                            "Max retry duration exceeded, giving up"
+                        );
+                        break 'retry;
+                    }
+                }
                 let delay = retry_backoff_with_jitter(retry_backoff_sec, attempt);
+                // Cap the sleep so we don't overshoot the duration budget.
+                let delay = if let Some(max_dur) = max_retry_duration {
+                    delay.min(max_dur.saturating_sub(start.elapsed()))
+                } else {
+                    delay
+                };
                 tracing::warn!(
                     bin = %bin,
                     job_id = %tick.job_id,
@@ -387,12 +437,12 @@ fn spawn_process<P: TickPublisher>(
             tracing::error!(
                 bin = %bin,
                 job_id = %tick.job_id,
-                attempts = total_attempts,
+                attempts = actual_attempts,
                 error = %last_error,
                 "Spawn failed after all retries"
             );
             if max_retries > 0 {
-                publish_dead_letter(&publisher, &tick, "spawn", total_attempts, last_error).await;
+                publish_dead_letter(&publisher, &tick, "spawn", actual_attempts, last_error).await;
             }
         }
 
@@ -475,6 +525,16 @@ pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobSt
         if retry.retry_backoff_sec == 0 {
             return Err(CronError::InvalidJobConfig {
                 reason: "retry_backoff_sec must be >= 1".into(),
+            });
+        }
+        if retry.max_retries > 50 {
+            return Err(CronError::InvalidJobConfig {
+                reason: format!("max_retries must be <= 50, got {}", retry.max_retries),
+            });
+        }
+        if retry.max_retry_duration_sec == Some(0) {
+            return Err(CronError::InvalidJobConfig {
+                reason: "max_retry_duration_sec must be >= 1 when set".into(),
             });
         }
     }
@@ -750,7 +810,7 @@ mod tests {
             action: Action::Publish { subject: "cron.bad-retry".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 0 }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 0, max_retry_duration_sec: None }),
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("retry_backoff_sec"));
@@ -764,7 +824,61 @@ mod tests {
             action: Action::Publish { subject: "cron.good-retry".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5 }),
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5, max_retry_duration_sec: None }),
+        };
+        assert!(build_job_state(config).is_ok());
+    }
+
+    #[test]
+    fn max_retries_over_50_is_rejected() {
+        let config = JobConfig {
+            id: "too-many-retries".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.too-many".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 51, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+        };
+        let err = build_job_state(config).err().unwrap();
+        assert!(err.to_string().contains("max_retries"));
+    }
+
+    #[test]
+    fn max_retries_at_50_is_accepted() {
+        let config = JobConfig {
+            id: "max-retries-50".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.max50".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 50, retry_backoff_sec: 1, max_retry_duration_sec: None }),
+        };
+        assert!(build_job_state(config).is_ok());
+    }
+
+    #[test]
+    fn max_retry_duration_zero_is_rejected() {
+        let config = JobConfig {
+            id: "bad-duration".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.bad-duration".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_retry_duration_sec: Some(0) }),
+        };
+        let err = build_job_state(config).err().unwrap();
+        assert!(err.to_string().contains("max_retry_duration_sec"));
+    }
+
+    #[test]
+    fn max_retry_duration_valid_is_accepted() {
+        let config = JobConfig {
+            id: "good-duration".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.good-duration".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 1, max_retry_duration_sec: Some(30) }),
         };
         assert!(build_job_state(config).is_ok());
     }
