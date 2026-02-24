@@ -58,7 +58,7 @@ pub mod traits;
 pub mod mocks;
 
 pub use client::CronClient;
-pub use config::{Action, JobConfig, Schedule, TickPayload};
+pub use config::{Action, JobConfig, RetryConfig, Schedule, TickPayload};
 pub use error::CronError;
 pub use nats_impls::NatsLeaderLock;
 pub use scheduler::Scheduler;

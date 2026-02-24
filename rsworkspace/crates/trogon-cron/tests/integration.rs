@@ -127,7 +127,8 @@ async fn test_register_and_list_job() {
         action: Action::Publish { subject: "cron.tick".to_string() },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
 
     client.register_job(&job).await.unwrap();
 
@@ -155,7 +156,8 @@ async fn test_get_job() {
         action: Action::Publish { subject: "cron.get".to_string() },
         enabled: true,
         payload: Some(serde_json::json!({ "key": "value" })),
-    };
+        retry: None,
+};
     client.register_job(&job).await.unwrap();
 
     let fetched = client.get_job(&id).await.unwrap().expect("job should exist");
@@ -178,7 +180,8 @@ async fn test_enable_disable_job() {
         action: Action::Publish { subject: "cron.toggle".to_string() },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
     client.register_job(&job).await.unwrap();
 
     client.set_enabled(&id, false).await.unwrap();
@@ -209,7 +212,8 @@ async fn test_interval_job_fires() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(serde_json::json!({ "test": true })),
-    };
+        retry: None,
+};
     client.register_job(&job).await.unwrap();
 
     // Clear any stale leader lock from a previous test so this scheduler can become
@@ -258,7 +262,8 @@ async fn test_hot_reload_job_config() {
         action: Action::Publish { subject: subject_v1.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Clear any stale leader lock so this scheduler acquires leadership immediately.
     reset_leader_lock(&js).await;
@@ -279,7 +284,8 @@ async fn test_hot_reload_job_config() {
         action: Action::Publish { subject: subject_v2.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Within 5 seconds, we should receive a tick on v2
     let msg = tokio::time::timeout(Duration::from_secs(5), sub_v2.next())
@@ -311,7 +317,8 @@ async fn test_disabled_job_does_not_fire() {
         action: Action::Publish { subject: subject.clone() },
         enabled: false,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Clear any stale leader lock so this scheduler acquires leadership immediately.
     reset_leader_lock(&js).await;
@@ -354,7 +361,8 @@ async fn test_spawn_job_fires() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -400,7 +408,8 @@ async fn test_spawn_job_env_vars() {
         },
         enabled: true,
         payload: Some(serde_json::json!({ "key": "value" })),
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -462,7 +471,8 @@ async fn test_spawn_concurrent_false_skips_while_running() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -515,7 +525,8 @@ async fn test_cron_expression_job_fires() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -560,7 +571,8 @@ async fn test_multiple_jobs_fire_independently() {
         action: Action::Publish { subject: subject_a.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     client.register_job(&JobConfig {
         id: id_b.clone(),
@@ -568,7 +580,8 @@ async fn test_multiple_jobs_fire_independently() {
         action: Action::Publish { subject: subject_b.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -615,7 +628,8 @@ async fn test_reenable_fires_after_disabled() {
         action: Action::Publish { subject: subject.clone() },
         enabled: false,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -663,7 +677,8 @@ async fn test_remove_job_stops_ticks() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -725,7 +740,8 @@ async fn test_spawn_timeout_kills_process() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -779,7 +795,8 @@ async fn test_leader_failover() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -840,7 +857,8 @@ async fn test_graceful_shutdown_releases_lock() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -915,6 +933,7 @@ async fn test_tick_payload_forwarded() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(custom_payload.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -971,7 +990,8 @@ async fn test_spawn_concurrent_true_allows_overlap() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1014,7 +1034,8 @@ async fn test_register_job_rejects_non_cron_subject() {
         action: Action::Publish { subject: "events.backup".to_string() },
         enabled: true,
         payload: None,
-    }).await;
+        retry: None,
+}).await;
 
     assert!(result.is_err(), "register_job should reject non-cron. subject");
     let err = result.unwrap_err().to_string();
@@ -1141,7 +1162,8 @@ async fn test_invalid_job_config_in_kv_is_ignored() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1183,7 +1205,8 @@ async fn test_cron_step_expression_fires() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1227,7 +1250,8 @@ async fn test_tick_without_payload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1274,7 +1298,8 @@ async fn test_interval_job_fires_multiple_times() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1340,7 +1365,8 @@ async fn test_hot_add_job_while_scheduler_running() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // The new job must fire within 5 s of registration.
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
@@ -1387,7 +1413,8 @@ async fn test_spawn_concurrent_false_re_fires_after_completion() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1445,7 +1472,8 @@ async fn test_spawn_no_timeout_completes_normally() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1500,7 +1528,8 @@ async fn test_spawn_failing_exit_code_scheduler_continues() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Healthy publish job — must fire despite the failing spawn.
     client.register_job(&JobConfig {
@@ -1509,7 +1538,8 @@ async fn test_spawn_failing_exit_code_scheduler_continues() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1553,7 +1583,8 @@ async fn test_two_schedulers_mutual_exclusion() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1618,7 +1649,8 @@ async fn test_update_interval_while_running() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -1641,7 +1673,8 @@ async fn test_update_interval_while_running() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Step 3: collect 2 more ticks. At 10 s they would need ~20 s; at 1 s ≤ 5 s.
     for i in 0..2 {
@@ -1679,7 +1712,8 @@ async fn test_scheduler_restart_resumes_jobs() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Scheduler A — becomes leader and fires the job.
     reset_leader_lock(&js).await;
@@ -1743,7 +1777,8 @@ async fn test_five_jobs_all_fire() {
             action: Action::Publish { subject: subject.clone() },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -1799,6 +1834,7 @@ async fn test_complex_payload_round_trip() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -1843,7 +1879,8 @@ async fn test_remove_and_readd_job() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
 
     client.register_job(&job).await.unwrap();
 
@@ -1927,6 +1964,7 @@ async fn test_spawn_all_env_vars_injected() {
         },
         enabled: true,
         payload: Some(custom_payload.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -1996,6 +2034,7 @@ async fn test_payload_changes_on_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_v1.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -2018,6 +2057,7 @@ async fn test_payload_changes_on_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_v2.clone()),
+        retry: None,
     }).await.unwrap();
 
     // Step 3: next tick must carry v2 payload.
@@ -2051,7 +2091,8 @@ async fn test_schedule_change_interval_to_cron() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2071,7 +2112,8 @@ async fn test_schedule_change_interval_to_cron() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // The cron job must fire within 5 s — at 10 s interval it would take ~10 s.
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
@@ -2189,7 +2231,8 @@ async fn test_ten_jobs_all_fire() {
             action: Action::Publish { subject: subject.clone() },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -2245,7 +2288,8 @@ async fn test_disable_stops_spawn_re_entry() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2325,7 +2369,8 @@ async fn test_sigkill_escalation() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2392,7 +2437,8 @@ async fn test_concurrent_false_preserved_across_hot_reload() {
         },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
 
     client.register_job(&base_job).await.unwrap();
 
@@ -2464,7 +2510,8 @@ async fn test_action_change_spawn_to_publish() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2488,7 +2535,8 @@ async fn test_action_change_spawn_to_publish() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // A NATS tick must now arrive — the scheduler switched to publishing.
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
@@ -2552,7 +2600,8 @@ async fn test_spawn_nonexistent_bin_skipped_scheduler_continues() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2579,7 +2628,8 @@ async fn test_spawn_nonexistent_bin_skipped_scheduler_continues() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // The healthy publish job must keep firing — bad binary must not crash scheduler.
     tokio::time::timeout(Duration::from_secs(5), sub.next())
@@ -2611,14 +2661,16 @@ async fn test_register_same_id_overwrites() {
         action: Action::Publish { subject: "cron.overwrite.v1".to_string() },
         enabled: true,
         payload: Some(serde_json::json!({ "version": 1 })),
-    };
+        retry: None,
+};
     let job_v2 = JobConfig {
         id: id.clone(),
         schedule: Schedule::Interval { interval_sec: 120 },
         action: Action::Publish { subject: "cron.overwrite.v2".to_string() },
         enabled: false,
         payload: Some(serde_json::json!({ "version": 2 })),
-    };
+        retry: None,
+};
 
     client.register_job(&job_v1).await.unwrap();
     client.register_job(&job_v2).await.unwrap(); // must overwrite v1
@@ -2689,7 +2741,8 @@ async fn test_spawn_multiple_positional_args() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2739,7 +2792,8 @@ async fn test_cron_schedule_timing_accuracy() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2805,7 +2859,8 @@ async fn test_concurrent_setting_change_false_to_true() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2838,7 +2893,8 @@ async fn test_concurrent_setting_change_false_to_true() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // After 3 s, new invocations must have started despite the first still sleeping.
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -2878,7 +2934,8 @@ async fn test_cron_to_interval_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -2898,7 +2955,8 @@ async fn test_cron_to_interval_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Must now fire within 3 s.
     let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
@@ -2943,7 +3001,8 @@ async fn test_two_concurrent_false_jobs_independent_flags() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Job B: just appends a marker quickly.
     client.register_job(&JobConfig {
@@ -2958,7 +3017,8 @@ async fn test_two_concurrent_false_jobs_independent_flags() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3021,7 +3081,8 @@ async fn test_multiple_rapid_hot_reloads() {
             action: Action::Publish { subject: subject.clone() },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -3084,7 +3145,8 @@ async fn test_spawn_payload_env_var() {
         },
         enabled: true,
         payload: Some(payload_json),
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3139,7 +3201,8 @@ async fn test_remove_then_readd_job() {
         action: Action::Publish { subject: subject_old.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3165,7 +3228,8 @@ async fn test_remove_then_readd_job() {
         action: Action::Publish { subject: subject_new.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // New subject must fire.
     let msg = tokio::time::timeout(Duration::from_secs(3), sub_new.next())
@@ -3205,7 +3269,8 @@ async fn test_execution_id_unique_per_tick() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3254,6 +3319,7 @@ async fn test_get_job_reflects_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_v1.clone()),
+        retry: None,
     }).await.unwrap();
 
     let job = client.get_job(&id).await.unwrap().expect("job must exist after register");
@@ -3266,6 +3332,7 @@ async fn test_get_job_reflects_hot_reload() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_v2.clone()),
+        retry: None,
     }).await.unwrap();
 
     let updated = client.get_job(&id).await.unwrap().expect("job must still exist after reload");
@@ -3305,7 +3372,8 @@ async fn test_partial_removal_others_continue_firing() {
             action: Action::Publish { subject: subject.clone() },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -3372,7 +3440,8 @@ async fn test_list_jobs_tracks_add_remove() {
             action: Action::Publish { subject: format!("cron.list-track.{id}") },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     let list = client.list_jobs().await.unwrap();
@@ -3422,7 +3491,8 @@ async fn test_fired_at_is_recent() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3486,7 +3556,8 @@ async fn test_spawn_triggered_by_cron_expression() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3536,7 +3607,8 @@ async fn test_is_running_clears_after_timeout_kill() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3591,7 +3663,8 @@ async fn test_three_schedulers_single_fires() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3659,7 +3732,8 @@ async fn test_spawn_empty_args() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3700,7 +3774,8 @@ async fn test_set_enabled_reflected_by_get_job() {
         action: Action::Publish { subject: format!("cron.set-enabled.{id}") },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     let job = client.get_job(&id).await.unwrap().unwrap();
     assert!(job.enabled, "newly registered job must be enabled");
@@ -3738,7 +3813,8 @@ async fn test_register_job_rejects_relative_bin() {
         },
         enabled: true,
         payload: None,
-    }).await;
+        retry: None,
+}).await;
 
     assert!(result.is_err(), "register_job must reject a relative bin path");
     let err = result.unwrap_err().to_string();
@@ -3770,7 +3846,8 @@ async fn test_register_job_rejects_timeout_sec_zero() {
         },
         enabled: true,
         payload: None,
-    }).await;
+        retry: None,
+}).await;
 
     assert!(result.is_err(), "register_job must reject timeout_sec = 0");
     let err = result.unwrap_err().to_string();
@@ -3802,7 +3879,8 @@ async fn test_register_job_rejects_null_byte_in_arg() {
         },
         enabled: true,
         payload: None,
-    }).await;
+        retry: None,
+}).await;
 
     assert!(result.is_err(), "register_job must reject args containing a null byte");
     let err = result.unwrap_err().to_string();
@@ -3836,7 +3914,8 @@ async fn test_action_change_publish_to_spawn() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3864,7 +3943,8 @@ async fn test_action_change_publish_to_spawn() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Spawn must run within 3 s.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
@@ -3912,7 +3992,8 @@ async fn test_spawn_fire_rate_matches_interval() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -3964,6 +4045,7 @@ async fn test_no_cron_payload_when_payload_none() {
         },
         enabled: true,
         payload: None,   // <── no payload
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -4015,7 +4097,8 @@ async fn test_register_remove_before_scheduler_no_fire() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     client.remove_job(&id).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -4052,7 +4135,8 @@ async fn test_cron_every_second_expression() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4103,7 +4187,8 @@ async fn test_disable_during_active_spawn_no_new_fires() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4160,7 +4245,8 @@ async fn test_long_interval_fires_exactly_once() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4210,7 +4296,8 @@ async fn test_cron_subject_multi_level() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4252,7 +4339,8 @@ async fn test_kv_purge_removes_job() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4302,7 +4390,8 @@ async fn test_leader_lock_ttl_renewal() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4374,7 +4463,8 @@ async fn test_non_executable_bin_is_skipped() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap(); // client accepts it (no exec check on client side)
+        retry: None,
+}).await.unwrap(); // client accepts it (no exec check on client side)
 
     // Register a good publish job alongside it.
     client.register_job(&JobConfig {
@@ -4383,7 +4473,8 @@ async fn test_non_executable_bin_is_skipped() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4433,7 +4524,8 @@ async fn test_twenty_jobs_all_fire() {
             action: Action::Publish { subject: subject.clone() },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -4481,7 +4573,8 @@ async fn test_invalid_cron_expression_skipped_by_scheduler() {
         action: Action::Publish { subject: format!("cron.bad-cron.{bad_id}") },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Register a valid job alongside the bad one.
     client.register_job(&JobConfig {
@@ -4490,7 +4583,8 @@ async fn test_invalid_cron_expression_skipped_by_scheduler() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4536,6 +4630,7 @@ async fn test_payload_array_type() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(array_payload.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -4587,7 +4682,8 @@ async fn test_cron_fired_at_env_var_is_rfc3339() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4643,6 +4739,7 @@ async fn test_two_jobs_each_carry_own_payload() {
         action: Action::Publish { subject: sub_a_str.clone() },
         enabled: true,
         payload: Some(payload_a.clone()),
+        retry: None,
     }).await.unwrap();
 
     client.register_job(&JobConfig {
@@ -4651,6 +4748,7 @@ async fn test_two_jobs_each_carry_own_payload() {
         action: Action::Publish { subject: sub_b_str.clone() },
         enabled: true,
         payload: Some(payload_b.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -4707,7 +4805,8 @@ async fn test_concurrent_false_rate_limits_slow_process() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4759,7 +4858,8 @@ async fn test_concurrent_true_not_rate_limited() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4802,7 +4902,8 @@ async fn test_cron_every_3_seconds_timing() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4863,7 +4964,8 @@ async fn test_two_spawn_jobs_correct_job_ids() {
             },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     reset_leader_lock(&js).await;
@@ -4916,7 +5018,8 @@ async fn test_interval_tick_timestamps_monotonic() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -4971,6 +5074,7 @@ async fn test_tick_payload_all_fields_present() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(expected_payload.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -5028,7 +5132,8 @@ async fn test_disabled_job_never_fires() {
         action: Action::Publish { subject: subject.clone() },
         enabled: false,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5063,7 +5168,8 @@ async fn test_enable_disabled_job_starts_firing() {
         action: Action::Publish { subject: subject.clone() },
         enabled: false,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5111,6 +5217,7 @@ async fn test_payload_hot_reload_updates_tick() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_a.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -5133,6 +5240,7 @@ async fn test_payload_hot_reload_updates_tick() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(payload_b.clone()),
+        retry: None,
     }).await.unwrap();
 
     // Drain any already-queued ticks that may still carry payload A,
@@ -5173,7 +5281,8 @@ async fn test_execution_id_is_uuid_format() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5240,7 +5349,8 @@ async fn test_spawn_positional_args_forwarded() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5290,7 +5400,8 @@ async fn test_interval_fires_immediately_on_load() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5338,7 +5449,8 @@ async fn test_spawn_cron_execution_id_env_var() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5403,7 +5515,8 @@ async fn test_two_clients_last_write_wins() {
         action: Action::Publish { subject: subject_a.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // …client2 overwrites with a different subject.
     client2.register_job(&JobConfig {
@@ -5412,7 +5525,8 @@ async fn test_two_clients_last_write_wins() {
         action: Action::Publish { subject: subject_b.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5481,7 +5595,8 @@ async fn test_concurrent_false_respawns_after_exit() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5547,7 +5662,8 @@ async fn test_spawn_nonzero_exit_continues_firing() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5605,6 +5721,7 @@ async fn test_large_json_payload_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(large.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -5658,7 +5775,8 @@ async fn test_scheduler_picks_up_dynamically_added_job() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Scheduler must pick up the new job via the watcher and fire.
     tokio::time::timeout(Duration::from_secs(3), sub.next())
@@ -5690,7 +5808,8 @@ async fn test_execution_ids_never_repeat_across_ticks() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5734,7 +5853,8 @@ async fn test_register_job_rejects_empty_publish_subject() {
         action: Action::Publish { subject: "".to_string() },
         enabled: true,
         payload: None,
-    }).await;
+        retry: None,
+}).await;
 
     assert!(
         matches!(result, Err(trogon_cron::CronError::InvalidJobConfig { .. })),
@@ -5764,7 +5884,8 @@ async fn test_list_jobs_exact_contents_after_add_remove() {
             action: Action::Publish { subject: format!("cron.list-exact.{id}") },
             enabled: true,
             payload: None,
-        }).await.unwrap();
+        retry: None,
+}).await.unwrap();
     }
 
     // Remove the middle job.
@@ -5800,7 +5921,8 @@ async fn test_job_config_round_trips_through_kv() {
         action: Action::Publish { subject: format!("cron.kv-roundtrip.{id}") },
         enabled: false,
         payload: Some(serde_json::json!({ "round": "trip", "n": 99 })),
-    };
+        retry: None,
+};
 
     client.register_job(&original).await.unwrap();
     let retrieved = client.get_job(&id).await.unwrap()
@@ -5844,7 +5966,8 @@ async fn test_spawn_timeout_does_not_prematurely_kill() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5887,7 +6010,8 @@ async fn test_all_ticks_carry_same_job_id() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5932,7 +6056,8 @@ async fn test_publish_subject_with_hyphens_and_dots() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -5977,7 +6102,8 @@ async fn test_spawn_no_timeout_fires_repeatedly() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6025,6 +6151,7 @@ async fn test_unicode_payload_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(unicode.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -6062,7 +6189,8 @@ async fn test_get_job_reflects_set_enabled_false() {
         action: Action::Publish { subject: format!("cron.get-enabled.{id}") },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     client.set_enabled(&id, false).await.unwrap();
 
@@ -6092,7 +6220,8 @@ async fn test_tick_message_subject_matches_configured() {
         action: Action::Publish { subject: expected_subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6134,7 +6263,8 @@ async fn test_null_json_payload_normalises_to_none() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(serde_json::Value::Null),
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6180,7 +6310,8 @@ async fn test_multiple_subscribers_receive_same_tick() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6224,7 +6355,8 @@ async fn test_interval_two_seconds_timing() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6274,7 +6406,8 @@ async fn test_set_enabled_true_on_already_enabled_continues() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6327,7 +6460,8 @@ async fn test_spawn_nonexistent_bin_scheduler_skips_gracefully() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     // Valid publish job running alongside.
     client.register_job(&JobConfig {
@@ -6336,7 +6470,8 @@ async fn test_spawn_nonexistent_bin_scheduler_skips_gracefully() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6378,6 +6513,7 @@ async fn test_payload_integer_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(expected.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -6414,6 +6550,7 @@ async fn test_payload_boolean_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(expected.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -6449,7 +6586,8 @@ async fn test_leader_failover_standby_takes_over() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
 
@@ -6507,7 +6645,8 @@ async fn test_concurrent_true_spawns_have_unique_execution_ids() {
         },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
     let scheduler_nats = nats.clone();
@@ -6547,7 +6686,8 @@ async fn test_cron_step_every_5_seconds() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
     let scheduler_nats = nats.clone();
@@ -6592,6 +6732,7 @@ async fn test_payload_float_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(expected.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -6628,6 +6769,7 @@ async fn test_payload_bare_string_round_trips() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: Some(expected.clone()),
+        retry: None,
     }).await.unwrap();
 
     reset_leader_lock(&js).await;
@@ -6663,7 +6805,8 @@ async fn test_disable_via_register_job_stops_firing() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
 
     client.register_job(&base_config).await.unwrap();
     reset_leader_lock(&js).await;
@@ -6709,7 +6852,8 @@ async fn test_fired_at_close_to_wall_clock() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    }).await.unwrap();
+        retry: None,
+}).await.unwrap();
 
     reset_leader_lock(&js).await;
     let scheduler_nats = nats.clone();
@@ -6753,7 +6897,8 @@ async fn test_register_same_config_twice_fires_once_per_tick() {
         action: Action::Publish { subject: subject.clone() },
         enabled: true,
         payload: None,
-    };
+        retry: None,
+};
 
     // Register twice with identical config.
     client.register_job(&config).await.unwrap();
@@ -6778,5 +6923,159 @@ async fn test_register_same_config_twice_fires_once_per_tick() {
     assert!(count >= 1, "Job must still fire after double-registration; got {count} ticks");
 
     handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Retry policy: spawn retries on non-zero exit and eventually succeeds ──────
+
+/// A spawn job with `max_retries: 2` runs a script that exits 1 on the first
+/// attempt and exits 0 on the second.  A success-marker file must appear,
+/// proving the retry loop re-executed the script.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_succeeds_on_second_attempt() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-spawn-retry");
+
+    let counter: std::path::PathBuf = std::env::temp_dir().join(format!("trogon-retry-counter-{id}"));
+    let success: std::path::PathBuf = std::env::temp_dir().join(format!("trogon-retry-ok-{id}"));
+    let _ = std::fs::remove_file(&counter);
+    let _ = std::fs::remove_file(&success);
+
+    // Script: increment a counter file; succeed only on the 2nd+ attempt.
+    let script = format!(
+        "count=$(cat '{}' 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > '{}'; [ \"$count\" -ge 2 ] && touch '{}' && exit 0; exit 1",
+        counter.display(), counter.display(), success.display(),
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig { max_retries: 2, retry_backoff_sec: 1 }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Wait up to 10 s for the success marker (actual time: ~2 s including 1 s backoff).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if success.exists() { break; }
+        assert!(tokio::time::Instant::now() < deadline, "Success marker never created — retry did not succeed");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let count: u32 = std::fs::read_to_string(&counter).unwrap().trim().parse().unwrap();
+    assert!(count >= 2, "Expected at least 2 spawn attempts, got {count}");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+    let _ = std::fs::remove_file(&success);
+}
+
+// ── Retry policy: dead-letter published after all retries exhausted ───────────
+
+/// A spawn job with `max_retries: 1` (2 total attempts) runs `exit 1` every
+/// time.  After all attempts fail, the scheduler must publish a dead-letter
+/// message to `cron.errors` containing the job_id, action type, and attempt count.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_dead_letter_after_exhausted_retries() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-dead-letter");
+
+    // Subscribe to cron.errors BEFORE starting the scheduler using DeliverPolicy::New
+    // so we don't receive dead-letters from previous test runs.
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "exit 1".to_string()],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig { max_retries: 1, retry_backoff_sec: 1 }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // max_retries=1 → 2 attempts: initial + 1 retry with 1s backoff → ~2 s total.
+    // Wait up to 15 s to avoid flakiness.  Filter by job_id in case another test's
+    // dead-letter arrives on the shared cron.errors subject.
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, action: String, attempts: u32 }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let dl = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter on cron.errors");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        let dl: DeadLetter = serde_json::from_slice(&msg.payload).unwrap();
+        if dl.job_id == id { break dl; }
+    };
+
+    assert_eq!(dl.action, "spawn", "dead-letter action must be 'spawn'");
+    assert_eq!(dl.attempts, 2, "expected 2 total attempts (initial + 1 retry)");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Retry policy: RetryConfig round-trips through NATS KV ────────────────────
+
+/// Register a job with `retry: Some(RetryConfig { max_retries: 5, retry_backoff_sec: 3 })`,
+/// read it back via `get_job`, and assert all fields survived the JSON ↔ KV round-trip.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_retry_config_round_trips_through_kv() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retry-kv");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig { max_retries: 5, retry_backoff_sec: 3 }),
+    }).await.unwrap();
+
+    let fetched = client.get_job(&id).await.unwrap().expect("job must exist after register");
+    let r = fetched.retry.expect("retry field must survive KV round-trip");
+    assert_eq!(r.max_retries, 5);
+    assert_eq!(r.retry_backoff_sec, 3);
+
     client.remove_job(&id).await.unwrap();
 }

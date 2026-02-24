@@ -28,6 +28,7 @@ use crate::{
 ///     action: Action::Publish { subject: "cron.health".to_string() },
 ///     enabled: true,
 ///     payload: None,
+///     retry: None,
 /// }).await?;
 /// # Ok(())
 /// # }

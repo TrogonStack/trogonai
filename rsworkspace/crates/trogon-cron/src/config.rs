@@ -31,6 +31,31 @@ pub enum Action {
     },
 }
 
+/// Optional retry policy for a job.
+///
+/// When a job fails (non-zero exit code for Spawn, publish error for Publish),
+/// the scheduler retries up to `max_retries` times using exponential backoff
+/// starting at `retry_backoff_sec` seconds.  After exhausting all attempts the
+/// failure is published to `cron.errors`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Number of retry attempts after the first failure (0 = no retries).
+    pub max_retries: u32,
+    /// Base delay in seconds before the first retry; doubles on each subsequent attempt.
+    #[serde(default = "default_retry_backoff_sec")]
+    pub retry_backoff_sec: u64,
+}
+
+fn default_retry_backoff_sec() -> u64 {
+    1
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self { max_retries: 0, retry_backoff_sec: 1 }
+    }
+}
+
 /// Job definition stored in NATS KV under key `jobs.<id>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobConfig {
@@ -42,6 +67,9 @@ pub struct JobConfig {
     /// Extra data forwarded in every tick payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
+    /// Retry policy applied when the job fails. None means no retries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryConfig>,
 }
 
 fn default_true() -> bool {
@@ -113,11 +141,50 @@ mod tests {
             action: Action::Publish { subject: "cron.backup".to_string() },
             enabled: true,
             payload: Some(serde_json::json!({ "db": "main" })),
+            retry: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let config2: JobConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config2.id, "backup");
         assert!(config2.enabled);
+    }
+
+    #[test]
+    fn retry_config_defaults() {
+        let json = r#"{"max_retries": 3}"#;
+        let r: RetryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(r.max_retries, 3);
+        assert_eq!(r.retry_backoff_sec, 1);
+    }
+
+    #[test]
+    fn job_config_retry_defaults_to_none() {
+        let json = r#"{
+            "id": "test",
+            "schedule": {"type": "interval", "interval_sec": 10},
+            "action": {"type": "publish", "subject": "cron.test"}
+        }"#;
+        let config: JobConfig = serde_json::from_str(json).unwrap();
+        assert!(config.retry.is_none());
+    }
+
+    #[test]
+    fn job_config_retry_roundtrip() {
+        let config = JobConfig {
+            id: "retrying".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.retrying".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5 }),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"max_retries\":3"));
+        assert!(json.contains("\"retry_backoff_sec\":5"));
+        let config2: JobConfig = serde_json::from_str(&json).unwrap();
+        let r = config2.retry.unwrap();
+        assert_eq!(r.max_retries, 3);
+        assert_eq!(r.retry_backoff_sec, 5);
     }
 }
 

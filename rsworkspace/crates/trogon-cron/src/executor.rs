@@ -82,6 +82,68 @@ impl JobState {
     }
 }
 
+/// Compute exponential backoff duration.
+///
+/// Returns `base_sec * 2^(attempt-1)`, capped at `base_sec * 32` (five doublings max).
+/// `attempt` starts at 1 for the first retry.
+fn retry_backoff(base_sec: u64, attempt: u32) -> Duration {
+    // 2^(attempt-1), clamped to 5 doublings → maximum multiplier is 32
+    let exponent = (attempt - 1).min(5);
+    let multiplier = 1u64 << exponent; // 1, 2, 4, 8, 16, 32
+    Duration::from_secs(base_sec * multiplier)
+}
+
+/// Dead-letter payload published to `cron.errors` after all retries are exhausted.
+#[derive(serde::Serialize)]
+struct DeadLetterPayload<'a> {
+    job_id: &'a str,
+    execution_id: &'a str,
+    fired_at: DateTime<Utc>,
+    action: &'a str,
+    attempts: u32,
+    error: String,
+}
+
+/// Publish a dead-letter message to `cron.errors` when a job action permanently fails.
+async fn publish_dead_letter<P: TickPublisher>(
+    publisher: &P,
+    tick: &TickPayload,
+    action: &str,
+    attempts: u32,
+    error: String,
+) {
+    let dl = DeadLetterPayload {
+        job_id: &tick.job_id,
+        execution_id: &tick.execution_id,
+        fired_at: tick.fired_at,
+        action,
+        attempts,
+        error,
+    };
+    let payload = match serde_json::to_vec(&dl) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(
+                job_id = %tick.job_id,
+                error = %e,
+                "Failed to serialize dead-letter payload"
+            );
+            return;
+        }
+    };
+    let headers = trogon_nats::messaging::headers_with_trace_context();
+    if let Err(e) = publisher
+        .publish_tick("cron.errors".to_string(), headers, payload.into())
+        .await
+    {
+        tracing::error!(
+            job_id = %tick.job_id,
+            error = %e,
+            "Failed to publish dead-letter to cron.errors"
+        );
+    }
+}
+
 /// Fire a job: publish to NATS (via `TickPublisher`) or spawn a process.
 pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: DateTime<Utc>) {
     let tick = TickPayload {
@@ -91,8 +153,17 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
         payload: state.config.payload.clone(),
     };
 
+    let (max_retries, retry_backoff_sec) = state
+        .config
+        .retry
+        .as_ref()
+        .map(|r| (r.max_retries, r.retry_backoff_sec.max(1)))
+        .unwrap_or((0, 1));
+
     match &state.config.action {
-        Action::Publish { subject } => publish(publisher, subject, &tick).await,
+        Action::Publish { subject } => {
+            publish(publisher, subject, &tick, max_retries, retry_backoff_sec).await
+        }
         Action::Spawn {
             bin,
             args,
@@ -110,12 +181,21 @@ pub async fn execute<P: TickPublisher>(publisher: &P, state: &JobState, now: Dat
                 *timeout_sec,
                 Arc::clone(&state.is_running),
                 tick,
+                max_retries,
+                retry_backoff_sec,
+                publisher.clone(),
             );
         }
     }
 }
 
-async fn publish<P: TickPublisher>(publisher: &P, subject: &str, tick: &TickPayload) {
+async fn publish<P: TickPublisher>(
+    publisher: &P,
+    subject: &str,
+    tick: &TickPayload,
+    max_retries: u32,
+    retry_backoff_sec: u64,
+) {
     let payload = match serde_json::to_vec(tick) {
         Ok(p) => p,
         Err(e) => {
@@ -123,63 +203,178 @@ async fn publish<P: TickPublisher>(publisher: &P, subject: &str, tick: &TickPayl
             return;
         }
     };
-    // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
-    let headers = trogon_nats::messaging::headers_with_trace_context();
-    if let Err(e) = publisher
-        .publish_tick(subject.to_string(), headers, payload.into())
-        .await
-    {
-        tracing::error!(subject, error = %e, "Failed to publish tick");
+
+    let total_attempts = max_retries + 1;
+    let mut last_error = String::new();
+
+    for attempt in 1..=total_attempts {
+        // Inject OpenTelemetry trace context so consumers can correlate ticks with traces.
+        let headers = trogon_nats::messaging::headers_with_trace_context();
+        match publisher
+            .publish_tick(subject.to_string(), headers, payload.clone().into())
+            .await
+        {
+            Ok(()) => return,
+            Err(e) => {
+                last_error = e.to_string();
+                if attempt < total_attempts {
+                    let delay = retry_backoff(retry_backoff_sec, attempt);
+                    tracing::warn!(
+                        subject,
+                        attempt,
+                        max_retries,
+                        delay_secs = delay.as_secs(),
+                        error = %e,
+                        "Publish failed, retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    tracing::error!(
+        subject,
+        attempts = total_attempts,
+        error = %last_error,
+        "Publish failed after all retries"
+    );
+    if max_retries > 0 {
+        publish_dead_letter(publisher, tick, "publish", total_attempts, last_error).await;
     }
 }
 
-fn spawn_process(
+#[allow(clippy::too_many_arguments)]
+fn spawn_process<P: TickPublisher>(
     bin: String,
     args: Vec<String>,
     timeout_sec: Option<u64>,
     is_running: Arc<AtomicBool>,
     tick: TickPayload,
+    max_retries: u32,
+    retry_backoff_sec: u64,
+    publisher: P,
 ) {
+    // Set is_running BEFORE entering the async task so the concurrent-guard in
+    // execute() sees the flag raised even if the OS scheduler hasn't started the
+    // spawned task yet.
     is_running.store(true, Ordering::SeqCst);
 
     tokio::spawn(async move {
-        tracing::debug!(bin = %bin, job_id = %tick.job_id, "Spawning process");
+        let total_attempts = max_retries + 1;
+        let mut succeeded = false;
+        let mut last_error = String::new();
 
-        // Build the command and inject tick context as environment variables so
-        // the spawned binary knows which job fired, when, and with what payload.
-        let mut cmd = tokio::process::Command::new(&bin);
-        cmd.args(&args)
-            .env("CRON_JOB_ID", &tick.job_id)
-            .env("CRON_FIRED_AT", tick.fired_at.to_rfc3339())
-            .env("CRON_EXECUTION_ID", &tick.execution_id)
-            // If the scheduler process is dropped (crash, SIGKILL) the OS will
-            // receive the Child handle drop and send SIGKILL to the child.
-            .kill_on_drop(true);
-        if let Some(ref payload) = tick.payload {
-            if let Ok(json) = serde_json::to_string(payload) {
-                cmd.env("CRON_PAYLOAD", json);
+        'retry: for attempt in 0..total_attempts {
+            // Delay before retry attempts (not before the first attempt).
+            if attempt > 0 {
+                let delay = retry_backoff(retry_backoff_sec, attempt);
+                tracing::warn!(
+                    bin = %bin,
+                    job_id = %tick.job_id,
+                    attempt,
+                    max_retries,
+                    delay_secs = delay.as_secs(),
+                    "Spawn failed, retrying"
+                );
+                tokio::time::sleep(delay).await;
+            } else {
+                tracing::debug!(bin = %bin, job_id = %tick.job_id, "Spawning process");
+            }
+
+            // Build the command and inject tick context as environment variables so
+            // the spawned binary knows which job fired, when, and with what payload.
+            let mut cmd = tokio::process::Command::new(&bin);
+            cmd.args(&args)
+                .env("CRON_JOB_ID", &tick.job_id)
+                .env("CRON_FIRED_AT", tick.fired_at.to_rfc3339())
+                .env("CRON_EXECUTION_ID", &tick.execution_id)
+                // If the scheduler process is dropped (crash, SIGKILL) the OS will
+                // receive the Child handle drop and send SIGKILL to the child.
+                .kill_on_drop(true);
+            if let Some(ref payload) = tick.payload {
+                if let Ok(json) = serde_json::to_string(payload) {
+                    cmd.env("CRON_PAYLOAD", json);
+                }
+            }
+
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    // Permanent failure — the binary cannot be started at all (e.g.,
+                    // ENOENT, EACCES).  Retrying won't help, so break immediately.
+                    last_error = e.to_string();
+                    tracing::error!(
+                        bin = %bin,
+                        error = %e,
+                        "Failed to spawn process (permanent failure, not retrying)"
+                    );
+                    break 'retry;
+                }
+            };
+
+            let exit_result = if let Some(secs) = timeout_sec {
+                match tokio::time::timeout(Duration::from_secs(secs), child.wait()).await {
+                    Ok(Ok(status)) => {
+                        if status.success() {
+                            tracing::debug!(bin = %bin, %status, "Process completed");
+                            Ok(())
+                        } else {
+                            let msg = format!("Process exited with status: {status}");
+                            tracing::warn!(bin = %bin, %status, "Process exited with non-zero status");
+                            Err(msg)
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!(bin = %bin, error = %e, "Process wait error");
+                        Err(e.to_string())
+                    }
+                    Err(_) => {
+                        kill_gracefully(&mut child, &bin, secs).await;
+                        Err(format!("Process timed out after {secs}s"))
+                    }
+                }
+            } else {
+                match child.wait().await {
+                    Ok(status) => {
+                        if status.success() {
+                            tracing::debug!(bin = %bin, %status, "Process completed");
+                            Ok(())
+                        } else {
+                            let msg = format!("Process exited with status: {status}");
+                            tracing::warn!(bin = %bin, %status, "Process exited with non-zero status");
+                            Err(msg)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(bin = %bin, error = %e, "Process wait error");
+                        Err(e.to_string())
+                    }
+                }
+            };
+
+            match exit_result {
+                Ok(()) => {
+                    succeeded = true;
+                    break 'retry;
+                }
+                Err(msg) => {
+                    last_error = msg;
+                    // Transient failure — will retry if attempts remain (loop continues).
+                }
             }
         }
 
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(bin = %bin, error = %e, "Failed to spawn process");
-                is_running.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
-
-        if let Some(secs) = timeout_sec {
-            match tokio::time::timeout(Duration::from_secs(secs), child.wait()).await {
-                Ok(Ok(status)) => tracing::debug!(bin = %bin, %status, "Process completed"),
-                Ok(Err(e)) => tracing::error!(bin = %bin, error = %e, "Process wait error"),
-                Err(_) => kill_gracefully(&mut child, &bin, secs).await,
-            }
-        } else {
-            match child.wait().await {
-                Ok(status) => tracing::debug!(bin = %bin, %status, "Process completed"),
-                Err(e) => tracing::error!(bin = %bin, error = %e, "Process wait error"),
+        if !succeeded && !last_error.is_empty() {
+            tracing::error!(
+                bin = %bin,
+                job_id = %tick.job_id,
+                attempts = total_attempts,
+                error = %last_error,
+                "Spawn failed after all retries"
+            );
+            if max_retries > 0 {
+                publish_dead_letter(&publisher, &tick, "spawn", total_attempts, last_error).await;
             }
         }
 
@@ -257,6 +452,15 @@ pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobSt
         }
     }
 
+    // Validate retry config.
+    if let Some(retry) = &config.retry {
+        if retry.retry_backoff_sec == 0 {
+            return Err(CronError::InvalidJobConfig {
+                reason: "retry_backoff_sec must be >= 1".into(),
+            });
+        }
+    }
+
     let parsed_cron = match &config.schedule {
         crate::config::Schedule::Cron { expr } => {
             let sched = cron::Schedule::from_str(expr).map_err(|e| {
@@ -292,7 +496,7 @@ pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobSt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Action, Schedule};
+    use crate::config::{Action, RetryConfig, Schedule};
 
     // ── execute() tests ───────────────────────────────────────────────────────
 
@@ -310,6 +514,7 @@ mod tests {
                 action: Action::Publish { subject: format!("cron.{id}") },
                 enabled: true,
                 payload: None,
+                retry: None,
             })
             .unwrap()
         }
@@ -348,8 +553,10 @@ mod tests {
             execute(&publisher, &state, now).await;
 
             let ticks = publisher.ticks();
-            let t1: crate::config::TickPayload = serde_json::from_slice(&ticks[0].payload).unwrap();
-            let t2: crate::config::TickPayload = serde_json::from_slice(&ticks[1].payload).unwrap();
+            let t1: crate::config::TickPayload =
+                serde_json::from_slice(&ticks[0].payload).unwrap();
+            let t2: crate::config::TickPayload =
+                serde_json::from_slice(&ticks[1].payload).unwrap();
             assert_ne!(t1.execution_id, t2.execution_id);
         }
 
@@ -367,6 +574,7 @@ mod tests {
                 },
                 enabled: true,
                 payload: None,
+                retry: None,
             })
             .unwrap();
 
@@ -388,6 +596,7 @@ mod tests {
             action: Action::Publish { subject: format!("cron.{id}") },
             enabled: true,
             payload: None,
+            retry: None,
         }
     }
 
@@ -436,6 +645,7 @@ mod tests {
             action: Action::Publish { subject: "cron.hourly".to_string() },
             enabled: true,
             payload: None,
+            retry: None,
         };
         let state = build_job_state(config).unwrap();
         assert!(state.next_fire.is_some());
@@ -449,6 +659,7 @@ mod tests {
             action: Action::Publish { subject: "cron.bad".to_string() },
             enabled: true,
             payload: None,
+            retry: None,
         };
         assert!(build_job_state(config).is_err());
     }
@@ -461,6 +672,7 @@ mod tests {
             action: Action::Publish { subject: "cron.zero".to_string() },
             enabled: true,
             payload: None,
+            retry: None,
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("interval_sec"));
@@ -479,6 +691,7 @@ mod tests {
             },
             enabled: true,
             payload: None,
+            retry: None,
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("timeout_sec"));
@@ -492,6 +705,7 @@ mod tests {
             action: Action::Publish { subject: "events.backup".to_string() },
             enabled: true,
             payload: None,
+            retry: None,
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("cron."));
@@ -505,7 +719,60 @@ mod tests {
             action: Action::Publish { subject: "cron.backup".to_string() },
             enabled: true,
             payload: None,
+            retry: None,
         };
         assert!(build_job_state(config).is_ok());
+    }
+
+    #[test]
+    fn retry_backoff_zero_is_rejected() {
+        let config = JobConfig {
+            id: "bad-retry".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.bad-retry".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 0 }),
+        };
+        let err = build_job_state(config).err().unwrap();
+        assert!(err.to_string().contains("retry_backoff_sec"));
+    }
+
+    #[test]
+    fn retry_config_valid_is_accepted() {
+        let config = JobConfig {
+            id: "good-retry".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.good-retry".to_string() },
+            enabled: true,
+            payload: None,
+            retry: Some(RetryConfig { max_retries: 3, retry_backoff_sec: 5 }),
+        };
+        assert!(build_job_state(config).is_ok());
+    }
+
+    // ── retry_backoff() unit tests ────────────────────────────────────────────
+
+    #[test]
+    fn retry_backoff_attempt_1_returns_base() {
+        assert_eq!(retry_backoff(2, 1), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn retry_backoff_attempt_2_doubles() {
+        assert_eq!(retry_backoff(2, 2), Duration::from_secs(4));
+    }
+
+    #[test]
+    fn retry_backoff_attempt_3_quadruples() {
+        assert_eq!(retry_backoff(2, 3), Duration::from_secs(8));
+    }
+
+    #[test]
+    fn retry_backoff_capped_at_32x() {
+        // attempt=6 would be 2^5=32x, attempt=7 would be 2^6=64x but cap is 32x
+        assert_eq!(retry_backoff(1, 6), Duration::from_secs(32));
+        assert_eq!(retry_backoff(1, 7), Duration::from_secs(32));
+        assert_eq!(retry_backoff(1, 100), Duration::from_secs(32));
     }
 }
