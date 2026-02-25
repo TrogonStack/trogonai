@@ -12465,3 +12465,127 @@ async fn test_client_list_jobs_empty_returns_empty_vec() {
         "list_jobs must return an empty Vec when no jobs are registered; got: {jobs:?}"
     );
 }
+
+/// `job list` must show the cron expression (not "every Xs") in the SCHEDULE
+/// column when the job uses a `Cron` schedule.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_list_shows_cron_schedule() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-cli-cron-sched");
+    let expr = "0 * * * * *";
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: expr.to_string() },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "list"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    client.remove_job(&id).await.unwrap();
+
+    assert!(out.status.success(), "job list must exit zero");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(expr),
+        "SCHEDULE column must show the cron expression '{expr}'; got: {stdout}"
+    );
+}
+
+/// `job list` must show "disabled" in the STATUS column for a job that has
+/// `enabled: false`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_list_shows_disabled_status() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-cli-disabled");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: false,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "list"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    client.remove_job(&id).await.unwrap();
+
+    assert!(out.status.success(), "job list must exit zero");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("disabled"),
+        "STATUS column must show 'disabled' for a disabled job; got: {stdout}"
+    );
+}
+
+/// `job add <file>` (from a real file on disk, not stdin) must register the
+/// job and print a confirmation to stdout.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_add_from_file() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-cli-add-file");
+
+    let config = JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: None,
+    };
+    let json = serde_json::to_string(&config).unwrap();
+
+    let tmp = std::env::temp_dir().join(format!("trogon-cli-add-{id}.json"));
+    std::fs::write(&tmp, json.as_bytes()).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", tmp.to_str().unwrap()])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    let _ = std::fs::remove_file(&tmp);
+    let _ = client.remove_job(&id).await;
+
+    assert!(
+        out.status.success(),
+        "job add <file> must exit zero; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(&id),
+        "stdout must mention the registered job id; got: {stdout}"
+    );
+}
