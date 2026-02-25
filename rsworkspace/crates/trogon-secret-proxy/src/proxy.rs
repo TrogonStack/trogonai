@@ -88,7 +88,8 @@ async fn handle_request(
     let payload = serde_json::to_vec(&message)
         .map_err(|e| ProxyError::Serialize(e.to_string()))?;
 
-    let nats_headers = headers_with_trace_context();
+    let mut nats_headers = headers_with_trace_context();
+    nats_headers.insert("Reply-To", reply_subject.as_str());
     state
         .jetstream
         .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
