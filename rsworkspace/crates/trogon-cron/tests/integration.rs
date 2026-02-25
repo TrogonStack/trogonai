@@ -11588,3 +11588,100 @@ async fn test_publish_retry_max_backoff_caps_delay_mock() {
     assert!(elapsed < Duration::from_secs(15),
         "max_backoff_sec did not cap publish retry delays; elapsed {elapsed:?}");
 }
+
+// ── Publish retry succeeds on the 2nd attempt → no dead-letter ───────────────
+
+/// A publish action that fails on attempt 1 but succeeds on attempt 2 must
+/// NOT produce a dead-letter.  This is the publish analogue of
+/// `test_spawn_retry_succeeds_on_second_attempt`.  Uses a mock publisher that
+/// fails the first call to the job subject and succeeds on the second.
+#[tokio::test]
+async fn test_publish_retry_succeeds_on_second_attempt_mock() {
+    use std::sync::{Arc, Mutex, atomic::{AtomicU32, Ordering}};
+    use bytes::Bytes;
+    use trogon_cron::executor::{build_job_state_at, execute};
+
+    // Publisher that fails on the first call to a non-error subject,
+    // succeeds on subsequent calls, and always succeeds for cron.errors.
+    #[derive(Clone)]
+    struct FlakyPublisher {
+        calls: Arc<AtomicU32>,
+        dls:   Arc<Mutex<Vec<serde_json::Value>>>,
+        ticks: Arc<AtomicU32>,
+    }
+
+    #[derive(Debug)]
+    struct PubFail;
+    impl std::fmt::Display for PubFail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "injected first-attempt failure")
+        }
+    }
+    impl std::error::Error for PubFail {}
+
+    impl trogon_cron::TickPublisher for FlakyPublisher {
+        type Error = PubFail;
+        fn publish_tick(
+            &self, subject: String,
+            _headers: async_nats::HeaderMap,
+            payload: Bytes,
+        ) -> impl std::future::Future<Output = Result<(), PubFail>> + Send {
+            let calls = self.calls.clone();
+            let dls   = self.dls.clone();
+            let ticks = self.ticks.clone();
+            async move {
+                if subject == "cron.errors" {
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        dls.lock().unwrap().push(v);
+                    }
+                    return Ok(());
+                }
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    // First attempt: fail.
+                    Err(PubFail)
+                } else {
+                    // Second (and later) attempt: succeed.
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    let publisher = FlakyPublisher {
+        calls: Arc::new(AtomicU32::new(0)),
+        dls:   Arc::new(Mutex::new(vec![])),
+        ticks: Arc::new(AtomicU32::new(0)),
+    };
+
+    let config = JobConfig {
+        id: "mock-pub-recover".to_string(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "cron.mock-pub-recover".to_string() },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    };
+
+    let state = build_job_state_at(config, chrono::Utc::now()).unwrap();
+    execute(&publisher, &state, chrono::Utc::now()).await;
+
+    // Wait for the background retry task: attempt 1 fails, sleeps 1 s, attempt 2 succeeds.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    // Exactly 2 calls to the job subject (attempt 1 fail + attempt 2 success).
+    assert_eq!(publisher.calls.load(std::sync::atomic::Ordering::SeqCst), 2,
+        "publisher must be called exactly twice (fail + retry success)");
+    // The successful retry counts as a delivered tick.
+    assert_eq!(publisher.ticks.load(std::sync::atomic::Ordering::SeqCst), 1,
+        "tick must be delivered on the second attempt");
+    // No dead-letter must be published.
+    assert!(publisher.dls.lock().unwrap().is_empty(),
+        "no dead-letter must be published when retry succeeds");
+}
