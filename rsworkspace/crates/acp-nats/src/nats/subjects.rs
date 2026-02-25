@@ -3,6 +3,10 @@ pub mod agent {
         format!("{}.agent.initialize", prefix)
     }
 
+    pub fn authenticate(prefix: &str) -> String {
+        format!("{}.agent.authenticate", prefix)
+    }
+
     pub fn session_new(prefix: &str) -> String {
         format!("{}.agent.session.new", prefix)
     }
