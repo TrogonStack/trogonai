@@ -20,6 +20,8 @@ trogon-vault = { path = "../trogon-vault" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+httpmock = "0.7"
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 
 [[bin]]
