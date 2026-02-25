@@ -8731,3 +8731,238 @@ async fn test_spawn_dead_letter_error_contains_exit_code() {
     handle.abort();
     client.remove_job(&id).await.unwrap();
 }
+
+// ── Disabled job does not retry ───────────────────────────────────────────────
+
+/// A job with `enabled: false` must never fire — not even trigger the retry
+/// cycle — regardless of its retry configuration.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_disabled_job_does_not_retry() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-disabled-retry");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: false,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    let mut got_dl = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() { break; }
+        match tokio::time::timeout(remaining, errors.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+                    if dl.job_id == id { got_dl = true; break; }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    assert!(!got_dl, "disabled job must not produce dead-letters even with retry config");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Backoff timing: dead-letter arrives after the expected minimum delay ──────
+
+/// With `retry_backoff_sec = 2` and `max_retries = 1` the scheduler sleeps
+/// ~2 s between the initial attempt and the retry.  The dead-letter must arrive
+/// no sooner than 1.5 s after the scheduler starts (0.8× jitter floor of 2 s).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_backoff_timing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-backoff-timing");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 2,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let start = tokio::time::Instant::now();
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+            if dl.job_id == id {
+                let elapsed = start.elapsed();
+                // 0.8× jitter floor on 2 s backoff = 1.6 s minimum sleep.
+                assert!(
+                    elapsed >= Duration::from_millis(1500),
+                    "dead-letter arrived too fast ({elapsed:?}); backoff must sleep at least ~1.6 s"
+                );
+                break;
+            }
+        }
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Job enabled after being disabled: retry fires normally ───────────────────
+
+/// A job registered with `enabled: false` produces no dead-letters.  After
+/// hot-reloading to `enabled: true`, the retry cycle fires and a dead-letter
+/// must arrive.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_job_enabled_after_disabled_retries_normally() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-enable-retry");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    let job = JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: false,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    };
+    client.register_job(&job).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    // Confirm no dead-letter while disabled.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut got_early_dl = false;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() { break; }
+        match tokio::time::timeout(remaining, errors.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+                    if dl.job_id == id { got_early_dl = true; break; }
+                }
+            }
+            _ => break,
+        }
+    }
+    assert!(!got_early_dl, "disabled job must not produce dead-letters");
+
+    // Enable the job via hot-reload.
+    client.register_job(&JobConfig { enabled: true, ..job }).await.unwrap();
+
+    // Dead-letter must now arrive.
+    let deadline2 = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining = deadline2.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter after enabling");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+            if dl.job_id == id { break; }
+        }
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
