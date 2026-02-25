@@ -3547,7 +3547,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
+ "trogon-std",
  "trogon-vault",
  "uuid",
 ]
