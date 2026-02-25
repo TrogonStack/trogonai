@@ -12612,3 +12612,238 @@ async fn test_cli_add_from_file() {
         "stdout must mention the registered job id; got: {stdout}"
     );
 }
+
+// ── End-to-end binary tests ───────────────────────────────────────────────────
+//
+// These tests start the real `trogon-cron` binary in `serve` mode as a child
+// process, interact with it via the CLI binary, and verify end-to-end behaviour
+// through NATS JetStream.  They complement the library-based scheduler tests by
+// exercising signal handling, process startup, and the full binary entry point.
+
+/// Spawn `trogon-cron serve` as a child process.
+#[cfg(unix)]
+fn spawn_serve(nats_url: &str) -> tokio::process::Child {
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_trogon-cron"))
+        .args(["serve"])
+        .env("NATS_URL", nats_url)
+        .env("RUST_LOG", "error")
+        .spawn()
+        .expect("Failed to spawn trogon-cron serve")
+}
+
+/// Send SIGTERM to `child` and wait up to `timeout_secs` seconds for it to exit.
+#[cfg(unix)]
+async fn sigterm_wait(child: &mut tokio::process::Child, timeout_secs: u64) {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+    let pid = child.id().expect("child has no PID");
+    kill(Pid::from_raw(pid as i32), Signal::SIGTERM).expect("kill(SIGTERM) failed");
+    tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait())
+        .await
+        .expect("trogon-cron binary did not exit within timeout after SIGTERM")
+        .unwrap();
+}
+
+/// Full E2E: register a publish job, start the scheduler binary, verify the
+/// tick arrives in JetStream, then shut down via SIGTERM.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_publish_job_fires_via_binary() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-pub");
+    let subject = format!("cron.e2e.pub.{id}");
+    let nats_url = test_url();
+
+    // Subscribe BEFORE starting the scheduler to avoid missing the first tick.
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    let msg = tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await
+        .expect("Publish job never fired via binary scheduler")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(payload["job_id"], id.as_str(), "tick payload must carry the job id");
+}
+
+/// Full E2E: a disabled job must not fire; enabling it via the CLI binary while
+/// the scheduler binary is running must cause it to fire shortly after.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_disable_blocks_firing_enable_resumes() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-dis");
+    let subject = format!("cron.e2e.dis.{id}");
+    let nats_url = test_url();
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Register the job as DISABLED.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: false,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Wait 3 s — disabled job must not fire.
+    let no_tick = tokio::time::timeout(Duration::from_secs(3), sub.next()).await;
+    assert!(no_tick.is_err(), "disabled job must not fire");
+
+    // Enable via CLI binary while the scheduler is still running.
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "enable", &id])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+    assert!(out.status.success(), "job enable failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // Now the job must fire.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Job did not fire after being enabled via CLI")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: register a job with a 60-second interval (will not fire during the
+/// test), then update the schedule to 1 second via the CLI binary while the
+/// scheduler is running, and verify the tick arrives (hot-reload).
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_hot_reload_via_cli_updates_schedule() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-reload");
+    let subject = format!("cron.e2e.reload.{id}");
+    let nats_url = test_url();
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Register with interval=60 — will not fire on its own during this test.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Give the scheduler time to load and become leader.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Update to interval=1 via CLI — triggers a KV Put that the scheduler watches.
+    let updated = serde_json::json!({
+        "id": id,
+        "schedule": { "type": "interval", "interval_sec": 1 },
+        "action": { "type": "publish", "subject": subject },
+        "enabled": true
+    })
+    .to_string();
+    let tmp = std::env::temp_dir().join(format!("trogon-e2e-reload-{id}.json"));
+    std::fs::write(&tmp, updated.as_bytes()).unwrap();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", tmp.to_str().unwrap()])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+    let _ = std::fs::remove_file(&tmp);
+    assert!(out.status.success(), "hot-reload via CLI failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // After hot-reload the job must fire within 5 s.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Job did not fire after hot-reload via CLI")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: SIGTERM on a running scheduler must release the leader lock so
+/// the next binary instance can acquire leadership immediately without waiting
+/// for the 10-second TTL to expire.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_sigterm_releases_lock_for_immediate_successor() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-succ");
+    let subject = format!("cron.e2e.succ.{id}");
+    let nats_url = test_url();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // Start first scheduler binary and let it become leader.
+    let mut first = spawn_serve(&nats_url);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Subscribe after the first scheduler is already leader.
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // SIGTERM the first scheduler — must release the lock.
+    sigterm_wait(&mut first, 5).await;
+
+    // Start the second scheduler immediately.
+    let mut second = spawn_serve(&nats_url);
+
+    // The second scheduler must acquire leadership and fire the job within 5 s
+    // (well under the 10 s lock TTL — proves the lock was released by SIGTERM).
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Second scheduler did not fire within 5 s — SIGTERM may not have released the lock")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut second, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
