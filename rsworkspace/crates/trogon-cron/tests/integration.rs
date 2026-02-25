@@ -13056,3 +13056,221 @@ async fn test_e2e_multiple_jobs_all_fire() {
         client.remove_job(id).await.unwrap();
     }
 }
+
+/// Full E2E: two scheduler binaries running concurrently must not both fire —
+/// only the leader fires, so ticks must arrive at a rate of ~1/s, not ~2/s.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_two_scheduler_binaries_mutual_exclusion() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-2bin");
+    let subject = format!("cron.e2e.2bin.{id}");
+    let nats_url = test_url();
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut a = spawn_serve(&nats_url);
+    let mut b = spawn_serve(&nats_url);
+
+    // Allow leader election to settle before counting.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut count = 0usize;
+    let window = tokio::time::sleep(Duration::from_secs(5));
+    tokio::pin!(window);
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut window => break,
+            _ = sub.next() => count += 1,
+        }
+    }
+
+    sigterm_wait(&mut a, 5).await;
+    sigterm_wait(&mut b, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    assert!(count >= 3, "too few ticks with 2 binaries: {count}");
+    assert!(count <= 8, "too many ticks — both binaries may be firing: {count}");
+}
+
+/// Full E2E: a job configured with a `payload` must deliver that payload in
+/// every tick message received via JetStream.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_payload_forwarded_in_tick() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-payload");
+    let subject = format!("cron.e2e.payload.{id}");
+    let nats_url = test_url();
+    let payload_value = format!("hello-from-{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: Some(serde_json::Value::String(payload_value.clone())),
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    let msg = tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await
+        .expect("Payload job never fired")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let tick: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(
+        tick["payload"].as_str().unwrap_or(""),
+        payload_value,
+        "tick must carry the configured payload; got: {tick}"
+    );
+}
+
+/// Full E2E: when the leader scheduler binary is killed, the follower binary
+/// must acquire leadership and continue firing the job within 5 s (well under
+/// the 10 s lock TTL — proves the lock was released on SIGTERM).
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_follower_takes_over_after_leader_dies() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-failover");
+    let subject = format!("cron.e2e.failover.{id}");
+    let nats_url = test_url();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // Start leader and follower.
+    let mut leader = spawn_serve(&nats_url);
+    let mut follower = spawn_serve(&nats_url);
+
+    // Wait for the leader to acquire leadership and fire at least once.
+    {
+        let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+        tokio::time::timeout(Duration::from_secs(8), sub.next())
+            .await
+            .expect("Leader never fired before failover test")
+            .unwrap()
+            .unwrap();
+    }
+
+    // SIGTERM the leader — it releases the lock.
+    sigterm_wait(&mut leader, 5).await;
+
+    // The follower must now take over and fire within 5 s.
+    let mut sub2 = cron_messages(&nats, &js, subject.clone()).await;
+    tokio::time::timeout(Duration::from_secs(5), sub2.next())
+        .await
+        .expect("Follower did not take over within 5 s after leader SIGTERM")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut follower, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: the scheduler binary must inject CRON_JOB_ID and CRON_FIRED_AT
+/// environment variables into spawned processes.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_job_env_vars_injected() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-envvars");
+    let nats_url = test_url();
+
+    // The spawned script writes "CRON_JOB_ID=<value> CRON_FIRED_AT=<value>"
+    // to a sentinel file so we can assert the values from the test.
+    let out_file = std::env::temp_dir().join(format!("trogon-e2e-envvars-{id}.txt"));
+    let _ = std::fs::remove_file(&out_file);
+
+    let script = format!(
+        "echo \"CRON_JOB_ID=$CRON_JOB_ID CRON_FIRED_AT=$CRON_FIRED_AT\" > {}",
+        out_file.display()
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Poll until the output file appears (max 8 s).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if out_file.exists() { break; }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Spawn job never wrote the env-vars file"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let content = std::fs::read_to_string(&out_file).unwrap();
+    let _ = std::fs::remove_file(&out_file);
+
+    assert!(
+        content.contains(&format!("CRON_JOB_ID={id}")),
+        "CRON_JOB_ID must be set to the job id; got: {content}"
+    );
+    assert!(
+        content.contains("CRON_FIRED_AT="),
+        "CRON_FIRED_AT must be set; got: {content}"
+    );
+    // CRON_FIRED_AT must not be empty (bash would leave it blank if unset).
+    let fired_at = content
+        .split("CRON_FIRED_AT=")
+        .nth(1)
+        .unwrap_or("")
+        .trim();
+    assert!(!fired_at.is_empty(), "CRON_FIRED_AT must not be empty; got: {content}");
+}
