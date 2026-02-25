@@ -7,7 +7,7 @@ name = "acp-nats"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "async-nats",
+ "async-nats 0.47.0",
  "async-trait",
  "bytes",
  "futures",
@@ -29,7 +29,7 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
- "async-nats",
+ "async-nats 0.47.0",
  "async-trait",
  "bytes",
  "futures",
@@ -50,7 +50,7 @@ dependencies = [
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
- "async-nats",
+ "async-nats 0.47.0",
  "bytes",
  "clap",
  "futures",
@@ -70,7 +70,7 @@ dependencies = [
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "clap",
@@ -79,6 +79,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.29.0",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
@@ -228,6 +229,43 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "async-nats"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86dde77d8a733a9dbaf865a9eb65c72e09c88f3d14d3dd0d2aecf511920ee4fe"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "memchr",
+ "nkeys",
+ "nuid",
+ "once_cell",
+ "pin-project",
+ "portable-atomic",
+ "rand 0.8.5",
+ "regex",
+ "ring",
+ "rustls-native-certs 0.7.3",
+ "rustls-pemfile",
+ "rustls-webpki 0.102.8",
+ "serde",
+ "serde_json",
+ "serde_nanos",
+ "serde_repr",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-stream",
+ "tokio-util",
+ "tokio-websockets 0.10.1",
+ "tracing",
+ "tryhard",
+ "url",
 ]
 
 [[package]]
@@ -674,6 +712,7 @@ dependencies = [
  "fiat-crypto",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -837,6 +876,7 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
+ "pkcs8",
  "signature",
 ]
 
@@ -848,9 +888,11 @@ checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
+ "serde",
  "sha2",
  "signature",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1731,6 +1773,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nuid"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc895af95856f929163a0aa20c26a78d26bfdc839f51b9d5aa7a5b79e52b7e83"
+dependencies = [
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1846,12 +1897,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -3462,14 +3507,10 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-nats",
- "trogon-service-config",
  "trogon-source-discord",
  "trogon-source-github",
  "trogon-source-gitlab",
- "trogon-source-incidentio",
  "trogon-source-linear",
- "trogon-source-notion",
- "trogon-source-sentry",
  "trogon-source-slack",
  "trogon-source-telegram",
  "trogon-std",
@@ -3479,11 +3520,10 @@ dependencies = [
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
- "async-nats",
+ "async-nats 0.47.0",
  "bytes",
  "futures",
  "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "tokio",
@@ -3495,13 +3535,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-service-config"
+name = "trogon-secret-proxy"
 version = "0.1.0"
 dependencies = [
- "clap",
- "confique",
- "tempfile",
+ "async-nats 0.45.0",
+ "axum",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
  "trogon-nats",
+ "trogon-vault",
+ "uuid",
 ]
 
 [[package]]
@@ -3509,13 +3557,18 @@ name = "trogon-source-discord"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
+ "axum",
  "bytes",
+ "ed25519-dalek",
  "futures-core",
+ "hex",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
  "twilight-gateway",
@@ -3527,7 +3580,7 @@ name = "trogon-source-github"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "hex",
@@ -3546,29 +3599,9 @@ name = "trogon-source-gitlab"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
- "sha2",
- "subtle",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-incidentio"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum",
- "base64 0.22.1",
- "bytes",
- "hmac",
- "serde_json",
  "sha2",
  "subtle",
  "tokio",
@@ -3584,7 +3617,7 @@ name = "trogon-source-linear"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "futures-util",
@@ -3603,50 +3636,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-source-notion"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum",
- "bytes",
- "hex",
- "hmac",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-sentry"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum",
- "hex",
- "hmac",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
 name = "trogon-source-slack"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "form_urlencoded",
@@ -3667,7 +3661,7 @@ name = "trogon-source-telegram"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "serde",
@@ -3686,18 +3680,20 @@ dependencies = [
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [
- "axum",
  "bytesize",
  "clap",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "trogon-vault"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-opentelemetry",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]
