@@ -344,7 +344,7 @@ mod tests {
 
     use crate::messages::OutboundHttpRequest;
 
-    use super::{forward_request_with_retry, process_request, resolve_token};
+    use super::{forward_request, forward_request_with_retry, process_request, resolve_token};
 
     fn make_headers(auth: &str) -> HashMap<String, String> {
         let mut m = HashMap::new();
@@ -541,6 +541,36 @@ mod tests {
         assert_eq!(resp.status, 503);
         // HTTP_MAX_RETRIES=3 → 1 initial + 3 retries = 4 total calls
         assert_eq!(mock.hits(), 4, "should attempt exactly 4 times (1 + 3 retries)");
+    }
+
+    /// GET requests with an empty body must not send a body to the upstream.
+    /// Verifies the `if !request.body.is_empty()` branch in `forward_request`.
+    #[tokio::test]
+    async fn forward_request_omits_body_when_empty() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/v1/models");
+                then.status(200).body("[]");
+            })
+            .await;
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: format!("{}/v1/models", mock_server.base_url()),
+            headers: HashMap::new(),
+            body: vec![], // empty — must not be sent
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem".to_string(),
+        };
+
+        let resp = forward_request(&client, &request, &HashMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status, 200);
+        mock.assert_async().await;
     }
 
     /// `WorkerError::JetStream` must include the message in its Display output.
