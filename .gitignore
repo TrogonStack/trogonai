@@ -40,6 +40,7 @@ Thumbs.db
 
 # Coverage
 lcov.info
+coverage.xml
 *.profraw
 *.profdata
 
