@@ -7295,3 +7295,198 @@ async fn test_max_backoff_sec_round_trips_through_kv() {
 
     client.remove_job(&id).await.unwrap();
 }
+
+// ── No dead-letter when retry is not configured ───────────────────────────────
+
+/// A spawn job with no retry policy (`retry: None`) fails every tick.
+/// No dead-letter must be published to `cron.errors` — silent failure is the
+/// expected behaviour when the user has not opted in to retry tracking.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_no_dead_letter_without_retry_policy() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-no-dl");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Wait 5 s and assert no dead-letter with our job_id arrives.
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut got_our_dl = false;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() { break; }
+        match tokio::time::timeout(remaining, errors.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+                    if dl.job_id == id { got_our_dl = true; break; }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    assert!(!got_our_dl, "No dead-letter expected when retry policy is not set");
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Job keeps firing after retry cycle is exhausted ──────────────────────────
+
+/// A spawn job with `max_retries: 1` always fails.  After the first retry
+/// cycle completes (2 attempts + dead-letter), `is_running` must be cleared
+/// so the job fires again on the next tick.  We verify this by counting total
+/// invocations: >= 4 means at least two full retry cycles ran.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_continues_firing_after_retry_exhausted() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-continues");
+
+    let counter = std::env::temp_dir().join(format!("trogon-continues-{id}"));
+    let _ = std::fs::remove_file(&counter);
+
+    // Always exits 1, but counts every invocation so we can verify re-entry.
+    let script = format!(
+        "count=$(cat '{p}' 2>/dev/null || echo 0); printf '%s' \"$((count + 1))\" > '{p}'; exit 1",
+        p = counter.display(),
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(3),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Two full cycles = 4 invocations (2 attempts per cycle).  Allow 20 s.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let count: u32 = std::fs::read_to_string(&counter)
+            .ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        if count >= 4 { break; }
+        assert!(tokio::time::Instant::now() < deadline,
+            "Expected >= 4 invocations across two retry cycles, got {count}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&counter);
+}
+
+// ── max_retries wins when exhausted before max_retry_duration ─────────────────
+
+/// With `max_retries: 2` and a generous `max_retry_duration_sec: 60`, the
+/// retry count is exhausted first.  The dead-letter must report exactly
+/// 3 attempts (1 initial + 2 retries), not fewer.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_max_retries_wins_over_duration() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retries-win");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 2,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: Some(60), // generous — max_retries hits first
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, attempts: u32 }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let dl = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        let dl: DeadLetter = serde_json::from_slice(&msg.payload).unwrap();
+        if dl.job_id == id { break dl; }
+    };
+
+    assert_eq!(dl.attempts, 3, "expected exactly 3 attempts (1 initial + 2 retries)");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
