@@ -1,3 +1,4 @@
+mod authenticate;
 mod initialize;
 mod new_session;
 
@@ -42,11 +43,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         initialize::handle(self, args).await
     }
 
-    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        authenticate::handle(self, args).await
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
@@ -106,8 +104,8 @@ mod tests {
     use super::Bridge;
     use crate::config::Config;
     use agent_client_protocol::{
-        Agent, AuthenticateRequest, CancelNotification, ExtNotification, ExtRequest,
-        LoadSessionRequest, PromptRequest, SetSessionModeRequest,
+        Agent, CancelNotification, ExtNotification, ExtRequest, LoadSessionRequest, PromptRequest,
+        SetSessionModeRequest,
     };
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -129,12 +127,6 @@ mod tests {
         let bridge = mock_bridge();
         let msg = "not yet implemented";
 
-        assert!(
-            bridge
-                .authenticate(AuthenticateRequest::new("test"))
-                .await
-                .is_err()
-        );
         assert!(
             bridge
                 .load_session(LoadSessionRequest::new("s1", "."))
@@ -168,7 +160,7 @@ mod tests {
         );
 
         let err = bridge
-            .authenticate(AuthenticateRequest::new("test"))
+            .load_session(LoadSessionRequest::new("s1", "."))
             .await
             .unwrap_err();
         assert!(err.to_string().contains(msg));
