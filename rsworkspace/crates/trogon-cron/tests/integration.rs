@@ -11685,3 +11685,137 @@ async fn test_publish_retry_succeeds_on_second_attempt_mock() {
     assert!(publisher.dls.lock().unwrap().is_empty(),
         "no dead-letter must be published when retry succeeds");
 }
+
+// ── Publish with retry=None fails → no dead-letter ───────────────────────────
+
+/// When a publish action has no retry config (`retry: None`) and the publish
+/// fails, no dead-letter must be sent to `cron.errors`.  Mirror of
+/// `test_spawn_no_dead_letter_without_retry_policy` for the publish action.
+#[tokio::test]
+async fn test_publish_no_retry_policy_no_dead_letter_mock() {
+    use std::sync::{Arc, Mutex};
+    use bytes::Bytes;
+    use trogon_cron::executor::{build_job_state_at, execute};
+
+    #[derive(Clone, Default)]
+    struct CaptureDl { dls: Arc<Mutex<Vec<serde_json::Value>>> }
+
+    #[derive(Debug)]
+    struct PubFail;
+    impl std::fmt::Display for PubFail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "injected failure")
+        }
+    }
+    impl std::error::Error for PubFail {}
+
+    impl trogon_cron::TickPublisher for CaptureDl {
+        type Error = PubFail;
+        fn publish_tick(
+            &self, subject: String,
+            _headers: async_nats::HeaderMap,
+            payload: Bytes,
+        ) -> impl std::future::Future<Output = Result<(), PubFail>> + Send {
+            let dls = self.dls.clone();
+            async move {
+                if subject == "cron.errors" {
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        dls.lock().unwrap().push(v);
+                    }
+                    Ok(())
+                } else {
+                    Err(PubFail)
+                }
+            }
+        }
+    }
+
+    let publisher = CaptureDl::default();
+
+    let config = JobConfig {
+        id: "mock-pub-no-retry".to_string(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "cron.mock-pub-no-retry".to_string() },
+        enabled: true,
+        payload: None,
+        retry: None, // no retry policy
+    };
+
+    let state = build_job_state_at(config, chrono::Utc::now()).unwrap();
+    execute(&publisher, &state, chrono::Utc::now()).await;
+
+    // Brief wait — with no retries the background task finishes almost instantly.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(publisher.dls.lock().unwrap().is_empty(),
+        "no dead-letter must be published when retry=None");
+}
+
+// ── Publish with max_retries=0 fails → no dead-letter ────────────────────────
+
+/// When a publish action has `max_retries=0` and the publish fails, no
+/// dead-letter must be sent.  Mirror of
+/// `test_spawn_explicit_max_retries_zero_no_dead_letter` for the publish action.
+#[tokio::test]
+async fn test_publish_max_retries_zero_no_dead_letter_mock() {
+    use std::sync::{Arc, Mutex};
+    use bytes::Bytes;
+    use trogon_cron::executor::{build_job_state_at, execute};
+
+    #[derive(Clone, Default)]
+    struct CaptureDl { dls: Arc<Mutex<Vec<serde_json::Value>>> }
+
+    #[derive(Debug)]
+    struct PubFail;
+    impl std::fmt::Display for PubFail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "injected failure")
+        }
+    }
+    impl std::error::Error for PubFail {}
+
+    impl trogon_cron::TickPublisher for CaptureDl {
+        type Error = PubFail;
+        fn publish_tick(
+            &self, subject: String,
+            _headers: async_nats::HeaderMap,
+            payload: Bytes,
+        ) -> impl std::future::Future<Output = Result<(), PubFail>> + Send {
+            let dls = self.dls.clone();
+            async move {
+                if subject == "cron.errors" {
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        dls.lock().unwrap().push(v);
+                    }
+                    Ok(())
+                } else {
+                    Err(PubFail)
+                }
+            }
+        }
+    }
+
+    let publisher = CaptureDl::default();
+
+    let config = JobConfig {
+        id: "mock-pub-zero-retry".to_string(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "cron.mock-pub-zero-retry".to_string() },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 0,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    };
+
+    let state = build_job_state_at(config, chrono::Utc::now()).unwrap();
+    execute(&publisher, &state, chrono::Utc::now()).await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(publisher.dls.lock().unwrap().is_empty(),
+        "no dead-letter must be published when max_retries=0");
+}
