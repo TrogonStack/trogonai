@@ -12847,3 +12847,212 @@ async fn test_e2e_sigterm_releases_lock_for_immediate_successor() {
     sigterm_wait(&mut second, 5).await;
     client.remove_job(&id).await.unwrap();
 }
+
+/// Full E2E: removing a job via the CLI binary while the scheduler is running
+/// must cause it to stop firing.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_job_removed_via_cli_stops_firing() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-rm");
+    let subject = format!("cron.e2e.rm.{id}");
+    let nats_url = test_url();
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Wait for at least one tick to confirm the job is firing.
+    tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await
+        .expect("Job never fired before removal")
+        .unwrap()
+        .unwrap();
+
+    // Remove via CLI while the scheduler is still running.
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "remove", &id])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+    assert!(out.status.success(), "job remove failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // Drain any ticks that were already in-flight at removal time.
+    let _ = tokio::time::timeout(Duration::from_millis(600), sub.next()).await;
+
+    // After removal no further tick must arrive within 3 s.
+    let no_tick = tokio::time::timeout(Duration::from_secs(3), sub.next()).await;
+    sigterm_wait(&mut scheduler, 5).await;
+
+    assert!(no_tick.is_err(), "job must not fire after being removed");
+}
+
+/// Full E2E: a job registered via the CLI binary AFTER the scheduler is already
+/// running must be picked up via the KV watch and start firing (hot-add).
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_job_added_after_scheduler_starts() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-hotadd");
+    let subject = format!("cron.e2e.hotadd.{id}");
+    let nats_url = test_url();
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Give the scheduler time to start and become leader before adding the job.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Subscribe after scheduler is already running.
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Add the job via CLI — the scheduler must pick it up via KV watch.
+    let json = serde_json::json!({
+        "id": id,
+        "schedule": { "type": "interval", "interval_sec": 1 },
+        "action": { "type": "publish", "subject": subject },
+        "enabled": true
+    }).to_string();
+    let tmp = std::env::temp_dir().join(format!("trogon-e2e-hotadd-{id}.json"));
+    std::fs::write(&tmp, json.as_bytes()).unwrap();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", tmp.to_str().unwrap()])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+    let _ = std::fs::remove_file(&tmp);
+    assert!(out.status.success(), "job add failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // The hot-added job must fire within 5 s.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("Hot-added job never fired")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: after a scheduler binary is stopped and a new one is started, the
+/// new instance must load jobs from the KV snapshot and fire them without any
+/// manual re-registration.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_scheduler_restart_picks_up_existing_jobs() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-restart");
+    let subject = format!("cron.e2e.restart.{id}");
+    let nats_url = test_url();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+
+    // First scheduler: confirm the job fires, then stop it.
+    {
+        let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+        let mut first = spawn_serve(&nats_url);
+        tokio::time::timeout(Duration::from_secs(8), sub.next())
+            .await
+            .expect("Job never fired before restart")
+            .unwrap()
+            .unwrap();
+        sigterm_wait(&mut first, 5).await;
+    }
+
+    // Second scheduler: must load the job from KV and fire it again without
+    // any re-registration — proves the initial KV snapshot is read on startup.
+    let mut sub2 = cron_messages(&nats, &js, subject.clone()).await;
+    let mut second = spawn_serve(&nats_url);
+
+    tokio::time::timeout(Duration::from_secs(8), sub2.next())
+        .await
+        .expect("Job did not fire after scheduler restart — KV snapshot may not be loaded")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut second, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: multiple jobs registered before the scheduler starts must all
+/// fire independently via the binary scheduler.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_multiple_jobs_all_fire() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let nats_url = test_url();
+
+    let jobs: Vec<(String, String)> = (0..3)
+        .map(|i| {
+            let id = unique_id(&format!("e2e-multi-{i}"));
+            let subject = format!("cron.e2e.multi.{id}");
+            (id, subject)
+        })
+        .collect();
+
+    // Subscribe to all three subjects before registering or starting the scheduler.
+    let mut subs = Vec::new();
+    for (_, subject) in &jobs {
+        subs.push(cron_messages(&nats, &js, subject.clone()).await);
+    }
+
+    for (id, subject) in &jobs {
+        client.register_job(&JobConfig {
+            id: id.clone(),
+            schedule: Schedule::Interval { interval_sec: 1 },
+            action: Action::Publish { subject: subject.clone() },
+            enabled: true,
+            payload: None,
+            retry: None,
+        }).await.unwrap();
+    }
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Every job must fire within 8 s.
+    for (i, sub) in subs.iter_mut().enumerate() {
+        tokio::time::timeout(Duration::from_secs(8), sub.next())
+            .await
+            .unwrap_or_else(|_| panic!("Job {i} never fired"))
+            .unwrap()
+            .unwrap();
+    }
+
+    sigterm_wait(&mut scheduler, 5).await;
+    for (id, _) in &jobs {
+        client.remove_job(id).await.unwrap();
+    }
+}
