@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::pull;
@@ -23,6 +24,11 @@ use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
 use crate::stream::STREAM_NAME;
 
 const BEARER_PREFIX: &str = "Bearer ";
+
+/// Maximum number of times to retry a transient upstream failure.
+const HTTP_MAX_RETRIES: u32 = 3;
+/// Initial backoff delay; doubles on each subsequent attempt.
+const HTTP_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Run the detokenization worker loop.
 ///
@@ -148,10 +154,10 @@ where
         request.idempotency_key.clone(),
     );
 
-    match forward_request(http_client, request, &forwarded_headers).await {
+    match forward_request_with_retry(http_client, request, &forwarded_headers).await {
         Ok(resp) => resp,
         Err(e) => {
-            tracing::error!(error = %e, url = %request.url, "Upstream HTTP call failed");
+            tracing::error!(error = %e, url = %request.url, "Upstream HTTP call failed after retries");
             OutboundHttpResponse {
                 status: 502,
                 headers: HashMap::new(),
@@ -198,6 +204,66 @@ where
         .await
         .map_err(|e| format!("Vault error: {}", e))?
         .ok_or_else(|| format!("Token not found in vault: {}", token))
+}
+
+/// Retry wrapper around [`forward_request`] using exponential backoff.
+///
+/// Retries on:
+/// - Network/transport errors (connection refused, timeout, etc.)
+/// - 5xx responses from the upstream provider (transient server errors)
+///
+/// Does **not** retry on 4xx responses (client errors — retrying won't help).
+async fn forward_request_with_retry(
+    http_client: &ReqwestClient,
+    request: &OutboundHttpRequest,
+    headers: &HashMap<String, String>,
+) -> Result<OutboundHttpResponse, String> {
+    let mut attempts = 0u32;
+    loop {
+        attempts += 1;
+        match forward_request(http_client, request, headers).await {
+            // Success or non-retryable client error — return immediately.
+            Ok(resp) if resp.status < 500 => return Ok(resp),
+            // 5xx but retries exhausted.
+            Ok(resp) if attempts > HTTP_MAX_RETRIES => {
+                tracing::warn!(
+                    url = %request.url,
+                    status = resp.status,
+                    attempts,
+                    "Upstream returned 5xx after all retries"
+                );
+                return Ok(resp);
+            }
+            // 5xx — backoff and retry.
+            Ok(resp) => {
+                let delay = HTTP_INITIAL_RETRY_DELAY * (1u32 << (attempts - 1).min(31));
+                tracing::debug!(
+                    url = %request.url,
+                    status = resp.status,
+                    attempt = attempts,
+                    max_retries = HTTP_MAX_RETRIES,
+                    delay_ms = delay.as_millis(),
+                    "Upstream returned 5xx, retrying"
+                );
+                tokio::time::sleep(delay).await;
+            }
+            // Transport error but retries exhausted.
+            Err(e) if attempts > HTTP_MAX_RETRIES => return Err(e),
+            // Transport error — backoff and retry.
+            Err(e) => {
+                let delay = HTTP_INITIAL_RETRY_DELAY * (1u32 << (attempts - 1).min(31));
+                tracing::debug!(
+                    url = %request.url,
+                    error = %e,
+                    attempt = attempts,
+                    max_retries = HTTP_MAX_RETRIES,
+                    delay_ms = delay.as_millis(),
+                    "Upstream request failed, retrying"
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 }
 
 /// Send the HTTP request to the upstream AI provider.

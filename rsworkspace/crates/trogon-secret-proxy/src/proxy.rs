@@ -21,6 +21,7 @@ use uuid::Uuid;
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
 use crate::provider;
 use crate::subjects;
+use trogon_nats::headers_with_trace_context;
 
 #[derive(Clone)]
 pub struct ProxyState {
@@ -82,13 +83,15 @@ async fn handle_request(
         .await
         .map_err(|e| ProxyError::NatsSubscribe(e.to_string()))?;
 
-    // Publish OutboundHttpRequest to JetStream.
+    // Publish OutboundHttpRequest to JetStream, injecting the current trace context
+    // into NATS headers so the worker can continue the distributed trace.
     let payload = serde_json::to_vec(&message)
         .map_err(|e| ProxyError::Serialize(e.to_string()))?;
 
+    let nats_headers = headers_with_trace_context();
     state
         .jetstream
-        .publish(state.outbound_subject.clone(), payload.into())
+        .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
         .await
         .map_err(|e| ProxyError::NatsPublish(e.to_string()))?;
 
