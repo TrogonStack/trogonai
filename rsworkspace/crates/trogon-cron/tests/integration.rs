@@ -12226,3 +12226,213 @@ async fn test_cli_add_malformed_json_exits_with_error() {
         "stderr must mention the JSON parse error; got: {stderr}"
     );
 }
+
+/// `job list` when the config bucket is empty must print "No jobs registered."
+/// and exit zero.  Uses `purge_all_jobs` first so we start from a clean slate.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_list_empty_shows_no_jobs_message() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    purge_all_jobs(&client).await;
+
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "list"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    assert!(out.status.success(), "job list must exit zero when empty");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("No jobs registered."),
+        "stdout must contain 'No jobs registered.' when bucket is empty; got: {stdout}"
+    );
+}
+
+/// `job add -` must read the JSON config from stdin and register the job.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_add_from_stdin() {
+    use tokio::io::AsyncWriteExt as _;
+
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-cli-stdin");
+    let subject = format!("cron.{id}");
+
+    let json = serde_json::json!({
+        "id": id,
+        "schedule": { "type": "interval", "interval_sec": 60 },
+        "action": { "type": "publish", "subject": subject },
+        "enabled": true
+    })
+    .to_string();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let mut child = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", "-"])
+        .env("RUST_LOG", "error")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(json.as_bytes()).await.unwrap();
+        // Close stdin so the binary sees EOF and proceeds.
+    }
+
+    let out = child.wait_with_output().await.unwrap();
+    client.remove_job(&id).await.unwrap();
+
+    assert!(
+        out.status.success(),
+        "job add - (stdin) must exit zero; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(&id),
+        "stdout must mention the registered job id; got: {stdout}"
+    );
+}
+
+/// `job get <id>` for an id that does not exist must exit non-zero and print
+/// a "not found" message to stderr.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_get_nonexistent_id_exits_with_error() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "get", "definitely-nonexistent-job-xyz-abc"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "job get of nonexistent id must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not found") || stderr.contains("Not found"),
+        "stderr must mention 'not found'; got: {stderr}"
+    );
+}
+
+/// `job enable <id>` for a nonexistent job must exit non-zero and report an error.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_enable_nonexistent_id_exits_with_error() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "enable", "definitely-nonexistent-job-xyz-abc"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "job enable of nonexistent id must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.is_empty(),
+        "stderr must contain an error message; got empty stderr"
+    );
+}
+
+/// `job disable <id>` for a nonexistent job must exit non-zero and report an error.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_disable_nonexistent_id_exits_with_error() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "disable", "definitely-nonexistent-job-xyz-abc"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "job disable of nonexistent id must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.is_empty(),
+        "stderr must contain an error message; got empty stderr"
+    );
+}
+
+/// Registering a job with subject `"cron."` (the bare prefix, no token after
+/// the dot) must succeed — the validation only checks the prefix, not the
+/// suffix.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_register_job_subject_exactly_cron_dot_is_accepted() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-cron-dot");
+
+    let result = client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "cron.".to_string() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await;
+
+    // Clean up regardless of outcome.
+    let _ = client.remove_job(&id).await;
+
+    assert!(result.is_ok(), "subject 'cron.' must be accepted by register_job");
+}
+
+/// `get_job` returns `None` when the key exists in the KV history but the
+/// latest operation is `Delete` (not `Put`).  This verifies the branch at
+/// `client.rs` that inspects `entry.operation`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_get_job_deleted_key_returns_none() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-get-deleted");
+
+    // Register so the key exists.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    // Delete — key exists in history with operation=Delete.
+    client.remove_job(&id).await.unwrap();
+
+    // get_job must return None, not an error.
+    let result = client.get_job(&id).await.unwrap();
+    assert!(
+        result.is_none(),
+        "get_job must return None for a key whose latest operation is Delete"
+    );
+}

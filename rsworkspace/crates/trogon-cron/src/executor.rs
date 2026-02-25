@@ -901,6 +901,22 @@ mod tests {
     }
 
     #[test]
+    fn interval_sec_too_large_is_rejected() {
+        // i64::MAX as u64 + 1 overflows the signed conversion in compute_next_fire.
+        let too_large = i64::MAX as u64 + 1;
+        let config = JobConfig {
+            id: "too-large".to_string(),
+            schedule: Schedule::Interval { interval_sec: too_large },
+            action: Action::Publish { subject: "cron.too-large".to_string() },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        let err = build_job_state(config).err().expect("overflow interval_sec must be rejected");
+        assert!(err.to_string().contains("interval_sec"), "got: {err}");
+    }
+
+    #[test]
     fn timeout_sec_zero_is_rejected() {
         let config = JobConfig {
             id: "timeout-zero".to_string(),
@@ -931,6 +947,20 @@ mod tests {
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("cron."));
+    }
+
+    #[test]
+    fn publish_subject_exact_cron_dot_is_accepted() {
+        // "cron." is the minimal valid subject — just the prefix with no token after the dot.
+        let config = JobConfig {
+            id: "exact-prefix".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.".to_string() },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        assert!(build_job_state(config).is_ok(), "\"cron.\" must be accepted as a valid subject");
     }
 
     #[test]
