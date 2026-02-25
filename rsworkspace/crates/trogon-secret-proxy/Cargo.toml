@@ -13,9 +13,19 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 trogon-nats = { path = "../trogon-nats" }
+trogon-std = { path = "../trogon-std" }
 trogon-vault = { path = "../trogon-vault" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "proxy"
+path = "src/bin/proxy.rs"
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
