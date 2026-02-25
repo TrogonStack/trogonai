@@ -30,6 +30,9 @@ pub struct ProxyState {
     pub prefix: String,
     pub outbound_subject: String,
     pub worker_timeout: Duration,
+    /// Overrides the AI-provider base URL for all requests.
+    /// `None` in production; set to a mock server URL in integration tests.
+    pub base_url_override: Option<String>,
 }
 
 /// Build the axum router for the HTTP proxy.
@@ -44,8 +47,12 @@ async fn handle_request(
     Path((provider, path)): Path<(String, String)>,
     req: Request,
 ) -> Result<Response<Body>, ProxyError> {
-    let base = provider::base_url(&provider)
-        .ok_or_else(|| ProxyError::UnknownProvider(provider.clone()))?;
+    let base: String = match &state.base_url_override {
+        Some(override_url) => override_url.clone(),
+        None => provider::base_url(&provider)
+            .ok_or_else(|| ProxyError::UnknownProvider(provider.clone()))?
+            .to_string(),
+    };
 
     let url = format!("{}/{}", base, path);
 
@@ -192,5 +199,57 @@ impl axum::response::IntoResponse for ProxyError {
             .status(status)
             .body(Body::from(body))
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[test]
+    fn unknown_provider_maps_to_502() {
+        let resp = ProxyError::UnknownProvider("fakeai".to_string()).into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn timeout_maps_to_504() {
+        let resp = ProxyError::Timeout {
+            correlation_id: "abc-123".to_string(),
+        }
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[test]
+    fn internal_errors_map_to_500() {
+        let cases: Vec<ProxyError> = vec![
+            ProxyError::ReadBody("x".to_string()),
+            ProxyError::Serialize("x".to_string()),
+            ProxyError::NatsSubscribe("x".to_string()),
+            ProxyError::NatsPublish("x".to_string()),
+            ProxyError::Deserialize("x".to_string()),
+            ProxyError::ReplyChannelClosed,
+        ];
+        for err in cases {
+            assert_eq!(err.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    #[test]
+    fn error_display_includes_context() {
+        assert!(ProxyError::UnknownProvider("fakeai".to_string())
+            .to_string()
+            .contains("fakeai"));
+        assert!(ProxyError::Timeout {
+            correlation_id: "req-1".to_string()
+        }
+        .to_string()
+        .contains("req-1"));
+        assert!(ProxyError::ReadBody("boom".to_string())
+            .to_string()
+            .contains("boom"));
+        assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
     }
 }

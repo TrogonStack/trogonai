@@ -16,6 +16,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::future::join_all;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
 use trogon_nats::{NatsAuth, NatsConfig, connect};
@@ -25,19 +26,22 @@ use trogon_secret_proxy::{
 };
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
-#[tokio::test]
-async fn e2e_token_is_exchanged_for_real_key() {
-    // ── 1. Start NATS with JetStream via Docker ──────────────────────────────
-    let nats_container: ContainerAsync<Nats> = Nats::default()
+// ── Shared helper ─────────────────────────────────────────────────────────────
+
+async fn start_nats() -> (ContainerAsync<Nats>, u16) {
+    let container: ContainerAsync<Nats> = Nats::default()
         .with_cmd(["--jetstream"])
         .start()
         .await
         .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+    (container, port)
+}
 
-    let nats_port = nats_container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("Failed to get NATS port");
+#[tokio::test]
+async fn e2e_token_is_exchanged_for_real_key() {
+    // ── 1. Start NATS with JetStream via Docker ──────────────────────────────
+    let (_nats_container, nats_port) = start_nats().await;
 
     // ── 2. Mock the AI provider (simulates Anthropic) ────────────────────────
     // The mock expects the REAL key in the Authorization header, not the token.
@@ -147,8 +151,7 @@ async fn e2e_token_is_exchanged_for_real_key() {
 #[tokio::test]
 async fn e2e_unknown_token_returns_error() {
     // ── NATS ─────────────────────────────────────────────────────────────────
-    let nats_container: ContainerAsync<Nats> = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
-    let nats_port = nats_container.get_host_port_ipv4(4222).await.unwrap();
+    let (_nats_container, nats_port) = start_nats().await;
 
     // Mock that should NOT be called (token unknown in vault)
     let mock_server = httpmock::MockServer::start_async().await;
@@ -209,4 +212,160 @@ async fn e2e_unknown_token_returns_error() {
         "Expected error status, got {}",
         resp.status()
     );
+}
+
+/// When no worker is running the proxy must return 504 Gateway Timeout
+/// after `worker_timeout` expires.
+#[tokio::test]
+async fn e2e_proxy_timeout_returns_504() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats,
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        // Short timeout so the test completes quickly.
+        worker_timeout: Duration::from_secs(2),
+        base_url_override: Some("http://127.0.0.1:9".to_string()), // irrelevant
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // No worker started — proxy will time out waiting for the reply.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_test_timeout1")
+        .body("{}")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        504,
+        "Expected 504 Gateway Timeout, got {}",
+        resp.status()
+    );
+}
+
+/// Five concurrent requests must all be routed independently — correlation IDs
+/// must never be mixed up.  Each receives the same mocked 200 response.
+#[tokio::test]
+async fn e2e_concurrent_requests_all_succeed() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_concurrent","type":"message"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_conc01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+
+    let http_client = reqwest::Client::new();
+    tokio::spawn(async move {
+        worker::run(jetstream, nats, vault, http_client, "e2e-concurrent-workers")
+            .await
+            .unwrap()
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Fire 5 requests simultaneously.
+    let client = reqwest::Client::new();
+    let handles: Vec<_> = (0..5)
+        .map(|_| {
+            let c = client.clone();
+            let url = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+            tokio::spawn(async move {
+                c.post(url)
+                    .header("Authorization", "Bearer tok_anthropic_test_conc01")
+                    .header("Content-Type", "application/json")
+                    .body(r#"{"model":"claude-3","messages":[]}"#)
+                    .timeout(Duration::from_secs(20))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    let responses = join_all(handles).await;
+    for result in responses {
+        let resp = result.unwrap();
+        assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["id"], "msg_concurrent", "Response body mismatch");
+    }
+}
+
+/// `ensure_stream` must be idempotent — calling it twice on the same subject
+/// must not return an error.
+#[tokio::test]
+async fn e2e_ensure_stream_is_idempotent() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
+    let outbound_subject = subjects::outbound("trogon");
+
+    // First call — creates the stream.
+    stream::ensure_stream(&jetstream, &outbound_subject)
+        .await
+        .expect("First ensure_stream call failed");
+
+    // Second call — stream already exists, must succeed without error.
+    stream::ensure_stream(&jetstream, &outbound_subject)
+        .await
+        .expect("Second ensure_stream call failed (not idempotent)");
 }
