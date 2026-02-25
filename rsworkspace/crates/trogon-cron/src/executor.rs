@@ -324,10 +324,11 @@ fn spawn_process<P: TickPublisher>(
         let start = tokio::time::Instant::now();
 
         'retry: for attempt in 0..total_attempts {
-            actual_attempts += 1;
             // Delay before retry attempts (not before the first attempt).
             if attempt > 0 {
                 // Stop retrying if the total duration budget is exhausted.
+                // Check BEFORE incrementing actual_attempts so the dead-letter
+                // reports only attempts where the process actually ran.
                 if let Some(max_dur) = max_retry_duration {
                     if start.elapsed() >= max_dur {
                         tracing::warn!(
@@ -359,6 +360,9 @@ fn spawn_process<P: TickPublisher>(
             } else {
                 tracing::debug!(bin = %bin, job_id = %tick.job_id, "Spawning process");
             }
+
+            // Count this as an actual attempt only after passing the duration gate.
+            actual_attempts += 1;
 
             // Build the command and inject tick context as environment variables so
             // the spawned binary knows which job fired, when, and with what payload.
