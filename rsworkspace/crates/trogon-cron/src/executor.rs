@@ -622,6 +622,8 @@ mod tests {
             let state = publish_job_state("smoke");
 
             execute(&publisher, &state, Utc::now()).await;
+            // execute() for Publish uses tokio::spawn; yield so the task runs.
+            tokio::task::yield_now().await;
 
             assert_eq!(publisher.tick_count(), 1);
             assert_eq!(publisher.ticks()[0].subject, "cron.smoke");
@@ -633,6 +635,7 @@ mod tests {
             let state = publish_job_state("heartbeat");
 
             execute(&publisher, &state, Utc::now()).await;
+            tokio::task::yield_now().await;
 
             let tick: crate::config::TickPayload =
                 serde_json::from_slice(&publisher.ticks()[0].payload).unwrap();
@@ -648,6 +651,7 @@ mod tests {
 
             execute(&publisher, &state, now).await;
             execute(&publisher, &state, now).await;
+            tokio::task::yield_now().await;
 
             let ticks = publisher.ticks();
             let t1: crate::config::TickPayload =
@@ -991,6 +995,54 @@ mod tests {
             let d = retry_backoff_with_jitter(60, 1, Some(max));
             assert!(d <= max, "delay {d:?} exceeded max_backoff {max:?}");
         }
+    }
+
+    #[test]
+    fn should_fire_returns_false_when_next_fire_is_none() {
+        let now = Utc::now();
+        let mut state = build_job_state_at(publish_job("none-test", 60), now).unwrap();
+        state.next_fire = None;
+        assert!(!state.should_fire(now), "next_fire=None must never fire");
+    }
+
+    #[test]
+    fn should_fire_at_exact_scheduled_time() {
+        let now = Utc::now();
+        // Interval jobs set next_fire = now (fires immediately on load).
+        let state = build_job_state_at(publish_job("exact-test", 60), now).unwrap();
+        assert!(state.should_fire(now), "job must fire when now == next_fire exactly");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn non_executable_bin_is_rejected() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = format!("/tmp/trogon-test-noexec-{}.sh", std::process::id());
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(b"#!/bin/sh\n").unwrap();
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let config = JobConfig {
+            id: "noexec".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Spawn {
+                bin: path.clone(),
+                args: vec![],
+                concurrent: false,
+                timeout_sec: None,
+            },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        let result = build_job_state(config);
+        let _ = std::fs::remove_file(&path);
+        let err = result.err().expect("non-executable binary must be rejected");
+        assert!(err.to_string().contains("not executable"), "got: {err}");
     }
 
     #[test]

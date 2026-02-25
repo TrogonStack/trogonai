@@ -153,5 +153,63 @@ mod tests {
             election.release().await;
             assert!(!election.is_leader());
         }
+
+        #[tokio::test]
+        async fn renewal_is_throttled_within_renew_interval() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock.clone(), "node-throttle".to_string());
+
+            // Acquire leadership — sets last_renewed to now.
+            election.ensure_leader().await;
+            assert!(election.is_leader());
+
+            // Deny renew: if throttle is broken, the next ensure_leader call will
+            // attempt to renew and fail, losing leadership. If throttle works, it
+            // skips the renew entirely and we stay leader.
+            lock.deny_renew();
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "renewal must be throttled within RENEW_INTERVAL");
+        }
+
+        #[tokio::test]
+        async fn loses_leadership_when_revision_is_none() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock, "node-norev".to_string());
+
+            // Construct an inconsistent leader state: is_leader=true but no revision.
+            election.is_leader = true;
+            election.last_renewed = None;     // force a renewal attempt
+            election.current_revision = None; // but no revision is stored
+
+            election.ensure_leader().await;
+            assert!(!election.is_leader(), "missing revision must clear leadership");
+        }
+
+        #[tokio::test]
+        async fn release_when_not_leader_is_noop() {
+            let lock = MockLeaderLock::new();
+            lock.deny_acquire();
+            let mut election = LeaderElection::new(lock, "node-nop".to_string());
+
+            election.ensure_leader().await;
+            assert!(!election.is_leader());
+
+            // Must not panic; state must remain unchanged.
+            election.release().await;
+            assert!(!election.is_leader());
+        }
+
+        #[tokio::test]
+        async fn revision_is_cleared_after_release() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock, "node-rev".to_string());
+
+            election.ensure_leader().await;
+            assert!(election.current_revision.is_some(), "revision must be set after acquire");
+
+            election.release().await;
+            assert!(election.current_revision.is_none(), "revision must be cleared after release");
+            assert!(!election.is_leader());
+        }
     }
 }

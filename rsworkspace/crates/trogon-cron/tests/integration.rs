@@ -112,6 +112,225 @@ async fn purge_all_jobs(client: &trogon_cron::CronClient) {
     }
 }
 
+// ── load_jobs_and_watch ───────────────────────────────────────────────────────
+
+/// `load_jobs_and_watch` must return all pre-existing jobs registered before
+/// it is called (DeliverPolicy::LastPerSubject snapshot).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_load_jobs_and_watch_returns_preexisting_jobs() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-ljw-preexist");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "cron.ljw-preexist".to_string() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    let kv = trogon_cron::kv::get_or_create_config_bucket(&js).await.unwrap();
+    let (jobs, _watcher) = trogon_cron::kv::load_jobs_and_watch(&kv).await.unwrap();
+
+    assert!(jobs.iter().any(|j| j.id == id),
+        "pre-registered job must appear in initial snapshot");
+
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Malformed JSON entries in the config bucket must be silently skipped by
+/// `load_jobs_and_watch`; valid entries must still be returned.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_load_jobs_and_watch_skips_malformed_entries() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let good_id  = unique_id("test-ljw-good");
+    let bad_key  = format!("{}{}",  trogon_cron::kv::JOBS_KEY_PREFIX,
+                           unique_id("test-ljw-bad"));
+
+    client.register_job(&JobConfig {
+        id: good_id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "cron.ljw-good".to_string() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    let kv = trogon_cron::kv::get_or_create_config_bucket(&js).await.unwrap();
+    kv.put(bad_key.clone(), bytes::Bytes::from("not valid json")).await.unwrap();
+
+    let (jobs, _watcher) = trogon_cron::kv::load_jobs_and_watch(&kv).await.unwrap();
+
+    assert!(jobs.iter().any(|j| j.id == good_id),
+        "valid job must be in snapshot");
+    assert!(!jobs.iter().any(|j| j.id == bad_key),
+        "malformed entry must be skipped");
+
+    client.remove_job(&good_id).await.unwrap();
+    kv.delete(bad_key).await.unwrap();
+}
+
+// ── CronClient edge cases ─────────────────────────────────────────────────────
+
+/// `get_job` must return `Err(CronError::Serde)` when the KV entry contains
+/// bytes that are not valid `JobConfig` JSON.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_get_job_malformed_json_returns_serde_error() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-getjob-bad");
+
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    kv.put(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, id),
+           bytes::Bytes::from("{\"broken\":true}")).await.unwrap();
+
+    let result = client.get_job(&id).await;
+    assert!(result.is_err(), "malformed JSON must return an error");
+    assert!(matches!(result.unwrap_err(), trogon_cron::CronError::Serde(_)),
+        "error must be CronError::Serde");
+
+    kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, id)).await.unwrap();
+}
+
+/// `list_jobs` must silently skip entries whose JSON cannot be deserialized
+/// into a `JobConfig`, returning only valid configs.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_list_jobs_skips_malformed_entries() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let good_id = unique_id("test-list-good");
+    let bad_id  = unique_id("test-list-bad");
+
+    client.register_job(&JobConfig {
+        id: good_id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "cron.list-good".to_string() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    kv.put(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id),
+           bytes::Bytes::from("not json at all")).await.unwrap();
+
+    let jobs = client.list_jobs().await.unwrap();
+
+    assert!(jobs.iter().any(|j| j.id == good_id),
+        "valid job must be in list");
+    assert!(!jobs.iter().any(|j| j.id == bad_id),
+        "malformed entry must be silently skipped");
+
+    client.remove_job(&good_id).await.unwrap();
+    kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id)).await.unwrap();
+}
+
+/// `remove_job` must be idempotent: calling it twice on the same job id
+/// must not return an error on the second call.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_remove_job_idempotent() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-remove-idem");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: "cron.remove-idem".to_string() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    client.remove_job(&id).await.unwrap();
+    // Second remove must not fail.
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Scheduler resilience ──────────────────────────────────────────────────────
+
+/// When the config KV bucket contains a malformed JSON entry alongside a valid
+/// job, the scheduler must silently skip the bad entry and still fire the
+/// valid job's ticks.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_scheduler_ignores_malformed_json_in_kv() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let good_id = unique_id("test-sched-malformed-good");
+    let bad_id  = unique_id("test-sched-malformed-bad");
+
+    let subject = format!("cron.{good_id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    // Register the valid job first.
+    client.register_job(&JobConfig {
+        id: good_id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    // Inject a completely malformed JSON entry directly into KV.
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    kv.put(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id),
+           bytes::Bytes::from("{{not json}}")).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let h = tokio::spawn({ let n = nats.clone(); async move { Scheduler::new(n).run().await.ok(); } });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await.expect("timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, good_id, "valid job must fire despite malformed KV entry");
+
+    h.abort();
+    client.remove_job(&good_id).await.unwrap();
+    kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id)).await.unwrap();
+}
+
+/// When a hot-reload delivers a malformed JSON entry via the config watcher,
+/// the scheduler must log the error and continue running other jobs normally.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_scheduler_ignores_malformed_json_on_hot_reload() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let good_id = unique_id("test-sched-hotbad-good");
+    let bad_id  = unique_id("test-sched-hotbad-bad");
+
+    let subject = format!("cron.{good_id}");
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: good_id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true, payload: None, retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let h = tokio::spawn({ let n = nats.clone(); async move { Scheduler::new(n).run().await.ok(); } });
+
+    // Wait for the scheduler to start and load initial jobs.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    // Hot-reload a malformed entry while the scheduler is running.
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    kv.put(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id),
+           bytes::Bytes::from("{{not json}}")).await.unwrap();
+
+    // Valid job must still fire after the bad hot-reload.
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await.expect("timed out").unwrap().unwrap();
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, good_id, "valid job must still fire after malformed hot-reload");
+
+    h.abort();
+    client.remove_job(&good_id).await.unwrap();
+    kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, bad_id)).await.unwrap();
+}
+
 // ── CronClient CRUD ──────────────────────────────────────────────────────────
 
 #[tokio::test]
