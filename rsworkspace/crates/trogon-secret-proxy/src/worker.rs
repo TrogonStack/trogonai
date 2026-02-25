@@ -543,6 +543,41 @@ mod tests {
         assert_eq!(mock.hits(), 4, "should attempt exactly 4 times (1 + 3 retries)");
     }
 
+    /// `WorkerError::JetStream` must include the message in its Display output.
+    #[test]
+    fn worker_error_display_includes_message() {
+        let err = super::WorkerError::JetStream("stream not found".to_string());
+        assert!(err.to_string().contains("stream not found"));
+    }
+
+    /// Transport errors (connection refused) are retried up to HTTP_MAX_RETRIES.
+    /// After exhaustion the function returns `Err`, not a panic or infinite loop.
+    #[tokio::test]
+    async fn transport_error_exhausts_retries_and_returns_err() {
+        // Bind a listener, capture its port, then drop it so connections are refused.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let client = ReqwestClient::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let request = make_request(
+            &format!("http://127.0.0.1:{}/v1/messages", port),
+            "",
+            "idem",
+        );
+
+        let result = forward_request_with_retry(&client, &request, &HashMap::new()).await;
+
+        assert!(result.is_err(), "Expected Err on transport failure");
+        assert!(
+            result.unwrap_err().contains("HTTP request failed"),
+            "Error message should describe the transport failure"
+        );
+    }
+
     /// Transient 5xx followed by a 200 → retry succeeds.
     /// Uses two mock endpoints to simulate the recovery.
     #[tokio::test]

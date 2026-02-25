@@ -345,6 +345,93 @@ async fn e2e_concurrent_requests_all_succeed() {
     }
 }
 
+/// JetStream durability: message published by proxy survives a worker being
+/// absent at publish time and is processed when the worker comes online later.
+///
+/// This exercises the core durability property of the hybrid design: the proxy
+/// publishes to a persisted JetStream stream, so the message is not lost even
+/// if no worker is running at that moment.
+#[tokio::test]
+async fn e2e_jetstream_message_processed_after_worker_starts_late() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_durable_01","type":"message"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_dur001").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    // Start proxy — no worker running yet.
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(20),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Send request through proxy — it publishes to JetStream and blocks waiting
+    // for a reply. The message is now persisted in the stream.
+    let request_handle = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
+            .header("Authorization", "Bearer tok_anthropic_test_dur001")
+            .header("Content-Type", "application/json")
+            .body(r#"{"model":"claude-3","messages":[]}"#)
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // Give the proxy time to publish to JetStream before the worker starts.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Start the worker now — it must find and process the persisted message.
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(jetstream, nats, vault, http_client, "e2e-durable-workers")
+            .await
+            .expect("Worker error");
+    });
+
+    // Proxy receives the worker reply and responds to our original HTTP request.
+    let resp = request_handle.await.unwrap();
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_durable_01");
+    ai_mock.assert_async().await;
+}
+
 /// `ensure_stream` must be idempotent — calling it twice on the same subject
 /// must not return an error.
 #[tokio::test]
