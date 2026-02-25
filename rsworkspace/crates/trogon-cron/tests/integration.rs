@@ -13480,3 +13480,225 @@ async fn test_e2e_tick_message_has_all_fields() {
         "execution_id must be a non-empty string; got: {tick}"
     );
 }
+
+/// Full E2E: `CRON_EXECUTION_ID` must be injected into every spawned process.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_execution_id_env_var_set() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-execid");
+    let nats_url = test_url();
+
+    let out_file = std::env::temp_dir().join(format!("trogon-e2e-execid-{id}.txt"));
+    let _ = std::fs::remove_file(&out_file);
+
+    let script = format!("echo \"$CRON_EXECUTION_ID\" > {}", out_file.display());
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if out_file.exists() { break; }
+        assert!(tokio::time::Instant::now() < deadline, "Spawn job never wrote the execution_id file");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let content = std::fs::read_to_string(&out_file).unwrap();
+    let _ = std::fs::remove_file(&out_file);
+    let exec_id = content.trim();
+
+    assert!(!exec_id.is_empty(), "CRON_EXECUTION_ID must not be empty");
+    // Execution IDs are UUIDs: 8-4-4-4-12 hex chars separated by dashes.
+    assert_eq!(exec_id.len(), 36, "CRON_EXECUTION_ID must be a UUID (36 chars); got: {exec_id:?}");
+    assert!(exec_id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'),
+        "CRON_EXECUTION_ID must contain only hex digits and dashes; got: {exec_id:?}");
+}
+
+/// Full E2E: a spawn job whose process fails (exit 1) must be retried.  The
+/// second attempt succeeds, proving the retry loop is driven by the binary scheduler.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_retry_on_failure() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-retry");
+    let nats_url = test_url();
+
+    // Flag file: absent → first run (fails), present → second run (succeeds).
+    let flag = std::env::temp_dir().join(format!("trogon-e2e-retry-flag-{id}"));
+    let done = std::env::temp_dir().join(format!("trogon-e2e-retry-done-{id}"));
+    let _ = std::fs::remove_file(&flag);
+    let _ = std::fs::remove_file(&done);
+
+    // Script: if flag exists → write done and exit 0; else create flag and exit 1.
+    let script = format!(
+        "if [ -f {flag} ]; then touch {done}; exit 0; else touch {flag}; exit 1; fi",
+        flag = flag.display(),
+        done = done.display(),
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 10 }, // long interval — retry fires within same cycle
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 2,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Wait for the done file — means the second attempt succeeded.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        if done.exists() { break; }
+        assert!(tokio::time::Instant::now() < deadline,
+            "Second attempt never succeeded — retry may not be working");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&flag);
+    let _ = std::fs::remove_file(&done);
+}
+
+/// Full E2E: when all retry attempts are exhausted, a dead-letter message must
+/// be published to `cron.errors` containing the job_id.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_dead_letter_published_on_retry_exhaustion() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-deadletter");
+    let nats_url = test_url();
+
+    // Subscribe to cron.errors before starting the scheduler.
+    let mut errors_sub = nats.subscribe("cron.errors").await.unwrap();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 10 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), "exit 1".to_string()],
+            concurrent: false,
+            timeout_sec: Some(2),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 2,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Wait for the dead-letter message.
+    let msg = tokio::time::timeout(Duration::from_secs(20), errors_sub.next())
+        .await
+        .expect("No dead-letter published to cron.errors within 20 s")
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let dl: serde_json::Value = serde_json::from_slice(&msg.payload)
+        .expect("Dead-letter payload must be valid JSON");
+    assert_eq!(dl["job_id"].as_str().unwrap_or(""), id,
+        "dead-letter job_id must match; got: {dl}");
+    assert!(dl["error"].as_str().is_some_and(|s| !s.is_empty()),
+        "dead-letter must contain an error message; got: {dl}");
+    assert_eq!(dl["attempts"].as_u64().unwrap_or(0), 3,
+        "dead-letter must report 3 attempts (1 + 2 retries); got: {dl}");
+}
+
+/// Full E2E: a spawn job with `concurrent: true` must start a new process on
+/// each tick even while a previous instance is still running.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_concurrent_true_allows_overlap() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-concurrent");
+    let nats_url = test_url();
+
+    // Each process appends a line to a shared file and then sleeps 5 s.
+    // With concurrent=true two ticks should both append before either exits.
+    let log_file = std::env::temp_dir().join(format!("trogon-e2e-concurrent-{id}.txt"));
+    let _ = std::fs::remove_file(&log_file);
+
+    let script = format!(
+        "echo started >> {}; sleep 5",
+        log_file.display()
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: true,
+            timeout_sec: Some(10),
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // After 2 s warm-up + 3 s observation = 5 s total, at least 2 processes
+    // must have started (first at t≈2s, second at t≈3s).
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let content = std::fs::read_to_string(&log_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&log_file);
+    let starts = content.lines().count();
+
+    assert!(starts >= 2,
+        "concurrent=true must allow ≥2 overlapping processes; got {starts} start(s)");
+}
