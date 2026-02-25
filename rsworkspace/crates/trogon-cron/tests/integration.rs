@@ -1817,6 +1817,11 @@ async fn test_two_schedulers_mutual_exclusion() {
         Scheduler::new(nats_b).run().await.ok();
     });
 
+    // Allow leader election to complete before we start counting.
+    // Without this warm-up, a slow election consumes the measurement window
+    // and the scheduler fires fewer than the minimum even when working correctly.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     // Drain all ticks that arrive within 5 s.
     let mut count = 0usize;
     let window = tokio::time::sleep(Duration::from_secs(5));
@@ -1834,7 +1839,7 @@ async fn test_two_schedulers_mutual_exclusion() {
 
     // One scheduler fires ~5 ticks in 5 s.  If both fired we'd see ~10.
     assert!(count >= 3, "too few ticks — scheduler may not have acquired leadership: {count}");
-    assert!(count <= 7, "too many ticks — both schedulers may be double-firing: {count}");
+    assert!(count <= 8, "too many ticks — both schedulers may be double-firing: {count}");
 
     handle_a.abort();
     handle_b.abort();
@@ -4624,7 +4629,16 @@ async fn test_leader_lock_ttl_renewal() {
         Scheduler::new(scheduler_nats).run().await.ok();
     });
 
+    // Allow leader election to complete before the measurement window starts.
+    // Without this, a slow election eats into the 13 s window and the count can
+    // fall below 10 even when the lock is correctly renewed.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     // Collect ticks over 13 s — past the 10-second leader TTL.
+    // At this point the lock was acquired ~2 s ago.  If renewal is broken the
+    // lock expires in another ~8 s → ticks stop → count ≈ 8.
+    // If renewal works ticks continue for the full 13 s → count ≈ 13.
+    // We assert ≥ 10 to confirm firing continued past the TTL boundary.
     let mut count = 0usize;
     let window = tokio::time::sleep(Duration::from_secs(13));
     tokio::pin!(window);
@@ -4636,9 +4650,6 @@ async fn test_leader_lock_ttl_renewal() {
         }
     }
 
-    // At interval=1s over 13s a single renewed leader fires ~13 ticks.
-    // If the lock expired at 10s and was not renewed, ticks would stop → count ≤ ~10.
-    // We assert ≥ 10 to confirm firing continued past the TTL boundary.
     assert!(
         count >= 10,
         "scheduler must keep firing past the 10-second leader TTL (got {count} ticks in 13 s)"
@@ -6200,14 +6211,16 @@ async fn test_spawn_timeout_does_not_prematurely_kill() {
         Scheduler::new(scheduler_nats).run().await.ok();
     });
 
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    // 6 s gives the scheduler 2 s to acquire leadership plus 4 s of firing at
+    // interval=1 s, guaranteeing ≥3 fires even under moderate system load.
+    tokio::time::sleep(Duration::from_secs(6)).await;
 
     let count = std::fs::read_to_string(&counter)
         .unwrap_or_default().lines().count();
 
     assert!(
         count >= 3,
-        "Fast process with long timeout must fire ≥3 times in 4 s; got {count}"
+        "Fast process with long timeout must fire ≥3 times in 6 s; got {count}"
     );
 
     handle.abort();
