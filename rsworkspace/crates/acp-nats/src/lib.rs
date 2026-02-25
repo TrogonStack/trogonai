@@ -2,6 +2,7 @@ pub mod agent;
 pub mod config;
 pub mod error;
 pub mod nats;
+pub(crate) mod telemetry;
 
 pub use agent::Bridge;
 pub use config::{AcpPrefix, Config, ValidationError};

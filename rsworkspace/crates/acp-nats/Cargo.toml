@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 agent-client-protocol = "0.9.4"
+opentelemetry = "0.31.0"
 async-nats = "0.45.0"
 async-trait = "0.1.89"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -13,6 +14,9 @@ tokio = { version = "1.49.0", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1.44"
 
 trogon-nats = { path = "../trogon-nats" }
+trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "testing"] }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
+trogon-std = { path = "../trogon-std", features = ["test-support"] }

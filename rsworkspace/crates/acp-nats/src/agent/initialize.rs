@@ -4,6 +4,7 @@ use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
 use agent_client_protocol::{Error, ErrorCode, InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
+use trogon_std::time::GetElapsed;
 
 fn map_initialize_error(e: NatsError) -> Error {
     match &e {
@@ -47,10 +48,12 @@ fn map_initialize_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(protocol_version = ?args.protocol_version)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient>(
-    bridge: &Bridge<N>,
+pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+    bridge: &Bridge<N, C>,
     args: InitializeRequest,
 ) -> Result<InitializeResponse> {
+    let start = bridge.clock.now();
+
     let client_name = args
         .client_info
         .as_ref()
@@ -62,14 +65,22 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient>(
     let nats = bridge.nats();
     let subject = agent::initialize(bridge.config.acp_prefix());
 
-    nats::request_with_timeout::<N, InitializeRequest, InitializeResponse>(
+    let result = nats::request_with_timeout::<N, InitializeRequest, InitializeResponse>(
         nats,
         &subject,
         &args,
         bridge.config.operation_timeout,
     )
     .await
-    .map_err(map_initialize_error)
+    .map_err(map_initialize_error);
+
+    bridge.metrics.record_request(
+        "initialize",
+        bridge.clock.elapsed(start).as_secs_f64(),
+        result.is_ok(),
+    );
+
+    result
 }
 
 #[cfg(test)]
@@ -80,11 +91,87 @@ mod tests {
     use agent_client_protocol::{
         Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion,
     };
+    use opentelemetry::Value;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{
+        PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
+    };
+    use std::time::Duration;
     use trogon_nats::{AdvancedMockNatsClient, NatsError};
 
-    fn mock_bridge() -> (AdvancedMockNatsClient, Bridge<AdvancedMockNatsClient>) {
+    fn assert_initialize_metric_recorded(
+        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+        expected_success: bool,
+    ) {
+        let found = finished_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .any(|sm| {
+                sm.metrics().any(|metric| {
+                    if metric.name() != "acp.request.count" {
+                        return false;
+                    }
+                    let data = metric.data();
+                    let sum = match data {
+                        AggregatedMetrics::U64(MetricData::Sum(s)) => s,
+                        _ => return false,
+                    };
+                    sum.data_points().any(|dp| {
+                        let mut method_ok = false;
+                        let mut success_ok = false;
+                        for attr in dp.attributes() {
+                            if attr.key.as_str() == "method" {
+                                method_ok = attr.value.as_str() == "initialize";
+                            } else if attr.key.as_str() == "success" {
+                                success_ok = attr.value == Value::from(expected_success);
+                            }
+                        }
+                        method_ok && success_ok
+                    })
+                })
+            });
+        assert!(
+            found,
+            "expected acp.request.count datapoint with method=initialize, success={}",
+            expected_success
+        );
+    }
+
+    fn mock_bridge_with_metrics() -> (
+        AdvancedMockNatsClient,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+        InMemoryMetricExporter,
+        SdkMeterProvider,
+    ) {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = provider.meter("acp-nats-test");
+
         let mock = AdvancedMockNatsClient::new();
-        let bridge = Bridge::new(mock.clone(), Config::for_test("acp"));
+        let bridge = Bridge::new(
+            mock.clone(),
+            trogon_std::time::SystemClock,
+            &meter,
+            Config::for_test("acp"),
+        );
+        (mock, bridge, exporter, provider)
+    }
+
+    fn mock_bridge() -> (
+        AdvancedMockNatsClient,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+    ) {
+        let mock = AdvancedMockNatsClient::new();
+        let bridge = Bridge::new(
+            mock.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("acp"),
+        );
         (mock, bridge)
     }
 
@@ -153,6 +240,40 @@ mod tests {
 
         assert!(err.to_string().contains("Invalid response from agent"));
         assert_eq!(err.code, ErrorCode::InternalError);
+    }
+
+    #[tokio::test]
+    async fn initialize_records_metrics_on_success() {
+        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_json_response(
+            &mock,
+            "acp.agent.initialize",
+            &InitializeResponse::new(ProtocolVersion::LATEST),
+        );
+
+        let _ = bridge
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await;
+
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert_initialize_metric_recorded(&finished_metrics, true);
+        provider.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn initialize_records_metrics_on_failure() {
+        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        mock.fail_next_request();
+
+        let _ = bridge
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await;
+
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert_initialize_metric_recorded(&finished_metrics, false);
+        provider.shutdown().unwrap();
     }
 
     #[test]
