@@ -7,7 +7,7 @@ name = "acp-nats"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "async-nats",
+ "async-nats 0.47.0",
  "async-trait",
  "bytes",
  "futures",
@@ -29,7 +29,7 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
- "async-nats",
+ "async-nats 0.47.0",
  "async-trait",
  "bytes",
  "futures",
@@ -50,7 +50,7 @@ dependencies = [
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
- "async-nats",
+ "async-nats 0.47.0",
  "bytes",
  "clap",
  "futures",
@@ -70,7 +70,7 @@ dependencies = [
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "clap",
@@ -229,6 +229,43 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "async-nats"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86dde77d8a733a9dbaf865a9eb65c72e09c88f3d14d3dd0d2aecf511920ee4fe"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "memchr",
+ "nkeys",
+ "nuid",
+ "once_cell",
+ "pin-project",
+ "portable-atomic",
+ "rand 0.8.5",
+ "regex",
+ "ring",
+ "rustls-native-certs 0.7.3",
+ "rustls-pemfile",
+ "rustls-webpki 0.102.8",
+ "serde",
+ "serde_json",
+ "serde_nanos",
+ "serde_repr",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-stream",
+ "tokio-util",
+ "tokio-websockets 0.10.1",
+ "tracing",
+ "tryhard",
+ "url",
 ]
 
 [[package]]
@@ -1733,6 +1770,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nuid"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc895af95856f929163a0aa20c26a78d26bfdc839f51b9d5aa7a5b79e52b7e83"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -3474,7 +3520,7 @@ dependencies = [
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
- "async-nats",
+ "async-nats 0.47.0",
  "bytes",
  "futures",
  "opentelemetry",
@@ -3489,11 +3535,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-secret-proxy"
+version = "0.1.0"
+dependencies = [
+ "async-nats 0.45.0",
+ "axum",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-vault",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-source-discord"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "ed25519-dalek",
@@ -3516,7 +3580,7 @@ name = "trogon-source-github"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "hex",
@@ -3535,7 +3599,7 @@ name = "trogon-source-gitlab"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "sha2",
@@ -3553,7 +3617,7 @@ name = "trogon-source-linear"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "futures-util",
@@ -3576,7 +3640,7 @@ name = "trogon-source-slack"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "form_urlencoded",
@@ -3597,7 +3661,7 @@ name = "trogon-source-telegram"
 version = "0.1.0"
 dependencies = [
  "acp-telemetry",
- "async-nats",
+ "async-nats 0.47.0",
  "axum",
  "bytes",
  "serde",
@@ -3620,6 +3684,16 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "trogon-vault"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]
