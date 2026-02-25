@@ -8276,3 +8276,217 @@ async fn test_spawn_each_tick_cycle_has_distinct_execution_id() {
     handle.abort();
     client.remove_job(&id).await.unwrap();
 }
+
+// ── All retry attempts within one tick share the same execution_id ────────────
+
+/// Every retry attempt within a single tick cycle must see the same
+/// CRON_EXECUTION_ID environment variable.  A fresh execution_id is only
+/// generated at tick time, not per-retry.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_execution_id_same_within_cycle() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-execid-same");
+
+    let log = std::env::temp_dir().join(format!("trogon-execids-{id}"));
+    let _ = std::fs::remove_file(&log);
+
+    // Append CRON_EXECUTION_ID to log file on every invocation, then exit 1.
+    let script = format!(
+        "echo \"$CRON_EXECUTION_ID\" >> '{p}'; exit 1",
+        p = log.display(),
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 2,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    // Wait until 3 lines appear in the log (1 initial + 2 retries).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let lines = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count();
+        if lines >= 3 { break; }
+        assert!(tokio::time::Instant::now() < deadline,
+            "Expected 3 log entries, got {lines}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let content = std::fs::read_to_string(&log).unwrap();
+    let ids: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(ids.len(), 3, "expected 3 invocations");
+    assert!(!ids[0].is_empty(), "execution_id must not be empty");
+    assert_eq!(ids[0], ids[1], "retry 1 must share execution_id with initial attempt");
+    assert_eq!(ids[0], ids[2], "retry 2 must share execution_id with initial attempt");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&log);
+}
+
+// ── Publish action with retry config fires normally ───────────────────────────
+
+/// An Action::Publish job with a retry policy must still publish ticks on the
+/// NATS subject normally.  Adding a retry config must not break publish behavior
+/// when the publish succeeds on the first attempt (no regression).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_publish_job_with_retry_config_fires_normally() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-pub-retry");
+    let subject = format!("cron.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await.expect("Timed out waiting for tick").unwrap().unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(tick.job_id, id, "publish with retry config must still deliver correct job_id");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
+
+// ── Hot-reload removing retry stops dead-letters ──────────────────────────────
+
+/// A job starts with `max_retries: 2`.  After the first dead-letter arrives,
+/// the job is hot-reloaded to `retry: None`.  Subsequent failing ticks must
+/// no longer produce dead-letters.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_hot_reload_removes_retry_stops_dead_letter() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-hotrl-retry");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    // Register with retry so the first cycle produces a dead-letter.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    // Wait for the first dead-letter from this job.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for first dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        let dl: DeadLetter = serde_json::from_slice(&msg.payload).unwrap();
+        if dl.job_id == id { break; }
+    }
+
+    // Hot-reload: remove the retry policy.
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/usr/bin/false".to_string(),
+            args: vec![],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    // Wait 5 s and assert no further dead-letters with our job_id arrive.
+    let mut got_second_dl = false;
+    let deadline2 = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline2.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() { break; }
+        match tokio::time::timeout(remaining, errors.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+                    if dl.job_id == id { got_second_dl = true; break; }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    assert!(!got_second_dl,
+        "After hot-reload to retry: None, no dead-letter must be published");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
