@@ -12449,3 +12449,19 @@ async fn test_get_job_deleted_key_returns_none() {
         "get_job must return None for a key whose latest operation is Delete"
     );
 }
+
+/// `list_jobs` must return an empty `Vec` (not an error) when the config
+/// bucket exists but contains no active jobs.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_list_jobs_empty_returns_empty_vec() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    purge_all_jobs(&client).await;
+
+    let jobs = client.list_jobs().await.unwrap();
+    assert!(
+        jobs.is_empty(),
+        "list_jobs must return an empty Vec when no jobs are registered; got: {jobs:?}"
+    );
+}
