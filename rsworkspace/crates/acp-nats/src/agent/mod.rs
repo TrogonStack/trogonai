@@ -1,4 +1,5 @@
 mod initialize;
+mod new_session;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient};
@@ -48,11 +49,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         ))
     }
 
-    async fn new_session(&self, _args: NewSessionRequest) -> Result<NewSessionResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
+        new_session::handle(self, args).await
     }
 
     async fn load_session(&self, _args: LoadSessionRequest) -> Result<LoadSessionResponse> {
@@ -109,7 +107,7 @@ mod tests {
     use crate::config::Config;
     use agent_client_protocol::{
         Agent, AuthenticateRequest, CancelNotification, ExtNotification, ExtRequest,
-        LoadSessionRequest, NewSessionRequest, PromptRequest, SetSessionModeRequest,
+        LoadSessionRequest, PromptRequest, SetSessionModeRequest,
     };
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -134,12 +132,6 @@ mod tests {
         assert!(
             bridge
                 .authenticate(AuthenticateRequest::new("test"))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .new_session(NewSessionRequest::new("."))
                 .await
                 .is_err()
         );
