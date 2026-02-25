@@ -661,6 +661,127 @@ mod tests {
             assert_ne!(t1.execution_id, t2.execution_id);
         }
 
+        /// Verify that CRON_JOB_ID, CRON_EXECUTION_ID and CRON_FIRED_AT are
+        /// injected as environment variables into the spawned process.
+        #[tokio::test]
+        #[cfg(unix)]
+        async fn spawn_env_vars_injected_into_process() {
+            use std::io::Write;
+            use std::os::unix::fs::PermissionsExt;
+
+            let pid = std::process::id();
+            let sentinel = format!("/tmp/trogon-envtest-{pid}.txt");
+            let script   = format!("/tmp/trogon-envtest-{pid}.sh");
+
+            {
+                let mut f = std::fs::File::create(&script).unwrap();
+                writeln!(f, "#!/bin/sh").unwrap();
+                writeln!(f, "printf 'JOB_ID=%s\\n' \"$CRON_JOB_ID\" > {sentinel}").unwrap();
+                writeln!(f, "printf 'EXEC_ID=%s\\n' \"$CRON_EXECUTION_ID\" >> {sentinel}").unwrap();
+                writeln!(f, "printf 'FIRED_AT=%s\\n' \"$CRON_FIRED_AT\" >> {sentinel}").unwrap();
+            }
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let publisher = MockTickPublisher::new();
+            let state = build_job_state(JobConfig {
+                id: "env-inject".to_string(),
+                schedule: Schedule::Interval { interval_sec: 60 },
+                action: Action::Spawn {
+                    bin: script.clone(),
+                    args: vec![],
+                    concurrent: false,
+                    timeout_sec: None,
+                },
+                enabled: true,
+                payload: None,
+                retry: None,
+            })
+            .unwrap();
+
+            execute(&publisher, &state, Utc::now()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let contents = std::fs::read_to_string(&sentinel).unwrap_or_default();
+            let _ = std::fs::remove_file(&sentinel);
+            let _ = std::fs::remove_file(&script);
+
+            assert!(contents.contains("JOB_ID=env-inject"), "CRON_JOB_ID not injected; got:\n{contents}");
+            assert!(contents.contains("EXEC_ID="), "CRON_EXECUTION_ID not injected; got:\n{contents}");
+            assert!(contents.contains("FIRED_AT="), "CRON_FIRED_AT not injected; got:\n{contents}");
+        }
+
+        /// Verify that a non-None `payload` in the job config is JSON-serialized and
+        /// injected into the spawned process as the CRON_PAYLOAD environment variable.
+        #[tokio::test]
+        #[cfg(unix)]
+        async fn spawn_payload_env_var_injected() {
+            use std::io::Write;
+            use std::os::unix::fs::PermissionsExt;
+
+            let pid = std::process::id();
+            let sentinel = format!("/tmp/trogon-payloadenv-{pid}.txt");
+            let script   = format!("/tmp/trogon-payloadenv-{pid}.sh");
+
+            {
+                let mut f = std::fs::File::create(&script).unwrap();
+                writeln!(f, "#!/bin/sh").unwrap();
+                writeln!(f, "printf '%s' \"$CRON_PAYLOAD\" > {sentinel}").unwrap();
+            }
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let publisher = MockTickPublisher::new();
+            let state = build_job_state(JobConfig {
+                id: "payload-env".to_string(),
+                schedule: Schedule::Interval { interval_sec: 60 },
+                action: Action::Spawn {
+                    bin: script.clone(),
+                    args: vec![],
+                    concurrent: false,
+                    timeout_sec: None,
+                },
+                enabled: true,
+                payload: Some(serde_json::json!({ "key": "value", "num": 42 })),
+                retry: None,
+            })
+            .unwrap();
+
+            execute(&publisher, &state, Utc::now()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let contents = std::fs::read_to_string(&sentinel).unwrap_or_default();
+            let _ = std::fs::remove_file(&sentinel);
+            let _ = std::fs::remove_file(&script);
+
+            assert!(!contents.is_empty(), "CRON_PAYLOAD must be set when payload is Some");
+            let parsed: serde_json::Value = serde_json::from_str(&contents)
+                .unwrap_or_else(|_| panic!("CRON_PAYLOAD must be valid JSON; got: {contents}"));
+            assert_eq!(parsed["key"], "value");
+            assert_eq!(parsed["num"], 42);
+        }
+
+        /// `MockTickPublisher::clear()` must reset the recorded tick list so
+        /// subsequent calls start from zero.
+        #[tokio::test]
+        async fn mock_publisher_clear_resets_recorded_ticks() {
+            let publisher = MockTickPublisher::new();
+            let state = publish_job_state("clear-test");
+            let now = Utc::now();
+
+            execute(&publisher, &state, now).await;
+            execute(&publisher, &state, now).await;
+            tokio::task::yield_now().await;
+            assert_eq!(publisher.tick_count(), 2);
+
+            publisher.clear();
+            assert_eq!(publisher.tick_count(), 0, "clear() must reset tick count to 0");
+            assert!(publisher.ticks().is_empty(), "clear() must empty the recorded ticks");
+
+            // Ticks published after clear must be counted again from zero.
+            execute(&publisher, &state, now).await;
+            tokio::task::yield_now().await;
+            assert_eq!(publisher.tick_count(), 1, "tick after clear must be counted from 0");
+        }
+
         #[tokio::test]
         async fn spawn_skips_when_already_running() {
             let publisher = MockTickPublisher::new();
@@ -1015,6 +1136,37 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn bin_not_found_is_rejected() {
+        let config = JobConfig {
+            id: "nofile".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Spawn {
+                bin: "/tmp/trogon-definitely-does-not-exist-abc123xyz".to_string(),
+                args: vec![],
+                concurrent: false,
+                timeout_sec: None,
+            },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        let err = build_job_state(config).err().expect("non-existent binary must be rejected");
+        assert!(err.to_string().contains("cannot access bin"), "got: {err}");
+    }
+
+    #[test]
+    fn max_backoff_below_base_clamps_all_delays() {
+        // max_backoff=1s with base=30s attempt=1 → raw delay 30s, capped to 1s.
+        // With jitter [0.8, 1.2) all results must still be ≤ max_backoff.
+        let max = Duration::from_secs(1);
+        for _ in 0..30 {
+            let d = retry_backoff_with_jitter(30, 1, Some(max));
+            assert!(d <= max, "delay {d:?} exceeded max_backoff {max:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn non_executable_bin_is_rejected() {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
@@ -1064,6 +1216,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compute_next_fire_interval_advances_by_interval() {
+        let now = Utc::now();
+        let interval_sec = 45u64;
+        let mut state = build_job_state_at(publish_job("advance-test", interval_sec), now).unwrap();
+        // Simulate the job just fired at `now`.
+        state.compute_next_fire(now);
+        let expected = now + chrono::Duration::seconds(interval_sec as i64);
+        assert_eq!(
+            state.next_fire,
+            Some(expected),
+            "compute_next_fire must set next_fire = from + interval_sec"
+        );
     }
 
 }

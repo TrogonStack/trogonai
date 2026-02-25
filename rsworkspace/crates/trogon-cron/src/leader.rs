@@ -211,5 +211,77 @@ mod tests {
             assert!(election.current_revision.is_none(), "revision must be cleared after release");
             assert!(!election.is_leader());
         }
+
+        #[tokio::test]
+        async fn rapid_acquire_release_acquire_cycle() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock, "node-cycle".to_string());
+
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "first acquire must succeed");
+
+            election.release().await;
+            assert!(!election.is_leader());
+
+            // Second acquire — must succeed again after a clean release.
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "must be able to re-acquire after release");
+            assert!(election.current_revision.is_some(), "revision must be set after re-acquire");
+        }
+
+        #[tokio::test]
+        async fn deny_then_allow_acquire_re_enables_leadership() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock.clone(), "node-reallow".to_string());
+
+            // Deny → stays follower.
+            lock.deny_acquire();
+            election.ensure_leader().await;
+            assert!(!election.is_leader());
+
+            // Re-enable → next attempt acquires.
+            lock.allow_acquire();
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "allow_acquire must re-enable leadership after deny");
+        }
+
+        #[tokio::test]
+        async fn deny_then_allow_renew_resumes_leadership() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock.clone(), "node-rerenew".to_string());
+
+            election.ensure_leader().await;
+            assert!(election.is_leader());
+
+            // Force immediate renew and deny it.
+            election.last_renewed = None;
+            lock.deny_renew();
+            election.ensure_leader().await;
+            assert!(!election.is_leader(), "denied renew must cause leadership loss");
+
+            // Re-enable renew — but now must re-acquire first (is_leader=false → try_acquire).
+            lock.allow_renew();
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "allow_renew must allow re-acquiring leadership");
+        }
+
+        #[tokio::test]
+        async fn can_reacquire_after_losing_leadership() {
+            let lock = MockLeaderLock::new();
+            let mut election = LeaderElection::new(lock.clone(), "node-reacq".to_string());
+
+            election.ensure_leader().await;
+            assert!(election.is_leader());
+
+            // Force a renewal attempt that fails → leadership lost.
+            election.last_renewed = None;
+            lock.deny_renew();
+            election.ensure_leader().await;
+            assert!(!election.is_leader());
+
+            // allow_acquire was never denied, so try_acquire succeeds immediately.
+            election.ensure_leader().await;
+            assert!(election.is_leader(), "must re-acquire after losing leadership via failed renew");
+        }
     }
 }

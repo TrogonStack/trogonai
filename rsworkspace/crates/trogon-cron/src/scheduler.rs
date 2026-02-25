@@ -133,6 +133,168 @@ async fn shutdown_signal() {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
+
+    use async_nats::jetstream::kv;
+    use bytes::Bytes;
+
+    use super::*;
+    use crate::{
+        config::{Action, JobConfig, Schedule},
+        executor::build_job_state,
+    };
+
+    fn make_entry(key: &str, operation: kv::Operation, value: Bytes) -> kv::Entry {
+        kv::Entry {
+            bucket: "cron_configs".to_string(),
+            key: key.to_string(),
+            value,
+            revision: 1,
+            delta: 0,
+            created: time::OffsetDateTime::UNIX_EPOCH,
+            seen_current: false,
+            operation,
+        }
+    }
+
+    fn insert_job(jobs: &mut HashMap<String, crate::executor::JobState>, id: &str) {
+        let config = JobConfig {
+            id: id.to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: format!("cron.{id}") },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        jobs.insert(id.to_string(), build_job_state(config).unwrap());
+    }
+
+    fn job_config_json(id: &str) -> Bytes {
+        let config = JobConfig {
+            id: id.to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: format!("cron.{id}") },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        Bytes::from(serde_json::to_vec(&config).unwrap())
+    }
+
+    // ── handle_config_change ──────────────────────────────────────────────────
+
+    #[test]
+    fn put_adds_new_job() {
+        let mut jobs = HashMap::new();
+        let entry = make_entry("jobs.fresh", kv::Operation::Put, job_config_json("fresh"));
+        handle_config_change(&mut jobs, entry);
+        assert!(jobs.contains_key("fresh"), "Put must insert the job");
+        assert_eq!(jobs["fresh"].config.id, "fresh");
+    }
+
+    #[test]
+    fn delete_existing_job_removes_it() {
+        let mut jobs = HashMap::new();
+        insert_job(&mut jobs, "gone");
+        let entry = make_entry("jobs.gone", kv::Operation::Delete, Bytes::new());
+        handle_config_change(&mut jobs, entry);
+        assert!(!jobs.contains_key("gone"), "Delete must remove the job");
+    }
+
+    #[test]
+    fn delete_nonexistent_job_is_noop() {
+        let mut jobs = HashMap::new();
+        let entry = make_entry("jobs.ghost", kv::Operation::Delete, Bytes::new());
+        handle_config_change(&mut jobs, entry);
+        assert!(jobs.is_empty(), "Delete of non-existent job must not insert anything");
+    }
+
+    #[test]
+    fn purge_removes_job() {
+        let mut jobs = HashMap::new();
+        insert_job(&mut jobs, "purgeable");
+        let entry = make_entry("jobs.purgeable", kv::Operation::Purge, Bytes::new());
+        handle_config_change(&mut jobs, entry);
+        assert!(!jobs.contains_key("purgeable"), "Purge must remove the job");
+    }
+
+    #[test]
+    fn malformed_json_does_not_insert_job() {
+        let mut jobs = HashMap::new();
+        let entry = make_entry(
+            "jobs.bad",
+            kv::Operation::Put,
+            Bytes::from(b"{not valid json}".to_vec()),
+        );
+        handle_config_change(&mut jobs, entry);
+        assert!(jobs.is_empty(), "Malformed JSON must not insert a job");
+    }
+
+    /// When a job's config is hot-reloaded via Put, the new `JobState` must
+    /// share the same `is_running` Arc so any in-flight spawn remains visible.
+    #[test]
+    fn put_preserves_is_running_from_old_state() {
+        let mut jobs = HashMap::new();
+        insert_job(&mut jobs, "live");
+
+        // Simulate the job currently executing.
+        jobs["live"].is_running.store(true, Ordering::SeqCst);
+        let old_arc = std::sync::Arc::clone(&jobs["live"].is_running);
+
+        // Hot-reload with a new config (changed interval).
+        let updated = JobConfig {
+            id: "live".to_string(),
+            schedule: Schedule::Interval { interval_sec: 120 },
+            action: Action::Publish { subject: "cron.live".to_string() },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        let entry = make_entry(
+            "jobs.live",
+            kv::Operation::Put,
+            Bytes::from(serde_json::to_vec(&updated).unwrap()),
+        );
+        handle_config_change(&mut jobs, entry);
+
+        let new_arc = &jobs["live"].is_running;
+        assert!(
+            std::sync::Arc::ptr_eq(new_arc, &old_arc),
+            "hot-reload must preserve is_running Arc"
+        );
+        assert!(
+            new_arc.load(Ordering::SeqCst),
+            "is_running flag must be preserved as true after hot-reload"
+        );
+    }
+
+    /// Key without the "jobs." prefix falls back to using the full key as the job id.
+    #[test]
+    fn key_without_prefix_uses_full_key() {
+        let mut jobs = HashMap::new();
+        // Construct a config whose id matches the raw key (no prefix).
+        let config = JobConfig {
+            id: "raw-key".to_string(),
+            schedule: Schedule::Interval { interval_sec: 60 },
+            action: Action::Publish { subject: "cron.raw-key".to_string() },
+            enabled: true,
+            payload: None,
+            retry: None,
+        };
+        let value = Bytes::from(serde_json::to_vec(&config).unwrap());
+        // Entry key has NO "jobs." prefix — strip_prefix fails, falls back to full key.
+        let entry = make_entry("raw-key", kv::Operation::Put, value);
+        handle_config_change(&mut jobs, entry);
+        assert!(
+            jobs.contains_key("raw-key"),
+            "job must be inserted under the full key when prefix is absent"
+        );
+    }
+}
+
 fn handle_config_change(
     jobs: &mut HashMap<String, JobState>,
     entry: async_nats::jetstream::kv::Entry,

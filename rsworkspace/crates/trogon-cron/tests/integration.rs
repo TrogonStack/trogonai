@@ -3892,6 +3892,11 @@ async fn test_three_schedulers_single_fires() {
     let handle_b = tokio::spawn(async move { Scheduler::new(nats_b).run().await.ok(); });
     let handle_c = tokio::spawn(async move { Scheduler::new(nats_c).run().await.ok(); });
 
+    // Allow leader election + job loading to complete before we start counting.
+    // Without this, election overhead can consume 2-3 s of the 5-second window,
+    // leaving too few ticks for the assertion to hold reliably.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     let mut count = 0usize;
     let window = tokio::time::sleep(Duration::from_secs(5));
     tokio::pin!(window);
@@ -3903,7 +3908,7 @@ async fn test_three_schedulers_single_fires() {
         }
     }
 
-    // Single leader → ~5 ticks. Triple firing → ~15 ticks.
+    // Single leader → ~5 ticks in 5 s. Triple firing → ~15 ticks.
     assert!(count >= 3, "too few ticks — no scheduler became leader: {count}");
     assert!(count <= 8, "too many ticks — multiple schedulers are double-firing: {count}");
 
@@ -12037,4 +12042,187 @@ async fn test_publish_max_retries_zero_no_dead_letter_mock() {
 
     assert!(publisher.dls.lock().unwrap().is_empty(),
         "no dead-letter must be published when max_retries=0");
+}
+
+// ── CronClient — set_enabled on non-existent job ─────────────────────────────
+
+/// `set_enabled` must return an error when the job id does not exist in the
+/// KV bucket, rather than silently succeeding or panicking.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_set_enabled_nonexistent_job_returns_error() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+
+    let result = client.set_enabled("definitely-no-such-job-xyz", true).await;
+    assert!(result.is_err(), "set_enabled on non-existent job must return Err");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("not found"), "error must mention 'not found'; got: {msg}");
+}
+
+// ── TickPayload — execution_id and fired_at validity ─────────────────────────
+
+/// Every tick message must carry a valid UUID v4 as `execution_id`.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_tick_payload_execution_id_is_valid_uuid() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-exec-uuid");
+    let subject = format!("cron.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let handle = tokio::spawn(async move { Scheduler::new(nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timeout waiting for tick")
+        .expect("stream ended")
+        .expect("NATS error");
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    uuid::Uuid::parse_str(&tick.execution_id)
+        .unwrap_or_else(|_| panic!("execution_id must be a valid UUID; got: {}", tick.execution_id));
+}
+
+/// The `fired_at` timestamp in every tick must be close to the current time,
+/// proving the scheduler sets it from a real clock rather than a default value.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_tick_payload_fired_at_is_recent() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-fired-at");
+    let subject = format!("cron.{id}");
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+    let before = chrono::Utc::now();
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let handle = tokio::spawn(async move { Scheduler::new(nats).run().await.ok(); });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timeout waiting for tick")
+        .expect("stream ended")
+        .expect("NATS error");
+
+    let after = chrono::Utc::now();
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+
+    let tick: trogon_cron::TickPayload = serde_json::from_slice(&msg.payload).unwrap();
+    let skew_ms = (tick.fired_at - before).num_milliseconds();
+    let window_ms = (after - before).num_milliseconds() + 500; // 500 ms slack
+    assert!(
+        skew_ms >= 0 && skew_ms <= window_ms,
+        "fired_at must fall between test start and shortly after receipt; skew_ms={skew_ms}"
+    );
+}
+
+/// After `remove_job`, `get_job` must return `None` (not an error).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_client_get_job_after_remove_returns_none() {
+    let (nats, _js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    let id = unique_id("test-get-after-remove");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 60 },
+        action: Action::Publish { subject: format!("cron.{id}") },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    // Confirm the job exists before removing.
+    let found = client.get_job(&id).await.unwrap();
+    assert!(found.is_some(), "job must exist before removal");
+
+    client.remove_job(&id).await.unwrap();
+
+    let result = client.get_job(&id).await.unwrap();
+    assert!(result.is_none(), "get_job must return None after remove_job");
+}
+
+/// `job add` with a path that does not exist must exit with a non-zero status
+/// and print a useful error to stderr (does not require a scheduler).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_add_nonexistent_file_exits_with_error() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", "/tmp/trogon-this-file-does-not-exist-abc.json"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "job add with nonexistent file must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Failed to read") || stderr.contains("No such file") || stderr.contains("Error"),
+        "stderr must mention the file read failure; got: {stderr}"
+    );
+}
+
+/// `job add` with a file containing invalid JSON must exit with a non-zero
+/// status and report a parse error (does not require a scheduler).
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_cli_add_malformed_json_exits_with_error() {
+    let bin = env!("CARGO_BIN_EXE_trogon-cron");
+    let nats_url = test_url();
+
+    let tmp = std::env::temp_dir().join("trogon-cli-malformed.json");
+    std::fs::write(&tmp, b"{not valid json}").unwrap();
+
+    let out = tokio::process::Command::new(bin)
+        .args(["--nats-url", &nats_url, "job", "add", tmp.to_str().unwrap()])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+
+    let _ = std::fs::remove_file(&tmp);
+
+    assert!(
+        !out.status.success(),
+        "job add with malformed JSON must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Invalid job config") || stderr.contains("expected") || stderr.contains("Error"),
+        "stderr must mention the JSON parse error; got: {stderr}"
+    );
 }

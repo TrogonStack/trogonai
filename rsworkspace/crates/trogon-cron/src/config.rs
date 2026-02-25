@@ -214,6 +214,80 @@ mod tests {
         assert!(r.max_backoff_sec.is_none());
     }
 
+    #[test]
+    fn tick_payload_roundtrip() {
+        let fired_at = chrono::Utc::now();
+        let p = TickPayload {
+            job_id: "my-job".to_string(),
+            fired_at,
+            execution_id: "exec-abc".to_string(),
+            payload: Some(serde_json::json!({ "x": 1 })),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let p2: TickPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(p2.job_id, "my-job");
+        assert_eq!(p2.execution_id, "exec-abc");
+        assert_eq!(p2.payload, Some(serde_json::json!({ "x": 1 })));
+        // fired_at must round-trip through RFC 3339 with millisecond precision at least.
+        assert!((p2.fired_at - fired_at).num_milliseconds().abs() < 1);
+    }
+
+    #[test]
+    fn tick_payload_no_payload_omitted_from_json() {
+        let p = TickPayload {
+            job_id: "j".to_string(),
+            fired_at: chrono::Utc::now(),
+            execution_id: "e".to_string(),
+            payload: None,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("\"payload\""), "None payload must be omitted from JSON; got: {json}");
+    }
+
+    #[test]
+    fn spawn_action_args_default_to_empty_vec() {
+        // Deserialize a Spawn action without the optional `args` field.
+        let json = r#"{"type":"spawn","bin":"/usr/bin/true"}"#;
+        let a: Action = serde_json::from_str(json).unwrap();
+        if let Action::Spawn { args, .. } = a {
+            assert!(args.is_empty(), "args must default to empty Vec; got: {args:?}");
+        } else {
+            panic!("expected Spawn variant");
+        }
+    }
+
+    #[test]
+    fn spawn_action_concurrent_defaults_to_false() {
+        let json = r#"{"type":"spawn","bin":"/usr/bin/true"}"#;
+        let a: Action = serde_json::from_str(json).unwrap();
+        if let Action::Spawn { concurrent, .. } = a {
+            assert!(!concurrent, "concurrent must default to false");
+        } else {
+            panic!("expected Spawn variant");
+        }
+    }
+
+    #[test]
+    fn retry_config_max_retry_duration_sec_roundtrip() {
+        let r = RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: Some(60),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"max_retry_duration_sec\":60"), "got: {json}");
+        let r2: RetryConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(r2.max_retry_duration_sec, Some(60));
+    }
+
+    #[test]
+    fn retry_config_max_retry_duration_sec_defaults_to_none() {
+        let json = r#"{"max_retries": 2}"#;
+        let r: RetryConfig = serde_json::from_str(json).unwrap();
+        assert!(r.max_retry_duration_sec.is_none());
+    }
+
 }
 
 /// Message published to NATS when a job fires.

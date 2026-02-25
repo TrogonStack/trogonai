@@ -115,4 +115,25 @@ mod tests {
         let e: CronError = raw.into();
         assert!(matches!(e, CronError::Io(_)));
     }
+
+    #[test]
+    fn invalid_cron_expression_source_is_none() {
+        let e = CronError::InvalidCronExpression {
+            expr: "bad".to_string(),
+            reason: "wrong".to_string(),
+        };
+        assert!(
+            std::error::Error::source(&e).is_none(),
+            "InvalidCronExpression must have no source"
+        );
+    }
+
+    #[test]
+    fn invalid_job_config_source_is_none() {
+        let e = CronError::InvalidJobConfig { reason: "nope".to_string() };
+        assert!(
+            std::error::Error::source(&e).is_none(),
+            "InvalidJobConfig must have no source"
+        );
+    }
 }
