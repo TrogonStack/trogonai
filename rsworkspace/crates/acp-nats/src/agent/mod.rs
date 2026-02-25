@@ -2,6 +2,7 @@ mod initialize;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient};
+use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::ErrorCode;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
@@ -9,15 +10,24 @@ use agent_client_protocol::{
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     Result, SetSessionModeRequest, SetSessionModeResponse,
 };
+use opentelemetry::metrics::Meter;
+use trogon_std::time::GetElapsed;
 
-pub struct Bridge<N: RequestClient + PublishClient + FlushClient> {
+pub struct Bridge<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> {
     pub(crate) nats: N,
+    pub(crate) clock: C,
     pub(crate) config: Config,
+    pub(crate) metrics: Metrics,
 }
 
-impl<N: RequestClient + PublishClient + FlushClient> Bridge<N> {
-    pub fn new(nats: N, config: Config) -> Self {
-        Self { nats, config }
+impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C> {
+    pub fn new(nats: N, clock: C, meter: &Meter, config: Config) -> Self {
+        Self {
+            nats,
+            clock,
+            config,
+            metrics: Metrics::new(meter),
+        }
     }
 
     pub(crate) fn nats(&self) -> &N {
@@ -26,7 +36,7 @@ impl<N: RequestClient + PublishClient + FlushClient> Bridge<N> {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + FlushClient> Agent for Bridge<N> {
+impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Bridge<N, C> {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
     }
@@ -103,8 +113,13 @@ mod tests {
     };
     use trogon_nats::AdvancedMockNatsClient;
 
-    fn mock_bridge() -> Bridge<AdvancedMockNatsClient> {
-        Bridge::new(AdvancedMockNatsClient::new(), Config::for_test("acp"))
+    fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
+        Bridge::new(
+            AdvancedMockNatsClient::new(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("acp"),
+        )
     }
 
     fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
