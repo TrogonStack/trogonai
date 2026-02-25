@@ -4,45 +4,45 @@
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.
+//!
+//! TODO: Consider extracting to `trogon-nats` as a generic `NatsSubject` (or `NatsToken`) type
+//! so prefix, session_id, and other subject tokens share the same validation.
 
-use trogon_nats::NatsToken;
-use trogon_nats::SubjectTokenViolation;
+use crate::config::ValidationError;
 
-/// Error returned when [`AcpSessionId`] validation fails.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum SessionIdError {
-    #[error("session_id must not be empty")]
-    Empty,
-    #[error("session_id contains invalid character: {0:?}")]
-    InvalidCharacter(char),
-    #[error("session_id is too long: {0} characters (max 128)")]
-    TooLong(usize),
-}
-
-impl From<SubjectTokenViolation> for SessionIdError {
-    fn from(v: SubjectTokenViolation) -> Self {
-        match v {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
-        }
-    }
-}
+const MAX_SESSION_ID_LENGTH: usize = 128;
 
 /// NATS-safe session ID. Guarantees validity at construction—invalid instances are unrepresentable.
 ///
 /// Follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 /// ASCII only; rejects `.`, `*`, `>`, and whitespace. Max 128 characters.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AcpSessionId(NatsToken);
+pub struct AcpSessionId(std::sync::Arc<str>);
 
 impl AcpSessionId {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, SessionIdError> {
-        NatsToken::new(s).map(Self).map_err(Into::into)
+    pub fn new(s: impl AsRef<str>) -> Result<Self, ValidationError> {
+        let s = s.as_ref();
+        if s.is_empty() {
+            return Err(ValidationError::EmptyValue("session_id"));
+        }
+        let mut char_count = 0;
+        for ch in s.chars() {
+            char_count += 1;
+            if char_count > MAX_SESSION_ID_LENGTH {
+                return Err(ValidationError::TooLong("session_id", char_count));
+            }
+            if !ch.is_ascii() {
+                return Err(ValidationError::InvalidCharacter("session_id", ch));
+            }
+            if ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
+                return Err(ValidationError::InvalidCharacter("session_id", ch));
+            }
+        }
+        Ok(Self(s.into()))
     }
 
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
     }
 }
 
@@ -61,7 +61,7 @@ impl std::ops::Deref for AcpSessionId {
 }
 
 impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
-    type Error = SessionIdError;
+    type Error = ValidationError;
 
     fn try_from(session_id: &agent_client_protocol::SessionId) -> Result<Self, Self::Error> {
         AcpSessionId::new(session_id.to_string().as_str())
@@ -71,13 +71,12 @@ impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::SessionId;
 
     #[test]
     fn acp_session_id_too_long_returns_err() {
         let long_id = "a".repeat(129);
         let err = AcpSessionId::new(&long_id).err().unwrap();
-        assert_eq!(err, SessionIdError::TooLong(129));
+        assert_eq!(err, ValidationError::TooLong("session_id", 129));
 
         assert!(AcpSessionId::new("a".repeat(128).as_str()).is_ok());
     }
@@ -85,7 +84,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_dots() {
         let err = AcpSessionId::new("session.id").err().unwrap();
-        assert_eq!(err, SessionIdError::InvalidCharacter('.'));
+        assert_eq!(err, ValidationError::InvalidCharacter("session_id", '.'));
     }
 
     #[test]
@@ -98,7 +97,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_non_ascii() {
         let err = AcpSessionId::new("séssion").err().unwrap();
-        assert_eq!(err, SessionIdError::InvalidCharacter('é'));
+        assert_eq!(err, ValidationError::InvalidCharacter("session_id", 'é'));
     }
 
     #[test]
@@ -110,14 +109,19 @@ mod tests {
     #[test]
     fn acp_session_id_empty_returns_err() {
         let err = AcpSessionId::new("").err().unwrap();
-        assert_eq!(err, SessionIdError::Empty);
+        assert_eq!(err, ValidationError::EmptyValue("session_id"));
     }
 
     #[test]
     fn acp_session_id_try_from_session_id() {
+        use agent_client_protocol::SessionId;
+
         let valid = SessionId::from("valid-session");
         assert!(AcpSessionId::try_from(&valid).is_ok());
-        assert_eq!(AcpSessionId::try_from(&valid).unwrap().as_str(), "valid-session");
+        assert_eq!(
+            AcpSessionId::try_from(&valid).unwrap().as_str(),
+            "valid-session"
+        );
 
         let invalid = SessionId::from("invalid.session");
         assert!(AcpSessionId::try_from(&invalid).is_err());
@@ -129,18 +133,5 @@ mod tests {
         assert_eq!(format!("{}", id), "my-session");
         assert_eq!(id.len(), 10);
         assert!(id.starts_with("my"));
-    }
-
-    #[test]
-    fn session_id_error_display() {
-        assert_eq!(format!("{}", SessionIdError::Empty), "session_id must not be empty");
-        assert_eq!(
-            format!("{}", SessionIdError::InvalidCharacter('.')),
-            "session_id contains invalid character: '.'"
-        );
-        assert_eq!(
-            format!("{}", SessionIdError::TooLong(129)),
-            "session_id is too long: 129 characters (max 128)"
-        );
     }
 }
