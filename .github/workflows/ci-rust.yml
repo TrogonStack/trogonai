@@ -43,5 +43,17 @@ jobs:
         working-directory: rsworkspace
 
       - name: Run tests with coverage
-        run: cargo llvm-cov --all-features --workspace
+        run: cargo llvm-cov --all-features --workspace --cobertura --output-path coverage.xml
         working-directory: rsworkspace
+
+      - name: Coverage report and gate
+        uses: insightsengineering/coverage-action@v3
+        with:
+          path: rsworkspace/coverage.xml
+          threshold: 90
+          fail: true
+          publish: true
+          diff: true
+          diff-branch: main
+          diff-storage: _xml_coverage_reports
+          coverage-rate-reduction-failure: true
