@@ -139,6 +139,25 @@ async fn test_load_jobs_and_watch_returns_preexisting_jobs() {
     client.remove_job(&id).await.unwrap();
 }
 
+/// `load_jobs_and_watch` must return an empty Vec (not hang or error) when the
+/// config bucket contains no active jobs.  This exercises the 500 ms deadline
+/// branch that fires when the initial `watch_with_history` snapshot is empty.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_load_jobs_and_watch_empty_bucket_returns_empty_vec() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats).await.unwrap();
+    purge_all_jobs(&client).await;
+
+    let kv = trogon_cron::kv::get_or_create_config_bucket(&js).await.unwrap();
+    let (jobs, _watcher) = trogon_cron::kv::load_jobs_and_watch(&kv).await.unwrap();
+
+    assert!(
+        jobs.is_empty(),
+        "load_jobs_and_watch must return an empty Vec when the bucket has no active jobs; got: {jobs:?}"
+    );
+}
+
 /// Malformed JSON entries in the config bucket must be silently skipped by
 /// `load_jobs_and_watch`; valid entries must still be returned.
 #[tokio::test]
