@@ -13274,3 +13274,209 @@ async fn test_e2e_spawn_job_env_vars_injected() {
         .trim();
     assert!(!fired_at.is_empty(), "CRON_FIRED_AT must not be empty; got: {content}");
 }
+
+/// Full E2E: a job using a cron expression (`* * * * * *` — every second) must
+/// fire via the binary scheduler just like an interval job.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_cron_expression_fires() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-cronexpr");
+    let subject = format!("cron.e2e.cronexpr.{id}");
+    let nats_url = test_url();
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Cron { expr: "* * * * * *".to_string() },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await
+        .expect("Cron-expression job never fired via binary scheduler")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+}
+
+/// Full E2E: a spawn job configured with a `payload` must receive the payload
+/// value in the `CRON_PAYLOAD` environment variable.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_payload_env_var_injected() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-cpayload");
+    let nats_url = test_url();
+    let payload_value = format!("secret-{id}");
+
+    let out_file = std::env::temp_dir().join(format!("trogon-e2e-cpayload-{id}.txt"));
+    let _ = std::fs::remove_file(&out_file);
+
+    let script = format!(
+        "echo \"$CRON_PAYLOAD\" > {}",
+        out_file.display()
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(5),
+        },
+        enabled: true,
+        payload: Some(serde_json::Value::String(payload_value.clone())),
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if out_file.exists() { break; }
+        assert!(tokio::time::Instant::now() < deadline, "Spawn job never wrote the payload file");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let content = std::fs::read_to_string(&out_file).unwrap();
+    let _ = std::fs::remove_file(&out_file);
+
+    // CRON_PAYLOAD is the JSON-serialised Value, so a string payload is wrapped
+    // in JSON quotes: `"secret-..."`.  We assert the raw value is present.
+    assert!(
+        content.contains(&payload_value),
+        "CRON_PAYLOAD must contain the payload value '{payload_value}'; got: {content:?}"
+    );
+}
+
+/// Full E2E: a spawn job with a short `timeout_sec` must be killed before the
+/// process finishes naturally.  We use a script that writes a "start" file,
+/// sleeps 30 s, then writes an "end" file.  The timeout fires after 2 s so the
+/// "end" file must never be created.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_spawn_timeout_kills_long_running_process() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-timeout");
+    let nats_url = test_url();
+
+    let start_file = std::env::temp_dir().join(format!("trogon-e2e-timeout-start-{id}"));
+    let end_file   = std::env::temp_dir().join(format!("trogon-e2e-timeout-end-{id}"));
+    let _ = std::fs::remove_file(&start_file);
+    let _ = std::fs::remove_file(&end_file);
+
+    let script = format!(
+        "touch {}; sleep 30; touch {}",
+        start_file.display(),
+        end_file.display(),
+    );
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/bash".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: Some(2),
+        },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    // Wait for the process to start (start_file appears).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if start_file.exists() { break; }
+        assert!(tokio::time::Instant::now() < deadline, "Spawn job never started");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Wait long enough for the timeout to fire and for the process to be killed.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let _ = std::fs::remove_file(&start_file);
+    assert!(
+        !end_file.exists(),
+        "end_file must not exist — the process must have been killed by the timeout before finishing"
+    );
+    let _ = std::fs::remove_file(&end_file);
+}
+
+/// Full E2E: a tick message delivered via JetStream must contain the fields
+/// `job_id`, `fired_at`, and `execution_id`.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_e2e_tick_message_has_all_fields() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("e2e-fields");
+    let subject = format!("cron.e2e.fields.{id}");
+    let nats_url = test_url();
+
+    let mut sub = cron_messages(&nats, &js, subject.clone()).await;
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: subject.clone() },
+        enabled: true,
+        payload: None,
+        retry: None,
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let mut scheduler = spawn_serve(&nats_url);
+
+    let msg = tokio::time::timeout(Duration::from_secs(8), sub.next())
+        .await
+        .expect("Tick never arrived")
+        .unwrap()
+        .unwrap();
+
+    sigterm_wait(&mut scheduler, 5).await;
+    client.remove_job(&id).await.unwrap();
+
+    let tick: serde_json::Value = serde_json::from_slice(&msg.payload)
+        .expect("Tick payload must be valid JSON");
+
+    assert_eq!(tick["job_id"].as_str().unwrap_or(""), id, "job_id must match");
+    assert!(
+        tick["fired_at"].as_str().is_some_and(|s| !s.is_empty()),
+        "fired_at must be a non-empty string; got: {tick}"
+    );
+    assert!(
+        tick["execution_id"].as_str().is_some_and(|s| !s.is_empty()),
+        "execution_id must be a non-empty string; got: {tick}"
+    );
+}
