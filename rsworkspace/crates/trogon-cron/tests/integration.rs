@@ -12503,6 +12503,10 @@ async fn test_cli_list_shows_cron_schedule() {
         stdout.contains(expr),
         "SCHEDULE column must show the cron expression '{expr}'; got: {stdout}"
     );
+    assert!(
+        stdout.contains("ID") && stdout.contains("STATUS") && stdout.contains("SCHEDULE"),
+        "table header must contain ID, STATUS and SCHEDULE columns; got: {stdout}"
+    );
 }
 
 /// `job list` must show "disabled" in the STATUS column for a job that has
