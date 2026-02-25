@@ -34,14 +34,14 @@ pub enum Action {
 /// Optional retry policy for a job.
 ///
 /// When a job fails (non-zero exit code for Spawn, publish error for Publish),
-/// the scheduler retries up to `max_retries` times (max 50) using exponential
+/// the scheduler retries up to `max_retries` times (max 10) using exponential
 /// backoff starting at `retry_backoff_sec` seconds.  The cycle also stops early
 /// if `max_retry_duration_sec` is set and the elapsed time exceeds it — whichever
 /// limit is hit first wins.  After exhausting all attempts the failure is
 /// published to `cron.errors`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
-    /// Number of retry attempts after the first failure (0 = no retries, max 50).
+    /// Number of retry attempts after the first failure (0 = no retries, max 10).
     pub max_retries: u32,
     /// Base delay in seconds before the first retry; doubles on each subsequent attempt.
     /// Must be >= 1.

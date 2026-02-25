@@ -7082,9 +7082,9 @@ async fn test_retry_config_round_trips_through_kv() {
 
 // ── max_retry_duration_sec stops retries before max_retries is reached ────────
 
-/// A spawn job with `max_retries: 50` but `max_retry_duration_sec: 3` always
+/// A spawn job with `max_retries: 10` but `max_retry_duration_sec: 3` always
 /// exits 1.  The duration cap must kick in and publish a dead-letter within
-/// a few seconds — long before the 50-retry limit would be reached.
+/// a few seconds — long before the 10-retry limit would be reached.
 #[tokio::test]
 #[ignore = "requires NATS at NATS_TEST_URL"]
 async fn test_spawn_dead_letter_respects_max_retry_duration() {
@@ -7118,7 +7118,7 @@ async fn test_spawn_dead_letter_respects_max_retry_duration() {
         enabled: true,
         payload: None,
         retry: Some(trogon_cron::RetryConfig {
-            max_retries: 50,
+            max_retries: 10,
             retry_backoff_sec: 1, max_backoff_sec: None,
             max_retry_duration_sec: Some(3),
         }),
@@ -7143,8 +7143,8 @@ async fn test_spawn_dead_letter_respects_max_retry_duration() {
         if dl.job_id == id { break dl; }
     };
 
-    // Must have stopped long before 50 retries.
-    assert!(dl.attempts < 50, "Duration cap must stop retries before reaching max_retries; got {} attempts", dl.attempts);
+    // Must have stopped long before 10 retries.
+    assert!(dl.attempts < 10, "Duration cap must stop retries before reaching max_retries; got {} attempts", dl.attempts);
 
     handle.abort();
     client.remove_job(&id).await.unwrap();

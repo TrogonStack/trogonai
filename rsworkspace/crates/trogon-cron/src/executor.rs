@@ -537,9 +537,9 @@ pub fn build_job_state_at(config: JobConfig, now: DateTime<Utc>) -> Result<JobSt
                 reason: "retry_backoff_sec must be >= 1".into(),
             });
         }
-        if retry.max_retries > 50 {
+        if retry.max_retries > 10 {
             return Err(CronError::InvalidJobConfig {
-                reason: format!("max_retries must be <= 50, got {}", retry.max_retries),
+                reason: format!("max_retries must be <= 10, got {}", retry.max_retries),
             });
         }
         if retry.max_retry_duration_sec == Some(0) {
@@ -845,28 +845,28 @@ mod tests {
     }
 
     #[test]
-    fn max_retries_over_50_is_rejected() {
+    fn max_retries_over_10_is_rejected() {
         let config = JobConfig {
             id: "too-many-retries".to_string(),
             schedule: Schedule::Interval { interval_sec: 60 },
             action: Action::Publish { subject: "cron.too-many".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 51, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 11, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         let err = build_job_state(config).err().unwrap();
         assert!(err.to_string().contains("max_retries"));
     }
 
     #[test]
-    fn max_retries_at_50_is_accepted() {
+    fn max_retries_at_10_is_accepted() {
         let config = JobConfig {
-            id: "max-retries-50".to_string(),
+            id: "max-retries-10".to_string(),
             schedule: Schedule::Interval { interval_sec: 60 },
-            action: Action::Publish { subject: "cron.max50".to_string() },
+            action: Action::Publish { subject: "cron.max10".to_string() },
             enabled: true,
             payload: None,
-            retry: Some(RetryConfig { max_retries: 50, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
+            retry: Some(RetryConfig { max_retries: 10, retry_backoff_sec: 1, max_backoff_sec: None, max_retry_duration_sec: None }),
         };
         assert!(build_job_state(config).is_ok());
     }
