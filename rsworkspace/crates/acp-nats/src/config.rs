@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 use trogon_nats::NatsConfig;
 
@@ -39,7 +40,7 @@ fn has_consecutive_or_boundary_dots(value: &str) -> bool {
 }
 
 #[derive(Clone)]
-pub struct AcpPrefix(String);
+pub struct AcpPrefix(Arc<str>);
 
 impl AcpPrefix {
     pub fn new(s: impl Into<String>) -> Result<Self, ValidationError> {
@@ -56,7 +57,7 @@ impl AcpPrefix {
         if s.len() > MAX_PREFIX_LENGTH {
             return Err(ValidationError::TooLong("acp_prefix", s.len()));
         }
-        Ok(Self(s))
+        Ok(Self(s.into()))
     }
 
     pub fn as_str(&self) -> &str {
