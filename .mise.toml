@@ -19,4 +19,9 @@ depends = ["check:rust"]
 
 [tasks."check:rust"]
 dir = "rsworkspace"
-run = "cargo clippy --workspace -- -D warnings && cargo fmt --check"
+run = "cargo clippy --workspace && cargo fmt --check"
+
+[tasks."rsc"]
+description = "Format and check all Rust code (fmt, clippy, all targets, all features)"
+dir = "rsworkspace"
+run = "cargo fmt && cargo clippy --all-targets --all-features"

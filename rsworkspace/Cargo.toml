@@ -2,6 +2,12 @@
 resolver = "2"
 members = ["crates/*"]
 
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+
 [profile.release]
 lto = "thin"
 strip = "symbols"

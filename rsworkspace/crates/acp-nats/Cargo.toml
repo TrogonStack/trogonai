@@ -3,6 +3,9 @@ name = "acp-nats"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 agent-client-protocol = "0.9.4"
 opentelemetry = "0.31.0"
