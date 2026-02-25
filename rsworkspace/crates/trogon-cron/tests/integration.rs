@@ -11362,3 +11362,229 @@ async fn test_spawn_retry_duration_zero_rejected_by_scheduler() {
     assert!(!got, "max_retry_duration_sec=0 must be rejected; job must not fire or dead-letter");
     kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, id)).await.unwrap();
 }
+
+// ── max_backoff_sec=0 rejected by scheduler → job silently skipped ────────────
+
+/// `max_backoff_sec=0` passes client-side storage but is rejected by the
+/// scheduler's `build_job_state_at` validator.  No ticks and no dead-letters
+/// must be produced for such a job.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_max_backoff_zero_rejected_by_scheduler() {
+    let (nats, js) = connect_js().await;
+    let _client = CronClient::new(nats.clone()).await.unwrap(); // ensures CONFIG_BUCKET exists
+    let id = unique_id("test-maxbo-zero-sched");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM).await.unwrap()
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        }).await.unwrap().messages().await.unwrap();
+
+    // Bypass client validation by writing the invalid config directly to KV.
+    let raw_config = serde_json::json!({
+        "id": id,
+        "schedule": {"type": "interval", "interval_sec": 1},
+        "action": {"type": "spawn", "bin": "/usr/bin/false", "args": [], "concurrent": false},
+        "enabled": true,
+        "retry": {"max_retries": 3, "retry_backoff_sec": 1, "max_backoff_sec": 0}
+    });
+    let kv = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await.unwrap();
+    kv.put(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, id),
+           serde_json::to_vec(&raw_config).unwrap().into()).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let h = tokio::spawn({ let n = nats.clone(); async move { Scheduler::new(n).run().await.ok(); } });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String }
+
+    let mut got = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if rem.is_zero() { break; }
+        match tokio::time::timeout(rem, errors.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+                    if dl.job_id == id { got = true; break; }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    h.abort();
+    assert!(!got, "max_backoff_sec=0 must be rejected; job must not fire or dead-letter");
+    kv.delete(format!("{}{}", trogon_cron::kv::JOBS_KEY_PREFIX, id)).await.unwrap();
+}
+
+// ── Publish retry respects max_retry_duration (mock) ─────────────────────────
+
+/// When `max_retry_duration_sec` expires before `max_retries` is reached, the
+/// publish retry loop stops early and sends a dead-letter.  Uses a mock
+/// publisher so no real NATS server is needed for the publish-fail path.
+#[tokio::test]
+async fn test_publish_retry_max_retry_duration_cuts_retries_short_mock() {
+    use std::sync::{Arc, Mutex};
+    use bytes::Bytes;
+    use trogon_cron::executor::{build_job_state_at, execute};
+
+    #[derive(Clone, Default)]
+    struct CaptureDl { dls: Arc<Mutex<Vec<serde_json::Value>>> }
+
+    #[derive(Debug)]
+    struct PubFail;
+    impl std::fmt::Display for PubFail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "injected failure") }
+    }
+    impl std::error::Error for PubFail {}
+
+    impl trogon_cron::TickPublisher for CaptureDl {
+        type Error = PubFail;
+        fn publish_tick(
+            &self, subject: String,
+            _headers: async_nats::HeaderMap,
+            payload: Bytes,
+        ) -> impl std::future::Future<Output = Result<(), PubFail>> + Send {
+            let dls = self.dls.clone();
+            async move {
+                if subject == "cron.errors" {
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        dls.lock().unwrap().push(v);
+                    }
+                    Ok(())
+                } else {
+                    Err(PubFail)
+                }
+            }
+        }
+    }
+
+    let publisher = CaptureDl::default();
+
+    // max_retries=5 but max_retry_duration_sec=2 with retry_backoff_sec=10.
+    // Flow in publish():
+    //   attempt=1 fails instantly (elapsed≈0ms); sleep capped to min(10s, 2s)=2s.
+    //   attempt=2 fails instantly (elapsed≈2s); duration gate fires → break.
+    // So 2 actual attempts run instead of 6, and total elapsed ≈2s not ≥50s.
+    let config = JobConfig {
+        id: "mock-pub-dur".to_string(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "cron.mock-pub-dur".to_string() },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 5,
+            retry_backoff_sec: 10,
+            max_backoff_sec: None,
+            max_retry_duration_sec: Some(2),
+        }),
+    };
+
+    let state = build_job_state_at(config, chrono::Utc::now()).unwrap();
+    let start = tokio::time::Instant::now();
+    execute(&publisher, &state, chrono::Utc::now()).await;
+
+    // Wait long enough for the background task to finish (duration budget = 2s
+    // + some slack), but much shorter than 5 full retries would take (≥50s).
+    tokio::time::sleep(Duration::from_secs(7)).await;
+
+    let elapsed = start.elapsed();
+    let dls = publisher.dls.lock().unwrap().clone();
+
+    assert_eq!(dls.len(), 1, "exactly one dead-letter after duration exhaustion");
+    let dl = &dls[0];
+    assert_eq!(dl["job_id"], "mock-pub-dur");
+    assert_eq!(dl["action"], "publish");
+    // 2 attempts: attempt 1 (fast) + attempt 2 (after 2s capped sleep). Duration
+    // gate fires after attempt 2 because elapsed has now reached max_retry_duration.
+    assert_eq!(dl["attempts"], 2, "duration must stop retries after 2 actual attempts");
+    // Total elapsed must be well under what 5 retries would cost (≥50s).
+    assert!(elapsed < Duration::from_secs(12),
+        "max_retry_duration did not stop retries early; elapsed {elapsed:?}");
+}
+
+// ── Publish retry respects max_backoff_sec (mock) ─────────────────────────────
+
+/// When `max_backoff_sec` is set, each inter-retry delay is capped at that
+/// value even when the exponential backoff would exceed it.  Uses a mock
+/// publisher to make publish reliably fail.
+#[tokio::test]
+async fn test_publish_retry_max_backoff_caps_delay_mock() {
+    use std::sync::{Arc, Mutex};
+    use bytes::Bytes;
+    use trogon_cron::executor::{build_job_state_at, execute};
+
+    #[derive(Clone, Default)]
+    struct CaptureDl { dls: Arc<Mutex<Vec<serde_json::Value>>> }
+
+    #[derive(Debug)]
+    struct PubFail;
+    impl std::fmt::Display for PubFail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "injected failure") }
+    }
+    impl std::error::Error for PubFail {}
+
+    impl trogon_cron::TickPublisher for CaptureDl {
+        type Error = PubFail;
+        fn publish_tick(
+            &self, subject: String,
+            _headers: async_nats::HeaderMap,
+            payload: Bytes,
+        ) -> impl std::future::Future<Output = Result<(), PubFail>> + Send {
+            let dls = self.dls.clone();
+            async move {
+                if subject == "cron.errors" {
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        dls.lock().unwrap().push(v);
+                    }
+                    Ok(())
+                } else {
+                    Err(PubFail)
+                }
+            }
+        }
+    }
+
+    let publisher = CaptureDl::default();
+
+    // retry_backoff_sec=30 would make 3 retries take >90 s.
+    // max_backoff_sec=1 caps every delay at 1 s → total ≈3 s.
+    let config = JobConfig {
+        id: "mock-pub-maxbo".to_string(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Publish { subject: "cron.mock-pub-maxbo".to_string() },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 3,
+            retry_backoff_sec: 30,
+            max_backoff_sec: Some(1),
+            max_retry_duration_sec: None,
+        }),
+    };
+
+    let state = build_job_state_at(config, chrono::Utc::now()).unwrap();
+    let start = tokio::time::Instant::now();
+    execute(&publisher, &state, chrono::Utc::now()).await;
+
+    // 3 retries × ≤1 s cap = ≈3 s; allow 10 s for CI jitter.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+
+    let elapsed = start.elapsed();
+    let dls = publisher.dls.lock().unwrap().clone();
+
+    assert_eq!(dls.len(), 1, "exactly one dead-letter after exhausting retries");
+    let dl = &dls[0];
+    assert_eq!(dl["job_id"], "mock-pub-maxbo");
+    assert_eq!(dl["action"], "publish");
+    assert_eq!(dl["attempts"], 4, "1 initial + 3 retries");
+    // Without the cap this would take >90 s; with it, well under 15 s.
+    assert!(elapsed < Duration::from_secs(15),
+        "max_backoff_sec did not cap publish retry delays; elapsed {elapsed:?}");
+}

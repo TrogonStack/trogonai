@@ -993,4 +993,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn retry_backoff_with_jitter_stays_within_20_percent_band() {
+        // Without a cap the jitter factor is in [0.8, 1.2), so the result must
+        // fall inside [base × 0.8, base × 1.2) for every attempt and base value.
+        for base in [1u64, 2, 5, 10, 30] {
+            for attempt in [1u32, 2, 3, 4, 5, 6] {
+                let raw_base = retry_backoff(base, attempt);
+                let lo = Duration::from_millis((raw_base.as_millis() as f64 * 0.8) as u64);
+                let hi = Duration::from_millis((raw_base.as_millis() as f64 * 1.2) as u64 + 1);
+                for _ in 0..50 {
+                    let d = retry_backoff_with_jitter(base, attempt, None);
+                    assert!(
+                        d >= lo && d < hi,
+                        "jitter out of ±20% band: base={base}s attempt={attempt} \
+                         raw_base={raw_base:?} got={d:?} expected [{lo:?}, {hi:?})"
+                    );
+                }
+            }
+        }
+    }
+
 }
