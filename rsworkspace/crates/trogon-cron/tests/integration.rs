@@ -10000,3 +10000,245 @@ async fn test_spawn_concurrent_true_retry_independent_execution_ids() {
     handle.abort();
     client.remove_job(&id).await.unwrap();
 }
+
+// ── payload=None: CRON_PAYLOAD env var not injected ──────────────────────────
+
+/// When a job has no `payload`, the `CRON_PAYLOAD` environment variable must
+/// NOT be set in the spawned process on any attempt of the retry cycle.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_payload_none_cron_payload_not_set() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retry-nopayload");
+    let log = format!("/tmp/{id}.log");
+    let _ = std::fs::remove_file(&log);
+
+    // Log the env var; use "UNSET" sentinel when variable is absent.
+    let script = format!(r#"echo "${{CRON_PAYLOAD:-UNSET}}" >> {log}; exit 1"#);
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None, // no payload → CRON_PAYLOAD must not be set
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, attempts: u32 }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+            if dl.job_id == id {
+                assert_eq!(dl.attempts, 2);
+                break;
+            }
+        }
+    }
+
+    handle.abort();
+
+    let content = std::fs::read_to_string(&log).unwrap_or_default();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 2, "expected 2 log lines (one per attempt)");
+    for line in &lines {
+        assert_eq!(*line, "UNSET",
+            "CRON_PAYLOAD must not be set when job payload is None; got: {line:?}");
+    }
+
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&log);
+}
+
+// ── dead-letter execution_id matches process CRON_EXECUTION_ID env var ────────
+
+/// The `execution_id` field in the dead-letter must equal the `CRON_EXECUTION_ID`
+/// environment variable that was injected into the spawned process — proving the
+/// ID is consistent across the entire retry lifecycle.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_dead_letter_execution_id_matches_process_env() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retry-execid-match");
+    let log = format!("/tmp/{id}.log");
+    let _ = std::fs::remove_file(&log);
+
+    let script = format!("echo \"$CRON_EXECUTION_ID\" >> {log}; exit 1");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            concurrent: false,
+            timeout_sec: None,
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, execution_id: String }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let dl_execution_id;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+            if dl.job_id == id { dl_execution_id = dl.execution_id; break; }
+        }
+    }
+
+    handle.abort();
+
+    let content = std::fs::read_to_string(&log).unwrap_or_default();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 2, "expected 2 log lines");
+    for line in &lines {
+        assert_eq!(
+            *line, dl_execution_id,
+            "process CRON_EXECUTION_ID ({line:?}) must equal dead-letter execution_id ({dl_execution_id:?})"
+        );
+    }
+
+    client.remove_job(&id).await.unwrap();
+    let _ = std::fs::remove_file(&log);
+}
+
+// ── Timeout error message in dead-letter ─────────────────────────────────────
+
+/// When a spawned process is killed by the timeout mechanism, the dead-letter
+/// `error` field must mention "timed out" and the configured timeout duration.
+#[tokio::test]
+#[ignore = "requires NATS at NATS_TEST_URL"]
+async fn test_spawn_retry_timeout_error_message_in_dead_letter() {
+    let (nats, js) = connect_js().await;
+    let client = CronClient::new(nats.clone()).await.unwrap();
+    let id = unique_id("test-retry-timeout-msg");
+
+    let errors_inbox = nats.new_inbox();
+    let mut errors = js.get_stream(trogon_cron::kv::TICKS_STREAM)
+        .await.expect("CRON_TICKS stream not found")
+        .create_consumer(consumer::push::Config {
+            deliver_subject: errors_inbox,
+            filter_subject: "cron.errors".to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::None,
+            ..Default::default()
+        })
+        .await.expect("Failed to create error consumer")
+        .messages().await.expect("Failed to start error stream");
+
+    client.register_job(&JobConfig {
+        id: id.clone(),
+        schedule: Schedule::Interval { interval_sec: 1 },
+        action: Action::Spawn {
+            bin: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "sleep 60".to_string()],
+            concurrent: false,
+            timeout_sec: Some(1), // killed after 1 s
+        },
+        enabled: true,
+        payload: None,
+        retry: Some(trogon_cron::RetryConfig {
+            max_retries: 1,
+            retry_backoff_sec: 1,
+            max_backoff_sec: None,
+            max_retry_duration_sec: None,
+        }),
+    }).await.unwrap();
+
+    reset_leader_lock(&js).await;
+    let scheduler_nats = nats.clone();
+    let handle = tokio::spawn(async move { Scheduler::new(scheduler_nats).run().await.ok(); });
+
+    #[derive(serde::Deserialize)]
+    struct DeadLetter { job_id: String, error: String, attempts: u32 }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining > Duration::ZERO, "Timed out waiting for dead-letter");
+        let msg = tokio::time::timeout(remaining, errors.next())
+            .await.expect("Timed out").unwrap().unwrap();
+        if let Ok(dl) = serde_json::from_slice::<DeadLetter>(&msg.payload) {
+            if dl.job_id == id {
+                assert_eq!(dl.attempts, 2, "both attempts must time out");
+                assert!(
+                    dl.error.contains("timed out"),
+                    "error must mention 'timed out'; got: {:?}", dl.error
+                );
+                assert!(
+                    dl.error.contains("1"),
+                    "error must mention the timeout duration (1 s); got: {:?}", dl.error
+                );
+                break;
+            }
+        }
+    }
+
+    handle.abort();
+    client.remove_job(&id).await.unwrap();
+}
