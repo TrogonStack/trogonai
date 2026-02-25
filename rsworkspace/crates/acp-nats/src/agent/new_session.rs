@@ -163,39 +163,87 @@ mod tests {
     use std::time::Duration;
     use trogon_nats::{AdvancedMockNatsClient, NatsError};
 
+    fn has_session_ready_error_metric(
+        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+    ) -> bool {
+        finished_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .find(|m| m.name() == "acp.errors.total")
+            .and_then(|metric| {
+                let data = metric.data();
+                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
+                    s.data_points()
+                        .find(|dp| {
+                            let mut operation_ok = false;
+                            let mut reason_ok = false;
+                            for attr in dp.attributes() {
+                                if attr.key.as_str() == "operation" {
+                                    operation_ok = attr.value.as_str() == "session_ready";
+                                } else if attr.key.as_str() == "reason" {
+                                    reason_ok =
+                                        attr.value.as_str() == "session_ready_publish_failed";
+                                }
+                            }
+                            operation_ok && reason_ok
+                        })
+                        .map(|_| ())
+                } else {
+                    None
+                }
+            })
+            .is_some()
+    }
+
+    fn assert_session_ready_error_recorded(
+        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+    ) {
+        assert!(
+            has_session_ready_error_metric(finished_metrics),
+            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
+        );
+    }
+
+    fn has_new_session_metric(
+        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+        expected_success: bool,
+    ) -> bool {
+        finished_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .find(|m| m.name() == "acp.request.count")
+            .and_then(|metric| {
+                let data = metric.data();
+                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
+                    s.data_points()
+                        .find(|dp| {
+                            let mut method_ok = false;
+                            let mut success_ok = false;
+                            for attr in dp.attributes() {
+                                if attr.key.as_str() == "method" {
+                                    method_ok = attr.value.as_str() == "new_session";
+                                } else if attr.key.as_str() == "success" {
+                                    success_ok = attr.value == Value::from(expected_success);
+                                }
+                            }
+                            method_ok && success_ok
+                        })
+                        .map(|_| ())
+                } else {
+                    None
+                }
+            })
+            .is_some()
+    }
+
     fn assert_new_session_metric_recorded(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
         expected_success: bool,
     ) {
-        let found = finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .any(|sm| {
-                sm.metrics().any(|metric| {
-                    if metric.name() != "acp.request.count" {
-                        return false;
-                    }
-                    let data = metric.data();
-                    let sum = match data {
-                        AggregatedMetrics::U64(MetricData::Sum(s)) => s,
-                        _ => return false,
-                    };
-                    sum.data_points().any(|dp| {
-                        let mut method_ok = false;
-                        let mut success_ok = false;
-                        for attr in dp.attributes() {
-                            if attr.key.as_str() == "method" {
-                                method_ok = attr.value.as_str() == "new_session";
-                            } else if attr.key.as_str() == "success" {
-                                success_ok = attr.value == Value::from(expected_success);
-                            }
-                        }
-                        method_ok && success_ok
-                    })
-                })
-            });
         assert!(
-            found,
+            has_new_session_metric(finished_metrics, expected_success),
             "expected acp.request.count datapoint with method=new_session, success={}",
             expected_success
         );
@@ -298,6 +346,7 @@ mod tests {
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
 
+        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert_new_session_metric_recorded(&finished_metrics, true);
@@ -357,6 +406,65 @@ mod tests {
         let err = map_new_session_error(NatsError::Other("misc failure".into()));
         assert!(err.to_string().contains("New session request failed"));
         assert_eq!(err.code, ErrorCode::InternalError);
+    }
+
+    #[test]
+    fn has_session_ready_error_metric_returns_false_when_metric_is_histogram() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = provider.meter("test");
+        let histogram = meter
+            .f64_histogram("acp.errors.total")
+            .with_description("test")
+            .build();
+        histogram.record(1.0, &[]);
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!has_session_ready_error_metric(&finished_metrics));
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn has_new_session_metric_returns_false_when_metric_is_histogram() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = provider.meter("test");
+        let histogram = meter
+            .f64_histogram("acp.request.count")
+            .with_description("test")
+            .build();
+        histogram.record(1.0, &[]);
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!has_new_session_metric(&finished_metrics, true));
+        provider.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn new_session_records_error_when_session_ready_publish_fails() {
+        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let session_id = SessionId::from("test-session-1");
+        set_json_response(
+            &mock,
+            "acp.agent.session.new",
+            &NewSessionResponse::new(session_id),
+        );
+        mock.fail_publish_count(4);
+
+        let _ = bridge.new_session(NewSessionRequest::new(".")).await;
+
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert_session_ready_error_recorded(&finished_metrics);
+        assert_new_session_metric_recorded(&finished_metrics, true);
+        provider.shutdown().unwrap();
     }
 
     struct FailsSerialize;
