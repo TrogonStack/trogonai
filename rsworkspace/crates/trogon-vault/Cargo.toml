@@ -1,0 +1,16 @@
+[package]
+name = "trogon-vault"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+trogon-std = { path = "../trogon-std" }
+
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+test-support = []
