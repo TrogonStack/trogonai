@@ -432,6 +432,87 @@ async fn e2e_jetstream_message_processed_after_worker_starts_late() {
     ai_mock.assert_async().await;
 }
 
+/// When the worker receives a JetStream message with an invalid (non-JSON)
+/// payload it must NAK it and keep running — the next valid request must be
+/// processed successfully.
+#[tokio::test]
+async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_after_bad","type":"message"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_nack01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+
+    // Inject garbage bytes directly into the stream — bypasses the proxy.
+    jetstream
+        .publish(outbound_subject.clone(), b"this is not valid json !!!".to_vec().into())
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(jetstream, nats, vault, http_client, "e2e-nack-workers")
+            .await
+            .expect("Worker error");
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Send a valid request — worker must still be alive and process it.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_test_nack01")
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3","messages":[]}"#)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_after_bad");
+    ai_mock.assert_async().await;
+}
+
 /// `ensure_stream` must be idempotent — calling it twice on the same subject
 /// must not return an error.
 #[tokio::test]
