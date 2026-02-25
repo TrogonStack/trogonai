@@ -1,0 +1,61 @@
+services:
+
+  # ── NATS with JetStream enabled ───────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--http_port=8222"
+    ports:
+      - "4222:4222"   # client connections
+      - "8222:8222"   # HTTP monitoring  (http://localhost:8222)
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── HTTP proxy ────────────────────────────────────────────────────────────
+  proxy:
+    build:
+      context: .
+      target: proxy
+    ports:
+      - "8080:8080"
+    environment:
+      NATS_URL: nats://nats:4222
+      PROXY_PREFIX: trogon
+      PROXY_PORT: "8080"
+      PROXY_WORKER_TIMEOUT_SECS: "60"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Detokenization worker ─────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      NATS_URL: nats://nats:4222
+      PROXY_PREFIX: trogon
+      WORKER_CONSUMER_NAME: proxy-workers
+      RUST_LOG: info
+    env_file:
+      - path: .env
+        required: false   # optional — only needed to inject VAULT_TOKEN_* secrets
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    # Scale horizontally: docker compose up --scale worker=3
+    # All instances share the same durable JetStream consumer → auto load-balanced.
+
+volumes:
+  nats-data:
