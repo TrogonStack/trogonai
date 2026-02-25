@@ -59,6 +59,9 @@ pub struct AdvancedMockNatsClient {
     base: MockNatsClient,
     request_responses: Arc<Mutex<std::collections::HashMap<String, bytes::Bytes>>>,
     should_fail_request: Arc<Mutex<bool>>,
+    /// Number of publishes to fail before succeeding. fail_next_publish() sets this to 1.
+    /// Use fail_publish_count(n) to fail n times (e.g. 4 for standard retry: 1 + 3 retries).
+    publish_fail_count: Arc<Mutex<u32>>,
 }
 
 impl std::fmt::Debug for AdvancedMockNatsClient {
@@ -73,6 +76,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
                 ),
             )
             .field("should_fail_request", &self.should_fail_request)
+            .field("publish_fail_count", &self.publish_fail_count)
             .finish()
     }
 }
@@ -83,7 +87,17 @@ impl AdvancedMockNatsClient {
             base: MockNatsClient::new(),
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
+            publish_fail_count: Arc::new(Mutex::new(0)),
         }
+    }
+
+    pub fn fail_next_publish(&self) {
+        *self.publish_fail_count.lock().unwrap() = 1;
+    }
+
+    /// Fail the next `n` publish attempts. Use 4 to exhaust standard retry (1 + 3 retries).
+    pub fn fail_publish_count(&self, n: u32) {
+        *self.publish_fail_count.lock().unwrap() = n;
     }
 
     pub fn set_response(&self, subject: &str, response: bytes::Bytes) {
@@ -224,6 +238,18 @@ impl PublishClient for AdvancedMockNatsClient {
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
     ) -> Result<(), MockError> {
+        let should_fail = {
+            let mut count = self.publish_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated publish failure".to_string()));
+        }
         self.base
             .publish_with_headers(subject, headers, payload)
             .await
@@ -269,6 +295,16 @@ mod tests {
         assert_eq!(mock.subscribed_to(), vec!["test.sub"]);
     }
 
+    #[tokio::test]
+    async fn mock_client_request_returns_err() {
+        let mock = MockNatsClient::new();
+        let result = mock
+            .request_with_headers("any", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().0.contains("not implemented"));
+    }
+
     #[test]
     fn advanced_mock_default() {
         let mock = AdvancedMockNatsClient::default();
@@ -282,6 +318,52 @@ mod tests {
         mock.set_response("a", "b".into());
         mock.clear_responses();
         assert!(mock.request_responses.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn advanced_mock_fail_next_publish_fails_once_then_succeeds() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_next_publish();
+
+        let first = mock
+            .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
+            .await;
+        assert!(first.is_err());
+
+        let second = mock
+            .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("y"))
+            .await;
+        assert!(second.is_ok());
+        assert_eq!(mock.published_messages(), vec!["foo"]);
+    }
+
+    #[tokio::test]
+    async fn advanced_mock_fail_publish_count_fails_n_times_then_succeeds() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_publish_count(2);
+
+        assert!(
+            mock.publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("1"))
+                .await
+                .is_err()
+        );
+        assert!(
+            mock.publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("2"))
+                .await
+                .is_err()
+        );
+        assert!(
+            mock.publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("3"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn advanced_mock_subscribe_delegates_to_base() {
+        let mock = AdvancedMockNatsClient::new();
+        let _ = mock.subscribe("test.sub").await;
+        assert_eq!(mock.subscribed_to(), vec!["test.sub"]);
     }
 
     #[tokio::test]
