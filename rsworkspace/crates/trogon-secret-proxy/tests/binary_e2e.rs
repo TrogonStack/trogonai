@@ -3548,3 +3548,190 @@ async fn binary_url_without_path_segment_returns_404() {
         resp_trailing_slash.status()
     );
 }
+
+/// A request to `/{provider}?query=string` with NO path segment after the
+/// provider (only a query string) is also unmatched by `/{provider}/{*path}`.
+/// The proxy returns 404 from the axum router before touching NATS.
+#[tokio::test]
+async fn binary_url_with_query_but_no_path_segment_returns_404() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, "http://127.0.0.1:1");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic?model=claude-3&stream=true",
+            proxy_port
+        ))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        404,
+        "Query string without path segment must not match the route → 404"
+    );
+}
+
+/// When `PROXY_WORKER_TIMEOUT_SECS=0` the proxy uses `Duration::ZERO` for the
+/// worker reply timeout.  `tokio::time::timeout(Duration::ZERO, future)` fires
+/// on the first poll if the future is not immediately ready — so the proxy
+/// returns 504 essentially as fast as the NATS round-trip for subscribe +
+/// publish completes.
+#[tokio::test]
+async fn binary_zero_worker_timeout_returns_504_immediately() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, "http://127.0.0.1:1", 0);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // No worker — proxy times out immediately.
+    let start = std::time::Instant::now();
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", "Bearer tok_anthropic_prod_ztimeout1")
+        .body("{}")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    assert_eq!(resp.status(), 504, "Zero timeout must produce 504");
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "Zero timeout must fire quickly, took {:?}",
+        elapsed
+    );
+}
+
+/// When the proxy binary cannot connect to NATS within the 10-second connect
+/// timeout it panics and exits with a non-zero status code.
+///
+/// We point `NATS_URL` at a port where nothing is listening to reliably
+/// trigger a connection failure.
+#[tokio::test]
+async fn binary_proxy_exits_nonzero_when_nats_unreachable() {
+    let unreachable_port = free_port(); // nothing bound here
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", unreachable_port))
+        .env("PROXY_PORT", free_port().to_string())
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    // Connect timeout is 10 s; give the binary up to 15 s to exit.
+    let status = tokio::time::timeout(Duration::from_secs(15), child.wait())
+        .await
+        .expect("Proxy binary must exit within 15 s when NATS is unreachable")
+        .unwrap();
+
+    assert!(
+        !status.success(),
+        "Proxy must exit non-zero when NATS is unreachable"
+    );
+}
+
+/// Same startup-failure behaviour for the worker binary.
+#[tokio::test]
+async fn binary_worker_exits_nonzero_when_nats_unreachable() {
+    let unreachable_port = free_port();
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", unreachable_port))
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    let status = tokio::time::timeout(Duration::from_secs(15), child.wait())
+        .await
+        .expect("Worker binary must exit within 15 s when NATS is unreachable")
+        .unwrap();
+
+    assert!(
+        !status.success(),
+        "Worker must exit non-zero when NATS is unreachable"
+    );
+}
+
+/// The proxy binary terminates within a few seconds of receiving SIGTERM.
+///
+/// Tokio does not install a custom SIGTERM handler; the OS default terminates
+/// the process when SIGTERM is delivered (process exits via signal, not
+/// `exit()`, so `status.success()` is false and `status.code()` is None).
+#[tokio::test]
+async fn binary_proxy_exits_on_sigterm() {
+    let (_nats_container, nats_port) = start_nats().await;
+    let proxy_port = free_port();
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_BASE_URL_OVERRIDE", "http://127.0.0.1:1")
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Send SIGTERM.
+    let pid = child.id().expect("Child must have a PID while running");
+    std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .expect("kill command must succeed");
+
+    // The process must exit within 5 seconds of SIGTERM.
+    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .expect("Proxy must exit within 5 s of SIGTERM")
+        .expect("wait() failed");
+
+    // Signal termination: success() is false, code() is None on Unix.
+    assert!(
+        !status.success(),
+        "Process killed by SIGTERM must not report success"
+    );
+}
+
+/// Same SIGTERM behaviour for the worker binary.
+#[tokio::test]
+async fn binary_worker_exits_on_sigterm() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-sigterm")
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    // Give the worker time to connect and start its consumer loop.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let pid = child.id().expect("Child must have a PID while running");
+    std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .expect("kill command must succeed");
+
+    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .expect("Worker must exit within 5 s of SIGTERM")
+        .expect("wait() failed");
+
+    assert!(
+        !status.success(),
+        "Process killed by SIGTERM must not report success"
+    );
+}
