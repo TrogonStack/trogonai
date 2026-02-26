@@ -1160,6 +1160,118 @@ async fn e2e_max_deliver_exhausted_proxy_returns_504() {
     );
 }
 
+/// Hop-by-hop headers sent by the client (Connection, Keep-Alive) are
+/// forwarded verbatim into the `OutboundHttpRequest.headers` map that the
+/// proxy publishes to JetStream — the proxy does NOT strip them.
+///
+/// This test uses an inline worker so it can inspect the raw `headers` field
+/// of the JetStream message before any HTTP client reprocesses them.
+/// It documents the current behaviour: the proxy is transparent and passes
+/// ALL request headers, including hop-by-hop ones, to the worker.
+///
+/// Whether the worker's reqwest call then forwards them to the upstream is a
+/// separate concern governed by hyper/reqwest internals (see the binary test).
+#[tokio::test]
+async fn e2e_hop_by_hop_headers_included_in_jetstream_message() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Inline consumer — inspects the raw JetStream message headers.
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-hoptohop-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-hoptohop-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Request carrying hop-by-hop headers alongside a custom end-to-end header.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_hophop01")
+        .header("connection", "keep-alive")
+        .header("keep-alive", "timeout=5, max=100")
+        .header("x-end-to-end", "must-survive")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_in_message = &parsed["headers"];
+
+    // ── Documented behaviour ─────────────────────────────────────────────────
+    // The proxy serialises ALL incoming request headers into the JetStream
+    // message — it does NOT strip hop-by-hop headers.
+    assert_eq!(
+        headers_in_message["connection"].as_str(),
+        Some("keep-alive"),
+        "connection header must be present in the JetStream message"
+    );
+    assert_eq!(
+        headers_in_message["keep-alive"].as_str(),
+        Some("timeout=5, max=100"),
+        "keep-alive header must be present in the JetStream message"
+    );
+    // End-to-end custom headers are also forwarded.
+    assert_eq!(
+        headers_in_message["x-end-to-end"].as_str(),
+        Some("must-survive"),
+        "end-to-end custom header must be present in the JetStream message"
+    );
+
+    // Reply so the proxy handle completes (avoids hanging the test).
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: std::collections::HashMap::new(),
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
 /// A request body sent as multiple stream chunks must arrive at the AI
 /// provider as a single, correctly assembled payload.
 ///
