@@ -83,6 +83,10 @@ async fn main() {
 
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
+        // Never follow HTTP redirects.  In a VGS-like system the real API key
+        // must not be forwarded to an uncontrolled redirect target.  Any 3xx
+        // response is returned as-is to the caller via the proxy.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("Failed to build HTTP client");
 
