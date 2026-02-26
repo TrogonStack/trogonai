@@ -1975,3 +1975,239 @@ async fn binary_options_request_passes_through() {
     );
     _mock.assert_async().await;
 }
+
+// ── Custom-prefix helpers ──────────────────────────────────────────────────
+
+fn spawn_proxy_with_prefix(
+    nats_port: u16,
+    proxy_port: u16,
+    mock_base_url: &str,
+    prefix: &str,
+) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_WORKER_TIMEOUT_SECS", "15")
+        .env("PROXY_BASE_URL_OVERRIDE", mock_base_url)
+        .env("PROXY_PREFIX", prefix)
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary")
+}
+
+fn spawn_worker_with_prefix(
+    nats_port: u16,
+    consumer_name: &str,
+    token: &str,
+    real_key: &str,
+    prefix: &str,
+) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", consumer_name)
+        .env("PROXY_PREFIX", prefix)
+        .env(format!("VAULT_TOKEN_{}", token), real_key)
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn worker binary")
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+/// Custom PROXY_PREFIX: both proxy and worker must use the same prefix for
+/// their NATS subjects to align.  A mismatch would cause the proxy to time
+/// out because the worker listens on a different subject.
+#[tokio::test]
+async fn binary_custom_prefix_routes_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_custom_prefix"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_pfx001";
+    let prefix = "mycompany";
+
+    let _proxy = spawn_proxy_with_prefix(nats_port, proxy_port, &mock_server.base_url(), prefix);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker =
+        spawn_worker_with_prefix(nats_port, "pfx-workers", token, "sk-ant-key-pfx", prefix);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Custom prefix request failed: {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_custom_prefix");
+    _mock.assert_async().await;
+}
+
+/// Corrupted JetStream payload: the test publishes invalid JSON directly to
+/// the stream.  The worker must NAK it (or skip it) and continue processing
+/// the next valid request without crashing.
+#[tokio::test]
+async fn binary_invalid_jetstream_payload_nacked_worker_continues() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_after_nak"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_nak001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker =
+        spawn_worker(nats_port, "binary-workers-nak", token, "sk-ant-key-nak");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Connect to NATS from the test and publish garbage directly to the stream.
+    let nats = async_nats::connect(format!("localhost:{}", nats_port))
+        .await
+        .unwrap();
+    let js = async_nats::jetstream::new(nats);
+    js.publish(
+        "trogon.proxy.http.outbound",
+        bytes::Bytes::from(b"NOT VALID JSON {{{".as_ref()),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap(); // wait for ack from JetStream server
+
+    // Give the worker time to receive and NAK the bad message.
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    // Worker must still be alive and process a valid request.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Worker should continue serving requests after NAKing a bad payload"
+    );
+    _mock.assert_async().await;
+}
+
+/// Effective token revocation: a request succeeds when the token is in the
+/// vault; after the worker restarts WITHOUT the token, the same request fails.
+/// (Runtime revocation is not supported by the binary — the vault is seeded
+/// once at startup from env vars.  Restarting without the token is the
+/// operational equivalent of revocation.)
+#[tokio::test]
+async fn binary_token_revocation_via_worker_restart() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _should_not_be_called_after = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_pre_revoke"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_rev001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker 1: token is present.
+    let mut worker_1 = spawn_worker(nats_port, "binary-workers-rev", token, "sk-ant-key-rev");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp_before = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_before.status(), 200, "Pre-revocation request should succeed");
+
+    // Revoke: kill worker 1, restart WITHOUT the token.
+    worker_1.kill().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Worker 2: empty vault (token not seeded).
+    let _worker_2 = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-rev")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp_after = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp_after.status().is_server_error(),
+        "Post-revocation request should fail with 5xx, got {}",
+        resp_after.status()
+    );
+    // AI provider was called once (pre-revocation) and not after.
+    assert_eq!(
+        _should_not_be_called_after.hits(),
+        1,
+        "AI provider should only have been called once (before revocation)"
+    );
+}
