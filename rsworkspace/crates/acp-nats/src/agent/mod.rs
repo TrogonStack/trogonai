@@ -1,4 +1,5 @@
 mod authenticate;
+mod cancel;
 mod initialize;
 mod load_session;
 mod new_session;
@@ -71,11 +72,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         ))
     }
 
-    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn cancel(&self, args: CancelNotification) -> Result<()> {
+        cancel::handle(self, args).await
     }
 
     async fn ext_method(&self, _args: ExtRequest) -> Result<ExtResponse> {
@@ -99,9 +97,7 @@ mod tests {
 
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{
-        Agent, CancelNotification, ExtNotification, ExtRequest, PromptRequest,
-    };
+    use agent_client_protocol::{Agent, ExtNotification, ExtRequest, PromptRequest};
     use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
@@ -128,7 +124,6 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(bridge.cancel(CancelNotification::new("s1")).await.is_err());
         assert!(
             bridge
                 .ext_method(ExtRequest::new("ext", empty_raw_value()))
