@@ -2992,3 +2992,87 @@ async fn binary_worker_starts_before_proxy_request_succeeds() {
     assert_eq!(body["id"], "msg_worker_first");
     ai_mock.assert_async().await;
 }
+
+/// Hop-by-hop headers sent by the client (Connection, Keep-Alive) are
+/// forwarded by the proxy into the JetStream message verbatim.
+/// This test documents what ACTUALLY arrives at the AI provider after the
+/// worker's reqwest call reprocesses those headers.
+///
+/// End-to-end custom headers (X-End-To-End) MUST arrive at the provider.
+/// Hop-by-hop headers (Connection, Keep-Alive) MAY be dropped by reqwest/hyper
+/// since it manages its own connection lifecycle.
+///
+/// The mock verifies the end-to-end custom header survives the full pipeline
+/// and documents the current behaviour for hop-by-hop ones.
+#[tokio::test]
+async fn binary_hop_by_hop_headers_behavior_documented() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Matches only if Connection: keep-alive reached the provider.
+    let mock_with_connection = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("connection", "keep-alive")
+                .header("x-end-to-end", "must-survive");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_hophop_forwarded"}"#);
+        })
+        .await;
+
+    // Fallback: matches requests that have x-end-to-end but NOT Connection.
+    let mock_without_connection = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("x-end-to-end", "must-survive");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_hophop_stripped"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_hophop01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-hophop", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Connection", "keep-alive")
+        .header("Keep-Alive", "timeout=5, max=100")
+        .header("X-End-To-End", "must-survive")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Proxy must return 200 regardless of hop-by-hop headers");
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+
+    // Document what actually happened at the AI provider level:
+    if mock_with_connection.hits() > 0 {
+        assert_eq!(body["id"], "msg_hophop_forwarded");
+        eprintln!("[hop-by-hop] Connection header WAS forwarded to the AI provider");
+    } else {
+        assert_eq!(body["id"], "msg_hophop_stripped");
+        eprintln!("[hop-by-hop] Connection header was STRIPPED by reqwest before reaching the AI provider");
+    }
+
+    // X-End-To-End MUST always arrive — this is the key invariant.
+    assert!(
+        mock_with_connection.hits() + mock_without_connection.hits() > 0,
+        "x-end-to-end header must always reach the AI provider"
+    );
+}
