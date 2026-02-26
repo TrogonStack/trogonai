@@ -3705,6 +3705,174 @@ async fn binary_proxy_exits_on_sigterm() {
     );
 }
 
+/// `PROXY_PORT=abc` is not a valid `u16` — the binary must fall back to the
+/// default port 8080 instead of panicking.
+///
+/// The parsing is `.and_then(|v| v.parse().ok()).unwrap_or(8080)` in proxy.rs,
+/// so any non-numeric value silently produces the default.
+///
+/// NOTE: This test requires port 8080 to be available on the host.
+#[tokio::test]
+async fn binary_proxy_port_invalid_value_falls_back_to_default_8080() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Use PROXY_PORT=abc which cannot be parsed as u16 → binary falls back to 8080.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", "abc") // invalid u16 → fall back to 8080
+        .env("PROXY_WORKER_TIMEOUT_SECS", "5")
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary");
+
+    // If the binary crashed, or bound to any other port, this will timeout and panic.
+    wait_for_port(8080, Duration::from_secs(15)).await;
+
+    // Successfully connected to port 8080 — invalid PROXY_PORT fell back to default.
+}
+
+/// `PROXY_WORKER_TIMEOUT_SECS=abc` is not a valid `u64` — the binary must
+/// fall back to the default (60 s) instead of panicking.
+///
+/// The parsing is `.and_then(|v| v.parse().ok()).unwrap_or(60)` in proxy.rs.
+#[tokio::test]
+async fn binary_worker_timeout_invalid_value_falls_back_to_default() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let proxy_port = free_port();
+
+    // Use PROXY_WORKER_TIMEOUT_SECS=abc which cannot be parsed as u64 → falls back to 60s.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_WORKER_TIMEOUT_SECS", "abc") // invalid u64 → fall back to 60 s
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary");
+
+    // Proxy must start — if the invalid timeout caused a panic the port never opens.
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // TCP connection succeeded → invalid PROXY_WORKER_TIMEOUT_SECS fell back to default.
+}
+
+/// When a `VAULT_TOKEN_*` env var is set with an empty value, the worker must
+/// reject the request with an error — it must NOT forward an `Authorization: Bearer`
+/// header (no key) to the AI provider.
+///
+/// An empty resolved key means the token exchange failed: the whole point of
+/// the system is to swap proxy tokens for real API keys, so an empty real key
+/// is a vault misconfiguration that must be caught before the upstream call.
+#[tokio::test]
+async fn binary_vault_token_empty_value_is_rejected_with_error() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // The AI provider must never be called — worker rejects before forwarding.
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not be reached");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_emptyval1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker with an empty real key: VAULT_TOKEN_<token>= (no value).
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-emptyval")
+        .env(format!("VAULT_TOKEN_{}", token), "") // empty real key
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn worker binary");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .expect("Request to proxy binary failed");
+
+    // Worker must return an error — empty key is a vault misconfiguration.
+    assert_eq!(
+        resp.status(),
+        502,
+        "Empty real key in vault must yield 502 Bad Gateway, not forward to provider"
+    );
+    // The AI provider must not have received the request.
+    assert_eq!(ai_mock.hits(), 0, "Provider must not be called when vault key is empty");
+}
+
+/// When `WORKER_CONSUMER_NAME` is not set, the worker binary falls back to
+/// the default consumer name `"proxy-workers"`.  Requests must be processed
+/// normally — the proxy is agnostic to consumer names.
+#[tokio::test]
+async fn binary_worker_default_consumer_name_when_not_set() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_default_consumer"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_defcons01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker WITHOUT WORKER_CONSUMER_NAME → falls back to "proxy-workers".
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        // No WORKER_CONSUMER_NAME env var — binary uses "proxy-workers" default.
+        .env(format!("VAULT_TOKEN_{}", token), "sk-ant-defcons-realkey")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn worker binary");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .expect("Request to proxy binary failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Default consumer name must allow worker to process requests"
+    );
+    ai_mock.assert_async().await;
+}
+
 /// Same SIGTERM behaviour for the worker binary.
 #[tokio::test]
 async fn binary_worker_exits_on_sigterm() {
@@ -3736,4 +3904,345 @@ async fn binary_worker_exits_on_sigterm() {
         !status.success(),
         "Process killed by SIGTERM must not report success"
     );
+}
+
+// ── NATS max_payload / large response body ────────────────────────────────────
+
+/// When the upstream AI provider returns a response large enough that the
+/// JSON-serialised `OutboundHttpResponse` exceeds the NATS server's
+/// `max_payload` limit, the worker's `nats.publish(reply_to, ...)` returns an
+/// error.  The worker logs the error and **still acks** the JetStream message
+/// (no duplicate upstream call), but the proxy never receives a reply and
+/// returns 504.
+///
+/// This covers two previously untested gaps in a single test:
+/// 1. Worker Core NATS reply-publish fails after a successful upstream call.
+/// 2. Response bodies large enough to overflow the NATS message-size limit.
+///
+/// The default NATS `max_payload` is 1 MiB (1,048,576 bytes).
+/// `serde_json` serialises `Vec<u8>` as a JSON array of numbers
+/// (`[120, 120, …]`); each byte averages ~4 chars when encoded, so a 300 KB
+/// response body serialises to ~1.2 MB of JSON — exceeding the 1 MiB limit
+/// and causing `nats.publish()` to fail without any custom server configuration.
+#[tokio::test]
+async fn binary_large_response_body_exceeds_nats_max_payload_causes_504() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // A 300 KB body: ~1.2 MB after JSON byte-array encoding → exceeds 1 MiB NATS limit.
+    let large_body: String = "x".repeat(300_000);
+    let large_json = format!(r#"{{"content":"{}"}}"#, large_body);
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(large_json.clone());
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_lge001";
+
+    // 5 s proxy timeout so the test doesn't block for the default 60 s.
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 5);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-lge", token, "sk-ant-key-lge");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let start = std::time::Instant::now();
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    // Worker called the AI provider but could not publish the reply (payload
+    // too large for NATS) → proxy times out and returns 504.
+    assert_eq!(
+        resp.status(),
+        504,
+        "NATS publish failure (payload > max_payload) must cause 504 timeout, got {}",
+        resp.status()
+    );
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "Should time out within 5 s (+ margin), took {:?}",
+        elapsed
+    );
+    // The AI provider was called exactly once.  Because the worker still calls
+    // msg.ack() even when nats.publish() fails, JetStream does NOT redeliver
+    // the message, so there is no duplicate upstream call.
+    assert_eq!(
+        ai_mock.hits(),
+        1,
+        "AI provider must be called exactly once (no JetStream redelivery after ack)"
+    );
+}
+
+// ── Slow upstream / proxy timeout while worker is mid-HTTP-call ───────────────
+
+/// When the upstream AI provider responds more slowly than the proxy's
+/// `worker_timeout`, the proxy returns 504 before the upstream finishes.
+///
+/// The worker's HTTP call is still in-flight at proxy-timeout time.  Once the
+/// upstream eventually responds, the worker serialises the reply and publishes
+/// it to the Core NATS reply subject.  The proxy's subscription was already
+/// dropped (request returned 504), so the Core NATS publish is silently
+/// discarded — no error in the worker.  The worker acks the JetStream message
+/// and remains healthy.
+///
+/// Assertions:
+/// - Proxy returns 504 within `worker_timeout` (not after the full upstream delay).
+/// - The AI provider was called exactly once (JetStream message was acked, no redelivery).
+///
+/// This is distinct from `binary_worker_survives_orphaned_reply_subject` which
+/// starts the worker *after* the proxy times out.  Here the worker's HTTP call
+/// is already in-progress when the proxy deadline fires.
+#[tokio::test]
+async fn binary_slow_upstream_proxy_times_out_before_upstream_responds() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // The AI mock delays its response by 6 s — more than the 2 s proxy timeout.
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .delay(Duration::from_secs(6))
+                .body(r#"{"id":"msg_slow"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_slow001";
+
+    // 2 s proxy timeout — fires before the 6 s AI response arrives.
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 2);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-slow", token, "sk-ant-key-slow");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let start = std::time::Instant::now();
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    assert_eq!(resp.status(), 504, "Slow upstream must cause 504 timeout");
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "Proxy must return 504 before the upstream responds (took {:?})",
+        elapsed
+    );
+
+    // Wait long enough for the worker to receive the delayed AI response,
+    // attempt to publish to the (now dead) reply subject, and ack the message.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    // The AI provider must have been called exactly once.  The JetStream message
+    // was acked after the worker finished (even though the reply was discarded),
+    // so there is no redelivery and no duplicate upstream call.
+    assert_eq!(
+        ai_mock.hits(),
+        1,
+        "AI provider must be called exactly once despite the proxy timeout"
+    );
+}
+
+// ── Gap 4: reqwest follows 3xx redirects transparently ───────────────────────
+
+/// When the upstream AI provider returns a 307 Temporary Redirect, reqwest
+/// inside the worker automatically follows it (default redirect policy:
+/// `Policy::limited(10)`).  The caller receives the final 200 response — the
+/// 307 is never visible at the proxy layer.
+///
+/// This demonstrates that redirect-based API migrations are transparent to
+/// service callers, but also that the worker cannot detect or block them.
+#[tokio::test]
+async fn binary_provider_307_redirect_followed_transparently() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Primary endpoint returns a 307 redirect to the v2 endpoint.
+    let _redirect_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(307).header("location", "/v2/messages");
+        })
+        .await;
+
+    // v2 endpoint returns the final success response.
+    let final_mock = mock_server
+        .mock_async(|when, then| {
+            when.path("/v2/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_after_redirect"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_redir307";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-redir307", token, "sk-ant-redir-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    // Caller sees the final 200 — the intermediate 307 is transparent.
+    assert_eq!(
+        resp.status(),
+        200,
+        "Worker's reqwest must follow 307 transparently; caller must see the final 200"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["id"], "msg_after_redirect",
+        "Body must come from the redirect target, not the redirect response"
+    );
+
+    // The final v2 endpoint must have been called.
+    final_mock.assert_async().await;
+}
+
+// ── Gap 12: HTTP 418 is forwarded as-is ──────────────────────────────────────
+
+/// Non-standard but valid HTTP status codes such as 418 I'm a Teapot must be
+/// forwarded to the caller without modification.
+///
+/// The worker treats any status < 500 as a successful (non-retriable) response.
+/// `axum::http::StatusCode::from_u16(418)` succeeds, so the proxy returns 418
+/// rather than falling back to 500.
+#[tokio::test]
+async fn binary_418_teapot_response_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(418).body("I'm a teapot");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_teapot01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-teapot", token, "sk-ant-teapot-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 418, "Proxy must forward 418 I'm a Teapot to the caller");
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, "I'm a teapot");
+
+    ai_mock.assert_async().await;
+}
+
+// ── Gap 15: UTF-8 multibyte response body is preserved ───────────────────────
+
+/// Unicode response bodies (emoji, CJK, accented characters) must survive the
+/// `Vec<u8>` → JSON integer-array → `Vec<u8>` serialization round-trip intact.
+///
+/// `serde_json` serializes `Vec<u8>` as `[b1, b2, ...]` (array of integers)
+/// and deserializes it back to the same byte sequence.  If encoding or decoding
+/// is off-by-one the caller would receive garbled text.
+#[tokio::test]
+async fn binary_utf8_multibyte_response_body_preserved() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let unicode_body = r#"{"message":"Hello 世界 🌍 ñoño café"}"#;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json; charset=utf-8")
+                .body(unicode_body);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_utf8001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-utf8", token, "sk-ant-utf8-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, unicode_body,
+        "UTF-8 multibyte characters must survive the Vec<u8> JSON round-trip"
+    );
+
+    ai_mock.assert_async().await;
 }

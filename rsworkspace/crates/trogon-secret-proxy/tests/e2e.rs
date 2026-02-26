@@ -1685,3 +1685,1265 @@ async fn e2e_large_request_header_value_forwarded() {
     let resp = proxy_handle.await.unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+/// When the upstream AI provider returns a response header whose value contains
+/// bytes that are not valid UTF-8 (obs-text: 0xFF 0xFE), the worker must
+/// silently drop that header rather than crashing or returning an error.
+///
+/// The filtering happens in `worker.rs`:
+///   `.filter_map(|(k, v)| v.to_str().ok().map(...))`
+/// `HeaderValue::to_str()` returns `Err` for any byte outside visible ASCII,
+/// so the `filter_map` discards the header without propagating an error.
+///
+/// A raw TCP server is used because httpmock validates header values as UTF-8.
+#[tokio::test]
+async fn e2e_non_utf8_upstream_response_header_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Raw TCP server: responds with a header value containing 0xFF 0xFE bytes.
+    // These are valid HTTP/1.1 obs-text (RFC 7230 §3.2.6) so hyper accepts them,
+    // but they are not valid UTF-8 so `to_str()` fails and we drop the header.
+    let raw_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let raw_port = raw_listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = raw_listener.accept().await {
+            let mut buf = vec![0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+
+            let mut response: Vec<u8> = Vec::new();
+            response.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
+            response.extend_from_slice(b"content-type: application/json\r\n");
+            // 0xFF 0xFE — valid obs-text in HTTP/1.1, but NOT valid UTF-8.
+            response.extend_from_slice(b"x-bad-header: ");
+            response.extend_from_slice(&[0xFF, 0xFE]);
+            response.extend_from_slice(b"\r\n");
+            response.extend_from_slice(b"content-length: 2\r\n");
+            response.extend_from_slice(b"\r\n");
+            response.extend_from_slice(b"ok");
+
+            let _ = socket.write_all(&response).await;
+        }
+    });
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_nonutf01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault_clone = vault.clone();
+    let js_clone = jetstream.clone();
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        worker::run(
+            js_clone,
+            nats_clone,
+            vault_clone,
+            reqwest::Client::new(),
+            "e2e-nonutf8-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let reply_subject = subjects::reply("trogon", "nonutf8-corr-001");
+    let mut reply_sub = nats.subscribe(reply_subject.clone()).await.unwrap();
+
+    // Inject the JetStream message directly — no need to go through the HTTP proxy.
+    let message = OutboundHttpRequest {
+        method: "GET".to_string(),
+        url: format!("http://127.0.0.1:{}/v1/models", raw_port),
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer tok_anthropic_test_nonutf01".to_string(),
+        )],
+        body: vec![],
+        reply_to: reply_subject.clone(),
+        idempotency_key: "nonutf8-corr-001".to_string(),
+    };
+
+    jetstream
+        .publish(outbound_subject, serde_json::to_vec(&message).unwrap().into())
+        .await
+        .unwrap();
+
+    let reply = tokio::time::timeout(Duration::from_secs(10), reply_sub.next())
+        .await
+        .expect("Timed out waiting for worker reply")
+        .unwrap();
+
+    let response: OutboundHttpResponse = serde_json::from_slice(&reply.payload).unwrap();
+
+    assert!(
+        response.error.is_none(),
+        "Valid HTTP response must not produce an error, got: {:?}",
+        response.error
+    );
+    assert_eq!(response.status, 200);
+
+    // The header with non-UTF-8 bytes must have been silently dropped.
+    let has_bad_header = response.headers.iter().any(|(k, _)| k == "x-bad-header");
+    assert!(
+        !has_bad_header,
+        "x-bad-header with non-UTF-8 value must be silently dropped, headers: {:?}",
+        response.headers
+    );
+
+    // The valid content-type header must have survived.
+    let has_content_type = response.headers.iter().any(|(k, _)| k == "content-type");
+    assert!(
+        has_content_type,
+        "Valid content-type header must be preserved, headers: {:?}",
+        response.headers
+    );
+}
+
+/// When the worker receives a JetStream message whose `method` field is not a
+/// valid HTTP method token (RFC 7230 §3.1.1 defines a method as `1*tchar`;
+/// spaces are not valid tchar), `reqwest` rejects the request before it is
+/// even sent.  After exhausting all retries (`HTTP_MAX_RETRIES=3`, ~700 ms
+/// total) the worker must publish an `OutboundHttpResponse` with
+/// `error: Some(...)` rather than panicking or hanging.
+#[tokio::test]
+async fn e2e_invalid_http_method_in_outbound_request_returns_worker_error() {
+    use futures_util::StreamExt as _;
+    use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_invmth01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault_clone = vault.clone();
+    let js_clone = jetstream.clone();
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        worker::run(
+            js_clone,
+            nats_clone,
+            vault_clone,
+            reqwest::Client::new(),
+            "e2e-invmth-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let reply_subject = subjects::reply("trogon", "invmth-corr-001");
+    let mut reply_sub = nats.subscribe(reply_subject.clone()).await.unwrap();
+
+    // "NOT VALID METHOD" contains spaces which are not valid tchar — reqwest
+    // rejects this before sending any bytes to the network.
+    let message = OutboundHttpRequest {
+        method: "NOT VALID METHOD".to_string(),
+        url: "http://127.0.0.1:1/v1/messages".to_string(), // unreachable — method fails first
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer tok_anthropic_test_invmth01".to_string(),
+        )],
+        body: vec![],
+        reply_to: reply_subject.clone(),
+        idempotency_key: "invmth-corr-001".to_string(),
+    };
+
+    jetstream
+        .publish(outbound_subject, serde_json::to_vec(&message).unwrap().into())
+        .await
+        .unwrap();
+
+    // The worker retries HTTP_MAX_RETRIES=3 times before giving up (~700 ms total).
+    let reply = tokio::time::timeout(Duration::from_secs(15), reply_sub.next())
+        .await
+        .expect("Timed out waiting for worker error reply")
+        .unwrap();
+
+    let response: OutboundHttpResponse = serde_json::from_slice(&reply.payload).unwrap();
+
+    assert!(
+        response.error.is_some(),
+        "Worker must report an error for an invalid HTTP method"
+    );
+    assert!(
+        response
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Invalid HTTP method"),
+        "Error must describe the invalid method, got: {:?}",
+        response.error
+    );
+}
+
+/// When an intercepting "worker" publishes raw non-JSON bytes to the Core NATS
+/// reply subject, the proxy fails `serde_json::from_slice` and returns 500.
+///
+/// This exercises `ProxyError::Deserialize` at the library level — distinct
+/// from `binary_malformed_worker_reply_returns_500` which uses the binary worker.
+#[tokio::test]
+async fn e2e_corrupted_worker_reply_returns_500() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Set up a consumer to intercept the JetStream message.
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-corrupt-reply-consumer",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-corrupt-reply-consumer".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_corruptreply")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    // Intercept the JetStream message and publish garbage to the reply subject.
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Publish bytes that cannot be deserialized as OutboundHttpResponse.
+    nats.publish(reply_to, b"this is definitely not json !!!".to_vec().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "Corrupted worker reply must produce HTTP 500"
+    );
+}
+
+/// When a request arrives at `/{provider}/` (provider with trailing slash,
+/// empty wildcard path), the proxy must return 400 Bad Request immediately
+/// without publishing to JetStream or timing out.
+///
+/// If axum routes to the handler (path=""), the handler catches it and returns
+/// 400 before touching NATS.  If axum itself finds no matching route it returns
+/// 404.  Either way the caller must not wait 60 s for a worker that will never
+/// succeed.
+#[tokio::test]
+async fn e2e_empty_path_after_provider_slash_handled_gracefully() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        // Short timeout so the test finishes quickly when the route matches.
+        worker_timeout: Duration::from_millis(500),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // /anthropic/ — trailing slash, no path after provider.
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/anthropic/")
+        .header("authorization", "Bearer tok_anthropic_test_emptypath1")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let resp = router(state).oneshot(request).await.unwrap();
+    let status = resp.status().as_u16();
+
+    // Acceptable outcomes:
+    //   400 — axum routes to the handler (path=""), handler returns Bad Request.
+    //   404 — axum finds no matching route for an empty catch-all segment.
+    // Either is acceptable; the important thing is no 504 timeout.
+    assert!(
+        [400, 404].contains(&status),
+        "Empty path after provider/ must yield 400 (bad request) or 404 (no route), got {}",
+        status
+    );
+}
+
+/// When `base_url_override` ends with a trailing slash the proxy must strip it
+/// before constructing the forwarded URL so no double slash appears.
+///
+/// e.g. `base_url_override = "http://mock/"` + path `"v1/messages"` must
+/// produce `"http://mock/v1/messages"`, not `"http://mock//v1/messages"`.
+#[tokio::test]
+async fn e2e_trailing_slash_in_base_url_override_is_normalized() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-trailing-slash-consumer",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-trailing-slash-consumer".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        // Trailing slash → URL will contain double slash.
+        base_url_override: Some("http://127.0.0.1:1/".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_trailslash1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let url = parsed["url"].as_str().unwrap();
+
+    // Trailing slash in base_url_override must be stripped; no double slash.
+    assert!(
+        !url.contains("//v1/messages"),
+        "Trailing slash in base_url_override must NOT produce double slash in URL, got: {}",
+        url
+    );
+    assert!(
+        url.contains("/v1/messages"),
+        "URL must contain /v1/messages, got: {}",
+        url
+    );
+
+    // Reply so the proxy resolves cleanly.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: vec![],
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    proxy_handle.await.unwrap();
+}
+
+// ── Gap 1: Stream config ──────────────────────────────────────────────────────
+
+/// `ensure_stream` must create the stream with WorkQueue retention and Memory
+/// storage.  If either is wrong the proxy silently misbehaves: File storage
+/// would write to disk, and the wrong retention policy would keep or lose
+/// messages unexpectedly.
+#[tokio::test]
+async fn e2e_stream_config_has_work_queue_retention_and_memory_storage() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
+    let outbound_subject = subjects::outbound("trogon");
+
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+
+    let info = js_stream.cached_info();
+
+    assert_eq!(
+        info.config.retention,
+        async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+        "Stream must use WorkQueue retention so messages are deleted after ack"
+    );
+    assert_eq!(
+        info.config.storage,
+        async_nats::jetstream::stream::StorageType::Memory,
+        "Stream must use Memory storage for low-latency delivery"
+    );
+}
+
+// ── Gap 2: Provider name case sensitivity ────────────────────────────────────
+
+/// Provider names are matched case-sensitively.  A request to `/ANTHROPIC/…`
+/// must fail with 502 (unknown provider) rather than routing to Anthropic.
+///
+/// This prevents accidental routing: clients must use the canonical lowercase
+/// provider name to get the correct base URL.
+#[tokio::test]
+async fn e2e_uppercase_provider_name_returns_502() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats,
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: None,
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/ANTHROPIC/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_prod_casetest1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let resp = router(state).oneshot(request).await.unwrap();
+
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::BAD_GATEWAY,
+        "Uppercase provider name must return 502 (unknown provider)"
+    );
+}
+
+// ── Gap 4: JetStream publish failure ─────────────────────────────────────────
+
+/// When the outbound subject is not covered by any JetStream stream, the proxy
+/// now awaits the `PubAckFuture` and receives a JetStream error immediately.
+/// This returns 500 Internal Server Error without waiting for the worker timeout,
+/// providing a fast and explicit failure instead of a silent 60-second hang.
+#[tokio::test]
+async fn e2e_outbound_subject_with_no_stream_returns_500_immediately() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    // Intentionally do NOT call ensure_stream — no stream covers this subject.
+
+    let state = ProxyState {
+        nats,
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject: "trogon.proxy.http.no-stream-here".to_string(),
+        worker_timeout: Duration::from_secs(30), // long timeout to prove we don't wait
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_prod_nostreamx1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let resp = router(state).oneshot(request).await.unwrap();
+
+    // JetStream ACK fails immediately (no stream) → 500, not a 30s timeout.
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "Missing JetStream stream must return 500 immediately, not wait for timeout"
+    );
+}
+
+// ── Gap 6: Worker stream not found ───────────────────────────────────────────
+
+/// `worker::run` must return `Err(WorkerError::JetStream)` immediately when
+/// the target stream does not exist, rather than panicking or looping forever.
+#[tokio::test]
+async fn e2e_worker_run_returns_error_when_stream_does_not_exist() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let vault = Arc::new(MemoryVault::new());
+    let http_client = reqwest::Client::new();
+
+    // "ghost" prefix — stream was never created.
+    let result = worker::run(
+        jetstream,
+        nats,
+        vault,
+        http_client,
+        "test-consumer-ghost",
+        &stream::stream_name("ghost"),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "worker::run must return Err when the JetStream stream does not exist"
+    );
+}
+
+// ── Duplicate Authorization headers ──────────────────────────────────────────
+
+/// When an `OutboundHttpRequest` arrives with two `Authorization` headers,
+/// `resolve_token` picks the **first** one via `.find()` and ignores the rest.
+///
+/// - First  `Authorization`: a valid `tok_...` token stored in the vault.
+/// - Second `Authorization`: a different `tok_...` token NOT in the vault.
+///
+/// If the second header were used instead, the vault lookup would fail and the
+/// worker would return an error response.  A 200 reply confirms the first
+/// header was used and the real key reached the AI provider.
+///
+/// This documents — and locks in — the tie-breaking rule for duplicate
+/// Authorization headers forwarded through the proxy pipeline.
+#[tokio::test]
+async fn e2e_duplicate_authorization_headers_first_value_used() {
+    use futures_util::StreamExt as _;
+    use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let vault = Arc::new(MemoryVault::new());
+    // Only the FIRST token is registered; the second would fail vault lookup.
+    let first_token = ApiKeyToken::new("tok_anthropic_test_dup1st1").unwrap();
+    vault.store(&first_token, "sk-ant-dup-firstkey").await.unwrap();
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models")
+                .header("authorization", "Bearer sk-ant-dup-firstkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"models":[]}"#);
+        })
+        .await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault_clone = vault.clone();
+    let js_clone = jetstream.clone();
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        worker::run(
+            js_clone,
+            nats_clone,
+            vault_clone,
+            reqwest::Client::new(),
+            "e2e-dupauth-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let reply_subject = subjects::reply("trogon", "dupauth-corr-001");
+    let mut reply_sub = nats.subscribe(reply_subject.clone()).await.unwrap();
+
+    // Two Authorization headers: first resolves, second does NOT exist in vault.
+    let message = OutboundHttpRequest {
+        method: "GET".to_string(),
+        url: format!("{}/v1/models", mock_server.base_url()),
+        headers: vec![
+            (
+                "Authorization".to_string(),
+                "Bearer tok_anthropic_test_dup1st1".to_string(),
+            ),
+            (
+                "Authorization".to_string(),
+                "Bearer tok_anthropic_test_dup2nd1".to_string(), // NOT in vault
+            ),
+        ],
+        body: vec![],
+        reply_to: reply_subject.clone(),
+        idempotency_key: "dupauth-corr-001".to_string(),
+    };
+
+    jetstream
+        .publish(outbound_subject, serde_json::to_vec(&message).unwrap().into())
+        .await
+        .unwrap();
+
+    let reply = tokio::time::timeout(Duration::from_secs(10), reply_sub.next())
+        .await
+        .expect("Timed out waiting for worker reply")
+        .unwrap();
+
+    let response: OutboundHttpResponse = serde_json::from_slice(&reply.payload).unwrap();
+
+    assert!(
+        response.error.is_none(),
+        "First Authorization header must resolve successfully; got error: {:?}",
+        response.error
+    );
+    assert_eq!(
+        response.status, 200,
+        "First Authorization header's real key must be accepted by the AI provider"
+    );
+    ai_mock.assert_async().await;
+}
+
+// ── Gap 13: transfer-encoding is hop-by-hop ───────────────────────────────────
+
+/// `Transfer-Encoding: chunked` must be stripped from the outbound JetStream
+/// message by the proxy.  It is a hop-by-hop header (RFC 7230 §6.1) and must
+/// not be forwarded to the AI provider.
+///
+/// This exercises the `"transfer-encoding"` entry in the `HOP_BY_HOP` list
+/// in `proxy.rs` specifically (other hop-by-hop headers are tested in
+/// `e2e_hop_by_hop_headers_stripped_from_jetstream_message`).
+#[tokio::test]
+async fn e2e_transfer_encoding_header_stripped_from_outbound_request() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Intercept consumer — reads the raw JetStream message and checks headers.
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-transfer-enc-consumer",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-transfer-enc-consumer".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_transenc1")
+        .header("transfer-encoding", "chunked")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_in_message = &parsed["headers"];
+
+    // transfer-encoding is hop-by-hop — must NOT appear in the JetStream message.
+    assert!(
+        find_header(headers_in_message, "transfer-encoding").is_none(),
+        "transfer-encoding must be stripped from the JetStream message (it is hop-by-hop)"
+    );
+    // End-to-end headers must still be forwarded.
+    assert_eq!(
+        find_header(headers_in_message, "content-type"),
+        Some("application/json"),
+        "content-type (end-to-end) must be forwarded to the AI provider"
+    );
+
+    // Reply so the proxy handle can complete cleanly.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+// ── Gap 11: worker publishes reply to wrong subject ───────────────────────────
+
+/// When a worker publishes its reply to a DIFFERENT Core NATS subject than
+/// the one the proxy subscribed to, the proxy never receives the reply and
+/// times out after `worker_timeout` with HTTP 504 Gateway Timeout.
+///
+/// In production this would happen if a buggy worker corrupted the `reply_to`
+/// field.  The proxy must not hang indefinitely.
+#[tokio::test]
+async fn e2e_worker_reply_to_wrong_subject_causes_proxy_timeout() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Intercept consumer plays the role of a misbehaving worker.
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-wrongreply-consumer",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-wrongreply-consumer".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        // Short timeout so the test finishes quickly.
+        worker_timeout: Duration::from_millis(500),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_wrongrpl1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+
+    // Deliberately publish to a DIFFERENT subject than the proxy's reply_to.
+    let wrong_subject = "trogon.proxy.reply.this-is-the-wrong-subject-xyz";
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(wrong_subject, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    // Proxy must time out (500 ms) and return 504 Gateway Timeout.
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::GATEWAY_TIMEOUT,
+        "A misdirected reply must cause the proxy to time out with 504"
+    );
+}
+
+// ── Gap 18: empty reply_to field ─────────────────────────────────────────────
+
+/// When an `OutboundHttpRequest` has `reply_to = ""`, the worker must:
+///   1. Still resolve the token and forward the request to the AI provider.
+///   2. Attempt `nats.publish("", payload)` — which fails (empty subject is
+///      invalid in NATS) — log the error silently, and fall through to ack.
+///   3. Acknowledge the JetStream message so it is not redelivered.
+///   4. Continue processing subsequent valid messages (worker must not crash).
+///
+/// This verifies that the worker's error path is resilient: a corrupt
+/// `reply_to` does not cause the worker to panic or enter an error loop.
+#[tokio::test]
+async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
+    use futures_util::StreamExt as _;
+    use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_emptyrplyto"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_emprep001").unwrap();
+    vault.store(&token, "sk-ant-emprep-key").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault_clone = vault.clone();
+    let js_clone = jetstream.clone();
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        worker::run(
+            js_clone,
+            nats_clone,
+            vault_clone,
+            reqwest::Client::new(),
+            "e2e-emprep-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Message 1: empty reply_to — worker resolves token, calls AI, but cannot
+    // publish the reply because "" is an invalid NATS subject.
+    let msg1 = OutboundHttpRequest {
+        method: "POST".to_string(),
+        url: format!("{}/v1/messages", mock_server.base_url()),
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer tok_anthropic_test_emprep001".to_string(),
+        )],
+        body: b"{}".to_vec(),
+        reply_to: "".to_string(), // EMPTY — nats.publish will fail
+        idempotency_key: "emprep-corr-001".to_string(),
+    };
+    jetstream
+        .publish(outbound_subject.clone(), serde_json::to_vec(&msg1).unwrap().into())
+        .await
+        .unwrap();
+
+    // Allow the worker to process message 1 (token resolution + AI call + failed publish + ack).
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Message 2: valid reply_to — proves the worker is still alive.
+    let reply_subject = subjects::reply("trogon", "emprep-corr-002");
+    let mut reply_sub = nats.subscribe(reply_subject.clone()).await.unwrap();
+
+    let msg2 = OutboundHttpRequest {
+        method: "POST".to_string(),
+        url: format!("{}/v1/messages", mock_server.base_url()),
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer tok_anthropic_test_emprep001".to_string(),
+        )],
+        body: b"{}".to_vec(),
+        reply_to: reply_subject.clone(),
+        idempotency_key: "emprep-corr-002".to_string(),
+    };
+    jetstream
+        .publish(outbound_subject, serde_json::to_vec(&msg2).unwrap().into())
+        .await
+        .unwrap();
+
+    let reply = tokio::time::timeout(Duration::from_secs(10), reply_sub.next())
+        .await
+        .expect(
+            "Worker must still be alive and reply to the second message \
+             after the failed first publish",
+        )
+        .unwrap();
+
+    let response: OutboundHttpResponse = serde_json::from_slice(&reply.payload).unwrap();
+    assert!(
+        response.error.is_none(),
+        "Worker must successfully process the valid second message"
+    );
+
+    // AI provider must have been called for both messages.
+    assert_eq!(
+        ai_mock.hits(),
+        2,
+        "AI provider must be called for both messages — worker acks after a failed publish"
+    );
+}
+
+// ── Gap 19: wrong retention policy — messages survive ack ────────────────────
+
+/// When the JetStream stream is pre-created with `RetentionPolicy::Limits`
+/// instead of `WorkQueue`, `ensure_stream` returns the existing stream without
+/// modifying its retention policy (NATS `get_or_create_stream` is a no-op when
+/// the stream already exists).
+///
+/// Consequence (documented production risk): messages survive acknowledgement
+/// and are visible to new consumers with `DeliverPolicy::All`.  A correctly
+/// configured WorkQueue stream would delete the message on ack, so a second
+/// consumer would receive nothing.
+#[tokio::test]
+async fn e2e_wrong_retention_policy_messages_survive_ack() {
+    use futures_util::StreamExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
+
+    // Use an isolated prefix so this test does not interfere with the shared
+    // "trogon" stream used by other tests.
+    let prefix = "wrongret";
+    let outbound_subject = subjects::outbound(prefix);
+    let sname = stream::stream_name(prefix);
+
+    // Step 1: Pre-create the stream with the WRONG retention policy.
+    jetstream
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: sname.clone(),
+            subjects: vec![outbound_subject.clone()],
+            retention: async_nats::jetstream::stream::RetentionPolicy::Limits,
+            storage: async_nats::jetstream::stream::StorageType::Memory,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Step 2: ensure_stream is a no-op — returns the existing Limits stream.
+    stream::ensure_stream(&jetstream, prefix, &outbound_subject)
+        .await
+        .unwrap();
+
+    // Verify the bug: stream still has Limits retention, NOT WorkQueue.
+    let info = jetstream
+        .get_stream(&sname)
+        .await
+        .unwrap()
+        .cached_info()
+        .clone();
+    assert_eq!(
+        info.config.retention,
+        async_nats::jetstream::stream::RetentionPolicy::Limits,
+        "ensure_stream must not modify an existing stream's retention policy"
+    );
+
+    // Step 3: Publish a test message.
+    jetstream
+        .publish(outbound_subject.clone(), b"test-payload".to_vec().into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    // Consumer A: pull the message and ack it.
+    let stream_handle = jetstream.get_stream(&sname).await.unwrap();
+    let consumer_a = stream_handle
+        .get_or_create_consumer(
+            "wrongret-consumer-a",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("wrongret-consumer-a".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut msgs_a = consumer_a.messages().await.unwrap();
+    let msg_a = tokio::time::timeout(Duration::from_secs(5), msgs_a.next())
+        .await
+        .expect("Consumer A must receive the message")
+        .unwrap()
+        .unwrap();
+    msg_a.ack().await.unwrap();
+
+    // Give NATS time to process the ack.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Consumer B: brand-new durable with DeliverPolicy::All.
+    // With WorkQueue retention the message would be GONE after Consumer A's ack.
+    // With Limits retention the message survives — this is the production risk.
+    let stream_handle2 = jetstream.get_stream(&sname).await.unwrap();
+    let consumer_b = stream_handle2
+        .get_or_create_consumer(
+            "wrongret-consumer-b",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("wrongret-consumer-b".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut msgs_b = consumer_b.messages().await.unwrap();
+    let msg_b = tokio::time::timeout(Duration::from_secs(3), msgs_b.next())
+        .await
+        .expect(
+            "Consumer B must still see the message — Limits retention does not delete on ack \
+             (demonstrates production risk of wrong retention policy)",
+        )
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        &*msg_b.payload,
+        b"test-payload",
+        "Message must survive ack under Limits retention"
+    );
+    msg_b.ack().await.unwrap();
+}
+
+// ── Gap 17: invalid URL in OutboundHttpRequest ────────────────────────────────
+
+/// When an `OutboundHttpRequest` contains an invalid URL, `reqwest` fails
+/// immediately (URL parse / builder error), the worker retries
+/// `HTTP_MAX_RETRIES` (3) times, and then publishes an error response.
+///
+/// The caller of the reply subject receives `response.error.is_some()`.
+///
+/// This exercises the same `Err` branch of `forward_request_with_retry` as a
+/// DNS / transport failure, but at the URL-construction layer.
+#[tokio::test]
+async fn e2e_invalid_url_in_outbound_request_returns_worker_error() {
+    use futures_util::StreamExt as _;
+    use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_invurl001").unwrap();
+    vault.store(&token, "sk-ant-invurl-key").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault_clone = vault.clone();
+    let js_clone = jetstream.clone();
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        worker::run(
+            js_clone,
+            nats_clone,
+            vault_clone,
+            reqwest::Client::new(),
+            "e2e-invurl-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let reply_subject = subjects::reply("trogon", "invurl-corr-001");
+    let mut reply_sub = nats.subscribe(reply_subject.clone()).await.unwrap();
+
+    // URL is syntactically invalid — spaces and special characters make it
+    // unparseable by any URL parser.
+    let message = OutboundHttpRequest {
+        method: "POST".to_string(),
+        url: "not a valid url ://##@@!!".to_string(),
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer tok_anthropic_test_invurl001".to_string(),
+        )],
+        body: b"{}".to_vec(),
+        reply_to: reply_subject.clone(),
+        idempotency_key: "invurl-corr-001".to_string(),
+    };
+
+    jetstream
+        .publish(outbound_subject, serde_json::to_vec(&message).unwrap().into())
+        .await
+        .unwrap();
+
+    // Worker retries HTTP_MAX_RETRIES=3 times before giving up (~700 ms total).
+    let reply = tokio::time::timeout(Duration::from_secs(15), reply_sub.next())
+        .await
+        .expect("Timed out waiting for worker error reply")
+        .unwrap();
+
+    let response: OutboundHttpResponse = serde_json::from_slice(&reply.payload).unwrap();
+    assert!(
+        response.error.is_some(),
+        "Worker must report an error for an invalid URL"
+    );
+}
