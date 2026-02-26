@@ -2063,6 +2063,59 @@ async fn binary_custom_prefix_routes_correctly() {
     _mock.assert_async().await;
 }
 
+/// Prefix mismatch: proxy uses prefix "alpha", worker uses prefix "beta".
+/// Each prefix now gets its own stream (PROXY_REQUESTS_ALPHA vs
+/// PROXY_REQUESTS_BETA), so the worker never sees the proxy's message and
+/// the proxy returns 504 Timeout.
+#[tokio::test]
+async fn binary_prefix_mismatch_causes_timeout() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_pfx002";
+
+    // Proxy on prefix "alpha" with 2s timeout.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_WORKER_TIMEOUT_SECS", "2")
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
+        .env("PROXY_PREFIX", "alpha")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker on prefix "beta" → listens on PROXY_REQUESTS_BETA, never sees
+    // messages published to PROXY_REQUESTS_ALPHA.
+    let _worker =
+        spawn_worker_with_prefix(nats_port, "pfx-mismatch-workers", token, "sk-ant-key", "beta");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        504,
+        "Prefix mismatch should time out with 504, got {}",
+        resp.status()
+    );
+    // AI provider was never contacted (no mock registered → any hit would panic).
+}
+
 /// Corrupted JetStream payload: the test publishes invalid JSON directly to
 /// the stream.  The worker must NAK it (or skip it) and continue processing
 /// the next valid request without crashing.
