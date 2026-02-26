@@ -2651,3 +2651,59 @@ async fn binary_invalid_vault_env_var_skipped_valid_token_still_works() {
     );
     ai_mock.assert_async().await;
 }
+
+/// Worker-first startup ordering: the worker binary starts and creates the
+/// JetStream stream before the proxy binary is launched.
+///
+/// Both binaries call `ensure_stream` / `get_or_create_stream` on startup, so
+/// whichever starts first creates the stream and the other gets the existing one.
+/// This is the reverse of `binary_worker_starts_late_message_is_delivered`.
+#[tokio::test]
+async fn binary_worker_starts_before_proxy_request_succeeds() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-worker-first");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_worker_first"}"#);
+        })
+        .await;
+
+    let token = "tok_anthropic_prod_wfirst01";
+
+    // Start worker FIRST — it creates the stream and registers its consumer.
+    let _worker = spawn_worker(nats_port, "binary-workers-wfirst", token, "sk-ant-worker-first");
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    // Start proxy AFTER — it must find the stream the worker already created.
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .expect("Request to proxy failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Request must succeed when worker started before proxy"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_worker_first");
+    ai_mock.assert_async().await;
+}
