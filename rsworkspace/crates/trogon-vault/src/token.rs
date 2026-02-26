@@ -259,6 +259,18 @@ mod tests {
         ));
     }
 
+    /// An underscore in the id segment is not alphanumeric and must be rejected.
+    ///
+    /// `tok_anthropic_prod_a_b_c` — after splitn(3) the id is `"a_b_c"`;
+    /// the underscore fails the `[a-zA-Z0-9]+` check.
+    #[test]
+    fn underscore_in_id_is_invalid() {
+        assert!(matches!(
+            ApiKeyToken::new("tok_anthropic_prod_a_b_c").unwrap_err(),
+            TokenError::InvalidIdCharacter('_')
+        ));
+    }
+
     #[test]
     fn try_from_str() {
         let t = ApiKeyToken::try_from("tok_anthropic_prod_abc123").unwrap();

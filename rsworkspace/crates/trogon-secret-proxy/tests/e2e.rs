@@ -664,3 +664,103 @@ async fn e2e_reply_channel_closed_returns_500() {
     let resp = request_handle.await.unwrap();
     assert_eq!(resp.status(), 500, "ReplyChannelClosed must return 500");
 }
+
+/// Invalid response headers from the worker are silently dropped; valid ones
+/// pass through to the caller unchanged.
+///
+/// In proxy.rs the header-building loop uses `if let (Ok(name), Ok(value))`
+/// which silently drops any header whose name or value fails HTTP parsing.
+/// This test uses an inline worker that directly injects a mix of valid and
+/// invalid entries into `OutboundHttpResponse.headers` to verify that branch.
+#[tokio::test]
+async fn e2e_invalid_response_headers_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Register an inline worker that will reply with crafted headers.
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-inv-hdr-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-inv-hdr-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Drive the axum router directly with tower::oneshot — no TCP listener needed.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_invhdr1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    // Pull the JetStream message and reply with a mix of valid and invalid headers.
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    let mut resp_headers = std::collections::HashMap::new();
+    resp_headers.insert("content-type".to_string(), "application/json".to_string()); // valid
+    resp_headers.insert("x-custom-valid".to_string(), "hello".to_string()); // valid
+    resp_headers.insert("invalid header name!".to_string(), "value".to_string()); // invalid name
+    resp_headers.insert("x-bad-value".to_string(), "\x00control".to_string()); // invalid value
+
+    let reply = OutboundHttpResponse {
+        status: 200,
+        headers: resp_headers,
+        body: b"{\"ok\":true}".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+
+    assert_eq!(resp.status(), 200, "Proxy must return 200 despite invalid headers");
+    // Valid headers must be forwarded.
+    assert!(resp.headers().contains_key("content-type"));
+    assert!(resp.headers().contains_key("x-custom-valid"));
+    // Invalid headers must be silently dropped — not panicking, not forwarded.
+    assert_eq!(resp.headers().get("x-bad-value"), None);
+}
