@@ -171,7 +171,13 @@ where
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
 
     match forward_request_with_retry(http_client, request, &forwarded_headers).await {
-        Ok(resp) => resp,
+        Ok(mut resp) => {
+            // Strip any response header whose value contains the real API key.
+            // A misbehaving provider might echo it back; the caller must never
+            // see it regardless.
+            resp.headers.retain(|(_, v)| !v.contains(real_key.as_str()));
+            resp
+        }
         Err(e) => {
             tracing::error!(error = %e, url = %request.url, "Upstream HTTP call failed after retries");
             OutboundHttpResponse {
