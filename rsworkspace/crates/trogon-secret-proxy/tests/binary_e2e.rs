@@ -53,10 +53,14 @@ async fn wait_for_port(port: u16, timeout: Duration) {
 }
 
 fn spawn_proxy(nats_port: u16, proxy_port: u16, mock_base_url: &str) -> Child {
+    spawn_proxy_with_timeout(nats_port, proxy_port, mock_base_url, 15)
+}
+
+fn spawn_proxy_with_timeout(nats_port: u16, proxy_port: u16, mock_base_url: &str, timeout_secs: u64) -> Child {
     Command::new(env!("CARGO_BIN_EXE_proxy"))
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("PROXY_PORT", proxy_port.to_string())
-        .env("PROXY_WORKER_TIMEOUT_SECS", "15")
+        .env("PROXY_WORKER_TIMEOUT_SECS", timeout_secs.to_string())
         .env("PROXY_BASE_URL_OVERRIDE", mock_base_url)
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
@@ -435,4 +439,287 @@ async fn binary_worker_restart_new_worker_handles_requests() {
     assert_eq!(resp2.status(), 200, "Second request failed after restart");
     let body: serde_json::Value = resp2.json().await.unwrap();
     assert_eq!(body["id"], "msg_after_restart");
+}
+
+/// No worker running → proxy must return 504 Gateway Timeout after its
+/// configured timeout expires.
+#[tokio::test]
+async fn binary_no_worker_returns_504_timeout() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let proxy_port = free_port();
+
+    // 2-second timeout so the test doesn't wait 60s.
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 2);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // No worker spawned — proxy will time out waiting for a reply.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_prod_tout01")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        504,
+        "Expected 504 Gateway Timeout, got {}",
+        resp.status()
+    );
+}
+
+/// Response headers returned by the AI provider must be forwarded back to
+/// the caller through the proxy.
+#[tokio::test]
+async fn binary_response_headers_are_forwarded_to_caller() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .header("x-request-id", "upstream-req-id-123")
+                .header("x-ratelimit-remaining-requests", "999")
+                .body(r#"{"id":"msg_headers"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_hdr001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-headers", token, "sk-ant-key-hdr");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get("x-request-id").and_then(|v| v.to_str().ok()),
+        Some("upstream-req-id-123"),
+        "x-request-id header should be forwarded"
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-ratelimit-remaining-requests")
+            .and_then(|v| v.to_str().ok()),
+        Some("999"),
+        "x-ratelimit-remaining-requests header should be forwarded"
+    );
+}
+
+/// Unknown provider in the path → proxy returns 502 immediately without
+/// publishing to NATS or waiting for a worker.
+///
+/// NOTE: spawned without PROXY_BASE_URL_OVERRIDE so the provider check in
+/// proxy.rs is NOT bypassed.  Unknown providers are rejected before any
+/// NATS publish, so no worker is needed.
+#[tokio::test]
+async fn binary_unknown_provider_returns_502_immediately() {
+    let (_nats_container, nats_port) = start_nats().await;
+    let proxy_port = free_port();
+
+    // Spawn proxy WITHOUT PROXY_BASE_URL_OVERRIDE so the provider guard runs.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_WORKER_TIMEOUT_SECS", "5")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // No worker spawned — the proxy must reject before touching NATS.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/fakeai/v1/completions",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_prod_abc123")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        502,
+        "Unknown provider should return 502 immediately, got {}",
+        resp.status()
+    );
+}
+
+/// GET request (e.g. listing models) passes through the proxy and reaches
+/// the AI provider with the original method intact.
+#[tokio::test]
+async fn binary_get_request_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET).path("/v1/models");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"object":"list","data":[{"id":"claude-3-5-sonnet-20241022"}]}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_get001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-get", token, "sk-ant-key-get");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["object"], "list", "Response body mismatch");
+    _mock.assert_async().await;
+}
+
+/// AI provider always responds with 503 Service Unavailable.
+/// The worker exhausts its 4 attempts (1 + 3 retries) then publishes the
+/// last provider status back to the proxy, which forwards it as-is.
+#[tokio::test]
+async fn binary_provider_5xx_exhausts_retries_and_status_is_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // Always returns 503 — worker will retry up to 4 attempts then give up.
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(503)
+                .header("content-type", "application/json")
+                .body(r#"{"error":{"type":"overloaded_error","message":"Overloaded"}}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_5xx001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-5xx", token, "sk-ant-key-5xx");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        // Retries add up to ~700ms of backoff; give generous timeout.
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    // Worker forwards the provider's last status code directly — 503 passes through.
+    assert_eq!(
+        resp.status(),
+        503,
+        "Provider 503 should be forwarded to the caller, got {}",
+        resp.status()
+    );
+
+    // Worker made 4 attempts (1 original + 3 retries).
+    assert_eq!(
+        _mock.hits(),
+        4,
+        "Worker should have made exactly 4 attempts before giving up"
+    );
+}
+
+/// Large request body (~50 KB) must pass through the proxy and reach the
+/// AI provider intact.
+#[tokio::test]
+async fn binary_large_request_body_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Build a ~50 KB JSON body.
+    let large_content = "x".repeat(50_000);
+    let large_body = format!(
+        r#"{{"model":"claude-3","messages":[{{"role":"user","content":"{}"}}]}}"#,
+        large_content
+    );
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_large_body"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_lgb001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-large", token, "sk-ant-key-large");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(large_body)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_large_body");
 }
