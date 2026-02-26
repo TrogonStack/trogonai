@@ -1,5 +1,6 @@
 mod authenticate;
 mod cancel;
+mod ext_method;
 mod initialize;
 mod load_session;
 mod new_session;
@@ -76,11 +77,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         cancel::handle(self, args).await
     }
 
-    async fn ext_method(&self, _args: ExtRequest) -> Result<ExtResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        ext_method::handle(self, args).await
     }
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
@@ -97,7 +95,7 @@ mod tests {
 
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{Agent, ExtNotification, ExtRequest, PromptRequest};
+    use agent_client_protocol::{Agent, ExtNotification, PromptRequest};
     use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
@@ -121,12 +119,6 @@ mod tests {
         assert!(
             bridge
                 .prompt(PromptRequest::new("s1", vec![]))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .ext_method(ExtRequest::new("ext", empty_raw_value()))
                 .await
                 .is_err()
         );
