@@ -723,3 +723,158 @@ async fn binary_large_request_body_passes_through() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["id"], "msg_large_body");
 }
+
+/// Security: if a caller sends an actual API key (e.g. `sk-ant-...`) instead
+/// of an opaque token, the worker must reject it.  The real key must never
+/// reach the AI provider.
+#[tokio::test]
+async fn binary_real_api_key_in_auth_is_rejected() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // This mock must NOT be reached — the worker rejects before forwarding.
+    let _should_not_be_called = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not reach here");
+        })
+        .await;
+
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker with empty vault (no tokens registered).
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-realkey")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send a request with a REAL key in Authorization, not a tok_ token.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer sk-ant-real-secret-key-12345")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // Worker rejects non-tok_ credentials → proxy returns 502.
+    assert!(
+        resp.status().is_server_error(),
+        "Real API key should be rejected with a server error, got {}",
+        resp.status()
+    );
+    // Critical: the AI provider was never contacted.
+    assert_eq!(
+        _should_not_be_called.hits(),
+        0,
+        "AI provider must not be called when a real key is passed"
+    );
+}
+
+/// OpenAI provider: requests to /openai/* are routed correctly and the
+/// worker resolves an OpenAI token to its real key.
+#[tokio::test]
+async fn binary_openai_provider_routes_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/chat/completions")
+                .header("authorization", "Bearer sk-openai-real-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"chatcmpl-openai-01","object":"chat.completion"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_openai_prod_oai001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-openai", token, "sk-openai-real-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/chat/completions",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["object"], "chat.completion");
+    _mock.assert_async().await;
+}
+
+/// 4xx responses from the AI provider are NOT retried — the worker forwards
+/// the error immediately (retrying a 4xx is pointless).
+#[tokio::test]
+async fn binary_4xx_from_provider_is_not_retried() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // Returns 422 Unprocessable Entity — a client error that must not be retried.
+    let mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(422)
+                .header("content-type", "application/json")
+                .body(r#"{"error":{"type":"invalid_request_error","message":"max_tokens required"}}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_4xx001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-4xx", token, "sk-ant-key-4xx");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // 422 forwarded as-is.
+    assert_eq!(
+        resp.status(),
+        422,
+        "4xx should be forwarded without retry, got {}",
+        resp.status()
+    );
+    // Provider was called exactly once — no retries.
+    assert_eq!(mock.hits(), 1, "4xx must not trigger retries");
+}
