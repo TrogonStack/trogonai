@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use trogon_nats::NatsConfig;
 
+use crate::nats::token;
+
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_PREFIX_LENGTH: usize = 128;
 
@@ -29,16 +31,6 @@ impl std::fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-fn has_nats_wildcards_or_whitespace(value: &str) -> Option<char> {
-    value
-        .chars()
-        .find(|ch| *ch == '*' || *ch == '>' || ch.is_whitespace())
-}
-
-fn has_consecutive_or_boundary_dots(value: &str) -> bool {
-    value.contains("..") || value.starts_with('.') || value.ends_with('.')
-}
-
 #[derive(Clone)]
 pub struct AcpPrefix(Arc<str>);
 
@@ -48,10 +40,10 @@ impl AcpPrefix {
         if s.is_empty() {
             return Err(ValidationError::EmptyValue("acp_prefix"));
         }
-        if let Some(ch) = has_nats_wildcards_or_whitespace(&s) {
+        if let Some(ch) = token::has_wildcards_or_whitespace(&s) {
             return Err(ValidationError::InvalidCharacter("acp_prefix", ch));
         }
-        if has_consecutive_or_boundary_dots(&s) {
+        if token::has_consecutive_or_boundary_dots(&s) {
             return Err(ValidationError::InvalidCharacter("acp_prefix", '.'));
         }
         if s.len() > MAX_PREFIX_LENGTH {
