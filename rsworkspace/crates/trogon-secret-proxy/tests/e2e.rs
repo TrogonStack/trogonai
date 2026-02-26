@@ -1073,3 +1073,186 @@ async fn e2e_worker_invalid_status_code_falls_back_to_500() {
         "Out-of-range status code must fall back to 500"
     );
 }
+
+/// When every worker that receives a JetStream message crashes (drops without
+/// ACKing), JetStream exhausts `max_deliver` retries and stops redelivering.
+/// Since no worker ever publishes a reply, the proxy times out → 504.
+///
+/// Setup: consumer with `max_deliver=3` and `ack_wait=1s`.
+/// Saboteur pulls each of the 3 deliveries and drops without ACKing.
+/// After the 3rd expiry no more deliveries happen; proxy worker_timeout fires.
+#[tokio::test]
+async fn e2e_max_deliver_exhausted_proxy_returns_504() {
+    use futures_util::StreamExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats,
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        // Longer than 3 * ack_wait (3 s) so all redeliveries exhaust first.
+        worker_timeout: Duration::from_secs(8),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.ok() });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Saboteur: pulls each delivery and drops without ACKing.
+    // max_deliver=3 means JetStream gives up after 3 failed attempts.
+    let consumer_name = "e2e-maxdeliver-workers";
+    let saboteur_js = jetstream.clone();
+    tokio::spawn(async move {
+        let js_stream = saboteur_js
+            .get_stream(&stream::stream_name("trogon"))
+            .await
+            .unwrap();
+        let consumer = js_stream
+            .get_or_create_consumer(
+                consumer_name,
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some(consumer_name.to_string()),
+                    ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                    ack_wait: Duration::from_secs(1),
+                    max_deliver: 3,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+        for _ in 0..3 {
+            match tokio::time::timeout(Duration::from_secs(5), messages.next()).await {
+                Ok(Some(Ok(msg))) => drop(msg), // no ACK = simulates crash
+                _ => break,
+            }
+        }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", "Bearer tok_anthropic_test_maxdlv1")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        504,
+        "All deliveries exhausted → no reply → proxy must return 504"
+    );
+}
+
+/// A request body sent as multiple stream chunks must arrive at the AI
+/// provider as a single, correctly assembled payload.
+///
+/// The proxy reads the full body with `axum::body::to_bytes(req.into_body(),
+/// usize::MAX)` before passing it to the worker.  This test verifies that
+/// two separate chunks are concatenated correctly and the mock AI provider
+/// receives the complete JSON body.
+#[tokio::test]
+async fn e2e_chunked_request_body_buffered_and_forwarded() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let expected_body = r#"{"model":"claude-3","messages":[]}"#;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .body(expected_body); // exact body match
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_chunked","type":"message"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_chunk01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            "e2e-chunk-workers",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Body split into two chunks: the proxy must concatenate them before
+    // forwarding to the worker.
+    let chunk1 = bytes::Bytes::from_static(b"{\"model\":\"claude-3\",");
+    let chunk2 = bytes::Bytes::from_static(b"\"messages\":[]}");
+    let body_stream = futures_util::stream::iter(vec![
+        Ok::<bytes::Bytes, std::io::Error>(chunk1),
+        Ok::<bytes::Bytes, std::io::Error>(chunk2),
+    ]);
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_chunk01")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from_stream(body_stream))
+        .unwrap();
+
+    let response = router(state).oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), 200, "Chunked body must be assembled and forwarded");
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body["id"], "msg_chunked");
+    // Mock assertion: if this passes, the exact expected_body arrived at the provider.
+    ai_mock.assert_async().await;
+}
