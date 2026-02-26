@@ -234,3 +234,205 @@ async fn binary_two_workers_handle_concurrent_requests() {
         assert_eq!(body["id"], "msg_binary_scaled");
     }
 }
+
+/// Token not registered in the worker vault → proxy must return an error
+/// status (the worker replies with a 401-equivalent wrapped as 502).
+#[tokio::test]
+async fn binary_unknown_token_returns_error() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // This mock must NOT be called — the worker should reject the token
+    // before reaching the AI provider.
+    let _should_not_be_called = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not reach here");
+        })
+        .await;
+
+    let proxy_port = free_port();
+
+    // Worker starts with an EMPTY vault — no tokens registered.
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Spawn worker with no VAULT_TOKEN_* vars → vault is empty.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-unknown")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_prod_notinvault")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_client_error() || resp.status().is_server_error(),
+        "Expected error status for unknown token, got {}",
+        resp.status()
+    );
+    // Mock was never reached.
+    assert_eq!(_should_not_be_called.hits(), 0, "AI provider should not have been called");
+}
+
+/// Two different tokens each map to a different real key.
+/// The mock AI verifies each request arrived with the correct key.
+#[tokio::test]
+async fn binary_multiple_tokens_each_resolve_to_correct_key() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Token A → sk-ant-key-a → response id "msg_key_a"
+    let mock_a = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-key-a");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_key_a","type":"message"}"#);
+        })
+        .await;
+
+    // Token B → sk-ant-key-b → response id "msg_key_b"
+    let mock_b = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-key-b");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_key_b","type":"message"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token_a = "tok_anthropic_prod_mta001";
+    let token_b = "tok_anthropic_prod_mtb002";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker seeded with both tokens.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-multi")
+        .env(format!("VAULT_TOKEN_{}", token_a), "sk-ant-key-a")
+        .env(format!("VAULT_TOKEN_{}", token_b), "sk-ant-key-b")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    // Request with token A.
+    let resp_a = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token_a))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp_a.status(), 200);
+    let body_a: serde_json::Value = resp_a.json().await.unwrap();
+    assert_eq!(body_a["id"], "msg_key_a", "Token A should resolve to key-a");
+
+    // Request with token B.
+    let resp_b = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token_b))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp_b.status(), 200);
+    let body_b: serde_json::Value = resp_b.json().await.unwrap();
+    assert_eq!(body_b["id"], "msg_key_b", "Token B should resolve to key-b");
+
+    mock_a.assert_async().await;
+    mock_b.assert_async().await;
+}
+
+/// Worker restart: kill the first worker process, start a second one.
+/// The second worker must process new requests correctly.
+#[tokio::test]
+async fn binary_worker_restart_new_worker_handles_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_after_restart","type":"message"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_rst001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Start first worker, send a request, verify it works.
+    let mut worker_1 = spawn_worker(nats_port, "binary-workers-restart", token, "sk-ant-restart-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "First request failed before restart");
+
+    // Kill worker 1.
+    worker_1.kill().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Start worker 2 — same consumer name picks up the durable subscription.
+    let _worker_2 = spawn_worker(nats_port, "binary-workers-restart", token, "sk-ant-restart-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // New request after restart must succeed.
+    let resp2 = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp2.status(), 200, "Second request failed after restart");
+    let body: serde_json::Value = resp2.json().await.unwrap();
+    assert_eq!(body["id"], "msg_after_restart");
+}
