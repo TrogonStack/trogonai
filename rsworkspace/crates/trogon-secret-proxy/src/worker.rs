@@ -8,7 +8,6 @@
 //! 5. Publishes an [`OutboundHttpResponse`] to the Core NATS reply subject.
 //! 6. Acknowledges the JetStream message.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -137,22 +136,27 @@ where
             tracing::warn!(error = %e, "Token resolution failed");
             return OutboundHttpResponse {
                 status: 401,
-                headers: HashMap::new(),
+                headers: vec![],
                 body: vec![],
                 error: Some(e),
             };
         }
     };
 
-    let mut forwarded_headers = request.headers.clone();
-    forwarded_headers.insert(
-        "Authorization".to_string(),
-        format!("Bearer {}", real_key),
-    );
-    forwarded_headers.insert(
-        "X-Request-Id".to_string(),
-        request.idempotency_key.clone(),
-    );
+    // Build the forwarded header list:
+    // - strip any existing Authorization and X-Request-Id from the client
+    // - add the resolved real key and the idempotency key
+    let mut forwarded_headers: Vec<(String, String)> = request
+        .headers
+        .iter()
+        .filter(|(k, _)| {
+            !k.eq_ignore_ascii_case("authorization")
+                && !k.eq_ignore_ascii_case("x-request-id")
+        })
+        .cloned()
+        .collect();
+    forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
+    forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
 
     match forward_request_with_retry(http_client, request, &forwarded_headers).await {
         Ok(resp) => resp,
@@ -160,7 +164,7 @@ where
             tracing::error!(error = %e, url = %request.url, "Upstream HTTP call failed after retries");
             OutboundHttpResponse {
                 status: 502,
-                headers: HashMap::new(),
+                headers: vec![],
                 body: vec![],
                 error: Some(e),
             }
@@ -171,7 +175,7 @@ where
 /// Extract the `tok_...` token from the Authorization header and resolve it.
 async fn resolve_token<V>(
     vault: &V,
-    headers: &HashMap<String, String>,
+    headers: &[(String, String)],
 ) -> Result<String, String>
 where
     V: VaultStore,
@@ -216,7 +220,7 @@ where
 async fn forward_request_with_retry(
     http_client: &ReqwestClient,
     request: &OutboundHttpRequest,
-    headers: &HashMap<String, String>,
+    headers: &[(String, String)],
 ) -> Result<OutboundHttpResponse, String> {
     let mut attempts = 0u32;
     loop {
@@ -270,7 +274,7 @@ async fn forward_request_with_retry(
 async fn forward_request(
     http_client: &ReqwestClient,
     request: &OutboundHttpRequest,
-    headers: &HashMap<String, String>,
+    headers: &[(String, String)],
 ) -> Result<OutboundHttpResponse, String> {
     let method = request
         .method
@@ -294,7 +298,9 @@ async fn forward_request(
 
     let status = upstream_resp.status().as_u16();
 
-    let resp_headers: HashMap<String, String> = upstream_resp
+    // Collect response headers as an ordered list of (name, value) pairs so
+    // that duplicate headers (e.g. multiple Set-Cookie) are preserved.
+    let resp_headers: Vec<(String, String)> = upstream_resp
         .headers()
         .iter()
         .filter_map(|(k, v)| {
@@ -336,7 +342,6 @@ impl std::error::Error for WorkerError {}
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::time::Duration;
 
     use reqwest::Client as ReqwestClient;
@@ -346,10 +351,8 @@ mod tests {
 
     use super::{forward_request, forward_request_with_retry, process_request, resolve_token};
 
-    fn make_headers(auth: &str) -> HashMap<String, String> {
-        let mut m = HashMap::new();
-        m.insert("Authorization".to_string(), auth.to_string());
-        m
+    fn make_headers(auth: &str) -> Vec<(String, String)> {
+        vec![("Authorization".to_string(), auth.to_string())]
     }
 
     fn make_request(url: &str, auth: &str, idempotency_key: &str) -> OutboundHttpRequest {
@@ -386,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_token_missing_header() {
         let vault = MemoryVault::new();
-        let headers = HashMap::new();
+        let headers: Vec<(String, String)> = vec![];
         let result = resolve_token(&vault, &headers).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing Authorization"));
@@ -416,11 +419,10 @@ mod tests {
         let token = ApiKeyToken::new("tok_anthropic_prod_abc999").unwrap();
         vault.store(&token, "sk-ant-value").await.unwrap();
 
-        let mut headers = HashMap::new();
-        headers.insert(
+        let headers = vec![(
             "authorization".to_string(),
             "Bearer tok_anthropic_prod_abc999".to_string(),
-        );
+        )];
 
         let key = resolve_token(&vault, &headers).await.unwrap();
         assert_eq!(key, "sk-ant-value");
@@ -503,7 +505,7 @@ mod tests {
             "idem",
         );
 
-        let resp = forward_request_with_retry(&client, &request, &HashMap::new())
+        let resp = forward_request_with_retry(&client, &request, &[])
             .await
             .unwrap();
 
@@ -534,7 +536,7 @@ mod tests {
             "idem",
         );
 
-        let resp = forward_request_with_retry(&client, &request, &HashMap::new())
+        let resp = forward_request_with_retry(&client, &request, &[])
             .await
             .unwrap();
 
@@ -559,13 +561,13 @@ mod tests {
         let request = OutboundHttpRequest {
             method: "GET".to_string(),
             url: format!("{}/v1/models", mock_server.base_url()),
-            headers: HashMap::new(),
+            headers: vec![],
             body: vec![], // empty — must not be sent
             reply_to: "test.reply".to_string(),
             idempotency_key: "idem".to_string(),
         };
 
-        let resp = forward_request(&client, &request, &HashMap::new())
+        let resp = forward_request(&client, &request, &[])
             .await
             .unwrap();
 
@@ -599,7 +601,7 @@ mod tests {
             "idem",
         );
 
-        let result = forward_request_with_retry(&client, &request, &HashMap::new()).await;
+        let result = forward_request_with_retry(&client, &request, &[]).await;
 
         assert!(result.is_err(), "Expected Err on transport failure");
         assert!(
@@ -637,13 +639,13 @@ mod tests {
         let request = OutboundHttpRequest {
             method: "POST".to_string(),
             url: format!("{}/ok", mock_server.base_url()),
-            headers: HashMap::new(),
+            headers: vec![],
             body: b"{}".to_vec(),
             reply_to: "test.reply".to_string(),
             idempotency_key: "idem".to_string(),
         };
 
-        let resp = forward_request_with_retry(&client, &request, &HashMap::new())
+        let resp = forward_request_with_retry(&client, &request, &[])
             .await
             .unwrap();
 

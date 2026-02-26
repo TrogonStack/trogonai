@@ -3315,15 +3315,13 @@ async fn binary_token_with_numeric_id_works() {
 }
 
 /// When the upstream AI provider returns multiple `Set-Cookie` response
-/// headers, the worker serialises them into `OutboundHttpResponse.headers`
-/// which is a `HashMap<String, String>`.  A HashMap can only hold one value
-/// per key — duplicate keys are deduplicated (last value wins).  The proxy
-/// then forwards that single value.
+/// headers both values must be forwarded to the client unchanged.
 ///
-/// This documents a known design limitation: multiple `Set-Cookie` headers
-/// from the provider are collapsed to one before reaching the client.
+/// The worker now uses `Vec<(String, String)>` for headers so duplicate
+/// header names are preserved.  The proxy uses `HeaderMap::append` (not
+/// `insert`) so all values survive the round-trip to the HTTP response.
 #[tokio::test]
-async fn binary_multiple_set_cookie_headers_collapsed_to_one() {
+async fn binary_multiple_set_cookie_headers_forwarded() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
@@ -3359,12 +3357,16 @@ async fn binary_multiple_set_cookie_headers_collapsed_to_one() {
 
     assert_eq!(resp.status(), 200);
 
-    // The HashMap model collapses both Set-Cookie headers into one.
-    let set_cookie_count = resp.headers().get_all("set-cookie").iter().count();
-    assert_eq!(
-        set_cookie_count, 1,
-        "Multiple Set-Cookie headers from the provider are collapsed to one (HashMap limitation)"
-    );
+    // Both Set-Cookie headers must reach the client — Vec + append preserve them.
+    let cookies: Vec<_> = resp
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect();
+    assert_eq!(cookies.len(), 2, "Both Set-Cookie headers must be forwarded; got: {:?}", cookies);
+    assert!(cookies.iter().any(|c| c.contains("session=abc")), "session cookie must be present");
+    assert!(cookies.iter().any(|c| c.contains("prefs=xyz")), "prefs cookie must be present");
     ai_mock.assert_async().await;
 }
 

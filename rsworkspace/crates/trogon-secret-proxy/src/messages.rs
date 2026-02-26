@@ -1,7 +1,5 @@
 //! Wire messages exchanged between the HTTP proxy and the detokenization worker.
 
-use std::collections::HashMap;
-
 /// Published to JetStream when the HTTP proxy receives an outbound request.
 ///
 /// The proxy subscribes to `reply_to` on Core NATS and blocks until the worker
@@ -13,7 +11,10 @@ pub struct OutboundHttpRequest {
     /// Full URL to forward to the AI provider (e.g. `https://api.anthropic.com/v1/messages`).
     pub url: String,
     /// Request headers, including the `Authorization: Bearer tok_...` header.
-    pub headers: HashMap<String, String>,
+    ///
+    /// Stored as an ordered list of `(name, value)` pairs so that headers with
+    /// the same name (e.g. two `Accept` values) are preserved without loss.
+    pub headers: Vec<(String, String)>,
     /// Raw request body.
     pub body: Vec<u8>,
     /// Core NATS subject the worker must reply to.
@@ -28,7 +29,10 @@ pub struct OutboundHttpResponse {
     /// HTTP status code returned by the AI provider.
     pub status: u16,
     /// Response headers from the AI provider.
-    pub headers: HashMap<String, String>,
+    ///
+    /// Stored as an ordered list of `(name, value)` pairs so that headers with
+    /// the same name (e.g. multiple `Set-Cookie` values) are preserved without loss.
+    pub headers: Vec<(String, String)>,
     /// Raw response body.
     pub body: Vec<u8>,
     /// Set when an error occurred before or during the upstream call.
@@ -44,14 +48,10 @@ mod tests {
         let req = OutboundHttpRequest {
             method: "POST".to_string(),
             url: "https://api.anthropic.com/v1/messages".to_string(),
-            headers: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "Authorization".to_string(),
-                    "Bearer tok_anthropic_prod_abc123".to_string(),
-                );
-                m
-            },
+            headers: vec![(
+                "Authorization".to_string(),
+                "Bearer tok_anthropic_prod_abc123".to_string(),
+            )],
             body: b"{}".to_vec(),
             reply_to: "trogon.proxy.reply.some-uuid".to_string(),
             idempotency_key: "req-id-1".to_string(),
@@ -67,14 +67,31 @@ mod tests {
     }
 
     #[test]
+    fn request_preserves_duplicate_headers() {
+        let req = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: "https://api.anthropic.com/v1/messages".to_string(),
+            headers: vec![
+                ("accept".to_string(), "application/json".to_string()),
+                ("accept".to_string(), "text/plain".to_string()),
+            ],
+            body: vec![],
+            reply_to: "trogon.proxy.reply.dup".to_string(),
+            idempotency_key: "req-dup".to_string(),
+        };
+
+        let json = serde_json::to_string(&req).unwrap();
+        let decoded: OutboundHttpRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.headers.len(), 2);
+        assert_eq!(decoded.headers[0], ("accept".to_string(), "application/json".to_string()));
+        assert_eq!(decoded.headers[1], ("accept".to_string(), "text/plain".to_string()));
+    }
+
+    #[test]
     fn response_round_trips_json() {
         let resp = OutboundHttpResponse {
             status: 200,
-            headers: {
-                let mut m = HashMap::new();
-                m.insert("content-type".to_string(), "application/json".to_string());
-                m
-            },
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
             body: b"{\"id\":\"msg_1\"}".to_vec(),
             error: None,
         };
@@ -87,10 +104,32 @@ mod tests {
     }
 
     #[test]
+    fn response_preserves_multiple_set_cookie_headers() {
+        let resp = OutboundHttpResponse {
+            status: 200,
+            headers: vec![
+                ("set-cookie".to_string(), "session=abc; Path=/".to_string()),
+                ("set-cookie".to_string(), "prefs=xyz; Path=/".to_string()),
+            ],
+            body: vec![],
+            error: None,
+        };
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: OutboundHttpResponse = serde_json::from_str(&json).unwrap();
+        let cookies: Vec<_> = decoded
+            .headers
+            .iter()
+            .filter(|(k, _)| k == "set-cookie")
+            .collect();
+        assert_eq!(cookies.len(), 2, "Both Set-Cookie values must survive round-trip");
+    }
+
+    #[test]
     fn response_with_error_round_trips() {
         let resp = OutboundHttpResponse {
             status: 500,
-            headers: HashMap::new(),
+            headers: vec![],
             body: vec![],
             error: Some("vault token not found".to_string()),
         };
