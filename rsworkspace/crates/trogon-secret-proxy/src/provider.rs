@@ -35,4 +35,16 @@ mod tests {
         assert_eq!(base_url("unknown-provider"), None);
         assert_eq!(base_url(""), None);
     }
+
+    /// Gap 2 (unit): provider matching is case-sensitive.
+    /// Uppercase or mixed-case names must return None so the proxy rejects
+    /// them with 502 rather than silently routing to the wrong URL.
+    #[test]
+    fn provider_matching_is_case_sensitive() {
+        assert_eq!(base_url("ANTHROPIC"), None);
+        assert_eq!(base_url("Anthropic"), None);
+        assert_eq!(base_url("OPENAI"), None);
+        assert_eq!(base_url("OpenAI"), None);
+        assert_eq!(base_url("Gemini"), None);
+    }
 }
