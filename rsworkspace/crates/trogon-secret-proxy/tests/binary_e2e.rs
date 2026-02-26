@@ -1743,3 +1743,235 @@ async fn binary_nats_reconnection_after_brief_disconnect() {
 
     assert_eq!(_mock.hits(), 2, "Both pre- and post-reconnect requests should reach the provider");
 }
+
+/// Binary response body (e.g. audio or image generation) passes through the
+/// proxy and worker as raw bytes without corruption.
+#[tokio::test]
+async fn binary_binary_response_body_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Fake PNG: valid PNG magic bytes + arbitrary payload.
+    let png_magic: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let payload: Vec<u8> = png_magic
+        .iter()
+        .copied()
+        .chain((0u8..=255).cycle().take(4096))
+        .collect();
+    let expected = payload.clone();
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(move |when, then| {
+            when.method(httpmock::Method::POST).path("/v1/audio/speech");
+            then.status(200)
+                .header("content-type", "image/png")
+                .body(payload.clone());
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_openai_prod_bin001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-binresp", token, "sk-openai-key-bin");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/audio/speech",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"tts-1","input":"hello","voice":"alloy"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    assert_eq!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/png"),
+        "content-type should be forwarded"
+    );
+    let body_bytes = resp.bytes().await.unwrap();
+    assert_eq!(
+        body_bytes.as_ref(),
+        expected.as_slice(),
+        "Binary response body corrupted in transit"
+    );
+}
+
+/// The worker must resolve the token regardless of whether the caller sends
+/// `Authorization` or `authorization` (HTTP header names are case-insensitive).
+#[tokio::test]
+async fn binary_authorization_header_case_insensitive() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_case_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_ci001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-case", token, "sk-ant-key-case");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    // Lowercase "authorization".
+    let resp_lower = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("authorization", format!("Bearer {}", token))
+        .header("content-type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_lower.status(), 200, "lowercase authorization failed: {}", resp_lower.status());
+
+    // All-caps "AUTHORIZATION".
+    let resp_upper = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("AUTHORIZATION", format!("Bearer {}", token))
+        .header("content-type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_upper.status(), 200, "AUTHORIZATION failed: {}", resp_upper.status());
+
+    assert_eq!(_mock.hits(), 2, "Both requests should have reached the provider");
+}
+
+/// Two successive NATS outages: after each pause/unpause cycle the proxy and
+/// worker reconnect and continue serving requests normally.
+#[tokio::test]
+async fn binary_multiple_nats_reconnections() {
+    let (nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_multi_rec"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_mr001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-multirec", token, "sk-ant-key-mr");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let container_id = nats_container.id().to_string();
+
+    // Baseline request.
+    let r0 = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}").timeout(Duration::from_secs(15)).send().await.unwrap();
+    assert_eq!(r0.status(), 200, "Baseline request failed");
+
+    // First disconnect.
+    std::process::Command::new("docker").args(["pause", &container_id]).status().unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    std::process::Command::new("docker").args(["unpause", &container_id]).status().unwrap();
+    tokio::time::sleep(Duration::from_millis(2_000)).await;
+
+    let r1 = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}").timeout(Duration::from_secs(20)).send().await.unwrap();
+    assert_eq!(r1.status(), 200, "Post-first-reconnect request failed");
+
+    // Second disconnect.
+    std::process::Command::new("docker").args(["pause", &container_id]).status().unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    std::process::Command::new("docker").args(["unpause", &container_id]).status().unwrap();
+    tokio::time::sleep(Duration::from_millis(2_000)).await;
+
+    let r2 = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}").timeout(Duration::from_secs(20)).send().await.unwrap();
+    assert_eq!(r2.status(), 200, "Post-second-reconnect request failed");
+
+    assert_eq!(_mock.hits(), 3, "All 3 requests should have reached the provider");
+}
+
+/// OPTIONS request (CORS preflight) passes through the full pipeline when
+/// the AI provider handles it.
+#[tokio::test]
+async fn binary_options_request_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::OPTIONS).path("/v1/messages");
+            then.status(204)
+                .header("access-control-allow-origin", "*")
+                .header("access-control-allow-methods", "GET, POST, OPTIONS")
+                .header("access-control-allow-headers", "Authorization, Content-Type");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_opt001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-options", token, "sk-ant-key-opt");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port),
+        )
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Origin", "https://my-app.example.com")
+        .header("Access-Control-Request-Method", "POST")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 204, "OPTIONS should return 204, got {}", resp.status());
+    assert_eq!(
+        resp.headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok()),
+        Some("*"),
+        "CORS header should be forwarded"
+    );
+    _mock.assert_async().await;
+}
