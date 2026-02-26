@@ -475,4 +475,26 @@ mod tests {
         assert_load_session_metric_recorded(&finished_metrics, true);
         provider.shutdown().unwrap();
     }
+
+    #[tokio::test]
+    async fn load_session_publishes_session_ready_to_correct_subject() {
+        let (mock, bridge) = mock_bridge();
+        set_json_response(
+            &mock,
+            "acp.s1.agent.session.load",
+            &LoadSessionResponse::new(),
+        );
+
+        let _ = bridge
+            .load_session(LoadSessionRequest::new("s1", "."))
+            .await;
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let published = mock.published_messages();
+        assert!(
+            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
+            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
+            published
+        );
+    }
 }
