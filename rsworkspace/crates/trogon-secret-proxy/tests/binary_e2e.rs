@@ -878,3 +878,372 @@ async fn binary_4xx_from_provider_is_not_retried() {
     // Provider was called exactly once — no retries.
     assert_eq!(mock.hits(), 1, "4xx must not trigger retries");
 }
+
+/// No Authorization header at all → worker cannot extract a token and must
+/// return an error; proxy returns 502.
+#[tokio::test]
+async fn binary_missing_auth_header_returns_error() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _should_not_be_called = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not reach here");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_noauth1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-noauth", token, "sk-ant-key-noauth");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // No Authorization header in the request.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_server_error(),
+        "Missing auth header should return 5xx, got {}",
+        resp.status()
+    );
+    assert_eq!(
+        _should_not_be_called.hits(),
+        0,
+        "AI provider must not be called when Authorization header is missing"
+    );
+}
+
+/// Request headers sent by the caller (e.g. anthropic-version, x-api-key)
+/// must be forwarded to the AI provider unchanged.
+#[tokio::test]
+async fn binary_request_headers_are_forwarded_to_provider() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                // Verify custom request headers arrive at the provider.
+                .header("anthropic-version", "2023-06-01")
+                .header("x-custom-caller-header", "my-service-v2");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_reqhdrs"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_hdrs001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-reqhdrs", token, "sk-ant-key-hdrs");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .header("anthropic-version", "2023-06-01")
+        .header("x-custom-caller-header", "my-service-v2")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    _mock.assert_async().await;
+}
+
+/// Query string parameters appended to the path must be forwarded to the
+/// AI provider intact.
+#[tokio::test]
+async fn binary_query_string_is_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models")
+                .query_param("limit", "5")
+                .query_param("order", "desc");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"object":"list","data":[]}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_qs001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-qs", token, "sk-ant-key-qs");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models?limit=5&order=desc",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    _mock.assert_async().await;
+}
+
+/// DELETE and PUT methods pass through the proxy with the correct method.
+#[tokio::test]
+async fn binary_delete_and_put_methods_pass_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let mock_delete = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::DELETE).path("/v1/files/file-abc");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"file-abc","deleted":true}"#);
+        })
+        .await;
+    let mock_put = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::PUT).path("/v1/assistants/asst-xyz");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"asst-xyz","updated":true}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_openai_prod_meth001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-methods", token, "sk-openai-key-meth");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    let resp_delete = client
+        .delete(format!(
+            "http://127.0.0.1:{}/openai/v1/files/file-abc",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_delete.status(), 200, "DELETE failed: {}", resp_delete.status());
+    let body_d: serde_json::Value = resp_delete.json().await.unwrap();
+    assert_eq!(body_d["deleted"], true);
+
+    let resp_put = client
+        .put(format!(
+            "http://127.0.0.1:{}/openai/v1/assistants/asst-xyz",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"name":"updated"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_put.status(), 200, "PUT failed: {}", resp_put.status());
+    let body_p: serde_json::Value = resp_put.json().await.unwrap();
+    assert_eq!(body_p["updated"], true);
+
+    mock_delete.assert_async().await;
+    mock_put.assert_async().await;
+}
+
+/// Proxy times out (no worker responds in time), but a late worker comes up
+/// and processes the orphaned JetStream message.  The worker must survive
+/// publishing to a reply subject with no subscriber and keep handling new
+/// requests normally afterwards.
+#[tokio::test]
+async fn binary_worker_survives_orphaned_reply_subject() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_orphan_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_orp001";
+
+    // 2-second proxy timeout so the test doesn't wait long.
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 2);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Send request BEFORE worker starts → proxy will time out.
+    let timeout_resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(timeout_resp.status(), 504, "Should have timed out with 504");
+
+    // Now start the worker — it picks up the orphaned message from JetStream,
+    // calls the mock, tries to publish to the dead reply subject (ignored),
+    // then acks the message and stays healthy.
+    let _worker = spawn_worker(nats_port, "binary-workers-orphan", token, "sk-ant-key-orphan");
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    // A fresh request must succeed — worker is still alive.
+    let ok_resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_resp.status(), 200, "Worker should still be alive after orphaned reply");
+
+    // Mock was called twice: once for the orphaned message, once for the fresh request.
+    assert_eq!(_mock.hits(), 2, "Mock should have been hit exactly twice");
+}
+
+/// Gemini, Cohere, and Mistral providers are routed correctly through the
+/// full pipeline.
+#[tokio::test]
+async fn binary_gemini_cohere_mistral_providers_route_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    let mock_gemini = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1beta/models/gemini-pro:generateContent");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}"#);
+        })
+        .await;
+    let mock_cohere = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/chat");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"text":"hi from cohere"}"#);
+        })
+        .await;
+    let mock_mistral = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"mistral-01","object":"chat.completion"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let tok_gemini  = "tok_gemini_prod_gem001";
+    let tok_cohere  = "tok_cohere_prod_coh001";
+    let tok_mistral = "tok_mistral_prod_mis001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-multi-prov")
+        .env(format!("VAULT_TOKEN_{}", tok_gemini),  "sk-gemini-real")
+        .env(format!("VAULT_TOKEN_{}", tok_cohere),  "sk-cohere-real")
+        .env(format!("VAULT_TOKEN_{}", tok_mistral), "sk-mistral-real")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    let resp_gemini = client
+        .post(format!(
+            "http://127.0.0.1:{}/gemini/v1beta/models/gemini-pro:generateContent",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", tok_gemini))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_gemini.status(), 200, "Gemini failed: {}", resp_gemini.status());
+
+    let resp_cohere = client
+        .post(format!(
+            "http://127.0.0.1:{}/cohere/v1/chat",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", tok_cohere))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_cohere.status(), 200, "Cohere failed: {}", resp_cohere.status());
+
+    let resp_mistral = client
+        .post(format!(
+            "http://127.0.0.1:{}/mistral/v1/chat/completions",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", tok_mistral))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_mistral.status(), 200, "Mistral failed: {}", resp_mistral.status());
+
+    mock_gemini.assert_async().await;
+    mock_cohere.assert_async().await;
+    mock_mistral.assert_async().await;
+}
