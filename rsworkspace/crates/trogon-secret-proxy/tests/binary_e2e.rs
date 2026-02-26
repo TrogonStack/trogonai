@@ -2839,6 +2839,104 @@ async fn binary_sse_response_buffered_and_returned_completely() {
     ai_mock.assert_async().await;
 }
 
+/// A client sending a real HTTP/1.1 chunked request (Transfer-Encoding: chunked)
+/// must have its body correctly assembled by the proxy and forwarded intact
+/// to the AI provider.
+///
+/// Uses a raw `TcpStream` to send the chunked HTTP/1.1 wire format directly,
+/// bypassing any high-level client that would set Content-Length instead.
+#[tokio::test]
+async fn binary_http_chunked_encoding_body_forwarded_completely() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let chunk1 = b"{\"model\":\"claude-3\",";
+    let chunk2 = b"\"messages\":[]}";
+    let full_body = format!(
+        "{}{}",
+        std::str::from_utf8(chunk1).unwrap(),
+        std::str::from_utf8(chunk2).unwrap()
+    );
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .body(full_body.clone());
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_tcp_chunked","type":"message"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_tcpchunk1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-tcpchunk", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Build raw HTTP/1.1 chunked request manually.
+    // Each chunk: "<hex-length>\r\n<data>\r\n", terminated by "0\r\n\r\n".
+    let c1_hex = format!("{:x}", chunk1.len());
+    let c2_hex = format!("{:x}", chunk2.len());
+    let raw_request = format!(
+        "POST /anthropic/v1/messages HTTP/1.1\r\n\
+         Host: 127.0.0.1:{}\r\n\
+         Authorization: Bearer {}\r\n\
+         Content-Type: application/json\r\n\
+         Transfer-Encoding: chunked\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}\r\n{}\r\n\
+         {}\r\n{}\r\n\
+         0\r\n\
+         \r\n",
+        proxy_port,
+        token,
+        c1_hex,
+        std::str::from_utf8(chunk1).unwrap(),
+        c2_hex,
+        std::str::from_utf8(chunk2).unwrap(),
+    );
+
+    let mut tcp = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", proxy_port))
+        .await
+        .expect("Failed to connect to proxy");
+
+    tcp.write_all(raw_request.as_bytes()).await.unwrap();
+
+    // Read the response — wait up to 15 s for the proxy to reply.
+    let mut response_buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let mut buf = [0u8; 4096];
+            match tcp.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => response_buf.extend_from_slice(&buf[..n]),
+            }
+        }
+    })
+    .await
+    .expect("Timed out reading proxy response");
+
+    let response_str = String::from_utf8_lossy(&response_buf);
+    assert!(
+        response_str.starts_with("HTTP/1.1 200"),
+        "Expected HTTP 200, got: {}",
+        &response_str[..response_str.len().min(100)]
+    );
+    assert!(
+        response_str.contains("msg_tcp_chunked"),
+        "Response body must contain the mock's id"
+    );
+    ai_mock.assert_async().await;
+}
+
 /// Worker-first startup ordering: the worker binary starts and creates the
 /// JetStream stream before the proxy binary is launched.
 ///
