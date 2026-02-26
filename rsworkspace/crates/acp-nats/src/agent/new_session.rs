@@ -466,6 +466,27 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
+    #[tokio::test]
+    async fn new_session_publishes_session_ready_to_correct_subject() {
+        let (mock, bridge) = mock_bridge();
+        let session_id = SessionId::from("test-session-1");
+        set_json_response(
+            &mock,
+            "acp.agent.session.new",
+            &NewSessionResponse::new(session_id),
+        );
+
+        let _ = bridge.new_session(NewSessionRequest::new(".")).await;
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let published = mock.published_messages();
+        assert!(
+            published.contains(&"acp.test-session-1.agent.ext.session.ready".to_string()),
+            "expected publish to acp.test-session-1.agent.ext.session.ready, got: {:?}",
+            published
+        );
+    }
+
     struct FailsSerialize;
     impl serde::Serialize for FailsSerialize {
         fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {

@@ -2,6 +2,7 @@ mod authenticate;
 mod initialize;
 mod load_session;
 mod new_session;
+mod set_session_mode;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient};
@@ -58,12 +59,9 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
 
     async fn set_session_mode(
         &self,
-        _args: SetSessionModeRequest,
+        args: SetSessionModeRequest,
     ) -> Result<SetSessionModeResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+        set_session_mode::handle(self, args).await
     }
 
     async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
@@ -103,7 +101,6 @@ mod tests {
     use crate::config::Config;
     use agent_client_protocol::{
         Agent, CancelNotification, ExtNotification, ExtRequest, PromptRequest,
-        SetSessionModeRequest,
     };
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -127,12 +124,6 @@ mod tests {
 
         assert!(
             bridge
-                .set_session_mode(SetSessionModeRequest::new("s1", "m1"))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
                 .prompt(PromptRequest::new("s1", vec![]))
                 .await
                 .is_err()
@@ -152,7 +143,7 @@ mod tests {
         );
 
         let err = bridge
-            .set_session_mode(SetSessionModeRequest::new("s1", "m1"))
+            .prompt(PromptRequest::new("s1", vec![]))
             .await
             .unwrap_err();
         assert!(err.to_string().contains(msg));
