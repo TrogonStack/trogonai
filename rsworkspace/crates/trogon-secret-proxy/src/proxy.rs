@@ -161,20 +161,21 @@ async fn handle_request(
     let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
         .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
 
+    let status = StatusCode::from_u16(proxy_response.status)
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
     if let Some(err) = proxy_response.error {
         tracing::warn!(
             correlation_id = %correlation_id,
+            status = %status,
             error = %err,
             "Worker reported an error"
         );
         return Ok(Response::builder()
-            .status(StatusCode::BAD_GATEWAY)
+            .status(status)
             .body(Body::from(err))
             .unwrap());
     }
-
-    let status = StatusCode::from_u16(proxy_response.status)
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     let mut response_headers = HeaderMap::new();
     for (k, v) in &proxy_response.headers {
