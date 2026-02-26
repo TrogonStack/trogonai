@@ -4340,3 +4340,40 @@ async fn binary_max_deliver_exhausted_with_real_proxy_causes_504() {
         "All deliveries exhausted → no reply ever sent → proxy must return 504"
     );
 }
+
+/// The proxy binary must exit with a non-zero status code when the TCP port it
+/// needs to bind is already occupied by another process.
+///
+/// Flow: NATS connects fine, JetStream stream is created, then
+/// `TcpListener::bind` fails → `expect("Failed to bind TCP listener")` panics
+/// → process exits non-zero.
+#[tokio::test]
+async fn binary_proxy_port_in_use_exits_nonzero() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Occupy the port before the proxy starts.
+    let occupied_port = free_port();
+    let _held = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", occupied_port))
+        .await
+        .expect("Test setup: failed to pre-bind port");
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", occupied_port.to_string())
+        .env("RUST_LOG", "error")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    // The proxy must connect to NATS, create the JetStream stream, then fail
+    // to bind and exit.  Give it up to 15 s to complete that sequence.
+    let status = tokio::time::timeout(Duration::from_secs(15), child.wait())
+        .await
+        .expect("Proxy binary must exit within 15 s when port is already in use")
+        .unwrap();
+
+    assert!(
+        !status.success(),
+        "Proxy must exit non-zero when the TCP port is already occupied"
+    );
+}
