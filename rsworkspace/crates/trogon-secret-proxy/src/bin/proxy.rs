@@ -50,7 +50,7 @@ async fn main() {
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound(&prefix);
-    stream::ensure_stream(&jetstream, &outbound_subject)
+    stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
         .await
         .expect("Failed to ensure JetStream stream");
 
