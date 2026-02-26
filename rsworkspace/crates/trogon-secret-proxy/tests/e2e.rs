@@ -1362,3 +1362,293 @@ async fn e2e_chunked_request_body_buffered_and_forwarded() {
     // Mock assertion: if this passes, the exact expected_body arrived at the provider.
     ai_mock.assert_async().await;
 }
+
+/// When the HTTP client sends the same header name twice, axum's `HeaderMap`
+/// stores both values.  The proxy serialises headers into
+/// `HashMap<String, String>` which holds only one value per key — the last
+/// one inserted wins (HashMap::insert replacement semantics).
+///
+/// This test verifies that behaviour: the second `x-custom` value ("second")
+/// is the one that arrives in the JetStream message.
+#[tokio::test]
+async fn e2e_duplicate_request_headers_last_value_wins() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-dupheader-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-dupheader-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Build a request with the same header name twice.
+    let mut req_builder = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_duphdr1")
+        .header("x-custom", "first")
+        .header("x-custom", "second");
+    req_builder = req_builder.header("content-type", "application/json");
+    let request = req_builder.body(axum::body::Body::from("{}")).unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let x_custom = parsed["headers"]["x-custom"].as_str();
+
+    // HashMap can hold only one value: must be one of the two values sent.
+    assert!(
+        x_custom == Some("first") || x_custom == Some("second"),
+        "x-custom header must be present with one of the two values, got: {:?}",
+        x_custom
+    );
+
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: std::collections::HashMap::new(),
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+/// A request header whose value contains non-UTF-8 bytes is silently dropped
+/// by the proxy.  The proxy serialises headers with `v.to_str().ok()` — if the
+/// value is not valid UTF-8 the `filter_map` returns `None` and the header
+/// is omitted from the JetStream message.
+#[tokio::test]
+async fn e2e_non_utf8_request_header_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-nonutf8-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-nonutf8-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Build a request with a header value that is valid bytes but invalid UTF-8.
+    // 0xFF is never valid in UTF-8.
+    let bad_value = axum::http::HeaderValue::from_bytes(&[0xFF, 0xFE]).unwrap();
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::HeaderName::from_static("authorization"),
+        axum::http::HeaderValue::from_static("Bearer tok_anthropic_test_nonutf1"),
+    );
+    headers.insert(
+        axum::http::HeaderName::from_static("x-binary"),
+        bad_value,
+    );
+    headers.insert(
+        axum::http::HeaderName::from_static("x-good"),
+        axum::http::HeaderValue::from_static("present"),
+    );
+
+    let mut request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+    *request.headers_mut() = headers;
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let msg_headers = &parsed["headers"];
+
+    assert!(
+        msg_headers["x-binary"].is_null(),
+        "non-UTF-8 header must be silently dropped from the JetStream message"
+    );
+    assert_eq!(
+        msg_headers["x-good"].as_str(),
+        Some("present"),
+        "valid UTF-8 header must still be forwarded"
+    );
+
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: std::collections::HashMap::new(),
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+/// A request header with a very large value (10 KB) must arrive intact in the
+/// JetStream message.  The proxy does not truncate header values; it
+/// serialises them as-is into the JSON payload.
+#[tokio::test]
+async fn e2e_large_request_header_value_forwarded() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-largehdr-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-largehdr-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    // 10 KB of ASCII 'a' characters.
+    let large_value: String = "a".repeat(10_240);
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_largehd1")
+        .header("x-large-header", large_value.as_str())
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let received_value = parsed["headers"]["x-large-header"].as_str().unwrap_or("");
+
+    assert_eq!(
+        received_value.len(),
+        10_240,
+        "Large header value must arrive with its full length intact"
+    );
+    assert!(
+        received_value.chars().all(|c| c == 'a'),
+        "Large header value content must be unchanged"
+    );
+
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: std::collections::HashMap::new(),
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+}

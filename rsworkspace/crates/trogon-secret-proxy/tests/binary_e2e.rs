@@ -3051,3 +3051,265 @@ async fn binary_hop_by_hop_headers_stripped_before_reaching_provider() {
     assert_eq!(body["id"], "msg_hophop_ok");
     mock_correct.assert_async().await;
 }
+
+/// Three worker instances share the same durable consumer.
+/// Nine concurrent requests must all succeed — each worker handles its share.
+#[tokio::test]
+async fn binary_three_workers_handle_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_three_workers"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_w3test01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _w1 = spawn_worker(nats_port, "binary-workers-3w", token, "sk-ant-realkey");
+    let _w2 = spawn_worker(nats_port, "binary-workers-3w", token, "sk-ant-realkey");
+    let _w3 = spawn_worker(nats_port, "binary-workers-3w", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let handles: Vec<_> = (0..9)
+        .map(|_| {
+            let c = client.clone();
+            let url = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+            let tok = token.to_string();
+            tokio::spawn(async move {
+                c.post(url)
+                    .header("Authorization", format!("Bearer {}", tok))
+                    .body("{}")
+                    .timeout(Duration::from_secs(20))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    for result in join_all(handles).await {
+        let resp = result.unwrap();
+        assert_eq!(resp.status(), 200, "Expected 200 with 3 workers");
+    }
+}
+
+/// Three proxy instances all serve requests through a single worker.
+#[tokio::test]
+async fn binary_three_proxy_instances_all_serve_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_three_proxies"}"#);
+        })
+        .await;
+
+    let token = "tok_anthropic_prod_p3test01";
+    let port_a = free_port();
+    let port_b = free_port();
+    let port_c = free_port();
+
+    let _pa = spawn_proxy(nats_port, port_a, &mock_server.base_url());
+    let _pb = spawn_proxy(nats_port, port_b, &mock_server.base_url());
+    let _pc = spawn_proxy(nats_port, port_c, &mock_server.base_url());
+
+    wait_for_port(port_a, Duration::from_secs(15)).await;
+    wait_for_port(port_b, Duration::from_secs(15)).await;
+    wait_for_port(port_c, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-3p", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    for port in [port_a, port_b, port_c] {
+        let resp = client
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", port))
+            .header("Authorization", format!("Bearer {}", token))
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "Proxy on port {} must return 200", port);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["id"], "msg_three_proxies");
+    }
+}
+
+/// A 304 Not Modified response (no body) must be forwarded to the caller
+/// with status 304.
+#[tokio::test]
+async fn binary_304_not_modified_response_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET).path("/v1/models");
+            then.status(304).header("etag", r#""abc123""#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_304test1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-304", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}/anthropic/v1/models", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 304, "304 Not Modified must be forwarded");
+    ai_mock.assert_async().await;
+}
+
+/// URL-encoded query string characters (spaces, ampersands) must be forwarded
+/// to the AI provider without alteration.
+#[tokio::test]
+async fn binary_query_string_url_encoded_chars_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models")
+                .query_param("q", "hello world")
+                .query_param("filter", "a&b");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_urlenc"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_urlenc01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-urlenc", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models?q=hello%20world&filter=a%26b",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "URL-encoded query string must be forwarded");
+    ai_mock.assert_async().await;
+}
+
+/// Set-Cookie, Cache-Control and ETag response headers from the AI provider
+/// must all be forwarded to the caller unchanged.
+#[tokio::test]
+async fn binary_set_cookie_cache_etag_response_headers_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .header("set-cookie", "session=abc123; Path=/; HttpOnly")
+                .header("cache-control", "no-store")
+                .header("etag", r#""v1""#)
+                .body(r#"{"id":"msg_resp_headers"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_rhdrs01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-rhdrs", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    assert!(resp.headers().contains_key("set-cookie"),   "Set-Cookie must be forwarded");
+    assert!(resp.headers().contains_key("cache-control"), "Cache-Control must be forwarded");
+    assert!(resp.headers().contains_key("etag"),          "ETag must be forwarded");
+    ai_mock.assert_async().await;
+}
+
+/// A token with an all-numeric ID (`tok_anthropic_prod_12345`) is valid per
+/// the `[a-zA-Z0-9]+` rule and must resolve correctly end-to-end.
+#[tokio::test]
+async fn binary_token_with_numeric_id_works() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-numeric");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_numeric_id"}"#);
+        })
+        .await;
+
+    let token = "tok_anthropic_prod_12345";
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-numid", token, "sk-ant-numeric");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_numeric_id");
+    ai_mock.assert_async().await;
+}
