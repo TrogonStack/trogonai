@@ -1,6 +1,7 @@
 mod authenticate;
 mod cancel;
 mod ext_method;
+mod ext_notification;
 mod initialize;
 mod load_session;
 mod new_session;
@@ -81,21 +82,16 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         ext_method::handle(self, args).await
     }
 
-    async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
+        ext_notification::handle(self, args).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{Agent, ExtNotification, PromptRequest};
+    use agent_client_protocol::{Agent, PromptRequest};
     use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
@@ -107,10 +103,6 @@ mod tests {
         )
     }
 
-    fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
-        Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap())
-    }
-
     #[tokio::test]
     async fn stub_methods_return_not_implemented() {
         let bridge = mock_bridge();
@@ -119,12 +111,6 @@ mod tests {
         assert!(
             bridge
                 .prompt(PromptRequest::new("s1", vec![]))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .ext_notification(ExtNotification::new("ext", empty_raw_value()))
                 .await
                 .is_err()
         );
