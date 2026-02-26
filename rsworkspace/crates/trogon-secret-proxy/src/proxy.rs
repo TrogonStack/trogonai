@@ -81,7 +81,7 @@ async fn handle_request(
         "upgrade",
     ];
 
-    let headers: std::collections::HashMap<String, String> = req_headers
+    let headers: Vec<(String, String)> = req_headers
         .iter()
         .filter_map(|(k, v)| {
             let key = k.as_str();
@@ -164,7 +164,9 @@ async fn handle_request(
             k.parse::<axum::http::HeaderName>(),
             v.parse::<axum::http::HeaderValue>(),
         ) {
-            response_headers.insert(name, value);
+            // Use append (not insert) to preserve multiple values for the same
+            // header name — e.g. multiple Set-Cookie headers from the provider.
+            response_headers.append(name, value);
         }
     }
 
