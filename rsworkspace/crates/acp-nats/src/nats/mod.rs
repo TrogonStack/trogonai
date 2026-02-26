@@ -1,5 +1,6 @@
 mod extensions;
 mod subjects;
+pub(crate) mod token;
 
 pub use extensions::ExtSessionReady;
 pub use subjects::agent;

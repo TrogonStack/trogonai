@@ -23,6 +23,12 @@ pub mod agent {
         format!("{}.{}.agent.session.set_mode", prefix, session_id)
     }
 
+    /// Extension methods and notifications share subject `{prefix}.agent.ext.{method}`.
+    /// Backend distinguishes request (reply expected) vs notification (fire-and-forget) by reply address.
+    pub fn ext(prefix: &str, method: &str) -> String {
+        format!("{}.agent.ext.{}", prefix, method)
+    }
+
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
@@ -69,6 +75,11 @@ mod tests {
             agent::session_set_mode("acp", "s1"),
             "acp.s1.agent.session.set_mode"
         );
+    }
+
+    #[test]
+    fn ext_subject() {
+        assert_eq!(agent::ext("acp", "my_method"), "acp.agent.ext.my_method");
     }
 
     #[test]

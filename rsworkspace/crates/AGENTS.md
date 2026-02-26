@@ -1,5 +1,7 @@
 Prefer domain-specific value objects over primitives (e.g. `AcpPrefix` not `String`). Each type's factory must guarantee correctness at construction—invalid instances should be unrepresentable. Validate per-type, not per-aggregate: avoid validating unrelated fields together in a single constructor.
 
+When validating strings for NATS subjects or domain constraints, introduce a value object in its own file (e.g. `ext_method_name.rs`, `session_id.rs`) rather than a standalone `validate_*` function or adding it to `config.rs`. The value object's constructor performs validation; invalid instances are unrepresentable.
+
 You must use the `test-support` feature to share test helpers between crates.
 Prefer one trait per operation over a single trait with multiple operations.
 
