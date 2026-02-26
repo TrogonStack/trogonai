@@ -75,7 +75,7 @@ async fn e2e_token_is_exchanged_for_real_key() {
 
     // ── 5. Ensure JetStream stream ───────────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure stream");
 
@@ -108,7 +108,7 @@ async fn e2e_token_is_exchanged_for_real_key() {
         .unwrap();
 
     tokio::spawn(async move {
-        worker::run(jetstream, nats, vault, http_client, "e2e-test-workers")
+        worker::run(jetstream, nats, vault, http_client, "e2e-test-workers", &stream::stream_name("trogon"))
             .await
             .expect("Worker error");
     });
@@ -172,7 +172,7 @@ async fn e2e_unknown_token_returns_error() {
     let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -189,7 +189,7 @@ async fn e2e_unknown_token_returns_error() {
 
     let http_client = reqwest::Client::new();
     tokio::spawn(async move {
-        worker::run(jetstream, nats, vault, http_client, "e2e-unknown-workers").await
+        worker::run(jetstream, nats, vault, http_client, "e2e-unknown-workers", &stream::stream_name("trogon")).await
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -227,7 +227,7 @@ async fn e2e_proxy_timeout_returns_504() {
     let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -293,7 +293,7 @@ async fn e2e_concurrent_requests_all_succeed() {
     let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -310,7 +310,7 @@ async fn e2e_concurrent_requests_all_succeed() {
 
     let http_client = reqwest::Client::new();
     tokio::spawn(async move {
-        worker::run(jetstream, nats, vault, http_client, "e2e-concurrent-workers")
+        worker::run(jetstream, nats, vault, http_client, "e2e-concurrent-workers", &stream::stream_name("trogon"))
             .await
             .unwrap()
     });
@@ -376,7 +376,7 @@ async fn e2e_jetstream_message_processed_after_worker_starts_late() {
     let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -419,7 +419,7 @@ async fn e2e_jetstream_message_processed_after_worker_starts_late() {
         .build()
         .unwrap();
     tokio::spawn(async move {
-        worker::run(jetstream, nats, vault, http_client, "e2e-durable-workers")
+        worker::run(jetstream, nats, vault, http_client, "e2e-durable-workers", &stream::stream_name("trogon"))
             .await
             .expect("Worker error");
     });
@@ -460,7 +460,7 @@ async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
     let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, &outbound_subject).await.unwrap();
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject).await.unwrap();
 
     // Inject garbage bytes directly into the stream — bypasses the proxy.
     jetstream
@@ -486,7 +486,7 @@ async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
         .build()
         .unwrap();
     tokio::spawn(async move {
-        worker::run(jetstream, nats, vault, http_client, "e2e-nack-workers")
+        worker::run(jetstream, nats, vault, http_client, "e2e-nack-workers", &stream::stream_name("trogon"))
             .await
             .expect("Worker error");
     });
@@ -528,12 +528,12 @@ async fn e2e_ensure_stream_is_idempotent() {
     let outbound_subject = subjects::outbound("trogon");
 
     // First call — creates the stream.
-    stream::ensure_stream(&jetstream, &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("First ensure_stream call failed");
 
     // Second call — stream already exists, must succeed without error.
-    stream::ensure_stream(&jetstream, &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("Second ensure_stream call failed (not idempotent)");
 }
