@@ -4138,6 +4138,7 @@ dependencies = [
  "serde_json",
  "testcontainers-modules",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
