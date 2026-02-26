@@ -47,12 +47,22 @@ async fn handle_request(
     Path((provider, path)): Path<(String, String)>,
     req: Request,
 ) -> Result<Response<Body>, ProxyError> {
+    // An empty path (e.g. from `GET /anthropic/`) has no meaningful endpoint to
+    // forward to.  Reject immediately with 400 rather than publishing to
+    // JetStream and burning a worker slot on a request that will always fail.
+    if path.is_empty() {
+        return Err(ProxyError::EmptyPath);
+    }
+
     let base: String = match &state.base_url_override {
         Some(override_url) => override_url.clone(),
         None => provider::base_url(&provider)
             .ok_or_else(|| ProxyError::UnknownProvider(provider.clone()))?
             .to_string(),
     };
+    // Strip any trailing slash so `format!("{}/{}", base, path)` never produces
+    // a double slash regardless of how base_url_override is configured.
+    let base = base.trim_end_matches('/');
 
     let query = req
         .uri()
@@ -115,6 +125,12 @@ async fn handle_request(
 
     // Publish OutboundHttpRequest to JetStream, injecting the current trace context
     // into NATS headers so the worker can continue the distributed trace.
+    //
+    // `publish_with_headers` returns a `PubAckFuture` that must be awaited to
+    // confirm the JetStream server has durably stored the message in the stream.
+    // Without this second `.await` the durability guarantee of JetStream is lost:
+    // the message may be silently dropped if no stream covers the subject, and
+    // the proxy would then wait forever for a worker reply that will never come.
     let payload = serde_json::to_vec(&message)
         .map_err(|e| ProxyError::Serialize(e.to_string()))?;
 
@@ -123,6 +139,8 @@ async fn handle_request(
     state
         .jetstream
         .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
+        .await
+        .map_err(|e| ProxyError::NatsPublish(e.to_string()))?
         .await
         .map_err(|e| ProxyError::NatsPublish(e.to_string()))?;
 
@@ -178,10 +196,11 @@ async fn handle_request(
     Ok(resp.body(Body::from(proxy_response.body)).unwrap())
 }
 
-/// Errors the proxy handler can produce (converted to HTTP 5xx responses).
+/// Errors the proxy handler can produce (converted to HTTP 4xx/5xx responses).
 #[derive(Debug)]
 pub enum ProxyError {
     UnknownProvider(String),
+    EmptyPath,
     ReadBody(String),
     Serialize(String),
     NatsSubscribe(String),
@@ -195,6 +214,7 @@ impl std::fmt::Display for ProxyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownProvider(p) => write!(f, "Unknown AI provider: {}", p),
+            Self::EmptyPath => write!(f, "Request path must not be empty"),
             Self::ReadBody(e) => write!(f, "Failed to read request body: {}", e),
             Self::Serialize(e) => write!(f, "Failed to serialize message: {}", e),
             Self::NatsSubscribe(e) => write!(f, "Failed to subscribe to NATS subject: {}", e),
@@ -214,6 +234,7 @@ impl axum::response::IntoResponse for ProxyError {
     fn into_response(self) -> Response {
         let (status, body) = match &self {
             Self::UnknownProvider(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
+            Self::EmptyPath => (StatusCode::BAD_REQUEST, self.to_string()),
             Self::Timeout { .. } => (StatusCode::GATEWAY_TIMEOUT, self.to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
@@ -236,6 +257,12 @@ mod tests {
     fn unknown_provider_maps_to_502() {
         let resp = ProxyError::UnknownProvider("fakeai".to_string()).into_response();
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn empty_path_maps_to_400() {
+        let resp = ProxyError::EmptyPath.into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
