@@ -764,3 +764,94 @@ async fn e2e_invalid_response_headers_silently_dropped() {
     // Invalid headers must be silently dropped — not panicking, not forwarded.
     assert_eq!(resp.headers().get("x-bad-value"), None);
 }
+
+/// When the worker returns an out-of-range HTTP status code (e.g. 1000),
+/// `StatusCode::from_u16` fails and the proxy falls back to 500
+/// Internal Server Error.
+///
+/// This exercises the `unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)` branch
+/// in proxy.rs where the worker's status field is converted.
+#[tokio::test]
+async fn e2e_worker_invalid_status_code_falls_back_to_500() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Register an inline worker that will reply with status 1000 (out of range).
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-inv-status-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-inv-status-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_invsts1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    // Pull the JetStream message and reply with status 1000 — StatusCode::from_u16
+    // rejects values > 999, triggering the unwrap_or(INTERNAL_SERVER_ERROR) fallback.
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    let reply = OutboundHttpResponse {
+        status: 1000,
+        headers: std::collections::HashMap::new(),
+        body: b"bad status".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "Out-of-range status code must fall back to 500"
+    );
+}
