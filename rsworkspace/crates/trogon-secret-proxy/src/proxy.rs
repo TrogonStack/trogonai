@@ -67,12 +67,30 @@ async fn handle_request(
         .await
         .map_err(|e| ProxyError::ReadBody(e.to_string()))?;
 
+    // Hop-by-hop headers must not be forwarded to the upstream AI provider.
+    // RFC 7230 §6.1 — these headers are meaningful only for a single transport
+    // hop and must be stripped by any intermediary (proxy).
+    const HOP_BY_HOP: &[&str] = &[
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    ];
+
     let headers: std::collections::HashMap<String, String> = req_headers
         .iter()
         .filter_map(|(k, v)| {
+            let key = k.as_str();
+            if HOP_BY_HOP.contains(&key) {
+                return None;
+            }
             v.to_str()
                 .ok()
-                .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
+                .map(|v_str| (key.to_string(), v_str.to_string()))
         })
         .collect();
 
