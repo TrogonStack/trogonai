@@ -2485,3 +2485,169 @@ async fn binary_error_response_body_describes_the_error() {
         body
     );
 }
+
+/// Gap 1 — TRACE HTTP method passes through end-to-end.
+///
+/// TRACE is the only standard HTTP method not covered by previous tests.
+/// The proxy must forward it to the AI provider and return the response.
+#[tokio::test]
+async fn binary_trace_method_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::TRACE).path("/v1/messages");
+            then.status(200).body("traced");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_trace01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-trace", token, "sk-ant-trace-key");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .request(
+            reqwest::Method::TRACE,
+            format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port),
+        )
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .expect("TRACE request to proxy failed");
+
+    assert_eq!(resp.status(), 200, "TRACE must be forwarded and return 200");
+    assert_eq!(resp.text().await.unwrap(), "traced");
+    ai_mock.assert_async().await;
+}
+
+/// Gap 2 — malformed `tok_` token (invalid id characters) is rejected with 502.
+///
+/// A token that starts with `tok_` but contains an illegal character in the id
+/// segment (e.g. a hyphen) fails `ApiKeyToken::new()` validation in the worker
+/// with `TokenError::InvalidIdCharacter`.  The proxy surfaces the "Invalid proxy
+/// token" error as a 502.
+///
+/// Previously this `ApiKeyToken::new` error path was only covered by unit tests.
+#[tokio::test]
+async fn binary_malformed_tok_token_format_returns_502_with_error_body() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-badfmt",
+        "tok_anthropic_prod_valid01",
+        "sk-ant-realkey",
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Hyphen in the id segment violates [a-zA-Z0-9]+ — ApiKeyToken::new returns Err.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_prod_abc-def")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        502,
+        "Malformed tok_ token must be rejected with 502"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("Invalid proxy token"),
+        "502 body must mention 'Invalid proxy token', got: {:?}",
+        body
+    );
+}
+
+/// Gap 3 — invalid `VAULT_TOKEN_*` env var is skipped; worker still handles
+/// requests for valid tokens.
+///
+/// `bin/worker.rs` logs a warning and skips any `VAULT_TOKEN_*` whose key fails
+/// `ApiKeyToken::new()` validation, then continues seeding the rest.
+/// This test verifies that a worker started with one invalid and one valid
+/// `VAULT_TOKEN_*` env var correctly resolves the valid token and rejects the
+/// malformed one.
+#[tokio::test]
+async fn binary_invalid_vault_env_var_skipped_valid_token_still_works() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-good-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_goodkey"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let valid_token = "tok_anthropic_prod_good001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Start worker with:
+    //   - one INVALID VAULT_TOKEN_* env var (hyphen in key name → bad ApiKeyToken)
+    //   - one VALID VAULT_TOKEN_* env var
+    // The worker must skip the invalid one and seed the valid one.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-invenv")
+        // Invalid: hyphen in the token segment — ApiKeyToken::new returns Err.
+        .env("VAULT_TOKEN_tok_anthropic_prod_bad-key", "sk-ant-bad")
+        // Valid: correct format.
+        .env(
+            format!("VAULT_TOKEN_{}", valid_token),
+            "sk-ant-good-key",
+        )
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The valid token must resolve and reach the AI provider.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", valid_token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Valid token must still resolve after invalid VAULT_TOKEN_* env var is skipped"
+    );
+    ai_mock.assert_async().await;
+}
