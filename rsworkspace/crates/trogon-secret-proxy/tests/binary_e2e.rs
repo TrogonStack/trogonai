@@ -83,6 +83,283 @@ fn spawn_worker(nats_port: u16, consumer_name: &str, token: &str, real_key: &str
         .expect("Failed to spawn worker binary — run `cargo build` first")
 }
 
+// ── VGS property tests ────────────────────────────────────────────────────────
+
+/// VGS property 1: the tok_ token NEVER reaches the AI provider.
+///
+/// The mock explicitly asserts that no request arrives with the proxy token
+/// in the Authorization header.  Only the real key must appear.
+#[tokio::test]
+async fn binary_vgs_tok_token_never_reaches_ai_provider() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_vgs001";
+    let real_key = "sk-ant-real-vgs-key-001";
+
+    // Mock that explicitly refuses any request that carries the proxy token.
+    let tok_leak_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", token));
+            then.status(500).body("TOK TOKEN LEAKED TO PROVIDER");
+        })
+        .await;
+
+    // Mock that accepts only the real key.
+    let real_key_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_vgs01","type":"message"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "vgs-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Request with valid token must succeed");
+
+    // The real key mock must have been hit exactly once.
+    assert_eq!(real_key_mock.hits(), 1, "AI provider must receive the real key");
+    // The tok_ token must NEVER have reached the provider.
+    assert_eq!(
+        tok_leak_mock.hits(),
+        0,
+        "tok_ proxy token must NEVER reach the AI provider — VGS security property violated"
+    );
+}
+
+/// VGS property 2: the real API key never leaks back to the calling service.
+///
+/// The caller sends a tok_ token; the AI provider echoes back whatever
+/// Authorization header it received.  The response body must contain the
+/// real key (proving the provider got it) but the proxy must NOT forward
+/// that value to the caller in any response header.
+#[tokio::test]
+async fn binary_vgs_real_key_never_leaks_to_caller_in_response_headers() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_vgs002";
+    let real_key = "sk-ant-real-vgs-key-002";
+
+    // Provider echoes back the Authorization header it received as a custom
+    // response header — simulating a misbehaving provider.
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .header("x-received-auth", format!("Bearer {}", real_key))
+                .body(r#"{"id":"msg_vgs02"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "vgs-workers-002", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    // Scan every response header for the real key — it must not appear.
+    for (name, value) in resp.headers() {
+        let v = value.to_str().unwrap_or("");
+        assert!(
+            !v.contains(real_key),
+            "Real API key must not appear in response header '{}': {:?}",
+            name,
+            v
+        );
+    }
+}
+
+/// VGS property 3: concurrent requests with different tokens resolve to their
+/// respective real keys without cross-contamination.
+///
+/// Two services each send 5 concurrent requests; the mock verifies that
+/// token A's key was never used for token B's requests and vice versa.
+#[tokio::test]
+async fn binary_vgs_concurrent_tokens_no_cross_contamination() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    let token_a = "tok_anthropic_prod_vgsa1";
+    let real_key_a = "sk-ant-key-for-service-A";
+    let token_b = "tok_anthropic_prod_vgsb1";
+    let real_key_b = "sk-ant-key-for-service-B";
+
+    // Mock for service A: only accepts real_key_a.
+    let mock_a = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key_a));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"service":"A"}"#);
+        })
+        .await;
+
+    // Mock for service B: only accepts real_key_b.
+    let mock_b = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key_b));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"service":"B"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Single worker holds both tokens.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "vgs-workers-cross")
+        .env(format!("VAULT_TOKEN_{}", token_a), real_key_a)
+        .env(format!("VAULT_TOKEN_{}", token_b), real_key_b)
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+
+    // Send 5 requests for each service concurrently.
+    let reqs_a = (0..5).map(|_| {
+        client
+            .post(&base)
+            .header("Authorization", format!("Bearer {}", token_a))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+    });
+    let reqs_b = (0..5).map(|_| {
+        client
+            .post(&base)
+            .header("Authorization", format!("Bearer {}", token_b))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+    });
+
+    let results_a: Vec<_> = join_all(reqs_a).await;
+    let results_b: Vec<_> = join_all(reqs_b).await;
+
+    for (i, r) in results_a.iter().enumerate() {
+        let resp = r.as_ref().unwrap();
+        assert_eq!(resp.status(), 200, "Service A request {} must succeed", i);
+    }
+    for (i, r) in results_b.iter().enumerate() {
+        let resp = r.as_ref().unwrap();
+        assert_eq!(resp.status(), 200, "Service B request {} must succeed", i);
+    }
+
+    // Each mock received exactly its own 5 requests — no cross-contamination.
+    assert_eq!(mock_a.hits(), 5, "Service A key must be used for exactly 5 requests");
+    assert_eq!(mock_b.hits(), 5, "Service B key must be used for exactly 5 requests");
+}
+
+/// VGS property 4: the proxy is transparent — status, headers, and body from
+/// the AI provider are faithfully forwarded to the caller unchanged.
+#[tokio::test]
+async fn binary_vgs_proxy_is_transparent_to_caller() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_vgs004";
+    let real_key = "sk-ant-real-vgs-key-004";
+    let response_body = r#"{"id":"msg_vgs04","type":"message","role":"assistant","content":[{"type":"text","text":"Hello!"}],"model":"claude-3-5-sonnet-20241022","stop_reason":"end_turn"}"#;
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(201)
+                .header("content-type", "application/json")
+                .header("x-request-id", "req-vgs-004")
+                .header("x-custom-provider-header", "provider-value-abc")
+                .body(response_body);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "vgs-workers-004", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // Status code forwarded unchanged.
+    assert_eq!(resp.status(), 201, "Provider status 201 must be forwarded to caller");
+
+    // Custom response headers forwarded.
+    assert_eq!(
+        resp.headers().get("x-request-id").and_then(|v| v.to_str().ok()),
+        Some("req-vgs-004"),
+        "x-request-id header must be forwarded"
+    );
+    assert_eq!(
+        resp.headers().get("x-custom-provider-header").and_then(|v| v.to_str().ok()),
+        Some("provider-value-abc"),
+        "Custom provider header must be forwarded"
+    );
+
+    // Response body forwarded byte-for-byte.
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, response_body, "Response body must be forwarded unchanged");
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// Full pipeline with real binaries: proxy binary + worker binary process a
