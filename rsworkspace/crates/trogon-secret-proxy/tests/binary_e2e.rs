@@ -3923,7 +3923,11 @@ async fn binary_worker_exits_on_sigterm() {
 /// `serde_json` serialises `Vec<u8>` as a JSON array of numbers
 /// (`[120, 120, …]`); each byte averages ~4 chars when encoded, so a 300 KB
 /// response body serialises to ~1.2 MB of JSON — exceeding the 1 MiB limit
-/// and causing `nats.publish()` to fail without any custom server configuration.
+/// and causing `nats.publish()` to fail.
+///
+/// After the bug-fix the worker catches this error and immediately publishes a
+/// compact `OutboundHttpResponse { error: Some("...") }` so the proxy returns
+/// 502 Bad Gateway with a descriptive message instead of waiting for a timeout.
 #[tokio::test]
 async fn binary_large_response_body_exceeds_nats_max_payload_causes_504() {
     let (_nats_container, nats_port) = start_nats().await;
@@ -3952,7 +3956,6 @@ async fn binary_large_response_body_exceeds_nats_max_payload_causes_504() {
     let _worker = spawn_worker(nats_port, "binary-workers-lge", token, "sk-ant-key-lge");
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let start = std::time::Instant::now();
     let resp = reqwest::Client::new()
         .post(format!(
             "http://127.0.0.1:{}/anthropic/v1/messages",
@@ -3965,24 +3968,25 @@ async fn binary_large_response_body_exceeds_nats_max_payload_causes_504() {
         .send()
         .await
         .unwrap();
-    let elapsed = start.elapsed();
 
-    // Worker called the AI provider but could not publish the reply (payload
-    // too large for NATS) → proxy times out and returns 504.
+    // Worker called the AI provider but could not publish the full reply
+    // (payload > 1 MiB NATS limit).  The worker now publishes a compact error
+    // response immediately, so the proxy returns 502 Bad Gateway with a
+    // descriptive body — not an opaque 504 timeout.
     assert_eq!(
         resp.status(),
-        504,
-        "NATS publish failure (payload > max_payload) must cause 504 timeout, got {}",
+        502,
+        "NATS publish failure (payload > max_payload) must cause 502 with error body, got {}",
         resp.status()
     );
+    let body = resp.text().await.unwrap();
     assert!(
-        elapsed < Duration::from_secs(8),
-        "Should time out within 5 s (+ margin), took {:?}",
-        elapsed
+        body.contains("Worker failed to publish reply"),
+        "Response body must describe the real cause, got: {:?}",
+        body
     );
-    // The AI provider was called exactly once.  Because the worker still calls
-    // msg.ack() even when nats.publish() fails, JetStream does NOT redeliver
-    // the message, so there is no duplicate upstream call.
+    // The AI provider was called exactly once.  The worker acks the JetStream
+    // message after publishing the error response, so there is no redelivery.
     assert_eq!(
         ai_mock.hits(),
         1,
@@ -4075,27 +4079,33 @@ async fn binary_slow_upstream_proxy_times_out_before_upstream_responds() {
 
 /// When the upstream AI provider returns a 307 Temporary Redirect, reqwest
 /// inside the worker automatically follows it (default redirect policy:
-/// `Policy::limited(10)`).  The caller receives the final 200 response — the
-/// 307 is never visible at the proxy layer.
+/// VGS security requirement: the worker must NOT follow HTTP redirects.
 ///
-/// This demonstrates that redirect-based API migrations are transparent to
-/// service callers, but also that the worker cannot detect or block them.
+/// If the worker followed a 3xx redirect, the real API key (substituted from
+/// the vault) would be forwarded in the Authorization header to an uncontrolled
+/// redirect target — violating the core VGS guarantee that secrets never leave
+/// the controlled path.
+///
+/// After the fix (`redirect::Policy::none()` on the reqwest client) the worker
+/// returns the 307 as-is to the proxy, which forwards it to the caller.
+/// The caller receives the 307 with the Location header intact and decides
+/// whether to follow the redirect — without ever exposing the real key.
 #[tokio::test]
-async fn binary_provider_307_redirect_followed_transparently() {
+async fn binary_provider_307_redirect_not_followed_returns_307_to_caller() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
 
-    // Primary endpoint returns a 307 redirect to the v2 endpoint.
-    let _redirect_mock = mock_server
+    // Primary endpoint returns a 307 redirect.
+    let redirect_mock = mock_server
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST).path("/v1/messages");
             then.status(307).header("location", "/v2/messages");
         })
         .await;
 
-    // v2 endpoint returns the final success response.
-    let final_mock = mock_server
+    // v2 endpoint must NOT be called — the worker stops at the 307.
+    let v2_mock = mock_server
         .mock_async(|when, then| {
             when.path("/v2/messages");
             then.status(200)
@@ -4113,7 +4123,11 @@ async fn binary_provider_307_redirect_followed_transparently() {
     let _worker = spawn_worker(nats_port, "binary-workers-redir307", token, "sk-ant-redir-key");
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let resp = reqwest::Client::new()
+    // Use a non-redirecting client so we observe exactly what the proxy returns.
+    let resp = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
         .post(format!(
             "http://127.0.0.1:{}/anthropic/v1/messages",
             proxy_port
@@ -4126,20 +4140,21 @@ async fn binary_provider_307_redirect_followed_transparently() {
         .await
         .unwrap();
 
-    // Caller sees the final 200 — the intermediate 307 is transparent.
+    // The proxy must forward the 307 exactly as received — the real key was
+    // never sent to the redirect target.
     assert_eq!(
         resp.status(),
-        200,
-        "Worker's reqwest must follow 307 transparently; caller must see the final 200"
+        307,
+        "Worker must not follow redirects; proxy must return 307 to the caller"
     );
-    let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(
-        body["id"], "msg_after_redirect",
-        "Body must come from the redirect target, not the redirect response"
+    assert!(
+        resp.headers().contains_key("location"),
+        "Location header must be forwarded to the caller"
     );
 
-    // The final v2 endpoint must have been called.
-    final_mock.assert_async().await;
+    // The v1 endpoint was hit once; the v2 redirect target was never called.
+    assert_eq!(redirect_mock.hits(), 1, "v1 endpoint must be called exactly once");
+    assert_eq!(v2_mock.hits(), 0, "v2 redirect target must never be called");
 }
 
 // ── Gap 12: HTTP 418 is forwarded as-is ──────────────────────────────────────
