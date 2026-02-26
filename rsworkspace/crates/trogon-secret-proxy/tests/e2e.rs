@@ -2590,7 +2590,7 @@ async fn e2e_worker_reply_to_wrong_subject_causes_proxy_timeout() {
         .unwrap()
         .unwrap();
 
-    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let _parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
 
     // Deliberately publish to a DIFFERENT subject than the proxy's reply_to.
     let wrong_subject = "trogon.proxy.reply.this-is-the-wrong-subject-xyz";
@@ -2946,4 +2946,110 @@ async fn e2e_invalid_url_in_outbound_request_returns_worker_error() {
         response.error.is_some(),
         "Worker must report an error for an invalid URL"
     );
+}
+
+// ── NATS-level Reply-To header injected by proxy ──────────────────────────────
+
+/// The proxy injects `Reply-To` as a **NATS-level header** on the JetStream
+/// message (`proxy.rs` line 138: `nats_headers.insert("Reply-To", ...)`).
+///
+/// This allows consumers outside the standard worker (monitoring, replay
+/// tools) to locate the reply channel without parsing the JSON payload.
+/// The value must match the `reply_to` field in the payload exactly.
+#[tokio::test]
+async fn e2e_nats_reply_to_header_injected_in_jetstream_message() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // Intercept consumer — reads the raw JetStream message and checks NATS headers.
+    let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-nats-hdr-consumer",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-nats-hdr-consumer".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_natshdr01")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message")
+        .unwrap()
+        .unwrap();
+
+    // ── Assert NATS-level headers (not the JSON payload headers) ──────────────
+    let nats_headers = msg
+        .headers
+        .as_ref()
+        .expect("JetStream message must carry NATS-level headers");
+
+    let reply_to_nats = nats_headers
+        .get("Reply-To")
+        .expect("Reply-To NATS header must be injected by the proxy (proxy.rs:138)");
+
+    // Must match the reply_to field inside the JSON payload.
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to_payload = parsed["reply_to"].as_str().unwrap();
+
+    assert_eq!(
+        reply_to_nats.as_str(),
+        reply_to_payload,
+        "Reply-To NATS header must equal the reply_to field in the JSON payload"
+    );
+    assert!(
+        reply_to_payload.starts_with("trogon.proxy.reply."),
+        "reply_to must be a trogon reply subject, got: {}",
+        reply_to_payload
+    );
+
+    // Reply so the proxy handle completes cleanly.
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to_payload.to_string(), serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
 }

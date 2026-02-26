@@ -4246,3 +4246,97 @@ async fn binary_utf8_multibyte_response_body_preserved() {
 
     ai_mock.assert_async().await;
 }
+
+// ── max_deliver exhaustion with real proxy binary ─────────────────────────────
+
+/// When every worker that receives a JetStream message crashes (drops without
+/// ACKing), JetStream exhausts `max_deliver` retries and stops redelivering.
+/// Since no worker ever publishes a reply, the proxy times out → 504.
+///
+/// This is the binary-level counterpart of `e2e_max_deliver_exhausted_proxy_returns_504`.
+/// Instead of an in-process proxy and router, it uses the real compiled proxy
+/// binary, demonstrating that the behaviour holds in production.
+///
+/// A "saboteur" consumer created from the test pulls each of the 3 deliveries
+/// and drops without ACKing.  After the 3rd expiry the proxy worker-timeout
+/// fires and the caller receives 504.
+#[tokio::test]
+async fn binary_max_deliver_exhausted_with_real_proxy_causes_504() {
+    use async_nats::jetstream::consumer::{pull, AckPolicy};
+    use futures_util::StreamExt as _;
+    use trogon_nats::{NatsAuth, NatsConfig, connect};
+    use trogon_secret_proxy::stream;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let proxy_port = free_port();
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Proxy with an 8 s timeout — long enough for 3 × ack_wait(1 s) to expire.
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 8);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Connect to NATS from the test to set up the saboteur consumer.
+    // By the time wait_for_port returns the proxy has already called ensure_stream,
+    // so the stream is guaranteed to exist.
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = std::sync::Arc::new(async_nats::jetstream::new(nats));
+
+    let consumer_name = "binary-maxdeliver-saboteur";
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            consumer_name,
+            pull::Config {
+                durable_name: Some(consumer_name.to_string()),
+                ack_policy: AckPolicy::Explicit,
+                // Short ack_wait so the 3 redeliveries happen within the 8 s proxy timeout.
+                ack_wait: Duration::from_secs(1),
+                max_deliver: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    // Send request to the real proxy binary — proxy publishes to JetStream and waits.
+    let proxy_port_clone = proxy_port;
+    let req_handle = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port_clone
+            ))
+            .header("Authorization", "Bearer tok_anthropic_prod_maxdlvbin1")
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // Saboteur: pull each delivery and drop without ACKing (simulates crash).
+    // After 3 drops + ack_wait expiry the message is exhausted.
+    for _ in 0..3 {
+        match tokio::time::timeout(Duration::from_secs(5), messages.next()).await {
+            Ok(Some(Ok(msg))) => drop(msg), // deliberately no ack
+            _ => break,
+        }
+    }
+
+    let resp = req_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        504,
+        "All deliveries exhausted → no reply ever sent → proxy must return 504"
+    );
+}
