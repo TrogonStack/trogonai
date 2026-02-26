@@ -26,7 +26,7 @@ use trogon_secret_proxy::{
 };
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
-// ── Shared helper ─────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     let container: ContainerAsync<Nats> = Nats::default()
@@ -36,6 +36,36 @@ async fn start_nats() -> (ContainerAsync<Nats>, u16) {
         .expect("Failed to start NATS container — is Docker running?");
     let port = container.get_host_port_ipv4(4222).await.unwrap();
     (container, port)
+}
+
+/// Find the first value for a header `name` in the serialised
+/// `Vec<(String, String)>` JSON payload (`[["name","value"],...]`).
+fn find_header<'a>(headers_json: &'a serde_json::Value, name: &str) -> Option<&'a str> {
+    headers_json.as_array()?.iter().find_map(|pair| {
+        let arr = pair.as_array()?;
+        if arr.first()?.as_str()? == name {
+            arr.get(1)?.as_str()
+        } else {
+            None
+        }
+    })
+}
+
+/// Return all values for a header `name` in the serialised headers JSON.
+fn all_header_values(headers_json: &serde_json::Value, name: &str) -> Vec<String> {
+    headers_json
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|pair| {
+            let arr = pair.as_array()?;
+            if arr.first()?.as_str()? == name {
+                Some(arr.get(1)?.as_str()?.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -738,11 +768,12 @@ async fn e2e_invalid_response_headers_silently_dropped() {
     let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
     let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
 
-    let mut resp_headers = std::collections::HashMap::new();
-    resp_headers.insert("content-type".to_string(), "application/json".to_string()); // valid
-    resp_headers.insert("x-custom-valid".to_string(), "hello".to_string()); // valid
-    resp_headers.insert("invalid header name!".to_string(), "value".to_string()); // invalid name
-    resp_headers.insert("x-bad-value".to_string(), "\x00control".to_string()); // invalid value
+    let resp_headers = vec![
+        ("content-type".to_string(), "application/json".to_string()),  // valid
+        ("x-custom-valid".to_string(), "hello".to_string()),           // valid
+        ("invalid header name!".to_string(), "value".to_string()),     // invalid name
+        ("x-bad-value".to_string(), "\x00control".to_string()),        // invalid value
+    ];
 
     let reply = OutboundHttpResponse {
         status: 200,
@@ -836,7 +867,7 @@ async fn e2e_worker_error_field_with_status_200_returns_502() {
     // Reply with status 200 BUT error field set — error must win.
     let reply = OutboundHttpResponse {
         status: 200,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"this body should not reach the caller".to_vec(),
         error: Some("upstream exploded despite 200".to_string()),
     };
@@ -1057,7 +1088,7 @@ async fn e2e_worker_invalid_status_code_falls_back_to_500() {
 
     let reply = OutboundHttpResponse {
         status: 1000,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"bad status".to_vec(),
         error: None,
     };
@@ -1235,16 +1266,16 @@ async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
 
     // Hop-by-hop headers must be absent from the JetStream message.
     assert!(
-        headers_in_message["connection"].is_null(),
+        find_header(headers_in_message, "connection").is_none(),
         "connection header must be stripped from the JetStream message"
     );
     assert!(
-        headers_in_message["keep-alive"].is_null(),
+        find_header(headers_in_message, "keep-alive").is_none(),
         "keep-alive header must be stripped from the JetStream message"
     );
     // End-to-end custom headers must still be forwarded.
     assert_eq!(
-        headers_in_message["x-end-to-end"].as_str(),
+        find_header(headers_in_message, "x-end-to-end"),
         Some("must-survive"),
         "end-to-end custom header must be present in the JetStream message"
     );
@@ -1253,7 +1284,7 @@ async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
     let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
     let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
         status: 200,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"ok".to_vec(),
         error: None,
     };
@@ -1365,13 +1396,10 @@ async fn e2e_chunked_request_body_buffered_and_forwarded() {
 
 /// When the HTTP client sends the same header name twice, axum's `HeaderMap`
 /// stores both values.  The proxy serialises headers into
-/// `HashMap<String, String>` which holds only one value per key — the last
-/// one inserted wins (HashMap::insert replacement semantics).
-///
-/// This test verifies that behaviour: the second `x-custom` value ("second")
-/// is the one that arrives in the JetStream message.
+/// `Vec<(String, String)>` which preserves all values — both `x-custom`
+/// entries appear in the JetStream message in the order they were sent.
 #[tokio::test]
-async fn e2e_duplicate_request_headers_last_value_wins() {
+async fn e2e_duplicate_request_headers_both_values_forwarded() {
     use futures_util::StreamExt as _;
     use tower::ServiceExt as _;
 
@@ -1430,19 +1458,24 @@ async fn e2e_duplicate_request_headers_last_value_wins() {
         .unwrap();
 
     let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-    let x_custom = parsed["headers"]["x-custom"].as_str();
+    let x_custom_values = all_header_values(&parsed["headers"], "x-custom");
 
-    // HashMap can hold only one value: must be one of the two values sent.
+    // Vec preserves all values — both "first" and "second" must be present.
     assert!(
-        x_custom == Some("first") || x_custom == Some("second"),
-        "x-custom header must be present with one of the two values, got: {:?}",
-        x_custom
+        x_custom_values.contains(&"first".to_string()),
+        "x-custom: first must be forwarded, got: {:?}",
+        x_custom_values
+    );
+    assert!(
+        x_custom_values.contains(&"second".to_string()),
+        "x-custom: second must be forwarded, got: {:?}",
+        x_custom_values
     );
 
     let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
     let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
         status: 200,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"ok".to_vec(),
         error: None,
     };
@@ -1536,11 +1569,11 @@ async fn e2e_non_utf8_request_header_silently_dropped() {
     let msg_headers = &parsed["headers"];
 
     assert!(
-        msg_headers["x-binary"].is_null(),
+        find_header(msg_headers, "x-binary").is_none(),
         "non-UTF-8 header must be silently dropped from the JetStream message"
     );
     assert_eq!(
-        msg_headers["x-good"].as_str(),
+        find_header(msg_headers, "x-good"),
         Some("present"),
         "valid UTF-8 header must still be forwarded"
     );
@@ -1548,7 +1581,7 @@ async fn e2e_non_utf8_request_header_silently_dropped() {
     let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
     let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
         status: 200,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"ok".to_vec(),
         error: None,
     };
@@ -1625,7 +1658,7 @@ async fn e2e_large_request_header_value_forwarded() {
         .unwrap();
 
     let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-    let received_value = parsed["headers"]["x-large-header"].as_str().unwrap_or("");
+    let received_value = find_header(&parsed["headers"], "x-large-header").unwrap_or("");
 
     assert_eq!(
         received_value.len(),
@@ -1640,7 +1673,7 @@ async fn e2e_large_request_header_value_forwarded() {
     let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
     let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
         status: 200,
-        headers: std::collections::HashMap::new(),
+        headers: vec![],
         body: b"ok".to_vec(),
         error: None,
     };
