@@ -3313,3 +3313,238 @@ async fn binary_token_with_numeric_id_works() {
     assert_eq!(body["id"], "msg_numeric_id");
     ai_mock.assert_async().await;
 }
+
+/// When the upstream AI provider returns multiple `Set-Cookie` response
+/// headers, the worker serialises them into `OutboundHttpResponse.headers`
+/// which is a `HashMap<String, String>`.  A HashMap can only hold one value
+/// per key — duplicate keys are deduplicated (last value wins).  The proxy
+/// then forwards that single value.
+///
+/// This documents a known design limitation: multiple `Set-Cookie` headers
+/// from the provider are collapsed to one before reaching the client.
+#[tokio::test]
+async fn binary_multiple_set_cookie_headers_collapsed_to_one() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET).path("/v1/session");
+            then.status(200)
+                .header("content-type", "application/json")
+                .header("set-cookie", "session=abc; Path=/; HttpOnly")
+                .header("set-cookie", "prefs=xyz; Path=/")
+                .body(r#"{"ok":true}"#);
+        })
+        .await;
+
+    let token = "tok_anthropic_prod_cookie01";
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-cookie", token, "sk-ant-cookie");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // reqwest is compiled without the `cookies` feature so Set-Cookie headers
+    // are never consumed internally — they appear in response.headers() as-is.
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}/anthropic/v1/session", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    // The HashMap model collapses both Set-Cookie headers into one.
+    let set_cookie_count = resp.headers().get_all("set-cookie").iter().count();
+    assert_eq!(
+        set_cookie_count, 1,
+        "Multiple Set-Cookie headers from the provider are collapsed to one (HashMap limitation)"
+    );
+    ai_mock.assert_async().await;
+}
+
+/// A 204 No Content response (no body, no Content-Type) is forwarded
+/// correctly by the proxy.  The status code must be 204 and the response
+/// body must be empty.
+#[tokio::test]
+async fn binary_204_no_content_response_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::DELETE).path("/v1/session");
+            then.status(204);
+        })
+        .await;
+
+    let token = "tok_anthropic_prod_nocont01";
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-nocont", token, "sk-ant-nocont");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .delete(format!(
+            "http://127.0.0.1:{}/anthropic/v1/session",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 204, "204 No Content must be forwarded as-is");
+    let body = resp.bytes().await.unwrap();
+    assert!(body.is_empty(), "204 response body must be empty");
+    ai_mock.assert_async().await;
+}
+
+/// A single worker instance can resolve tokens for multiple AI providers.
+/// The worker reads ALL `VAULT_TOKEN_*` environment variables at startup,
+/// so one process can hold keys for both Anthropic and OpenAI.
+///
+/// This test sends one request per provider and verifies that the correct
+/// real key is substituted for each token.
+#[tokio::test]
+async fn binary_single_worker_handles_multiple_providers() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Anthropic endpoint — expects the anthropic real key.
+    let ant_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-multiprov");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"provider":"anthropic"}"#);
+        })
+        .await;
+
+    // OpenAI endpoint — expects the openai real key.
+    let oai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/chat/completions")
+                .header("authorization", "Bearer sk-oai-multiprov");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"provider":"openai"}"#);
+        })
+        .await;
+
+    let ant_token = "tok_anthropic_prod_mp001";
+    let oai_token = "tok_openai_prod_mp001";
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // One worker process configured with both tokens.
+    let _worker = tokio::process::Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-multiprov")
+        .env(format!("VAULT_TOKEN_{}", ant_token), "sk-ant-multiprov")
+        .env(format!("VAULT_TOKEN_{}", oai_token), "sk-oai-multiprov")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    let ant_resp = client
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", ant_token))
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    let oai_resp = client
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/chat/completions",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", oai_token))
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(ant_resp.status(), 200);
+    let ant_body: serde_json::Value = ant_resp.json().await.unwrap();
+    assert_eq!(ant_body["provider"], "anthropic");
+
+    assert_eq!(oai_resp.status(), 200);
+    let oai_body: serde_json::Value = oai_resp.json().await.unwrap();
+    assert_eq!(oai_body["provider"], "openai");
+
+    ant_mock.assert_async().await;
+    oai_mock.assert_async().await;
+}
+
+/// A request to `/anthropic` with no path segment after the provider is not
+/// matched by the `/{provider}/{*path}` route — axum requires at least one
+/// character after the second `/`.
+///
+/// The proxy returns 404 directly from the axum router without ever
+/// touching NATS or the worker.
+#[tokio::test]
+async fn binary_url_without_path_segment_returns_404() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // No mock server needed — the request must fail at axum routing.
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, "http://127.0.0.1:1");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let client = reqwest::Client::new();
+
+    // No second path segment → axum route `/{provider}/{*path}` has no match.
+    let resp_no_path = client
+        .get(format!("http://127.0.0.1:{}/anthropic", proxy_port))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp_no_path.status(),
+        404,
+        "Request with no path segment after provider must return 404"
+    );
+
+    // A trailing slash produces an empty `{*path}` segment; axum rejects it too.
+    let resp_trailing_slash = client
+        .get(format!("http://127.0.0.1:{}/anthropic/", proxy_port))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp_trailing_slash.status() == 404
+            || resp_trailing_slash.status().as_u16() >= 400,
+        "Trailing-slash request with empty path must return a 4xx; got {}",
+        resp_trailing_slash.status()
+    );
+}
