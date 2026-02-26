@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 use futures_util::future::join_all;
+use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
 use tokio::process::{Child, Command};
@@ -2265,5 +2266,222 @@ async fn binary_token_revocation_via_worker_restart() {
         _should_not_be_called_after.hits(),
         1,
         "AI provider should only have been called once (before revocation)"
+    );
+}
+
+/// Gap 1 — ProxyError::Deserialize → 500.
+///
+/// A rogue NATS actor publishes malformed JSON to the Core NATS reply subject
+/// that the proxy is subscribed to.  The proxy fails to deserialize the reply
+/// and must return HTTP 500.
+///
+/// This is the only binary-mode test for the `ProxyError::Deserialize` path in
+/// proxy.rs (previously only reachable via unit tests).
+#[tokio::test]
+async fn binary_malformed_worker_reply_returns_500() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // No real mock server needed: the bad worker publishes before any HTTP call
+    // to the AI provider is made.  Point the override at an unused address.
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, "http://127.0.0.1:1");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Connect to NATS directly and act as a "bad worker".
+    let nats = async_nats::connect(format!("localhost:{}", nats_port))
+        .await
+        .unwrap();
+    let jetstream = async_nats::jetstream::new(nats.clone());
+
+    // The proxy creates PROXY_REQUESTS_TROGON during startup (before TCP listen).
+    let stream = jetstream.get_stream("PROXY_REQUESTS_TROGON").await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            "bad-worker-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bad-worker-test".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    // Send a request to the proxy; it blocks waiting for a Core NATS reply.
+    let request_handle = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
+            .header("Authorization", "Bearer tok_anthropic_prod_bad001")
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // Pull the JetStream message the proxy published.
+    let msg = tokio::time::timeout(Duration::from_secs(10), messages.next())
+        .await
+        .expect("Timed out waiting for JetStream message from proxy")
+        .unwrap()
+        .unwrap();
+
+    // Extract the reply subject embedded in the payload.
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Publish intentionally malformed JSON to the reply subject.
+    nats.publish(reply_to, b"NOT VALID JSON {{{".to_vec().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = request_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        500,
+        "Proxy must return 500 when it cannot deserialize the worker reply"
+    );
+}
+
+/// Gap 2 — non-Bearer Authorization scheme rejected in binary mode.
+///
+/// A client sends `Authorization: Basic ...` instead of `Authorization: Bearer tok_...`.
+/// The worker rejects it ("not a Bearer token") and the proxy surfaces that as 502.
+///
+/// Previously this code path was only exercised by unit tests in worker.rs.
+/// This test also verifies Gap 3 for this case: the 502 body contains the
+/// human-readable rejection reason.
+#[tokio::test]
+async fn binary_non_bearer_auth_scheme_returns_502_with_error_body() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker is running; the Basic-auth request will be rejected before vault lookup.
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-basic",
+        "tok_anthropic_prod_basic001",
+        "sk-ant-realkey",
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Basic dXNlcjpwYXNz") // "user:pass" base64
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        502,
+        "Non-Bearer Authorization scheme must be rejected with 502"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("not a Bearer token"),
+        "502 body must explain the rejection reason, got: {:?}",
+        body
+    );
+}
+
+/// Gap 3 — error response body text verification.
+///
+/// Binary tests previously only asserted HTTP status codes for error cases.
+/// This test explicitly verifies that the 502 body forwarded to the caller
+/// contains a human-readable description of the failure for each error type:
+///
+/// - Missing `Authorization` header
+/// - Token not present in vault
+/// - Real API key supplied instead of a `tok_...` token
+#[tokio::test]
+async fn binary_error_response_body_describes_the_error() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let proxy_port = free_port();
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-body",
+        "tok_anthropic_prod_body001",
+        "sk-ant-realkey",
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+
+    // ── Case 1: missing Authorization header ─────────────────────────────────
+    let resp = client
+        .post(&base)
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502, "missing auth header must be 502");
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("Missing Authorization"),
+        "missing auth body must mention 'Missing Authorization', got: {:?}",
+        body
+    );
+
+    // ── Case 2: token not registered in vault ────────────────────────────────
+    let resp = client
+        .post(&base)
+        .header("Authorization", "Bearer tok_anthropic_prod_notinvault99")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502, "unknown token must be 502");
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("not found"),
+        "unknown token body must mention 'not found', got: {:?}",
+        body
+    );
+
+    // ── Case 3: real API key supplied directly (not a tok_ token) ────────────
+    let resp = client
+        .post(&base)
+        .header("Authorization", "Bearer sk-ant-realkey-direct")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502, "real API key must be 502");
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("does not look like a proxy token"),
+        "real key body must explain the rejection, got: {:?}",
+        body
     );
 }
