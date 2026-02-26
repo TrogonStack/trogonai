@@ -11,6 +11,7 @@
 //! | `PROXY_PREFIX`            | `trogon`  | NATS subject prefix                  |
 //! | `PROXY_PORT`              | `8080`    | TCP port to listen on                |
 //! | `PROXY_WORKER_TIMEOUT_SECS` | `60`    | Seconds to wait for worker reply     |
+//! | `PROXY_BASE_URL_OVERRIDE` | —         | Override AI provider base URL (tests)|
 //! | `RUST_LOG`                | `info`    | Log filter (tracing-subscriber)      |
 
 use std::sync::Arc;
@@ -61,12 +62,15 @@ async fn main() {
         "HTTP proxy starting"
     );
 
+    let base_url_override = std::env::var("PROXY_BASE_URL_OVERRIDE").ok();
+
     let state = ProxyState {
         nats,
         jetstream,
         prefix,
         outbound_subject,
         worker_timeout: Duration::from_secs(timeout_secs),
+        base_url_override,
     };
 
     let app = router(state);
