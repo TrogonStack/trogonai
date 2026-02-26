@@ -165,14 +165,21 @@ async fn handle_request(
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     if let Some(err) = proxy_response.error {
+        // Use the worker's status if it is already an error code (4xx/5xx),
+        // otherwise fall back to 502 to avoid leaking a spurious 2xx.
+        let error_status = if status.is_client_error() || status.is_server_error() {
+            status
+        } else {
+            StatusCode::BAD_GATEWAY
+        };
         tracing::warn!(
             correlation_id = %correlation_id,
-            status = %status,
+            status = %error_status,
             error = %err,
             "Worker reported an error"
         );
         return Ok(Response::builder()
-            .status(status)
+            .status(error_status)
             .body(Body::from(err))
             .unwrap());
     }
