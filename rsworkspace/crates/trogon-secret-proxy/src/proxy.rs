@@ -54,7 +54,12 @@ async fn handle_request(
             .to_string(),
     };
 
-    let url = format!("{}/{}", base, path);
+    let query = req
+        .uri()
+        .query()
+        .map(|q| format!("?{}", q))
+        .unwrap_or_default();
+    let url = format!("{}/{}{}", base, path, query);
 
     let method = req.method().to_string();
     let req_headers = req.headers().clone();
