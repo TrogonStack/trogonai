@@ -773,10 +773,10 @@ async fn binary_real_api_key_in_auth_is_rejected() {
         .await
         .unwrap();
 
-    // Worker rejects non-tok_ credentials → proxy returns 502.
+    // Worker rejects non-tok_ credentials → proxy returns 401 (client error).
     assert!(
-        resp.status().is_server_error(),
-        "Real API key should be rejected with a server error, got {}",
+        resp.status().is_client_error(),
+        "Real API key should be rejected with a client error, got {}",
         resp.status()
     );
     // Critical: the AI provider was never contacted.
@@ -920,8 +920,8 @@ async fn binary_missing_auth_header_returns_error() {
         .unwrap();
 
     assert!(
-        resp.status().is_server_error(),
-        "Missing auth header should return 5xx, got {}",
+        resp.status().is_client_error(),
+        "Missing auth header should return 4xx, got {}",
         resp.status()
     );
     assert_eq!(
@@ -2257,8 +2257,8 @@ async fn binary_token_revocation_via_worker_restart() {
         .unwrap();
 
     assert!(
-        resp_after.status().is_server_error(),
-        "Post-revocation request should fail with 5xx, got {}",
+        resp_after.status().is_client_error(),
+        "Post-revocation request should fail with 4xx, got {}",
         resp_after.status()
     );
     // AI provider was called once (pre-revocation) and not after.
@@ -2391,13 +2391,13 @@ async fn binary_non_bearer_auth_scheme_returns_502_with_error_body() {
 
     assert_eq!(
         resp.status(),
-        502,
-        "Non-Bearer Authorization scheme must be rejected with 502"
+        401,
+        "Non-Bearer Authorization scheme must be rejected with 401"
     );
     let body = resp.text().await.unwrap();
     assert!(
         body.contains("not a Bearer token"),
-        "502 body must explain the rejection reason, got: {:?}",
+        "401 body must explain the rejection reason, got: {:?}",
         body
     );
 }
@@ -2441,7 +2441,7 @@ async fn binary_error_response_body_describes_the_error() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 502, "missing auth header must be 502");
+    assert_eq!(resp.status(), 401, "missing auth header must be 401");
     let body = resp.text().await.unwrap();
     assert!(
         body.contains("Missing Authorization"),
@@ -2459,7 +2459,7 @@ async fn binary_error_response_body_describes_the_error() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 502, "unknown token must be 502");
+    assert_eq!(resp.status(), 401, "unknown token must be 401");
     let body = resp.text().await.unwrap();
     assert!(
         body.contains("not found"),
@@ -2477,7 +2477,7 @@ async fn binary_error_response_body_describes_the_error() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 502, "real API key must be 502");
+    assert_eq!(resp.status(), 401, "real API key must be 401");
     let body = resp.text().await.unwrap();
     assert!(
         body.contains("does not look like a proxy token"),
@@ -2569,13 +2569,13 @@ async fn binary_malformed_tok_token_format_returns_502_with_error_body() {
 
     assert_eq!(
         resp.status(),
-        502,
-        "Malformed tok_ token must be rejected with 502"
+        401,
+        "Malformed tok_ token must be rejected with 401"
     );
     let body = resp.text().await.unwrap();
     assert!(
         body.contains("Invalid proxy token"),
-        "502 body must mention 'Invalid proxy token', got: {:?}",
+        "401 body must mention 'Invalid proxy token', got: {:?}",
         body
     );
 }
@@ -2690,8 +2690,8 @@ async fn binary_bearer_extra_whitespace_returns_502() {
 
     assert_eq!(
         resp.status(),
-        502,
-        "Double-space Bearer must return 502, got {}",
+        401,
+        "Double-space Bearer must return 401, got {}",
         resp.status()
     );
     assert_eq!(_should_not_be_called.hits(), 0, "AI provider must not be called");
@@ -3811,8 +3811,8 @@ async fn binary_vault_token_empty_value_is_rejected_with_error() {
     // Worker must return an error — empty key is a vault misconfiguration.
     assert_eq!(
         resp.status(),
-        502,
-        "Empty real key in vault must yield 502 Bad Gateway, not forward to provider"
+        401,
+        "Empty real key in vault must yield 401, not forward to provider"
     );
     // The AI provider must not have received the request.
     assert_eq!(ai_mock.hits(), 0, "Provider must not be called when vault key is empty");
