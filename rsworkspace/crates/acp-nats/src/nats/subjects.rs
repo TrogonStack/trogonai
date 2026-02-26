@@ -15,6 +15,10 @@ pub mod agent {
         format!("{}.{}.agent.session.load", prefix, session_id)
     }
 
+    pub fn session_cancel(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.cancel", prefix, session_id)
+    }
+
     pub fn session_set_mode(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.session.set_mode", prefix, session_id)
     }
@@ -48,6 +52,14 @@ mod tests {
         assert_eq!(
             agent::session_load("acp", "s1"),
             "acp.s1.agent.session.load"
+        );
+    }
+
+    #[test]
+    fn session_cancel_subject() {
+        assert_eq!(
+            agent::session_cancel("acp", "s1"),
+            "acp.s1.agent.session.cancel"
         );
     }
 
@@ -87,6 +99,7 @@ mod tests {
         let expected_prefix = format!("{}.{}.agent.", prefix, sid);
 
         assert!(agent::session_load(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_cancel(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::session_set_mode(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::ext_session_ready(prefix, sid).starts_with(&expected_prefix));
     }
