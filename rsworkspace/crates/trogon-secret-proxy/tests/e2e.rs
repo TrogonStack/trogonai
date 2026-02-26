@@ -537,3 +537,130 @@ async fn e2e_ensure_stream_is_idempotent() {
         .await
         .expect("Second ensure_stream call failed (not idempotent)");
 }
+
+/// ProxyError::ReadBody — the incoming request body stream errors mid-read.
+///
+/// `axum::body::to_bytes` fails when the body stream produces an `Err`.
+/// The handler converts that into `ProxyError::ReadBody` → HTTP 500.
+///
+/// Uses `tower::ServiceExt::oneshot` to drive the router directly with a
+/// synthetic broken body, without going through a TCP listener.  NATS is
+/// still required to construct `ProxyState`, but is never actually touched
+/// because the error occurs before any NATS call.
+#[tokio::test]
+async fn e2e_read_body_error_returns_500() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats,
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Stream that errors on the first poll — axum::body::to_bytes returns Err.
+    let error_stream = futures_util::stream::once(async {
+        Err::<bytes::Bytes, std::io::Error>(std::io::Error::other(
+            "simulated body read failure",
+        ))
+    });
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_readbody1")
+        .body(axum::body::Body::from_stream(error_stream))
+        .unwrap();
+
+    let response = router(state).oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "Body read failure must produce 500"
+    );
+}
+
+/// ProxyError::ReplyChannelClosed — the NATS connection is closed while the
+/// proxy is waiting for a worker reply on its Core NATS subscription.
+///
+/// `reply_sub.next()` returns `None` when the underlying connection is closed,
+/// which the proxy maps to HTTP 500 (InternalServerError).
+///
+/// The proxy has a long worker_timeout (30 s) so the close must race the
+/// timeout.  We sleep 500 ms to let the proxy subscribe and publish before
+/// calling `Client::close()`.
+#[tokio::test]
+async fn e2e_reply_channel_closed_returns_500() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(30),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    tokio::spawn(async move {
+        axum::serve(listener, router(state)).await.ok();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Fire the request — proxy subscribes to its reply subject, publishes to
+    // JetStream, then blocks waiting for a reply that will never come.
+    let request_handle = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
+            .header("Authorization", "Bearer tok_anthropic_test_closed1")
+            .body("{}")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // Give the proxy time to subscribe and publish to JetStream.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Drain all subscriptions on this connection.  Because the proxy's
+    // `state.nats` shares the same underlying connection, its `reply_sub`
+    // channel is also closed → `next()` returns `None` →
+    // ProxyError::ReplyChannelClosed → 500.
+    nats.drain().await.unwrap();
+
+    let resp = request_handle.await.unwrap();
+    assert_eq!(resp.status(), 500, "ReplyChannelClosed must return 500");
+}
