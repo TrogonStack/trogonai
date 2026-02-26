@@ -1160,19 +1160,17 @@ async fn e2e_max_deliver_exhausted_proxy_returns_504() {
     );
 }
 
-/// Hop-by-hop headers sent by the client (Connection, Keep-Alive) are
-/// forwarded verbatim into the `OutboundHttpRequest.headers` map that the
-/// proxy publishes to JetStream — the proxy does NOT strip them.
+/// Hop-by-hop headers sent by the client (Connection, Keep-Alive) must be
+/// stripped by the proxy before publishing to JetStream — they must NOT
+/// appear in `OutboundHttpRequest.headers`.
 ///
-/// This test uses an inline worker so it can inspect the raw `headers` field
-/// of the JetStream message before any HTTP client reprocesses them.
-/// It documents the current behaviour: the proxy is transparent and passes
-/// ALL request headers, including hop-by-hop ones, to the worker.
+/// RFC 7230 §6.1: hop-by-hop headers are meaningful only for a single
+/// transport hop and must be removed by any intermediary proxy.
 ///
-/// Whether the worker's reqwest call then forwards them to the upstream is a
-/// separate concern governed by hyper/reqwest internals (see the binary test).
+/// This test uses an inline worker to inspect the raw `headers` field of
+/// the JetStream message directly.
 #[tokio::test]
-async fn e2e_hop_by_hop_headers_included_in_jetstream_message() {
+async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
     use futures_util::StreamExt as _;
     use tower::ServiceExt as _;
 
@@ -1235,20 +1233,16 @@ async fn e2e_hop_by_hop_headers_included_in_jetstream_message() {
     let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
     let headers_in_message = &parsed["headers"];
 
-    // ── Documented behaviour ─────────────────────────────────────────────────
-    // The proxy serialises ALL incoming request headers into the JetStream
-    // message — it does NOT strip hop-by-hop headers.
-    assert_eq!(
-        headers_in_message["connection"].as_str(),
-        Some("keep-alive"),
-        "connection header must be present in the JetStream message"
+    // Hop-by-hop headers must be absent from the JetStream message.
+    assert!(
+        headers_in_message["connection"].is_null(),
+        "connection header must be stripped from the JetStream message"
     );
-    assert_eq!(
-        headers_in_message["keep-alive"].as_str(),
-        Some("timeout=5, max=100"),
-        "keep-alive header must be present in the JetStream message"
+    assert!(
+        headers_in_message["keep-alive"].is_null(),
+        "keep-alive header must be stripped from the JetStream message"
     );
-    // End-to-end custom headers are also forwarded.
+    // End-to-end custom headers must still be forwarded.
     assert_eq!(
         headers_in_message["x-end-to-end"].as_str(),
         Some("must-survive"),
