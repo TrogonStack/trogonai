@@ -110,6 +110,18 @@ where
                 error = %e,
                 "Failed to publish reply to Core NATS"
             );
+            // The original payload was too large (or the connection dropped).
+            // Publish a compact error response so the proxy returns a
+            // descriptive error to the caller instead of timing out with 504.
+            let error_response = OutboundHttpResponse {
+                status: 502,
+                headers: vec![],
+                body: vec![],
+                error: Some(format!("Worker failed to publish reply: {}", e)),
+            };
+            if let Ok(error_payload) = serde_json::to_vec(&error_response) {
+                let _ = nats.publish(reply_to.clone(), error_payload.into()).await;
+            }
         }
 
         if let Err(e) = msg.ack().await {
@@ -203,11 +215,20 @@ where
     let token = trogon_vault::ApiKeyToken::new(raw_token)
         .map_err(|e| format!("Invalid proxy token: {}", e))?;
 
-    vault
+    let real_key = vault
         .resolve(&token)
         .await
         .map_err(|e| format!("Vault error: {}", e))?
-        .ok_or_else(|| format!("Token not found in vault: {}", token))
+        .ok_or_else(|| format!("Token not found in vault: {}", token))?;
+
+    if real_key.is_empty() {
+        return Err(format!(
+            "Vault returned an empty key for token: {}",
+            token
+        ));
+    }
+
+    Ok(real_key)
 }
 
 /// Retry wrapper around [`forward_request`] using exponential backoff.
@@ -413,6 +434,50 @@ mod tests {
         assert!(result.unwrap_err().contains("does not look like a proxy token"));
     }
 
+    /// Gap 3: token starting with `tok_` but missing provider/env/id segments
+    /// must be rejected by `ApiKeyToken::new` validation before touching the vault.
+    #[tokio::test]
+    async fn resolve_token_malformed_tok_missing_parts_is_rejected() {
+        let vault = MemoryVault::new();
+
+        let cases = [
+            "Bearer tok_anthropic",          // missing env and id
+            "Bearer tok_anthropic_prod",     // missing id
+            "Bearer tok_",                   // nothing after tok_
+        ];
+
+        for header in cases {
+            let headers = make_headers(header);
+            let result = resolve_token(&vault, &headers).await;
+            assert!(
+                result.is_err(),
+                "Malformed token '{}' must be rejected",
+                header
+            );
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("Invalid proxy token"),
+                "Error must mention 'Invalid proxy token', got: {}",
+                err
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_token_empty_real_key_is_rejected() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_emptyv1").unwrap();
+        vault.store(&token, "").await.unwrap(); // store empty real key
+
+        let headers = make_headers("Bearer tok_anthropic_prod_emptyv1");
+        let result = resolve_token(&vault, &headers).await;
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("empty key"),
+            "Error must mention empty key"
+        );
+    }
+
     #[tokio::test]
     async fn resolve_token_case_insensitive_header() {
         let vault = MemoryVault::new();
@@ -573,6 +638,31 @@ mod tests {
 
         assert_eq!(resp.status, 200);
         mock.assert_async().await;
+    }
+
+    /// Gap 5: DNS resolution failure for an invalid hostname must exhaust retries
+    /// and return `Err`, not panic or loop forever.
+    ///
+    /// `.invalid` is an RFC 2606 reserved TLD guaranteed to never resolve.
+    #[tokio::test]
+    async fn dns_resolution_failure_exhausts_retries_and_returns_err() {
+        let client = ReqwestClient::builder()
+            .timeout(Duration::from_secs(1))
+            .build()
+            .unwrap();
+        let request = make_request(
+            "http://host.does.not.exist.invalid./v1/messages",
+            "Bearer tok_anthropic_prod_dns1",
+            "idem-dns",
+        );
+
+        let result = forward_request_with_retry(&client, &request, &[]).await;
+
+        assert!(result.is_err(), "DNS failure must return Err after retries");
+        assert!(
+            result.unwrap_err().contains("HTTP request failed"),
+            "Error must describe the transport failure"
+        );
     }
 
     /// `WorkerError::JetStream` must include the message in its Display output.
