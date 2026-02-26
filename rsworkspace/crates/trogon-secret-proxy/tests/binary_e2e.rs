@@ -1247,3 +1247,268 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
     mock_cohere.assert_async().await;
     mock_mistral.assert_async().await;
 }
+
+/// PATCH method passes through the proxy with the correct method verb.
+#[tokio::test]
+async fn binary_patch_method_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::PATCH)
+                .path("/v1/messages/msg-abc");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg-abc","patched":true}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_pat001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-patch", token, "sk-ant-key-patch");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .patch(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages/msg-abc",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"metadata":{"tag":"updated"}}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["patched"], true);
+    _mock.assert_async().await;
+}
+
+/// Non-200 success status codes (201, 202, 204) are forwarded to the caller
+/// unchanged.
+#[tokio::test]
+async fn binary_non_200_success_status_forwarded() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // 201 Created — e.g. uploading a file.
+    let mock_201 = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/files");
+            then.status(201)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"file-new","object":"file"}"#);
+        })
+        .await;
+
+    // 202 Accepted — e.g. async batch job.
+    let mock_202 = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/batches");
+            then.status(202)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"batch-new","status":"processing"}"#);
+        })
+        .await;
+
+    // 204 No Content — e.g. deleting with no body in response.
+    let mock_204 = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::DELETE).path("/v1/sessions/sess-abc");
+            then.status(204);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_openai_prod_2xx001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-2xx", token, "sk-openai-key-2xx");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}/openai", proxy_port);
+
+    let r201 = client.post(format!("{}/v1/files", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send().await.unwrap();
+    assert_eq!(r201.status(), 201, "Expected 201, got {}", r201.status());
+
+    let r202 = client.post(format!("{}/v1/batches", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send().await.unwrap();
+    assert_eq!(r202.status(), 202, "Expected 202, got {}", r202.status());
+
+    let r204 = client.delete(format!("{}/v1/sessions/sess-abc", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send().await.unwrap();
+    assert_eq!(r204.status(), 204, "Expected 204, got {}", r204.status());
+
+    mock_201.assert_async().await;
+    mock_202.assert_async().await;
+    mock_204.assert_async().await;
+}
+
+/// Large response body (~100 KB) from the AI provider passes through the
+/// worker and proxy to the caller intact.
+#[tokio::test]
+async fn binary_large_response_body_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Build a ~100 KB JSON response body.
+    let large_text = "y".repeat(100_000);
+    let large_response = format!(
+        r#"{{"id":"msg_large_resp","content":[{{"type":"text","text":"{}"}}]}}"#,
+        large_text
+    );
+    let expected_len = large_response.len();
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(large_response.clone());
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_lrb001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-lrb", token, "sk-ant-key-lrb");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+    let body_bytes = resp.bytes().await.unwrap();
+    assert_eq!(
+        body_bytes.len(),
+        expected_len,
+        "Response body length mismatch: got {} bytes, expected {}",
+        body_bytes.len(),
+        expected_len
+    );
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body["id"], "msg_large_resp");
+}
+
+/// The worker adds an `X-Request-Id` header (idempotency key) to every
+/// request forwarded to the AI provider.  The value must be a valid UUID and
+/// must differ between requests.
+///
+/// httpmock doesn't expose captured header values, so this test spins up a
+/// minimal axum server that records the X-Request-Id from each incoming call.
+#[tokio::test]
+async fn binary_idempotency_key_sent_to_provider() {
+    use axum::{extract::State, http::Request, body::Body as AxumBody};
+    use std::sync::{Arc, Mutex};
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Shared store for captured X-Request-Id values.
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_handler = captured.clone();
+
+    // Minimal axum "AI provider" server that records the idempotency key.
+    let capture_app = axum::Router::new()
+        .route(
+            "/v1/messages",
+            axum::routing::post(
+                move |State(ids): State<Arc<Mutex<Vec<String>>>>, req: Request<AxumBody>| {
+                    let ids = ids.clone();
+                    async move {
+                        if let Some(v) = req.headers().get("x-request-id") {
+                            ids.lock().unwrap().push(v.to_str().unwrap().to_string());
+                        }
+                        axum::response::Response::builder()
+                            .status(200)
+                            .header("content-type", "application/json")
+                            .body(AxumBody::from(r#"{"id":"msg_idem"}"#))
+                            .unwrap()
+                    }
+                },
+            ),
+        )
+        .with_state(captured_for_handler);
+
+    let provider_port = free_port();
+    let provider_listener =
+        tokio::net::TcpListener::bind(format!("127.0.0.1:{}", provider_port))
+            .await
+            .unwrap();
+    tokio::spawn(async move {
+        axum::serve(provider_listener, capture_app).await.unwrap();
+    });
+    wait_for_port(provider_port, Duration::from_secs(5)).await;
+
+    let provider_base = format!("http://127.0.0.1:{}", provider_port);
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_idem01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &provider_base);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-idem", token, "sk-ant-key-idem");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send the same logical request twice.
+    let client = reqwest::Client::new();
+    for _ in 0..2 {
+        let resp = client
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    let ids = captured.lock().unwrap().clone();
+    assert_eq!(ids.len(), 2, "Provider should have been called twice");
+
+    // Each ID must be a valid UUID.
+    uuid::Uuid::parse_str(&ids[0])
+        .expect("X-Request-Id in first request is not a valid UUID");
+    uuid::Uuid::parse_str(&ids[1])
+        .expect("X-Request-Id in second request is not a valid UUID");
+
+    // The two requests must carry different idempotency keys.
+    assert_ne!(ids[0], ids[1], "Each request must have a unique X-Request-Id");
+}
