@@ -76,7 +76,8 @@ async fn main() {
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound(&prefix);
-    stream::ensure_stream(&jetstream, &outbound_subject)
+    let sname = stream::stream_name(&prefix);
+    stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
         .await
         .expect("Failed to ensure JetStream stream");
 
@@ -87,7 +88,7 @@ async fn main() {
 
     tracing::info!(consumer = %consumer_name, "Detokenization worker starting");
 
-    worker::run(jetstream, nats, vault, http_client, &consumer_name)
+    worker::run(jetstream, nats, vault, http_client, &consumer_name, &sname)
         .await
         .expect("Worker exited with error");
 }

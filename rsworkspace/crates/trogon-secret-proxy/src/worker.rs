@@ -21,7 +21,6 @@ use reqwest::Client as ReqwestClient;
 use trogon_vault::VaultStore;
 
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
-use crate::stream::STREAM_NAME;
 
 const BEARER_PREFIX: &str = "Bearer ";
 
@@ -40,13 +39,14 @@ pub async fn run<V>(
     vault: Arc<V>,
     http_client: ReqwestClient,
     consumer_name: &str,
+    stream_name: &str,
 ) -> Result<(), WorkerError>
 where
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
 {
     let stream = jetstream
-        .get_stream(STREAM_NAME)
+        .get_stream(stream_name)
         .await
         .map_err(|e| WorkerError::JetStream(e.to_string()))?;
 
