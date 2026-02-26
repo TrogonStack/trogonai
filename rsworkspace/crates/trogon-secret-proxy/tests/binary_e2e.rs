@@ -9,6 +9,7 @@
 //!
 //! Requires Docker.
 
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 use futures_util::future::join_all;
@@ -28,11 +29,13 @@ async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     (container, port)
 }
 
-/// Bind to port 0, record the assigned port, then release it.
-/// The binary will bind the same port moments later.
+static PORT_COUNTER: AtomicU16 = AtomicU16::new(30000);
+
+/// Return a unique port number for each caller.
+/// Using an atomic counter avoids the bind-and-release race condition where
+/// two parallel tests could receive the same OS-assigned port and collide.
 fn free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    l.local_addr().unwrap().port()
+    PORT_COUNTER.fetch_add(1, Ordering::SeqCst)
 }
 
 /// Poll until a TCP connection to `port` succeeds or `timeout` elapses.
