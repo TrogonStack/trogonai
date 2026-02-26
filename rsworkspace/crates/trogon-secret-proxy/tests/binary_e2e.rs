@@ -1512,3 +1512,234 @@ async fn binary_idempotency_key_sent_to_provider() {
     // The two requests must carry different idempotency keys.
     assert_ne!(ids[0], ids[1], "Each request must have a unique X-Request-Id");
 }
+
+/// 429 Too Many Requests is treated as a 4xx client error and forwarded
+/// immediately without any retries.
+#[tokio::test]
+async fn binary_429_rate_limit_is_not_retried() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(429)
+                .header("content-type", "application/json")
+                .header("retry-after", "60")
+                .body(r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_rl001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-ratelimit", token, "sk-ant-key-rl");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // 429 forwarded as-is.
+    assert_eq!(
+        resp.status(),
+        429,
+        "Expected 429 to be forwarded, got {}",
+        resp.status()
+    );
+    // retry-after header forwarded to caller.
+    assert_eq!(
+        resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+        Some("60"),
+        "retry-after header should be forwarded"
+    );
+    // Provider called exactly once — no retry on 429.
+    assert_eq!(mock.hits(), 1, "429 must not trigger retries");
+}
+
+/// HEAD method passes through the proxy.  The provider returns 200 with no
+/// body; the proxy forwards the status and headers correctly.
+#[tokio::test]
+async fn binary_head_method_passes_through() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::HEAD).path("/v1/models");
+            then.status(200)
+                .header("x-model-count", "42");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_head01";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-head", token, "sk-ant-key-head");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .head(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "HEAD should return 200, got {}", resp.status());
+    assert_eq!(
+        resp.headers().get("x-model-count").and_then(|v| v.to_str().ok()),
+        Some("42"),
+        "x-model-count header should be forwarded"
+    );
+    _mock.assert_async().await;
+}
+
+/// Two proxy instances connected to the same NATS cluster both serve requests
+/// correctly.  A single worker processes messages from either proxy — the
+/// correlation IDs ensure replies are routed back to the originating proxy.
+#[tokio::test]
+async fn binary_two_proxy_instances_both_serve_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_multi_proxy"}"#);
+        })
+        .await;
+
+    let proxy_port_a = free_port();
+    let proxy_port_b = free_port();
+    let token = "tok_anthropic_prod_mp001";
+
+    let _proxy_a = spawn_proxy(nats_port, proxy_port_a, &mock_server.base_url());
+    let _proxy_b = spawn_proxy(nats_port, proxy_port_b, &mock_server.base_url());
+    wait_for_port(proxy_port_a, Duration::from_secs(15)).await;
+    wait_for_port(proxy_port_b, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-multiproxy", token, "sk-ant-key-mp");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    // Send requests to each proxy in parallel.
+    let handles: Vec<_> = [proxy_port_a, proxy_port_b, proxy_port_a, proxy_port_b]
+        .iter()
+        .map(|&port| {
+            let c = client.clone();
+            let tok = token.to_string();
+            tokio::spawn(async move {
+                c.post(format!("http://127.0.0.1:{}/anthropic/v1/messages", port))
+                    .header("Authorization", format!("Bearer {}", tok))
+                    .header("Content-Type", "application/json")
+                    .body("{}")
+                    .timeout(Duration::from_secs(20))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    let results = join_all(handles).await;
+    for result in results {
+        let resp = result.unwrap();
+        assert_eq!(resp.status(), 200, "Expected 200, got {}", resp.status());
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["id"], "msg_multi_proxy");
+    }
+
+    // All 4 requests reached the provider.
+    assert_eq!(_mock.hits(), 4, "All 4 requests should have reached the provider");
+}
+
+/// NATS brief disconnect: pause the NATS container for ~1 second, unpause it,
+/// then verify the proxy and worker reconnect and continue serving requests.
+#[tokio::test]
+async fn binary_nats_reconnection_after_brief_disconnect() {
+    let (nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_reconnect"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_rec001";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-reconnect", token, "sk-ant-key-rec");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Verify pipeline works before disconnect.
+    let before = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(before.status(), 200, "Pre-disconnect request failed");
+
+    // Pause NATS container (~1 second).
+    let container_id = nats_container.id();
+    std::process::Command::new("docker")
+        .args(["pause", container_id])
+        .status()
+        .expect("docker pause failed — is Docker available?");
+
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+
+    std::process::Command::new("docker")
+        .args(["unpause", container_id])
+        .status()
+        .expect("docker unpause failed");
+
+    // Allow clients to reconnect.
+    tokio::time::sleep(Duration::from_millis(2_000)).await;
+
+    // Pipeline must work again after reconnection.
+    let after = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), 200, "Post-reconnect request failed");
+
+    assert_eq!(_mock.hits(), 2, "Both pre- and post-reconnect requests should reach the provider");
+}
