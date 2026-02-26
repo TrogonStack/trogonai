@@ -765,6 +765,224 @@ async fn e2e_invalid_response_headers_silently_dropped() {
     assert_eq!(resp.headers().get("x-bad-value"), None);
 }
 
+/// When the worker sets `error: Some(...)` in the response AND `status: 200`,
+/// the proxy must still return 502 Bad Gateway.
+///
+/// The `error` field takes precedence over `status` — proxy.rs checks
+/// `if let Some(err) = proxy_response.error` before reading the status code.
+#[tokio::test]
+async fn e2e_worker_error_field_with_status_200_returns_502() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-err-status200-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-err-status200-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_errstatus1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Reply with status 200 BUT error field set — error must win.
+    let reply = OutboundHttpResponse {
+        status: 200,
+        headers: std::collections::HashMap::new(),
+        body: b"this body should not reach the caller".to_vec(),
+        error: Some("upstream exploded despite 200".to_string()),
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::BAD_GATEWAY,
+        "error field must take precedence over status 200 → 502"
+    );
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        std::str::from_utf8(&body_bytes).unwrap().contains("upstream exploded"),
+        "Error message must be forwarded in the body"
+    );
+}
+
+/// JetStream redelivery: a "worker" that NAKs a message simulates a crash
+/// mid-request.  After the NAK, a real worker picks up the redelivered
+/// message and completes the request successfully.
+///
+/// This exercises the JetStream durability guarantee that ensures a
+/// message is not lost even if the first worker that pulled it fails.
+#[tokio::test]
+async fn e2e_nacked_message_redelivered_to_second_worker() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_redelivered","type":"message"}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_ndlv01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    // ── Start proxy (no worker yet) ──────────────────────────────────────────
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(30),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // ── Fire the request — proxy publishes to JetStream and waits ────────────
+    let request_handle = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .header("Authorization", "Bearer tok_anthropic_test_ndlv01")
+            .header("Content-Type", "application/json")
+            .body(r#"{"model":"claude-3","messages":[]}"#)
+            .timeout(Duration::from_secs(35))
+            .send()
+            .await
+            .unwrap()
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // ── Saboteur: pull the JetStream message without ACKing ──────────────────
+    // Configure a 2-second ack_wait so the un-ACKed message is redelivered
+    // quickly rather than waiting for the 30-second JetStream default.
+    // Dropping the saboteur handles without ACKing simulates a worker crash.
+    use futures_util::StreamExt as _;
+    let consumer_name = "e2e-redeliver-workers";
+    {
+        let js_stream = jetstream.get_stream(&stream::stream_name("trogon")).await.unwrap();
+        let bad_consumer = js_stream
+            .get_or_create_consumer(
+                consumer_name,
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some(consumer_name.to_string()),
+                    ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                    ack_wait: Duration::from_secs(2),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mut bad_messages = bad_consumer.messages().await.unwrap();
+
+        // Pull the message but do NOT ack — simulates crash mid-request.
+        let _bad_msg = tokio::time::timeout(Duration::from_secs(5), bad_messages.next())
+            .await
+            .expect("Saboteur timed out pulling message")
+            .unwrap()
+            .unwrap();
+
+        // Scope ends here — bad_consumer and bad_messages are dropped without ACKing.
+        // After ack_wait (2 s) the message is redelivered to the same consumer.
+    }
+
+    // Wait for ack_wait to expire so the message is available for redelivery.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // ── Real worker: picks up the redelivered message ────────────────────────
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            consumer_name,
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+
+    let resp = request_handle.await.unwrap();
+    assert_eq!(resp.status(), 200, "Redelivered message must be processed successfully");
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_redelivered");
+    ai_mock.assert_async().await;
+}
+
 /// When the worker returns an out-of-range HTTP status code (e.g. 1000),
 /// `StatusCode::from_u16` fails and the proxy falls back to 500
 /// Internal Server Error.

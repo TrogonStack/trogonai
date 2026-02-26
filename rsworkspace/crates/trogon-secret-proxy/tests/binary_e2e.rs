@@ -2652,6 +2652,193 @@ async fn binary_invalid_vault_env_var_skipped_valid_token_still_works() {
     ai_mock.assert_async().await;
 }
 
+/// `Authorization: Bearer  tok_...` (two spaces after Bearer) does not match
+/// `BEARER_PREFIX = "Bearer "` (one space), so the extracted token starts with
+/// a space and fails the `tok_` prefix check → worker returns an error →
+/// proxy returns 502.
+#[tokio::test]
+async fn binary_bearer_extra_whitespace_returns_502() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _should_not_be_called = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not reach here");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_wsptest1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-ws", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Two spaces between "Bearer" and the token.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer  {}", token))  // double space
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        502,
+        "Double-space Bearer must return 502, got {}",
+        resp.status()
+    );
+    assert_eq!(_should_not_be_called.hits(), 0, "AI provider must not be called");
+}
+
+/// Tokens from different environments (prod vs. staging) stored in the same
+/// vault resolve to different real keys without cross-contamination.
+#[tokio::test]
+async fn binary_staging_and_prod_tokens_resolve_independently() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    let mock_prod = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-prod-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_prod","env":"prod"}"#);
+        })
+        .await;
+
+    let mock_staging = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-staging-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_staging","env":"staging"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let prod_token = "tok_anthropic_prod_envtest1";
+    let staging_token = "tok_anthropic_staging_envtest2";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Single worker seeded with both tokens from different environments.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "binary-workers-envtest")
+        .env(format!("VAULT_TOKEN_{}", prod_token), "sk-prod-key")
+        .env(format!("VAULT_TOKEN_{}", staging_token), "sk-staging-key")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    // Request with prod token → prod key must be used.
+    let resp_prod = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", prod_token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_prod.status(), 200);
+    let body_prod: serde_json::Value = resp_prod.json().await.unwrap();
+    assert_eq!(body_prod["id"], "msg_prod", "Prod token must use prod key");
+
+    // Request with staging token → staging key must be used.
+    let resp_staging = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", staging_token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_staging.status(), 200);
+    let body_staging: serde_json::Value = resp_staging.json().await.unwrap();
+    assert_eq!(body_staging["id"], "msg_staging", "Staging token must use staging key");
+
+    mock_prod.assert_async().await;
+    mock_staging.assert_async().await;
+}
+
+/// When the AI provider returns a Server-Sent Events (SSE) / streaming
+/// response, the proxy buffers the entire body before returning it to
+/// the caller.
+///
+/// This documents the current buffering behavior: the caller does NOT
+/// receive tokens incrementally — it receives the complete response
+/// once the provider finishes.  The body and Content-Type are preserved.
+#[tokio::test]
+async fn binary_sse_response_buffered_and_returned_completely() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Simulate an SSE stream as returned by OpenAI / Anthropic with stream:true.
+    let sse_body = concat!(
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"Hello\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\" world\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .header("cache-control", "no-cache")
+                .body(sse_body);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let token = "tok_anthropic_prod_ssetest1";
+
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "binary-workers-sse", token, "sk-ant-realkey");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3","stream":true,"messages":[]}"#)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "SSE response must return 200, got {}", resp.status());
+
+    // Proxy buffers the full SSE stream and returns it as a single response body.
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Hello"), "First SSE token must be present in buffered body");
+    assert!(body.contains("world"), "Second SSE token must be present in buffered body");
+    assert!(body.contains("[DONE]"), "SSE done sentinel must be present in buffered body");
+
+    ai_mock.assert_async().await;
+}
+
 /// Worker-first startup ordering: the worker binary starts and creates the
 /// JetStream stream before the proxy binary is launched.
 ///
