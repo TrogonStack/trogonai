@@ -3603,3 +3603,207 @@ async fn e2e_request_header_with_invalid_utf8_silently_dropped() {
     let resp = proxy_handle.await.unwrap().unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+// ── Gap A ─────────────────────────────────────────────────────────────────────
+
+/// Percent-encoded characters in the query string (e.g. `%20` for a space,
+/// `%2B` for `+`) must be forwarded verbatim to the upstream provider.
+///
+/// `proxy.rs` line 67–72: `uri().query()` returns the raw query string
+/// without decoding, and `format!("?{}", q)` appends it unchanged to the
+/// URL stored in the `OutboundHttpRequest`.
+#[tokio::test]
+async fn e2e_query_string_encoded_chars_preserved() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-encoded-qs-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-encoded-qs-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/anthropic/v1/messages?foo=bar%20baz&x=y%2Bz")
+        .header("authorization", "Bearer tok_anthropic_test_encqs001")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let url = parsed["url"].as_str().expect("url field must be present");
+
+    // Percent-encoded sequences must be preserved verbatim — not decoded.
+    assert!(
+        url.contains("foo=bar%20baz"),
+        "URL must preserve %20 encoding, got: {}",
+        url
+    );
+    assert!(
+        url.contains("x=y%2Bz"),
+        "URL must preserve %2B encoding, got: {}",
+        url
+    );
+    assert!(
+        !url.contains("bar baz"),
+        "URL must NOT decode %20 to a space, got: {}",
+        url
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+// ── Gap D ─────────────────────────────────────────────────────────────────────
+
+/// When the upstream provider returns multiple `Set-Cookie` headers, the
+/// proxy must forward all of them to the caller without collapsing them.
+///
+/// `proxy.rs` line 194–195: `response_headers.append(name, value)` (not
+/// `insert`) preserves duplicate header names.
+#[tokio::test]
+async fn e2e_duplicate_set_cookie_headers_both_forwarded() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-dup-set-cookie-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-dup-set-cookie-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_dupcook01")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Simulate a provider response with two distinct Set-Cookie headers.
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![
+            ("set-cookie".to_string(), "session=abc; Path=/".to_string()),
+            ("set-cookie".to_string(), "theme=dark; Path=/".to_string()),
+        ],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Both Set-Cookie headers must be present in the response.
+    let cookie_headers: Vec<_> = resp.headers().get_all("set-cookie").iter().collect();
+    assert_eq!(
+        cookie_headers.len(),
+        2,
+        "Both Set-Cookie headers must be forwarded, got {} header(s)",
+        cookie_headers.len()
+    );
+    let values: Vec<&str> = cookie_headers.iter().map(|v| v.to_str().unwrap()).collect();
+    assert!(values.contains(&"session=abc; Path=/"), "session cookie must be present");
+    assert!(values.contains(&"theme=dark; Path=/"), "theme cookie must be present");
+}
