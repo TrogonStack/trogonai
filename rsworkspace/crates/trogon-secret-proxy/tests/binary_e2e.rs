@@ -5554,3 +5554,294 @@ async fn binary_50_sequential_requests_all_succeed() {
 
     assert_eq!(_ai_mock.hits(), 50, "All 50 requests must reach the provider");
 }
+
+/// Work-queue exactly-once semantics: two workers share the same consumer
+/// name (JetStream queue group).  With 10 requests the provider must be
+/// called exactly 10 times — never more — proving each JetStream message is
+/// delivered to one worker only, not fan-out to both.
+///
+/// The existing concurrent-workers test only checks that all responses are
+/// 200.  This test additionally verifies the absence of double-processing.
+#[tokio::test]
+async fn binary_two_workers_no_double_processing() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_anthropic_prod_once01";
+    let real_key = "sk-ant-once-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_once"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Two workers in the same queue group.
+    let _worker_a = spawn_worker(nats_port, "once-workers", token, real_key);
+    let _worker_b = spawn_worker(nats_port, "once-workers", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = std::sync::Arc::new(reqwest::Client::new());
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let c = client.clone();
+            let url = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+            let token = token.to_string();
+            tokio::spawn(async move {
+                c.post(url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .body(format!(r#"{{"req":{}}}"#, i))
+                    .timeout(Duration::from_secs(20))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    let responses = join_all(handles).await;
+    for r in responses {
+        assert_eq!(r.unwrap().status(), 200);
+    }
+
+    // The critical assertion: 10 requests → exactly 10 provider calls.
+    // If JetStream delivered to both workers, this would be > 10.
+    assert_eq!(
+        _ai_mock.hits(),
+        10,
+        "Each request must reach the provider exactly once (work-queue semantics)"
+    );
+}
+
+/// NATS prefix isolation: two independent proxy+worker pairs share the same
+/// NATS server but use different `PROXY_PREFIX` values.  A request sent to
+/// proxy-A must be processed by worker-A only and vice versa — the prefixes
+/// act as namespaces that prevent cross-tenant interference.
+#[tokio::test]
+async fn binary_nats_prefix_isolation() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_a = httpmock::MockServer::start_async().await;
+    let mock_b = httpmock::MockServer::start_async().await;
+
+    let token_a = "tok_anthropic_prod_piso01";
+    let key_a   = "sk-ant-prefix-a-key";
+    let token_b = "tok_anthropic_prod_piso02";
+    let key_b   = "sk-ant-prefix-b-key";
+
+    let hit_a = mock_a
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"tenant":"a"}"#);
+        })
+        .await;
+
+    let hit_b = mock_b
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"tenant":"b"}"#);
+        })
+        .await;
+
+    let port_a = free_port();
+    let port_b = free_port();
+
+    let _proxy_a  = spawn_proxy_with_prefix(nats_port, port_a, &mock_a.base_url(), "tenant_a");
+    let _proxy_b  = spawn_proxy_with_prefix(nats_port, port_b, &mock_b.base_url(), "tenant_b");
+    wait_for_port(port_a, Duration::from_secs(15)).await;
+    wait_for_port(port_b, Duration::from_secs(15)).await;
+
+    let _worker_a = spawn_worker_with_prefix(nats_port, "iso-workers-a", token_a, key_a, "tenant_a");
+    let _worker_b = spawn_worker_with_prefix(nats_port, "iso-workers-b", token_b, key_b, "tenant_b");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+
+    let resp_a = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", port_a))
+        .header("Authorization", format!("Bearer {}", token_a))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    let resp_b = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", port_b))
+        .header("Authorization", format!("Bearer {}", token_b))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp_a.status(), 200, "Proxy-A must serve tenant-A request");
+    assert_eq!(resp_b.status(), 200, "Proxy-B must serve tenant-B request");
+
+    // Critical: each mock must be hit exactly once — no cross-prefix leakage.
+    assert_eq!(hit_a.hits(), 1, "Tenant-A mock must receive exactly 1 request");
+    assert_eq!(hit_b.hits(), 1, "Tenant-B mock must receive exactly 1 request");
+}
+
+/// API key with special characters: real keys may contain dots, dashes,
+/// underscores, and alphanumeric characters.  The worker must forward the
+/// key verbatim as an HTTP header value without any percent-encoding or
+/// truncation.
+#[tokio::test]
+async fn binary_api_key_with_special_chars_forwarded_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_anthropic_prod_spc001";
+    // Real key with dots and underscores — realistic for some providers.
+    let real_key = "sk-ant-v2.0_special.key_value-abc123";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_special_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "spc-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "API key with dots and dashes must be forwarded verbatim"
+    );
+    assert_eq!(_ai_mock.hits(), 1, "Provider must see the exact real key");
+}
+
+/// HTML error body forwarded unchanged: when an AI provider returns a
+/// non-JSON error page (e.g. an HTML 503 from a CDN or load balancer),
+/// the proxy must forward the body and status code unchanged — it must not
+/// try to parse or reinterpret the HTML.
+#[tokio::test]
+async fn binary_provider_html_error_body_forwarded_unchanged() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_anthropic_prod_html01";
+    let real_key = "sk-ant-html-key";
+
+    let html_body = "<html><head><title>Service Unavailable</title></head><body><h1>503 Service Unavailable</h1></body></html>";
+
+    // A persistent 503 — the worker will exhaust retries and forward the last
+    // response (status + body) back to the caller.
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(503)
+                .header("content-type", "text/html")
+                .body(html_body);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "html-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 503, "HTTP 503 from provider must be forwarded");
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, html_body,
+        "HTML error body must reach the caller byte-for-byte"
+    );
+}
+
+/// Long token ID: a token with a 24-character alphanumeric ID segment must
+/// be accepted by the worker's vault lookup without truncation or rejection.
+///
+/// Ensures the token validator has no undocumented length cap on the ID
+/// segment that would silently reject valid long-form tokens.
+#[tokio::test]
+async fn binary_token_with_long_alphanumeric_id_works() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    // 24-character alphanumeric ID — deliberately long.
+    let token    = "tok_anthropic_prod_abcdefghij0123456789ABCD";
+    let real_key = "sk-ant-long-id-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_longid_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "longid-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Token with 24-char alphanumeric ID must be accepted and resolved"
+    );
+    assert_eq!(_ai_mock.hits(), 1, "Provider must receive the request with the real key");
+}
