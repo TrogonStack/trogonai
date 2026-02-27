@@ -1375,4 +1375,107 @@ mod tests {
             "First Authorization header must win; second must be ignored"
         );
     }
+
+    // ── Gap B ──────────────────────────────────────────────────────────────
+
+    /// A very long Authorization header whose value does not start with
+    /// `tok_` must not panic and must have its raw-token prefix truncated
+    /// to at most 16 characters in the error message.
+    ///
+    /// `worker.rs`: `&raw_token[..raw_token.len().min(16)]`
+    #[tokio::test]
+    async fn resolve_token_very_long_header_error_truncated_at_16_chars() {
+        let vault = MemoryVault::new();
+        // 100 KB of 'X' chars — does NOT start with "tok_".
+        let long_prefix = "X".repeat(100_000);
+        let auth_value = format!("Bearer {}", long_prefix);
+        let headers = vec![("authorization".to_string(), auth_value)];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err(), "Long non-tok_ header must produce an error");
+        let msg = result.unwrap_err();
+
+        // The truncated snippet must be exactly 16 'X' characters.
+        assert!(
+            msg.contains("XXXXXXXXXXXXXXXX"),
+            "Error must contain a 16-char truncation, got: {}",
+            msg
+        );
+        // Must NOT include 17 or more consecutive X's (i.e. the full value
+        // must not be leaked into the error string).
+        assert!(
+            !msg.contains(&"X".repeat(17)),
+            "Error must not leak more than 16 chars of the raw value"
+        );
+    }
+
+    // ── Gap C ──────────────────────────────────────────────────────────────
+
+    /// A header value containing a raw control character (U+0001 SOH, byte
+    /// 0x01) is invalid per RFC 7230.  reqwest / the `http` crate rejects
+    /// it when building the request, returning an error before any TCP
+    /// connection is attempted.
+    ///
+    /// This validates that such errors propagate up as
+    /// `"HTTP request failed: …"` rather than panicking.
+    #[tokio::test]
+    async fn forward_request_control_char_in_header_value_is_rejected() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: "http://127.0.0.1:1/test".to_string(),
+            headers: vec![],
+            body: vec![],
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "valid-key".to_string(),
+        };
+        // Inject control char 0x01 into a header value, simulating a
+        // corrupted idempotency_key reaching forward_request.
+        let headers = vec![
+            ("Authorization".to_string(), "Bearer sk-realkey".to_string()),
+            ("X-Request-Id".to_string(), "key\x01invalid".to_string()),
+        ];
+
+        let result = forward_request(&client, &request, &headers).await;
+
+        assert!(result.is_err(), "Control char in header value must cause an error");
+        assert!(
+            result.unwrap_err().contains("HTTP request failed"),
+            "Error must originate from the HTTP layer"
+        );
+    }
+
+    // ── Gap E ──────────────────────────────────────────────────────────────
+
+    /// A CRLF sequence embedded in a header value is an HTTP
+    /// request-splitting attack vector.  The `http` crate rejects bytes
+    /// 0x0D (`\r`) and 0x0A (`\n`) in header values.
+    #[tokio::test]
+    async fn forward_request_crlf_in_header_value_is_rejected() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: "http://127.0.0.1:1/test".to_string(),
+            headers: vec![],
+            body: vec![],
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "valid-key".to_string(),
+        };
+        let headers = vec![
+            ("Authorization".to_string(), "Bearer sk-realkey".to_string()),
+            (
+                "X-Evil".to_string(),
+                "value\r\nX-Injected: yes".to_string(),
+            ),
+        ];
+
+        let result = forward_request(&client, &request, &headers).await;
+
+        assert!(result.is_err(), "CRLF in header value must cause an error");
+        assert!(
+            result.unwrap_err().contains("HTTP request failed"),
+            "Error must originate from the HTTP layer"
+        );
+    }
 }
