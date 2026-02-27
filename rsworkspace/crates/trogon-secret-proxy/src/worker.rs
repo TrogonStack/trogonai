@@ -1995,4 +1995,62 @@ mod tests {
         assert!(resp.body.is_empty(), "204 response must have an empty body");
         mock.assert_async().await;
     }
+
+    // ── Gap: error message 16-char boundary ──────────────────────────────────
+
+    /// `resolve_token` truncates the raw token in the error message to at most
+    /// 16 characters via `&raw_token[..raw_token.len().min(16)]`.
+    ///
+    /// Three boundary cases:
+    ///   - 15 chars → full token shown (< limit)
+    ///   - 16 chars → full token shown (= limit, no truncation at boundary)
+    ///   - 17 chars → only first 16 shown (> limit, 17th char absent)
+    ///
+    /// The `resolve_token_very_long_header_error_truncated_at_16_chars` test
+    /// covers the "much longer than 16" case; these tests pin down the exact
+    /// boundary conditions at 15, 16, and 17 characters.
+    #[tokio::test]
+    async fn resolve_token_error_shows_all_chars_when_token_is_under_16() {
+        let vault = MemoryVault::new();
+        // "sk-ant-realkey1" = 15 chars — under the 16-char limit.
+        let headers = make_headers("Bearer sk-ant-realkey1");
+        let err = resolve_token(&vault, &headers).await.unwrap_err();
+        assert!(
+            err.contains("sk-ant-realkey1"),
+            "All 15 chars must appear in the error message: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_token_error_shows_all_chars_when_token_is_exactly_16() {
+        let vault = MemoryVault::new();
+        // "sk-ant-realkey12" = 16 chars — exactly at the limit, no truncation.
+        let headers = make_headers("Bearer sk-ant-realkey12");
+        let err = resolve_token(&vault, &headers).await.unwrap_err();
+        assert!(
+            err.contains("sk-ant-realkey12"),
+            "All 16 chars must appear (no truncation at boundary): {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_token_error_truncates_to_16_chars_when_token_is_17() {
+        let vault = MemoryVault::new();
+        // "sk-ant-realkey123" = 17 chars — one over the limit.
+        // Only the first 16 ("sk-ant-realkey12") must appear; the 17th ("3") is cut.
+        let headers = make_headers("Bearer sk-ant-realkey123");
+        let err = resolve_token(&vault, &headers).await.unwrap_err();
+        assert!(
+            err.contains("sk-ant-realkey12"),
+            "First 16 chars must appear in the error message: {}",
+            err
+        );
+        assert!(
+            !err.contains("sk-ant-realkey123"),
+            "Full 17-char token must NOT appear — must be truncated at 16: {}",
+            err
+        );
+    }
 }
