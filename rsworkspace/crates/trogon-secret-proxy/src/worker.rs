@@ -1032,4 +1032,159 @@ mod tests {
         assert_eq!(resp.status, 200);
         mock.assert_async().await;
     }
+
+    // ── Gap: multiple Authorization headers all stripped ──────────────────────
+
+    /// When an incoming request carries more than one `Authorization` header
+    /// (e.g. added by different middleware layers), `process_request` must strip
+    /// ALL of them and inject a single header with the resolved real key.
+    ///
+    /// The mock explicitly rejects any call that still carries the tok_ token,
+    /// which would happen if one of the duplicate headers leaked through.
+    #[tokio::test]
+    async fn process_request_duplicate_authorization_headers_stripped() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_dupauth1").unwrap();
+        let real_key = "sk-ant-dupauth-real-key";
+        vault.store(&token, real_key).await.unwrap();
+
+        // Accept only the real key — no tok_ or duplicate value must survive.
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path("/v1/messages")
+                    .header("authorization", format!("Bearer {}", real_key));
+                then.status(200).body(r#"{"id":"dup"}"#);
+            })
+            .await;
+
+        let url = format!("{}/v1/messages", mock_server.base_url());
+        let request = OutboundHttpRequest {
+            method: "POST".to_string(),
+            url,
+            headers: vec![
+                // Primary tok_ token (valid).
+                ("Authorization".to_string(), "Bearer tok_anthropic_prod_dupauth1".to_string()),
+                // Duplicate — must also be stripped.
+                ("Authorization".to_string(), "Bearer some-extra-key-1".to_string()),
+                // Lowercase key — eq_ignore_ascii_case catches this too.
+                ("authorization".to_string(), "Bearer some-extra-key-2".to_string()),
+            ],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-dup-01".to_string(),
+        };
+
+        let client = ReqwestClient::new();
+        let resp = process_request(&request, &vault, &client).await;
+
+        assert_eq!(resp.status, 200, "All duplicate Authorization headers must be stripped and real key injected");
+        mock.assert_async().await;
+    }
+
+    // ── Gap: invalid HTTP method names (non-ASCII / special chars) ─────────────
+
+    /// A method with non-ASCII characters (e.g. `"INVÁLIDO"`) cannot be parsed
+    /// by `reqwest::Method::from_str` and must return an error immediately.
+    #[tokio::test]
+    async fn forward_request_non_ascii_method_returns_error() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "INVÁLIDO".to_string(),
+            url: "http://127.0.0.1:1/v1/messages".to_string(),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-nonascii".to_string(),
+        };
+
+        let result = forward_request_with_retry(&client, &request, &[]).await;
+        assert!(result.is_err(), "Non-ASCII method must return Err");
+        assert!(
+            result.unwrap_err().contains("Invalid HTTP method"),
+            "Error must contain 'Invalid HTTP method'"
+        );
+    }
+
+    /// A method with an invalid character (e.g. `"GET@"`) is rejected by
+    /// `reqwest::Method::from_str` — `@` is not a valid RFC 7230 tchar.
+    /// (Note: `!` IS a valid tchar and would be accepted.)
+    #[tokio::test]
+    async fn forward_request_special_char_method_returns_error() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET@".to_string(),
+            url: "http://127.0.0.1:1/v1/messages".to_string(),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-specialchar".to_string(),
+        };
+
+        let result = forward_request_with_retry(&client, &request, &[]).await;
+        assert!(result.is_err(), "Method with special char must return Err");
+        assert!(
+            result.unwrap_err().contains("Invalid HTTP method"),
+            "Error must contain 'Invalid HTTP method'"
+        );
+    }
+
+    // ── Gap: vault error exact message format ─────────────────────────────────
+
+    /// When the vault backend returns `Err(e)`, the error is wrapped with the
+    /// prefix `"Vault error: "` and the backend's `Display` representation is
+    /// appended verbatim.  This test verifies the exact combined string so that
+    /// log consumers and callers can pattern-match reliably.
+    #[tokio::test]
+    async fn resolve_token_vault_error_exact_message_format() {
+        use trogon_vault::{ApiKeyToken as VaultToken, VaultStore as VaultStoreTrait};
+
+        struct ExactErrorVault;
+
+        impl VaultStoreTrait for ExactErrorVault {
+            type Error = std::io::Error;
+
+            fn store(
+                &self,
+                _token: &VaultToken,
+                _plaintext: &str,
+            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+                async { Ok(()) }
+            }
+
+            fn resolve(
+                &self,
+                _token: &VaultToken,
+            ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
+            {
+                async {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "simulated backend failure",
+                    ))
+                }
+            }
+
+            fn revoke(
+                &self,
+                _token: &VaultToken,
+            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+                async { Ok(()) }
+            }
+        }
+
+        let vault = ExactErrorVault;
+        let headers = make_headers("Bearer tok_anthropic_prod_exacterr1");
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            "Vault error: simulated backend failure",
+            "Vault error format must be 'Vault error: <display>'"
+        );
+    }
 }
