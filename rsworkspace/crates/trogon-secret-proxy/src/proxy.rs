@@ -297,6 +297,29 @@ mod tests {
         }
     }
 
+    /// `StatusCode::from_u16` accepts values 100–999; outside that range it
+    /// returns `Err`.  `proxy.rs:164` uses `.unwrap_or(INTERNAL_SERVER_ERROR)`
+    /// so the proxy returns 500 instead of panicking when a worker sends an
+    /// out-of-range status code.
+    ///
+    /// This unit test verifies the fallback expression directly.  The e2e test
+    /// `e2e_invalid_response_status_code_falls_back_to_500` exercises the same
+    /// behaviour end-to-end; this test documents it at the unit level.
+    #[test]
+    fn invalid_upstream_status_code_falls_back_to_500() {
+        for invalid in [0u16, 99, 1000] {
+            let result = StatusCode::from_u16(invalid);
+            assert!(result.is_err(), "Status {} must be rejected as invalid", invalid);
+            let fallback = result.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                fallback,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Invalid status {} must fall back to 500",
+                invalid
+            );
+        }
+    }
+
     #[test]
     fn error_display_includes_context() {
         assert!(ProxyError::UnknownProvider("fakeai".to_string())
