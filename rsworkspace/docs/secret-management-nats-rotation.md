@@ -390,6 +390,10 @@ impl NatsKvVault {
    - Rotation coordinator revoca sk-ant-v1 en Anthropic
 
 6. Solo sk-ant-v2 válida. Rotación completa. Cero downtime.
+
+
+
+always provision the new key at the provider first, then write to KV. Never write to KV before the key exists at the provider
 ```
 
 ---
