@@ -3807,3 +3807,184 @@ async fn e2e_duplicate_set_cookie_headers_both_forwarded() {
     assert!(values.contains(&"session=abc; Path=/"), "session cookie must be present");
     assert!(values.contains(&"theme=dark; Path=/"), "theme cookie must be present");
 }
+
+// ── Gap 1 ─────────────────────────────────────────────────────────────────────
+
+/// When the worker sends an `OutboundHttpResponse` whose `status` field is not
+/// a valid HTTP status code (e.g. `9999`), `StatusCode::from_u16(9999)` returns
+/// `Err`, and the proxy falls back to `500 Internal Server Error`.
+///
+/// `proxy.rs` line 164–165:
+/// ```rust
+/// let status = StatusCode::from_u16(proxy_response.status)
+///     .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+/// ```
+#[tokio::test]
+async fn e2e_invalid_status_code_in_worker_response_falls_back_to_500() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-invalid-status-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-invalid-status-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_invstat01")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Return a response with an out-of-range HTTP status code.
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 9999,
+        headers: vec![],
+        body: b"body".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(
+        resp.status(),
+        500,
+        "Invalid status code must fall back to 500 Internal Server Error"
+    );
+}
+
+// ── Gap 2 ─────────────────────────────────────────────────────────────────────
+
+/// When the worker publishes bytes to the Core NATS reply subject that are not
+/// valid JSON, `serde_json::from_slice` fails with `ProxyError::Deserialize`,
+/// which maps to `500 Internal Server Error` via `IntoResponse`.
+///
+/// `proxy.rs` line 161–162:
+/// ```rust
+/// let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
+///     .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
+/// ```
+#[tokio::test]
+async fn e2e_corrupted_reply_json_returns_500() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-corrupted-reply-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-corrupted-reply-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_corrpjson1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    // Extract the reply subject from the well-formed JetStream message, then
+    // publish garbage bytes to it — simulating a misbehaving worker.
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    nats.publish(reply_to, b"not valid json {{{".as_ref().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(
+        resp.status(),
+        500,
+        "Corrupted reply payload must produce 500 Internal Server Error"
+    );
+}

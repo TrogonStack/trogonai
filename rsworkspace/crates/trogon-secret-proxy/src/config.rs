@@ -98,4 +98,41 @@ mod tests {
         let cfg = Config::for_test().with_worker_timeout(Duration::from_secs(30));
         assert_eq!(cfg.worker_timeout(), Duration::from_secs(30));
     }
+
+    // ── Gap 5 — extreme builder values ────────────────────────────────────
+
+    #[test]
+    fn with_proxy_port_zero_is_accepted() {
+        let cfg = Config::for_test().with_proxy_port(0);
+        assert_eq!(cfg.proxy_port(), 0);
+    }
+
+    #[test]
+    fn with_proxy_port_max_is_accepted() {
+        let cfg = Config::for_test().with_proxy_port(u16::MAX);
+        assert_eq!(cfg.proxy_port(), u16::MAX);
+    }
+
+    #[test]
+    fn with_worker_timeout_zero_is_accepted() {
+        let cfg = Config::for_test().with_worker_timeout(Duration::ZERO);
+        assert_eq!(cfg.worker_timeout(), Duration::ZERO);
+    }
+
+    #[test]
+    fn with_worker_timeout_max_is_accepted() {
+        let cfg = Config::for_test().with_worker_timeout(Duration::MAX);
+        assert_eq!(cfg.worker_timeout(), Duration::MAX);
+    }
+
+    #[test]
+    fn builder_chaining_overrides_all_defaults() {
+        let cfg = Config::for_test()
+            .with_proxy_port(1234)
+            .with_worker_timeout(Duration::from_millis(500));
+        assert_eq!(cfg.proxy_port(), 1234);
+        assert_eq!(cfg.worker_timeout(), Duration::from_millis(500));
+        // prefix and NATS config are unaffected by the overrides.
+        assert_eq!(cfg.prefix(), DEFAULT_SUBJECT_PREFIX);
+    }
 }
