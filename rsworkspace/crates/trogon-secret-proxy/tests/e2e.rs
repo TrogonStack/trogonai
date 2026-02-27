@@ -3491,3 +3491,115 @@ async fn e2e_empty_query_string_appended_as_bare_question_mark() {
     let resp = proxy_handle.await.unwrap().unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+/// A request header whose value bytes are valid Latin-1 but NOT valid UTF-8
+/// (e.g. `0xFF`) must be silently dropped by the proxy before the
+/// `OutboundHttpRequest` is published to JetStream.
+///
+/// `proxy.rs` line 101: `v.to_str().ok().map(...)` — returns `None` for
+/// non-UTF-8 bytes, so the header is filtered out.  A sibling header with a
+/// valid ASCII value must be preserved.
+///
+/// Uses `Request::from_parts` to inject a raw `HeaderValue::from_bytes`
+/// containing `0xFF`, bypassing the `&str` builder API.
+#[tokio::test]
+async fn e2e_request_header_with_invalid_utf8_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-inv-utf8-req-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-inv-utf8-req-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Build a base request, then inject a non-UTF-8 header via from_parts.
+    let base = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_invutf801")
+        .header("x-ascii-header", "must-survive")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let (mut parts, body) = base.into_parts();
+    // 0xFF is a valid header value byte (Latin-1) but not valid UTF-8.
+    let bad_value = axum::http::HeaderValue::from_bytes(b"\xff\xfe").unwrap();
+    parts.headers.insert(
+        axum::http::HeaderName::from_static("x-binary-header"),
+        bad_value,
+    );
+    let request = axum::http::Request::from_parts(parts, body);
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_json = &parsed["headers"];
+
+    // The invalid-UTF-8 header must be absent.
+    assert!(
+        find_header(headers_json, "x-binary-header").is_none(),
+        "Header with invalid UTF-8 value must be silently dropped"
+    );
+
+    // The valid ASCII header must be preserved.
+    assert!(
+        find_header(headers_json, "x-ascii-header").is_some(),
+        "Header with valid ASCII value must be forwarded"
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+}

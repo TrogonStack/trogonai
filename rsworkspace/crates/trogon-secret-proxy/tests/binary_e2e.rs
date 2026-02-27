@@ -6326,3 +6326,61 @@ async fn binary_base_url_override_with_trailing_slash_is_normalized() {
         "Provider must receive exactly one request at /v1/messages (no double slash)"
     );
 }
+
+// ── Gap A: invalid PROXY_PORT falls back to 8080 ─────────────────────────────
+
+/// When `PROXY_PORT` is set to a non-numeric string (e.g. `"not-a-number"`),
+/// `.parse::<u16>().ok()` returns `None` and the proxy falls back to the
+/// default port `8080`.  The proxy must start and serve requests normally.
+///
+/// NOTE: This test requires port 8080 to be available on the test host.
+#[tokio::test]
+async fn binary_invalid_proxy_port_falls_back_to_8080() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_invport01";
+    let real_key = "sk-ant-invport-real-001";
+
+    let mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"invport"}"#);
+        })
+        .await;
+
+    // Spawn proxy with an invalid PROXY_PORT → must fall back to 8080.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", "not-a-number")
+        .env("PROXY_WORKER_TIMEOUT_SECS", "15")
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary");
+
+    wait_for_port(8080, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "invport-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post("http://127.0.0.1:8080/anthropic/v1/messages")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Proxy with invalid PROXY_PORT must fall back to 8080 and serve requests"
+    );
+    assert_eq!(mock.hits(), 1, "Provider must receive exactly one request");
+}

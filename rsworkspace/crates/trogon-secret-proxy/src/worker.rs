@@ -1220,4 +1220,128 @@ mod tests {
             let _delay = HTTP_INITIAL_RETRY_DELAY * multiplier;
         }
     }
+
+    // ── Gap C: response header with invalid UTF-8 silently dropped ────────────
+
+    /// A provider may return a header whose value bytes are valid Latin-1
+    /// (accepted by HTTP/1.1 parsers) but NOT valid UTF-8 — e.g. `0xFF`.
+    /// `forward_request` calls `v.to_str().ok()` which returns `None` for
+    /// such values; the header is silently omitted from `OutboundHttpResponse`.
+    /// A sibling header with a valid ASCII value must be preserved.
+    ///
+    /// Uses a raw TCP server to send the non-UTF-8 byte directly.
+    #[tokio::test]
+    async fn forward_request_invalid_utf8_response_header_silently_dropped() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            stream.read(&mut buf).await.ok();
+            // x-invalid: has byte 0xFF (valid Latin-1, invalid UTF-8)
+            // x-valid:   has plain ASCII value — must survive
+            let mut response = Vec::new();
+            response.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
+            response.extend_from_slice(b"x-invalid: \xff\xfe\r\n");
+            response.extend_from_slice(b"x-valid: ascii-safe\r\n");
+            response.extend_from_slice(b"content-length: 2\r\n\r\nok");
+            stream.write_all(&response).await.ok();
+        });
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: format!("http://127.0.0.1:{}/test", port),
+            headers: vec![],
+            body: vec![],
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-invalid-utf8".to_string(),
+        };
+
+        let resp = forward_request_with_retry(&client, &request, &[])
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status, 200);
+
+        let has_invalid = resp.headers.iter().any(|(k, _)| k == "x-invalid");
+        assert!(
+            !has_invalid,
+            "Header with invalid UTF-8 value must be silently dropped"
+        );
+
+        let has_valid = resp.headers.iter().any(|(k, _)| k == "x-valid");
+        assert!(has_valid, "Header with valid ASCII value must be preserved");
+    }
+
+    // ── Gap D: 5xx retry succeeds on second attempt ───────────────────────────
+
+    /// When the provider returns 503 on the first attempt, the retry loop
+    /// (lines 268-279) must sleep and retry.  On the second attempt the server
+    /// returns 200 — the function must return that 200 response.
+    ///
+    /// Uses a raw TCP server with an AtomicU32 counter:
+    /// - attempt 1 → 503 with `Connection: close` (forces new TCP conn on retry)
+    /// - attempt 2 → 200
+    #[tokio::test]
+    async fn forward_request_5xx_retry_succeeds_on_second_attempt() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let attempt_count = Arc::new(AtomicU32::new(0));
+        let counter = attempt_count.clone();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut buf = vec![0u8; 4096];
+                stream.read(&mut buf).await.ok();
+
+                if n == 1 {
+                    // First attempt: 503 + Connection: close so reqwest opens
+                    // a fresh TCP connection on the next retry.
+                    let r = b"HTTP/1.1 503 Service Unavailable\r\n\
+                              Connection: close\r\n\
+                              content-length: 5\r\n\r\nerror";
+                    stream.write_all(r).await.ok();
+                } else {
+                    // Second attempt: 200 OK.
+                    let r = b"HTTP/1.1 200 OK\r\n\
+                              content-length: 7\r\n\r\nretried";
+                    stream.write_all(r).await.ok();
+                    break;
+                }
+            }
+        });
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "POST".to_string(),
+            url: format!("http://127.0.0.1:{}/retry-me", port),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-5xx-retry".to_string(),
+        };
+
+        let resp = forward_request_with_retry(&client, &request, &[])
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status, 200, "Second attempt must return 200");
+        assert_eq!(resp.body, b"retried", "Body from successful retry must be returned");
+        assert_eq!(
+            attempt_count.load(Ordering::SeqCst),
+            2,
+            "Must make exactly 2 attempts"
+        );
+    }
 }
