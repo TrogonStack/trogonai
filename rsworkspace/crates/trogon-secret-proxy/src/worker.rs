@@ -1608,4 +1608,153 @@ mod tests {
             msg
         );
     }
+
+    // ── Gap 1 ──────────────────────────────────────────────────────────────
+
+    /// The worker builds its HTTP client with `redirect::Policy::none()`
+    /// (`worker.rs` binary, line 89).  When the upstream returns a 3xx
+    /// redirect, `forward_request` must return the 3xx response as-is —
+    /// it must NOT follow the redirect to a different URL.
+    ///
+    /// This test uses the same `redirect::Policy::none()` the real worker
+    /// uses, so it faithfully reproduces production behaviour.
+    #[tokio::test]
+    async fn forward_request_upstream_3xx_is_forwarded_without_following_redirect() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/v1/messages");
+                then.status(301)
+                    .header("location", "https://example.com/new-location");
+            })
+            .await;
+
+        // Mirror the redirect policy used by the real worker binary.
+        let client = ReqwestClient::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+
+        let request = OutboundHttpRequest {
+            method: "POST".to_string(),
+            url: format!("{}/v1/messages", mock_server.base_url()),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "key-redir".to_string(),
+        };
+        let headers = vec![("Authorization".to_string(), "Bearer sk-key".to_string())];
+
+        let result = forward_request(&client, &request, &headers).await;
+
+        assert!(result.is_ok(), "3xx must not cause a transport error");
+        assert_eq!(
+            result.unwrap().status,
+            301,
+            "301 must be returned as-is, not followed"
+        );
+        mock.assert_async().await;
+    }
+
+    // ── Gap 2 ──────────────────────────────────────────────────────────────
+
+    /// `" ".is_empty()` is `false` in Rust — a whitespace-only string is NOT
+    /// considered empty.  The guard at `worker.rs:230` only calls
+    /// `real_key.is_empty()`, so a vault entry of a single space passes and
+    /// is returned as the resolved key.
+    ///
+    /// This documents the design boundary: vault callers are responsible for
+    /// not storing whitespace-only values.
+    #[tokio::test]
+    async fn resolve_token_whitespace_only_real_key_passes_empty_check() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_wspace001").unwrap();
+        vault.store(&token, " ").await.unwrap(); // single space — not empty
+
+        let headers = make_headers("Bearer tok_anthropic_prod_wspace001");
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(
+            result.is_ok(),
+            "Whitespace-only key must pass is_empty() check — got: {:?}",
+            result
+        );
+        assert_eq!(
+            result.unwrap(),
+            " ",
+            "Whitespace key must be returned unchanged"
+        );
+    }
+
+    // ── Gap 4 ──────────────────────────────────────────────────────────────
+
+    /// `body.is_empty()` is `false` for `vec![0x00]` (a single null byte).
+    /// The body must be included in the upstream request — not silently
+    /// omitted as if it were empty.
+    #[tokio::test]
+    async fn forward_request_body_with_null_byte_is_sent_to_upstream() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path("/v1/data")
+                    .body("\0"); // null byte as &str — Into<String> required by httpmock
+                then.status(200);
+            })
+            .await;
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "POST".to_string(),
+            url: format!("{}/v1/data", mock_server.base_url()),
+            headers: vec![],
+            body: vec![0x00], // single null byte — not empty
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "key-null".to_string(),
+        };
+        let headers = vec![("Authorization".to_string(), "Bearer sk-key".to_string())];
+
+        let result = forward_request(&client, &request, &headers).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().status, 200);
+        // mock.assert_async() verifies the null-byte body was actually sent.
+        mock.assert_async().await;
+    }
+
+    // ── Gap 5 ──────────────────────────────────────────────────────────────
+
+    /// A 204 No Content response has no body.  `upstream_resp.bytes().await`
+    /// returns an empty `Bytes`, so `OutboundHttpResponse.body` must be
+    /// `vec![]` and the status 204 must be preserved — no panic, no
+    /// unexpected bytes injected.
+    #[tokio::test]
+    async fn forward_request_204_no_content_response_is_forwarded() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::DELETE).path("/v1/items/1");
+                then.status(204); // No Content
+            })
+            .await;
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "DELETE".to_string(),
+            url: format!("{}/v1/items/1", mock_server.base_url()),
+            headers: vec![],
+            body: vec![], // DELETE typically has no body
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "key-del".to_string(),
+        };
+        let headers = vec![("Authorization".to_string(), "Bearer sk-key".to_string())];
+
+        let result = forward_request(&client, &request, &headers).await;
+
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert_eq!(resp.status, 204, "204 status must be preserved");
+        assert!(resp.body.is_empty(), "204 response must have an empty body");
+        mock.assert_async().await;
+    }
 }
