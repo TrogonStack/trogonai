@@ -955,6 +955,52 @@ mod tests {
         );
     }
 
+    // ── Gap: real key containing newline causes HTTP request to fail ────────────
+
+    /// A vault entry whose real key contains a newline (`\n`) causes the
+    /// `Authorization` header to be built as `"Bearer sk\nkey"`.
+    /// The `http` crate rejects control characters (including `\n`) in header
+    /// values, so `forward_request` returns `Err("HTTP request failed: …")`
+    /// **before** any TCP connection is attempted.
+    ///
+    /// Consequence: a misconfigured vault entry with an embedded newline makes
+    /// ALL requests using that token fail with status 502 — the `retain()`
+    /// sanitisation step is never reached.
+    #[tokio::test]
+    async fn process_request_real_key_with_newline_causes_502_error() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_nlkey001").unwrap();
+        // Key contains a literal newline — pathological vault misconfiguration.
+        vault.store(&token, "sk\nkey").await.unwrap();
+
+        // Mock should NOT be called — the request fails before any TCP send.
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.any_request();
+                then.status(200).body("should not reach here");
+            })
+            .await;
+
+        let url = format!("{}/v1/messages", mock_server.base_url());
+        let request = make_request(&url, "Bearer tok_anthropic_prod_nlkey001", "idem-nl");
+        let client = ReqwestClient::new();
+
+        let resp = process_request(&request, &vault, &client).await;
+
+        // reqwest rejects "Bearer sk\nkey" → forward_request returns Err →
+        // process_request wraps it as a 502 error response.
+        assert_eq!(
+            resp.status, 502,
+            "A newline in the real key must cause a 502 error (reqwest rejects \\n in header values)"
+        );
+        assert!(resp.error.is_some(), "Error field must be set");
+
+        // The mock must not have been called — the failure happens before TCP.
+        assert_eq!(mock.hits(), 0, "Upstream must not be called when header is invalid");
+    }
+
     // ── Gap: single-char real key strips every header containing that byte ────
 
     /// When `real_key` is a single character (e.g. `"k"`), the substring
