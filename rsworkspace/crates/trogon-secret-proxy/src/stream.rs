@@ -60,4 +60,27 @@ mod tests {
     fn stream_name_different_prefixes_differ() {
         assert_ne!(stream_name("production"), stream_name("staging"));
     }
+
+    // ── Gap: slash not replaced ────────────────────────────────────────────────
+
+    /// `stream_name` only replaces hyphens with underscores.  A slash in the
+    /// prefix is NOT replaced and appears verbatim in the stream name.
+    ///
+    /// NATS stream names must not contain `/`.  Callers are responsible for
+    /// validating the prefix before passing it here; `stream_name` does not
+    /// perform input validation.
+    #[test]
+    fn stream_name_slash_is_preserved_not_replaced() {
+        // Hyphens are still replaced as usual.
+        assert_eq!(stream_name("my-company"), "PROXY_REQUESTS_MY_COMPANY");
+        // A slash is NOT replaced — it is uppercased but otherwise preserved.
+        assert_eq!(stream_name("trogon/api"), "PROXY_REQUESTS_TROGON/API");
+    }
+
+    /// An empty prefix produces `"PROXY_REQUESTS_"` — a trailing underscore
+    /// with nothing after it.  Callers must ensure the prefix is non-empty.
+    #[test]
+    fn stream_name_empty_prefix_produces_trailing_underscore() {
+        assert_eq!(stream_name(""), "PROXY_REQUESTS_");
+    }
 }

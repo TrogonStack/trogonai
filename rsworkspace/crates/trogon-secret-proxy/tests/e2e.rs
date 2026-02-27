@@ -4438,3 +4438,55 @@ async fn e2e_error_field_with_4xx_status_uses_that_status_not_502() {
         "4xx status with error field must use the 4xx code, not fall back to 502"
     );
 }
+
+// ── Gap 8.7: request to root path returns 404 ──────────────────────────────
+
+/// `GET /` has no matching route in the axum router (`/{provider}/{*path}`
+/// requires at least a provider segment and a path segment).  Axum must
+/// return 404 before any handler is called — no JetStream message is
+/// published, no worker slot is consumed.
+///
+/// Uses `oneshot` so we exercise the router layer in isolation without
+/// spawning threads or waiting for a response from a worker.
+#[tokio::test]
+async fn e2e_request_to_root_path_returns_404() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats,
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    use tower::ServiceExt as _;
+
+    // Axum returns 404 at the routing level — handle_request is never called
+    // and the ProxyState is never accessed.
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let resp: axum::response::Response = router(state).oneshot(request).await.unwrap();
+
+    assert_eq!(
+        resp.status(),
+        404,
+        "GET / must return 404 — no matching route in /{{provider}}/{{*path}}"
+    );
+}
