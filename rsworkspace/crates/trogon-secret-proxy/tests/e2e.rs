@@ -3053,3 +3053,224 @@ async fn e2e_nats_reply_to_header_injected_in_jetstream_message() {
     let resp = proxy_handle.await.unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+// ── Gap 1: 4xx error status preserved ─────────────────────────────────────
+
+/// When the worker sets the `error` field AND the status code is already a
+/// 4xx client error, the proxy must return the original 4xx status code —
+/// not convert it to 502 Bad Gateway.
+///
+/// proxy.rs logic:
+/// ```text
+/// let error_status = if status.is_client_error() || status.is_server_error() {
+///     status          // ← 4xx/5xx preserved
+/// } else {
+///     StatusCode::BAD_GATEWAY   // ← 2xx/3xx with error field → 502
+/// };
+/// ```
+///
+/// The complementary test `e2e_worker_error_field_with_status_200_returns_502`
+/// covers the 200→502 path; this test covers the 403→403 path.
+#[tokio::test]
+async fn e2e_worker_error_with_4xx_status_preserves_status_code() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-err-4xx-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-err-4xx-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_err4xx1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Reply with 403 AND error field set.
+    // proxy.rs must preserve 403 (not convert to 502) because 4xx is already
+    // an error status code.
+    let reply = OutboundHttpResponse {
+        status: 403,
+        headers: vec![],
+        body: b"access forbidden".to_vec(),
+        error: Some("Access denied: insufficient permissions".to_string()),
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::FORBIDDEN,
+        "error field with 4xx status must preserve 403 — must NOT convert to 502"
+    );
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        std::str::from_utf8(&body_bytes)
+            .unwrap()
+            .contains("Access denied"),
+        "Error message must be forwarded in the response body"
+    );
+}
+
+// ── Gap 15: hop-by-hop headers stripped ───────────────────────────────────
+
+/// Hop-by-hop headers (`proxy-authenticate`, `te`, `trailers`) must be
+/// stripped by the proxy before publishing the `OutboundHttpRequest` to
+/// JetStream.  Non-hop-by-hop headers must be preserved.
+///
+/// The test directly inspects the JSON payload of the JetStream message,
+/// which is more reliable than checking the provider's received headers
+/// through a binary test (where the test HTTP client might strip some
+/// hop-by-hop headers itself before they even reach the proxy).
+#[tokio::test]
+async fn e2e_hop_by_hop_headers_stripped_in_outbound_request() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-hbh-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-hbh-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Include hop-by-hop headers alongside a custom non-hop-by-hop header.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_hbh01")
+        .header("proxy-authenticate", "Basic realm=\"Proxy\"")
+        .header("te", "trailers")
+        .header("trailers", "X-Checksum")
+        .header("x-custom-business-header", "must-be-forwarded")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_json = &parsed["headers"];
+
+    // Hop-by-hop headers must NOT appear in the OutboundHttpRequest payload.
+    let hop_by_hop = ["proxy-authenticate", "te", "trailers"];
+    for name in &hop_by_hop {
+        assert!(
+            find_header(headers_json, name).is_none(),
+            "Hop-by-hop header '{}' must be stripped before publishing to JetStream",
+            name
+        );
+    }
+
+    // Non-hop-by-hop headers must be preserved.
+    assert!(
+        find_header(headers_json, "x-custom-business-header").is_some(),
+        "Non-hop-by-hop header 'x-custom-business-header' must be forwarded unchanged"
+    );
+
+    // Send a reply to unblock the proxy task and verify it completes cleanly.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200, "Proxy must complete the request successfully");
+}
