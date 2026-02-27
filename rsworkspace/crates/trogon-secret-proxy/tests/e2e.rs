@@ -3392,3 +3392,102 @@ async fn e2e_multiple_transfer_encoding_headers_all_stripped() {
     let resp = proxy_handle.await.unwrap().unwrap();
     assert_eq!(resp.status(), 200, "Proxy must complete the request successfully");
 }
+
+/// When the incoming URI has a trailing `?` with no query parameters (e.g.
+/// `/anthropic/v1/messages?`), `uri.query()` returns `Some("")`, which the
+/// proxy formats as `"?"` and appends to the upstream URL.
+///
+/// This test documents that concrete behavior: the URL stored in the
+/// `OutboundHttpRequest` payload ends with `?`.  A bare `?` is valid HTTP
+/// and AI providers handle it correctly.
+#[tokio::test]
+async fn e2e_empty_query_string_appended_as_bare_question_mark() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-empty-qs-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-empty-qs-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    // URI with a trailing `?` — empty query string, not None.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages?")
+        .header("authorization", "Bearer tok_anthropic_test_emptyqs01")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let url = parsed["url"].as_str().expect("url field must be present");
+
+    // uri.query() = Some("") → format!("?{}", "") = "?" → appended to URL.
+    assert!(
+        url.ends_with('?'),
+        "URL with empty query string must end with '?', got: {}",
+        url
+    );
+    assert!(
+        url.contains("/v1/messages?"),
+        "Path must be preserved before the bare '?', got: {}",
+        url
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+}
