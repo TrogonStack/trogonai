@@ -4928,3 +4928,431 @@ async fn e2e_error_field_with_5xx_status_uses_that_5xx_not_502() {
         "error field with 5xx status must use that 5xx code, not fall back to 502"
     );
 }
+
+// ── Gap: worker::run Ok(()) path ──────────────────────────────────────────────
+
+/// `worker::run` returns `Ok(())` when the JetStream message stream ends
+/// naturally (the `while let Some(...)` loop exits because `messages.next()`
+/// returns `None`).
+///
+/// This path is reached when the underlying consumer/stream is deleted while
+/// the worker is running: the async_nats `Messages` iterator's internal task
+/// detects that the consumer no longer exists on the server and closes the
+/// channel, causing `messages.next()` to return `None` and the loop to exit.
+///
+/// The test verifies that the worker exits cleanly (`Ok(())`) rather than
+/// panicking, hanging, or returning a `WorkerError`.
+#[tokio::test]
+async fn e2e_worker_run_exits_ok_when_jetstream_stream_is_deleted() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+
+    // Use an isolated prefix so this test does not share a stream with others.
+    let prefix = "e2e-graceful";
+    let outbound_subject = subjects::outbound(prefix);
+    let stream_name_val = stream::stream_name(prefix);
+
+    stream::ensure_stream(&jetstream, prefix, &outbound_subject)
+        .await
+        .unwrap();
+
+    let vault = Arc::new(MemoryVault::new());
+    let http_client = reqwest::Client::new();
+
+    let consumer_name = "e2e-graceful-consumer";
+    let jetstream_worker = jetstream.clone();
+    let nats_worker = nats.clone();
+    let stream_name_clone = stream_name_val.clone();
+
+    let handle = tokio::spawn(async move {
+        worker::run(
+            jetstream_worker,
+            nats_worker,
+            vault,
+            http_client,
+            consumer_name,
+            &stream_name_clone,
+        )
+        .await
+    });
+
+    // Give the worker time to start, enter get_stream + get_or_create_consumer,
+    // and begin waiting on messages.next().
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Delete the stream — this terminates the JetStream Messages iterator.
+    // The async_nats internal pull task detects the consumer/stream is gone and
+    // closes the channel, causing messages.next() to return None.
+    jetstream
+        .delete_stream(&stream_name_val)
+        .await
+        .expect("Failed to delete stream");
+
+    // The worker should exit within a few seconds of the stream being deleted.
+    let result = tokio::time::timeout(Duration::from_secs(10), handle)
+        .await
+        .expect("worker::run did not exit within 10 s after the stream was deleted")
+        .expect("Worker task panicked");
+
+    // When messages.next() returns None, the while-let loop exits and run()
+    // returns Ok(()).
+    assert!(
+        result.is_ok(),
+        "worker::run must return Ok(()) when the JetStream message stream ends; got: {:?}",
+        result
+    );
+}
+
+// ── Scenario 24: Valid token, provider returns 401 ────────────────────────────
+
+/// A valid proxy token (`tok_...`) is resolved from the vault and the real key
+/// is forwarded to the AI provider.  When the provider responds with HTTP 401
+/// (expired or rotated key), the worker must **not** retry (4xx responses are
+/// non-retryable per `forward_request_with_retry`) and must forward the 401
+/// status verbatim through to the proxy caller.
+///
+/// This test distinguishes two 401 paths:
+///   - Token not in vault      → worker returns 401 (tested in `e2e_unknown_token_returns_error`)
+///   - Token resolved OK, provider rejects the real key → also 401, forwarded here
+#[tokio::test]
+async fn e2e_provider_returns_401_proxy_forwards_401_to_caller() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Mock: any request → 401 authentication error (simulates an expired real key).
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(401)
+                .header("content-type", "application/json")
+                .body(r#"{"error":{"type":"authentication_error","message":"invalid api key"}}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_p401aa1").unwrap();
+    vault.store(&token, "sk-ant-expired-key").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("prov401");
+    stream::ensure_stream(&jetstream, "prov401", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "prov401".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            "e2e-prov401-wkr",
+            &stream::stream_name("prov401"),
+        )
+        .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_test_p401aa1")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // Provider returned 401 — 4xx is non-retryable — proxy must forward the 401.
+    assert_eq!(
+        resp.status(),
+        401,
+        "Provider HTTP 401 must be forwarded to the caller unchanged; got {}",
+        resp.status()
+    );
+
+    // Mock was hit — confirms the real key was actually forwarded (not the token).
+    ai_mock.assert_async().await;
+}
+
+// ── Scenario 1: Short real key as substring in response header is stripped ────
+
+/// The worker strips any response header whose VALUE contains the real API key
+/// as a substring (`resp.headers.retain(|(_, v)| !v.contains(real_key))`).
+///
+/// When the real key is very short (e.g. `"sec"`), an unrelated response header
+/// whose value happens to contain that substring is also removed — a
+/// "false positive" caused by substring matching rather than exact matching.
+///
+/// The test uses real key `"sec"` and a response that includes:
+///   - `x-session-id: proc-sec-abc`  → STRIPPED  (value contains "sec")
+///   - `x-version: 2.0`              → PRESERVED (value does not contain "sec")
+///
+/// This documents the intentional trade-off: substring matching is conservative
+/// (may over-strip) to ensure the real key is never visible to the caller.
+#[tokio::test]
+async fn e2e_real_key_substring_in_response_header_is_stripped() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Real key "sec" is deliberately short to demonstrate the substring side-effect.
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sec");
+            then.status(200)
+                .header("content-type", "application/json")
+                // Contains "sec" as substring → must be stripped by the worker.
+                .header("x-session-id", "proc-sec-abc")
+                // Does NOT contain "sec" → must survive unchanged.
+                .header("x-version", "2.0")
+                .body("{}");
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_openai_test_shortkey1").unwrap();
+    vault.store(&token, "sec").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("keysubstr");
+    stream::ensure_stream(&jetstream, "keysubstr", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "keysubstr".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            "e2e-keysubstr-wkr",
+            &stream::stream_name("keysubstr"),
+        )
+        .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_openai_test_shortkey1")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Expected 200; got {}", resp.status());
+
+    // x-session-id value contains "sec" (substring of real key) → stripped by worker.
+    assert!(
+        resp.headers().get("x-session-id").is_none(),
+        "x-session-id (value 'proc-sec-abc' contains real key 'sec') must be stripped"
+    );
+
+    // x-version value "2.0" does not contain "sec" → must reach the caller.
+    assert_eq!(
+        resp.headers()
+            .get("x-version")
+            .and_then(|v| v.to_str().ok()),
+        Some("2.0"),
+        "x-version must be preserved (value '2.0' does not contain the real key)"
+    );
+
+    ai_mock.assert_async().await;
+}
+
+// ── Scenario 15: Prefix with '/' produces an invalid NATS stream name ─────────
+
+/// `stream::stream_name("trogon/api")` produces `"PROXY_REQUESTS_TROGON/API"`.
+/// NATS stream names must not contain `/` (only alphanumerics, hyphens,
+/// underscores, and dots are accepted by the server).
+///
+/// `ensure_stream` calls `jetstream.get_or_create_stream(config)` which
+/// returns a `CreateStreamError` from the NATS server.  This test confirms
+/// the error propagates — the function does NOT swallow it — so startup code
+/// can detect and reject an invalid prefix before the proxy begins serving.
+#[tokio::test]
+async fn e2e_slash_in_prefix_causes_ensure_stream_to_fail() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+
+    // "trogon/api" → stream name "PROXY_REQUESTS_TROGON/API" (invalid: contains '/')
+    let outbound_subject = subjects::outbound("trogon/api");
+    let result = stream::ensure_stream(&jetstream, "trogon/api", &outbound_subject).await;
+
+    assert!(
+        result.is_err(),
+        "ensure_stream must fail when prefix contains '/' — stream name '{}' \
+         is rejected by the NATS server; got Ok",
+        stream::stream_name("trogon/api")
+    );
+}
+
+// ── Scenario 16: Response body is forwarded verbatim (no body filtering) ──────
+
+/// The worker strips real API keys from response *headers* only via
+/// `resp.headers.retain(...)`.  Response *bodies* are forwarded verbatim —
+/// even if the body happens to contain the real key (e.g. in a provider error
+/// message such as `{"error": "key sk-ant-... is expired"}`).
+///
+/// This is intentional: filtering body content would risk corrupting JSON
+/// payloads and breaking streaming responses.  The proxy ensures the real key
+/// is never sent in outbound requests; it does not scrub provider error bodies.
+#[tokio::test]
+async fn e2e_real_key_in_response_body_is_not_filtered() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Provider echoes the real key back in the response body (e.g. an error message).
+    let real_key = "sk-ant-secretkey99";
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(401)
+                .header("content-type", "application/json")
+                // Body contains the real key verbatim — must NOT be filtered.
+                .body(format!(
+                    r#"{{"error":{{"type":"auth_error","key":"{}"}}}}"#,
+                    real_key
+                ));
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_bodyfilter1").unwrap();
+    vault.store(&token, real_key).await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("bodyfilter");
+    stream::ensure_stream(&jetstream, "bodyfilter", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "bodyfilter".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(10),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            "e2e-bodyfilter-wkr",
+            &stream::stream_name("bodyfilter"),
+        )
+        .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", "Bearer tok_anthropic_test_bodyfilter1")
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 401);
+
+    let body_text = resp.text().await.unwrap();
+    // The body must contain the real key — bodies are NOT filtered by the worker.
+    assert!(
+        body_text.contains(real_key),
+        "Response body must be forwarded verbatim even if it contains the real key; \
+         got body: {}",
+        body_text
+    );
+
+    ai_mock.assert_async().await;
+}
