@@ -954,4 +954,82 @@ mod tests {
             "x-safe header (value does not contain key) must be preserved"
         );
     }
+
+    // ── Gap: sub-500 status not retried ──────────────────────────────────────
+
+    /// `forward_request_with_retry` only retries on `status >= 500`.
+    /// A 4xx response (e.g. 418) must be returned immediately without
+    /// triggering a retry — mock must be hit exactly once.
+    ///
+    /// Note: 1xx status codes are reserved by the HTTP stack (hyper/httpmock)
+    /// for informational handshakes; we use 418 as a concrete non-5xx boundary.
+    #[tokio::test]
+    async fn forward_request_4xx_not_retried() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/v1/info");
+                then.status(418).body("I'm a teapot");
+            })
+            .await;
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "POST".to_string(),
+            url: format!("{}/v1/info", mock_server.base_url()),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-418".to_string(),
+        };
+
+        let resp = forward_request_with_retry(&client, &request, &[])
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status, 418, "4xx response must be returned as-is");
+        assert_eq!(mock.hits(), 1, "4xx response must not trigger a retry");
+    }
+
+    // ── Gap: GET with Content-Type but no body ────────────────────────────────
+
+    /// A GET request with a `Content-Type` header but an empty body must
+    /// succeed.  `forward_request` skips the `.body()` call when
+    /// `request.body` is empty, but still forwards headers from its `headers`
+    /// slice — so Content-Type must reach the provider without a body.
+    #[tokio::test]
+    async fn forward_request_get_with_content_type_but_no_body() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/v1/models")
+                    .header("content-type", "application/json");
+                then.status(200).body(r#"{"models":[]}"#);
+            })
+            .await;
+
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "GET".to_string(),
+            url: format!("{}/v1/models", mock_server.base_url()),
+            headers: vec![],
+            body: vec![],   // empty body — forward_request skips .body()
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-get-ct".to_string(),
+        };
+
+        // Content-Type is passed via the `headers` slice (the processed
+        // header list), not via request.headers.  forward_request adds them.
+        let extra_headers = vec![("content-type".to_string(), "application/json".to_string())];
+
+        let resp = forward_request_with_retry(&client, &request, &extra_headers)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status, 200);
+        mock.assert_async().await;
+    }
 }
