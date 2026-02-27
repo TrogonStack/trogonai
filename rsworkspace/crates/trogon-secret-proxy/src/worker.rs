@@ -376,7 +376,7 @@ mod tests {
 
     use crate::messages::OutboundHttpRequest;
 
-    use super::{forward_request, forward_request_with_retry, process_request, resolve_token};
+    use super::{forward_request, forward_request_with_retry, process_request, resolve_token, HTTP_INITIAL_RETRY_DELAY};
 
     fn make_headers(auth: &str) -> Vec<(String, String)> {
         vec![("Authorization".to_string(), auth.to_string())]
@@ -1186,5 +1186,38 @@ mod tests {
             "Vault error: simulated backend failure",
             "Vault error format must be 'Vault error: <display>'"
         );
+    }
+
+    // ── Gap: exponential backoff shift saturates at 31 ────────────────────────
+
+    /// The backoff formula is:
+    ///   `HTTP_INITIAL_RETRY_DELAY * (1u32 << (attempts - 1).min(31))`
+    ///
+    /// `.min(31)` prevents a left-shift overflow for attempts > 32.
+    /// `HTTP_MAX_RETRIES = 3` means the loop never actually reaches attempt 32
+    /// in production, but the guard must still be correct.
+    ///
+    /// This test verifies the arithmetic directly: for any attempt >= 33 the
+    /// shift is capped at 31 (producing the maximum multiplier 2^31) and no
+    /// integer overflow occurs.
+    #[test]
+    fn backoff_shift_saturates_at_31_for_high_attempt_counts() {
+        for attempts in [32u32, 33, 50, 100, u32::MAX] {
+            let shift = (attempts - 1).min(31);
+            assert_eq!(
+                shift, 31,
+                "Shift must be saturated at 31 for attempts={}, got {}",
+                attempts, shift
+            );
+            // 1u32 << 31 must not panic (would panic in debug mode if it overflowed).
+            let multiplier = 1u32 << shift;
+            assert_eq!(
+                multiplier,
+                2u32.pow(31),
+                "Multiplier must be 2^31 at saturation"
+            );
+            // Verify the full delay expression does not overflow Duration arithmetic.
+            let _delay = HTTP_INITIAL_RETRY_DELAY * multiplier;
+        }
     }
 }
