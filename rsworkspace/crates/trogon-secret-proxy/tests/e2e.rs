@@ -4344,3 +4344,97 @@ async fn e2e_real_key_in_response_body_is_not_stripped() {
         body_str
     );
 }
+
+// ── Gap 3 ─────────────────────────────────────────────────────────────────────
+
+/// When the worker sets `error = Some("message")` AND `status` is a 4xx
+/// client-error code, `proxy.rs:170-174` uses the 4xx status directly
+/// (not 502) because `status.is_client_error()` is true.
+///
+/// This is the complementary test to
+/// `e2e_worker_error_field_with_status_200_returns_502`: that test covers
+/// the fallback to 502; this test covers the branch where the status IS
+/// already an error code.
+#[tokio::test]
+async fn e2e_error_field_with_4xx_status_uses_that_status_not_502() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-err-status422-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-err-status422-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_err4xx001")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Reply with a 4xx status AND error field set.
+    // proxy.rs:170 — status.is_client_error() is true → uses 422, not 502.
+    let reply = OutboundHttpResponse {
+        status: 422,
+        headers: vec![],
+        body: vec![],
+        error: Some("validation failed: missing required field".to_string()),
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        422,
+        "4xx status with error field must use the 4xx code, not fall back to 502"
+    );
+}
