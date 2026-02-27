@@ -83,4 +83,16 @@ mod tests {
     fn stream_name_empty_prefix_produces_trailing_underscore() {
         assert_eq!(stream_name(""), "PROXY_REQUESTS_");
     }
+
+    // ── Gap: null byte in prefix ───────────────────────────────────────────────
+
+    /// A null byte (`\0`) in the prefix is uppercased to `\0` (unchanged)
+    /// and passes through to the stream name.  NATS stream names must not
+    /// contain null bytes.  Callers must validate the prefix before calling
+    /// `stream_name`.
+    #[test]
+    fn stream_name_null_byte_in_prefix_is_preserved() {
+        let name = stream_name("foo\0bar");
+        assert_eq!(name, "PROXY_REQUESTS_FOO\0BAR");
+    }
 }

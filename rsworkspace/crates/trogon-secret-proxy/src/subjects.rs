@@ -31,6 +31,28 @@ mod tests {
         );
     }
 
+    // ── Gap: NATS wildcards in prefix ─────────────────────────────────────────
+
+    /// `outbound` and `reply` do not validate the prefix — NATS wildcard
+    /// characters (`*`, `>`) pass through unchanged.  The resulting subjects
+    /// would act as wildcard subscriptions rather than literal names.
+    /// Callers must ensure the prefix contains no NATS special characters.
+    #[test]
+    fn outbound_prefix_with_nats_wildcard_is_not_sanitized() {
+        assert_eq!(outbound("trogon.*"), "trogon.*.proxy.http.outbound");
+        assert_eq!(outbound("trogon.>"), "trogon.>.proxy.http.outbound");
+    }
+
+    /// A correlation ID containing dots produces extra subject segments.
+    /// NATS treats each `.` as a token separator, so `"a.b.c"` as a
+    /// correlation ID yields `"trogon.proxy.reply.a.b.c"` — syntactically
+    /// valid but may create unexpected subscription matches.
+    /// Callers should use UUIDs (hyphens only, no dots) as correlation IDs.
+    #[test]
+    fn reply_correlation_id_with_dots_produces_extra_segments() {
+        assert_eq!(reply("trogon", "a.b.c"), "trogon.proxy.reply.a.b.c");
+    }
+
     // ── Gap 3.1: empty prefix ─────────────────────────────────────────────────
 
     /// An empty prefix produces subjects with a leading dot.
