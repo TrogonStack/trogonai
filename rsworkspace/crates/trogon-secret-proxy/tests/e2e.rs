@@ -4490,3 +4490,110 @@ async fn e2e_request_to_root_path_returns_404() {
         "GET / must return 404 — no matching route in /{{provider}}/{{*path}}"
     );
 }
+
+// ── Gap: response header with invalid name is silently dropped ─────────────
+
+/// proxy.rs:189-192 tries to parse each response header name with
+/// `k.parse::<axum::http::HeaderName>()`.  A header name containing a
+/// control character (e.g. `\x01`) fails the parse; the header is silently
+/// omitted.  A valid sibling header must be preserved unchanged.
+#[tokio::test]
+async fn e2e_response_header_with_invalid_name_is_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-hdr-invalid-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-hdr-invalid-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/anthropic/v1/models")
+        .header("authorization", "Bearer tok_anthropic_test_hdrinvalid1")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // One header whose name contains a control char (0x01) — invalid per RFC 7230.
+    // One valid header that must survive.
+    let reply_resp = OutboundHttpResponse {
+        status: 200,
+        headers: vec![
+            ("x-invalid\x01name".to_string(), "some-value".to_string()),
+            ("x-valid-header".to_string(), "preserved-value".to_string()),
+        ],
+        body: b"[]".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply_resp).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // The invalid header name must be silently dropped — no name with \x01.
+    let has_invalid = resp
+        .headers()
+        .iter()
+        .any(|(k, _)| k.as_str().contains('\x01'));
+    assert!(
+        !has_invalid,
+        "Header with control char in name must be silently dropped"
+    );
+
+    // The valid header must be preserved with its value intact.
+    assert_eq!(
+        resp.headers().get("x-valid-header").map(|v| v.to_str().unwrap()),
+        Some("preserved-value"),
+        "Valid response header must be preserved"
+    );
+}
