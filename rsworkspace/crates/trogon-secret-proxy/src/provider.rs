@@ -47,4 +47,27 @@ mod tests {
         assert_eq!(base_url("OpenAI"), None);
         assert_eq!(base_url("Gemini"), None);
     }
+
+    // ── Gap 4 ──────────────────────────────────────────────────────────────
+
+    /// Provider matching uses an exact `str` match — no trimming.
+    /// A name with leading or trailing whitespace must return `None` so the
+    /// proxy rejects it with 502 instead of routing to the wrong URL.
+    #[test]
+    fn provider_with_leading_or_trailing_whitespace_returns_none() {
+        assert_eq!(base_url(" anthropic"), None, "leading space must not match");
+        assert_eq!(base_url("anthropic "), None, "trailing space must not match");
+        assert_eq!(base_url(" openai "), None, "surrounding spaces must not match");
+        assert_eq!(base_url("\tanthropic"), None, "leading tab must not match");
+    }
+
+    /// A visually similar provider name using a Unicode homoglyph
+    /// (e.g. Greek omicron U+03BF instead of ASCII 'o') must not match.
+    #[test]
+    fn provider_homoglyph_returns_none() {
+        // 'ο' is Greek small letter omicron (U+03BF), not ASCII 'o'.
+        assert_eq!(base_url("anthr\u{03BF}pic"), None);
+        // Cyrillic 'о' (U+043E) instead of ASCII 'o'.
+        assert_eq!(base_url("anthr\u{043E}pic"), None);
+    }
 }
