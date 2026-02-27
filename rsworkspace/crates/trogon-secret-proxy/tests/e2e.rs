@@ -3274,3 +3274,121 @@ async fn e2e_hop_by_hop_headers_stripped_in_outbound_request() {
     let resp = proxy_handle.await.unwrap().unwrap();
     assert_eq!(resp.status(), 200, "Proxy must complete the request successfully");
 }
+
+/// Multiple `transfer-encoding` headers (sent by e.g. different middleware
+/// layers) must ALL be stripped by the proxy — none may appear in the
+/// `OutboundHttpRequest` published to JetStream.
+///
+/// This test directly inspects the JetStream payload rather than relying on a
+/// binary integration test, because the test HTTP client may strip these
+/// headers itself before they reach the proxy.
+#[tokio::test]
+async fn e2e_multiple_transfer_encoding_headers_all_stripped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-multi-te-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-multi-te-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://127.0.0.1:1".to_string()),
+    };
+
+    // Include two transfer-encoding headers alongside a safe custom header.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_multite01")
+        .header("transfer-encoding", "chunked")
+        .header("transfer-encoding", "gzip")
+        .header("x-safe-header", "must-survive")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_json = &parsed["headers"];
+
+    // Neither transfer-encoding value must appear in the outbound request.
+    let empty = vec![];
+    let te_headers: Vec<&str> = headers_json
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|pair| {
+            let arr = pair.as_array()?;
+            if arr.first()?.as_str()? == "transfer-encoding" {
+                arr.get(1)?.as_str()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        te_headers.is_empty(),
+        "All transfer-encoding headers must be stripped, found: {:?}",
+        te_headers
+    );
+
+    // Non-hop-by-hop header must survive.
+    assert!(
+        find_header(headers_json, "x-safe-header").is_some(),
+        "Non-hop-by-hop header 'x-safe-header' must be preserved"
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200, "Proxy must complete the request successfully");
+}
