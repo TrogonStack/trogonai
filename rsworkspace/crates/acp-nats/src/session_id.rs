@@ -111,7 +111,6 @@ mod tests {
         let err = AcpSessionId::new("").err().unwrap();
         assert_eq!(err, ValidationError::EmptyValue("session_id"));
     }
-
     #[test]
     fn acp_session_id_try_from_session_id() {
         use agent_client_protocol::SessionId;

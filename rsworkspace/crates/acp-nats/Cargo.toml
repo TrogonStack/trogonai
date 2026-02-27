@@ -11,11 +11,15 @@ agent-client-protocol = "0.9.4"
 opentelemetry = "0.31.0"
 async-nats = "0.45.0"
 async-trait = "0.1.89"
+bytes = "1"
+futures = "0.3.31"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1.44"
+tracing-opentelemetry = "0.32.1"
 
+# Shared NATS infrastructure
 trogon-nats = { path = "../trogon-nats" }
 trogon-std = { path = "../trogon-std" }
 
