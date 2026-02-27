@@ -955,6 +955,62 @@ mod tests {
         );
     }
 
+    // ── Gap: single-char real key strips every header containing that byte ────
+
+    /// When `real_key` is a single character (e.g. `"k"`), the substring
+    /// check `v.contains("k")` strips ANY response header whose value
+    /// contains the letter 'k' — including completely innocent ones like
+    /// `x-task-id: task-key` or `content-type: application/json` (contains
+    /// no 'k', preserved) vs `x-link: bookmark` (contains 'k', stripped).
+    ///
+    /// This is the extreme end of the false-positive behaviour already
+    /// documented in `process_request_short_real_key_strips_headers_with_matching_substring`.
+    /// The single-byte case is the worst possible scenario for operator misconfiguration.
+    #[tokio::test]
+    async fn process_request_single_char_real_key_strips_every_matching_header() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_onechar01").unwrap();
+        // Single-char key: "k".  Any header value containing 'k' will be stripped.
+        vault.store(&token, "k").await.unwrap();
+
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/v1/messages");
+                then.status(200)
+                    .header("content-type", "application/json") // no 'k' → preserved
+                    .header("x-link", "bookmark")               // "bookmark" contains 'k' → stripped
+                    .header("x-safe", "clean-value")            // no 'k' → preserved
+                    .body(r#"{"id":"msg_onechar"}"#);
+            })
+            .await;
+
+        let url = format!("{}/v1/messages", mock_server.base_url());
+        let request = make_request(&url, "Bearer tok_anthropic_prod_onechar01", "idem-1char");
+        let client = ReqwestClient::new();
+
+        let resp = process_request(&request, &vault, &client).await;
+
+        assert_eq!(resp.status, 200);
+        mock.assert_async().await;
+
+        // "bookmark" contains 'k' → stripped (false positive, design boundary).
+        let link_present = resp.headers.iter().any(|(k, _)| k == "x-link");
+        assert!(
+            !link_present,
+            "x-link (value 'bookmark' contains 'k') must be stripped"
+        );
+
+        // "application/json" does not contain 'k' → preserved.
+        let ct_present = resp.headers.iter().any(|(k, _)| k == "content-type");
+        assert!(ct_present, "content-type must be preserved (no 'k' in value)");
+
+        // "clean-value" does not contain 'k' → preserved.
+        let safe_present = resp.headers.iter().any(|(k, _)| k == "x-safe");
+        assert!(safe_present, "x-safe must be preserved (no 'k' in value)");
+    }
+
     // ── Gap: sub-500 status not retried ──────────────────────────────────────
 
     /// `forward_request_with_retry` only retries on `status >= 500`.

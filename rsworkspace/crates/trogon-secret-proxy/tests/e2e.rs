@@ -4597,3 +4597,235 @@ async fn e2e_response_header_with_invalid_name_is_silently_dropped() {
         "Valid response header must be preserved"
     );
 }
+
+// ── Gap: response header with invalid VALUE is silently dropped ────────────
+
+/// proxy.rs:189-192 parses each response header as `(HeaderName, HeaderValue)`.
+/// A header VALUE containing a control character (`\x01`) fails
+/// `v.parse::<axum::http::HeaderValue>()` — it is silently dropped.
+/// A sibling header with a valid value must be preserved unchanged.
+///
+/// Complements `e2e_response_header_with_invalid_name_is_silently_dropped`,
+/// which tests the NAME branch of the same `if let`.
+#[tokio::test]
+async fn e2e_response_header_with_invalid_value_is_silently_dropped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-hdr-invalid-val-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-hdr-invalid-val-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/anthropic/v1/models")
+        .header("authorization", "Bearer tok_anthropic_test_hdrval001")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // One header with a control char in the VALUE (invalid per RFC 7230).
+    // One header with a valid value — must survive.
+    let reply_resp = OutboundHttpResponse {
+        status: 200,
+        headers: vec![
+            ("x-bad-value".to_string(), "ok\x01nope".to_string()),
+            ("x-good-header".to_string(), "all-good".to_string()),
+        ],
+        body: b"[]".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply_resp).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // x-bad-value has a control char → silently dropped.
+    assert!(
+        resp.headers().get("x-bad-value").is_none(),
+        "Header with control char in value must be silently dropped"
+    );
+
+    // x-good-header has a clean value → preserved.
+    assert_eq!(
+        resp.headers()
+            .get("x-good-header")
+            .map(|v| v.to_str().unwrap()),
+        Some("all-good"),
+        "Header with valid value must be preserved"
+    );
+}
+
+// ── Gap: hop-by-hop headers are stripped before forwarding to JetStream ─────
+
+/// proxy.rs:83-105 defines 8 RFC 7230 hop-by-hop headers that must not be
+/// forwarded to the upstream AI provider.  This test sends a request
+/// carrying all 8 through the proxy (via oneshot) and verifies that NONE
+/// of them appear in the `OutboundHttpRequest.headers` published to JetStream.
+/// A non-hop-by-hop header (`x-custom`) must be preserved.
+///
+/// Note: `connection` and `transfer-encoding` may be consumed by the HTTP
+/// stack before reaching the handler; the other six are tested explicitly.
+#[tokio::test]
+async fn e2e_hop_by_hop_headers_are_stripped_before_forwarding() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-hop-by-hop-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-hop-by-hop-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    // Send a request carrying all hop-by-hop headers plus one custom header.
+    // Using `oneshot` bypasses HTTP/1.1 parsing so all headers reach the handler.
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_hopbyhop1")
+        .header("keep-alive", "timeout=5")
+        .header("proxy-authenticate", "Basic realm=test")
+        .header("proxy-authorization", "Basic dXNlcjpwYXNz")
+        .header("te", "trailers")
+        .header("trailers", "Expires")
+        .header("upgrade", "websocket")
+        .header("x-custom", "must-survive")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    // Capture the OutboundHttpRequest published by the proxy.
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let published: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    msg.ack().await.unwrap();
+
+    let headers = published["headers"]
+        .as_array()
+        .expect("headers must be a JSON array");
+
+    // Helper: check whether a header name appears in the published list.
+    let has_header = |name: &str| -> bool {
+        headers.iter().any(|pair| {
+            pair.as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .map(|k| k.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+        })
+    };
+
+    // All of these must be absent from the forwarded request.
+    for hop_header in &[
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    ] {
+        assert!(
+            !has_header(hop_header),
+            "Hop-by-hop header '{}' must not be forwarded to JetStream",
+            hop_header
+        );
+    }
+
+    // x-custom is not a hop-by-hop header — it must be forwarded.
+    assert!(
+        has_header("x-custom"),
+        "Non-hop-by-hop header 'x-custom' must be preserved"
+    );
+
+    // Unblock the proxy_handle by letting it time out (no worker will reply).
+    let _ = proxy_handle.await;
+}
