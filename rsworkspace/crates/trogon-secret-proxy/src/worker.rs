@@ -1344,4 +1344,35 @@ mod tests {
             "Must make exactly 2 attempts"
         );
     }
+
+    // ── Gap #9: first Authorization header wins when multiple with different casing ──
+
+    /// `resolve_token` uses `Iterator::find` which returns the **first** header
+    /// whose name matches `"authorization"` (case-insensitive).  When a request
+    /// carries two Authorization headers with different casing, the first one
+    /// is used for token resolution and the second is ignored.
+    ///
+    /// Both tokens are stored in the vault; only the first one's real key must
+    /// be returned.
+    #[tokio::test]
+    async fn resolve_token_first_authorization_header_wins_when_multiple() {
+        let vault = MemoryVault::new();
+
+        let token_first = ApiKeyToken::new("tok_anthropic_prod_first01").unwrap();
+        let token_second = ApiKeyToken::new("tok_anthropic_prod_second1").unwrap();
+        vault.store(&token_first, "sk-ant-first-key").await.unwrap();
+        vault.store(&token_second, "sk-ant-second-key").await.unwrap();
+
+        // First header uses uppercase casing, second uses lowercase.
+        let headers = vec![
+            ("AUTHORIZATION".to_string(), "Bearer tok_anthropic_prod_first01".to_string()),
+            ("authorization".to_string(), "Bearer tok_anthropic_prod_second1".to_string()),
+        ];
+
+        let key = resolve_token(&vault, &headers).await.unwrap();
+        assert_eq!(
+            key, "sk-ant-first-key",
+            "First Authorization header must win; second must be ignored"
+        );
+    }
 }
