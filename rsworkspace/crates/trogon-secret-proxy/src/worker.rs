@@ -748,4 +748,110 @@ mod tests {
         assert_eq!(resp.status, 200);
         ok_mock.assert_async().await;
     }
+
+    // ── Gap: lowercase "bearer" prefix ────────────────────────────────────────
+
+    /// `BEARER_PREFIX` is `"Bearer "` (capital B).  `starts_with` is byte-exact,
+    /// so `"bearer tok_..."` (lowercase) does NOT match and must be rejected.
+    ///
+    /// This prevents bypassing token validation by sending a lowercase scheme.
+    #[tokio::test]
+    async fn resolve_token_lowercase_bearer_is_rejected() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_abc123").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let headers = make_headers("bearer tok_anthropic_prod_abc123");
+        let result = resolve_token(&vault, &headers).await;
+        assert!(result.is_err(), "lowercase 'bearer' must be rejected");
+        assert!(
+            result.unwrap_err().contains("not a Bearer token"),
+            "Error must describe the rejection reason"
+        );
+    }
+
+    /// `"Bearer  tok_..."` (two spaces) means `raw_token` starts with a space,
+    /// not with `"tok_"`.  The validation must reject it as not looking like a
+    /// proxy token.
+    #[tokio::test]
+    async fn resolve_token_double_space_after_bearer_is_rejected() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_dbl01").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        // Two spaces between "Bearer" and the token name.
+        let headers = make_headers("Bearer  tok_anthropic_prod_dbl01");
+        let result = resolve_token(&vault, &headers).await;
+        assert!(result.is_err(), "double-space Bearer must be rejected");
+        // raw_token is " tok_..." which starts with a space, not "tok_".
+        assert!(
+            result.unwrap_err().contains("does not look like a proxy token"),
+            "Error must describe the rejection reason"
+        );
+    }
+
+    // ── Gap: VaultStore::resolve() returning Err ───────────────────────────────
+
+    /// When the vault backend itself returns an error (network failure, I/O error,
+    /// etc.), `process_request` must surface it as a `401` error response —
+    /// NOT panic or propagate the error up to the worker loop.
+    ///
+    /// This tests the `Vault error: {}` branch in `resolve_token` at
+    /// `worker.rs:227`.  MemoryVault never fails, so a dedicated test-only
+    /// implementation is needed to exercise this path.
+    #[tokio::test]
+    async fn process_request_vault_backend_error_returns_401() {
+        use trogon_vault::{ApiKeyToken as VaultToken, VaultStore as VaultStoreTrait};
+
+        struct ErrorVault;
+
+        impl VaultStoreTrait for ErrorVault {
+            type Error = std::io::Error;
+
+            fn store(
+                &self,
+                _token: &VaultToken,
+                _plaintext: &str,
+            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+                async { Ok(()) }
+            }
+
+            fn resolve(
+                &self,
+                _token: &VaultToken,
+            ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
+            {
+                async {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "vault backend unavailable",
+                    ))
+                }
+            }
+
+            fn revoke(
+                &self,
+                _token: &VaultToken,
+            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+                async { Ok(()) }
+            }
+        }
+
+        let mock_server = httpmock::MockServer::start_async().await;
+        let vault = ErrorVault;
+        let client = ReqwestClient::new();
+        let url = format!("{}/v1/messages", mock_server.base_url());
+
+        let request = make_request(&url, "Bearer tok_anthropic_prod_vaulterr1", "idem-ve-01");
+        let resp = process_request(&request, &vault, &client).await;
+
+        assert_eq!(resp.status, 401, "Vault backend error must result in 401");
+        assert!(resp.error.is_some(), "Error field must be set");
+        let err = resp.error.unwrap();
+        assert!(
+            err.contains("Vault error") || err.contains("vault backend unavailable"),
+            "Error must mention vault failure, got: {}",
+            err
+        );
+    }
 }
