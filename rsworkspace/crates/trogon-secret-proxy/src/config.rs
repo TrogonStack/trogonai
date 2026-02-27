@@ -148,6 +148,22 @@ mod tests {
         assert_eq!(cfg.proxy_port(), 2000, "Second call must overwrite the first");
     }
 
+    // ── Gap: whitespace-only prefix ───────────────────────────────────────────
+
+    /// `Config::new` accepts a whitespace-only prefix without validation.
+    /// The prefix is stored as-is; callers are responsible for ensuring it
+    /// contains valid NATS subject characters (no spaces, wildcards, etc.).
+    #[test]
+    fn config_whitespace_only_prefix_is_accepted_without_validation() {
+        use trogon_nats::{NatsAuth, NatsConfig};
+        let nats = NatsConfig {
+            servers: vec!["localhost:4222".to_string()],
+            auth: NatsAuth::None,
+        };
+        let cfg = Config::new(" ", nats);
+        assert_eq!(cfg.prefix(), " ", "Whitespace-only prefix must be stored as-is");
+    }
+
     /// Calling `with_worker_timeout` twice must apply the last value.
     #[test]
     fn with_worker_timeout_called_twice_last_value_wins() {

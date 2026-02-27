@@ -1722,6 +1722,55 @@ mod tests {
         mock.assert_async().await;
     }
 
+    // ── Gap: empty method string ──────────────────────────────────────────────
+
+    /// An empty string is not a valid RFC 7230 HTTP method token.
+    /// `"".parse::<reqwest::Method>()` must fail, and `forward_request`
+    /// must return `Err("Invalid HTTP method: …")` — no panic.
+    #[tokio::test]
+    async fn forward_request_empty_method_returns_error() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "".to_string(),
+            url: "http://127.0.0.1:1/v1/messages".to_string(),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-empty-method".to_string(),
+        };
+
+        let result = forward_request(&client, &request, &[]).await;
+
+        assert!(result.is_err(), "Empty method string must be rejected");
+        assert!(
+            result.unwrap_err().contains("Invalid HTTP method"),
+            "Error must contain 'Invalid HTTP method'"
+        );
+    }
+
+    // ── Gap: bizarre mixed-case Authorization header name ─────────────────────
+
+    /// `eq_ignore_ascii_case` matches any ASCII casing of "authorization",
+    /// including bizarre variants like "AuThOrIzAtIoN".
+    /// Documents that header name matching is fully case-insensitive.
+    #[tokio::test]
+    async fn resolve_token_bizarre_mixed_case_authorization_header_is_matched() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_mixcase1").unwrap();
+        vault.store(&token, "sk-ant-mixcase-key").await.unwrap();
+
+        let headers = vec![(
+            "AuThOrIzAtIoN".to_string(),
+            "Bearer tok_anthropic_prod_mixcase1".to_string(),
+        )];
+
+        let key = resolve_token(&vault, &headers).await.unwrap();
+        assert_eq!(
+            key, "sk-ant-mixcase-key",
+            "Mixed-case header name must match via eq_ignore_ascii_case"
+        );
+    }
+
     // ── Gap: "Bearer" without trailing space ──────────────────────────────────
 
     /// `"Bearer"` (exactly 6 bytes, no trailing space or token) does NOT match
