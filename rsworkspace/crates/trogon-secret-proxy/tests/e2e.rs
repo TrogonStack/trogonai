@@ -3988,3 +3988,208 @@ async fn e2e_corrupted_reply_json_returns_500() {
         "Corrupted reply payload must produce 500 Internal Server Error"
     );
 }
+
+// ── Gap 1 ─────────────────────────────────────────────────────────────────────
+
+/// A non-hop-by-hop request header with an **empty string value** must survive
+/// the proxy's filter-map at `proxy.rs:94-105` and appear in the
+/// `OutboundHttpRequest.headers` published to JetStream.
+///
+/// `v.to_str().ok()` returns `Some("")` for an empty `HeaderValue`, so the
+/// header is preserved — not silently dropped.
+#[tokio::test]
+async fn e2e_empty_valued_request_header_is_preserved() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-empty-hdr-val-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-empty-hdr-val-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_emptyval01")
+        // Empty-value header — must survive the filter.
+        .header("x-custom-empty", "")
+        // Non-empty header — must also survive for comparison.
+        .header("x-custom-present", "hello")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let headers_json = &parsed["headers"];
+
+    // Empty-valued header must be present (not filtered out).
+    assert!(
+        find_header(headers_json, "x-custom-empty").is_some(),
+        "Empty-valued header must be forwarded, not silently dropped"
+    );
+    assert_eq!(
+        find_header(headers_json, "x-custom-empty").unwrap(),
+        "",
+        "Empty header value must be preserved as an empty string"
+    );
+
+    // Non-empty header must also be present.
+    assert_eq!(
+        find_header(headers_json, "x-custom-present").unwrap(),
+        "hello"
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+// ── Gap 4 ─────────────────────────────────────────────────────────────────────
+
+/// `trim_end_matches('/')` removes only trailing **slash** characters — it
+/// does not strip leading or trailing whitespace.  A `base_url_override`
+/// that is purely whitespace (e.g. `"   "`) therefore produces a URL like
+/// `"   /v1/messages"` (with a leading space) in the `OutboundHttpRequest`
+/// published to JetStream.
+///
+/// This test documents that behaviour: the URL in the JetStream payload
+/// retains the whitespace prefix exactly as the proxy computed it.
+#[tokio::test]
+async fn e2e_whitespace_only_base_url_override_produces_leading_space_in_url() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-ws-base-url-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-ws-base-url-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    // Whitespace-only override: trim_end_matches('/') leaves the spaces.
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("   ".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_wsbase001")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let url = parsed["url"].as_str().expect("url field must be present");
+
+    // The URL starts with spaces because trim_end_matches('/') ≠ trim().
+    assert!(
+        url.starts_with(' '),
+        "Whitespace-only base_url_override must produce a URL with a leading space; got: {:?}",
+        url
+    );
+
+    // Unblock the proxy.
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"ok".to_vec(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+}

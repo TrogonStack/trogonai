@@ -135,4 +135,25 @@ mod tests {
         // prefix and NATS config are unaffected by the overrides.
         assert_eq!(cfg.prefix(), DEFAULT_SUBJECT_PREFIX);
     }
+
+    // ── Gap 3 ──────────────────────────────────────────────────────────────
+
+    /// Calling `with_proxy_port` twice must apply the last value.
+    /// The builder takes `mut self`, so each call replaces the previous value.
+    #[test]
+    fn with_proxy_port_called_twice_last_value_wins() {
+        let cfg = Config::for_test()
+            .with_proxy_port(1000)
+            .with_proxy_port(2000);
+        assert_eq!(cfg.proxy_port(), 2000, "Second call must overwrite the first");
+    }
+
+    /// Calling `with_worker_timeout` twice must apply the last value.
+    #[test]
+    fn with_worker_timeout_called_twice_last_value_wins() {
+        let cfg = Config::for_test()
+            .with_worker_timeout(Duration::from_secs(10))
+            .with_worker_timeout(Duration::from_secs(99));
+        assert_eq!(cfg.worker_timeout(), Duration::from_secs(99), "Second call must overwrite the first");
+    }
 }
