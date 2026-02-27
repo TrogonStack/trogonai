@@ -4917,3 +4917,355 @@ async fn binary_anthropic_and_openai_tokens_resolve_to_correct_keys() {
     assert_eq!(anthropic_mock.hits(), 1, "Anthropic key must be used exactly once");
     assert_eq!(openai_mock.hits(), 1, "OpenAI key must be used exactly once");
 }
+
+/// Concurrency safety: 20 parallel requests using the same token all succeed.
+///
+/// Verifies that the vault's read path is safe under concurrent access and
+/// that JetStream handles fan-out: every one of the 20 requests is delivered
+/// to the worker and receives an independent, correct response.
+#[tokio::test]
+async fn binary_parallel_requests_same_token_all_succeed() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_par001";
+    let real_key = "sk-ant-parallel-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "par-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = std::sync::Arc::new(reqwest::Client::new());
+    let url = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+
+    let handles: Vec<_> = (0..20)
+        .map(|i| {
+            let client = client.clone();
+            let url = url.clone();
+            let token = token.to_string();
+            tokio::spawn(async move {
+                client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .body(format!(r#"{{"request":{}}}"#, i))
+                    .timeout(Duration::from_secs(30))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    let responses = join_all(handles).await;
+
+    let mut success_count = 0;
+    for resp in responses {
+        let resp = resp.expect("task panicked");
+        if resp.status() == 200 {
+            success_count += 1;
+        }
+    }
+
+    assert_eq!(
+        success_count, 20,
+        "All 20 parallel requests must succeed; {} did",
+        success_count
+    );
+    assert_eq!(_ai_mock.hits(), 20, "Provider must receive all 20 requests");
+}
+
+/// JetStream backlog: the worker starts after the proxy has already queued
+/// requests in JetStream.  The worker must drain the backlog and all callers
+/// must receive their responses.
+///
+/// This proves the durability guarantee: messages published before any
+/// consumer exists survive in JetStream and are delivered when the worker
+/// connects.
+#[tokio::test]
+async fn binary_worker_starts_after_messages_queued() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_backlog1";
+    let real_key = "sk-ant-backlog-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_backlog"}"#);
+        })
+        .await;
+
+    // Proxy with a generous 25 s timeout so it can wait for the worker.
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 25);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let client = std::sync::Arc::new(reqwest::Client::new());
+    let url = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+
+    // Launch 5 concurrent requests BEFORE starting the worker.
+    // Each will publish to JetStream and block waiting for a Core NATS reply.
+    let handles: Vec<_> = (0..5)
+        .map(|i| {
+            let client = client.clone();
+            let url = url.clone();
+            let token = token.to_string();
+            tokio::spawn(async move {
+                client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .body(format!(r#"{{"backlog":{}}}"#, i))
+                    .timeout(Duration::from_secs(25))
+                    .send()
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+
+    // Give the proxy time to publish all 5 messages to JetStream before the
+    // worker starts draining.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Worker starts AFTER messages are already queued.
+    let _worker = spawn_worker(nats_port, "backlog-workers-001", token, real_key);
+
+    let responses = join_all(handles).await;
+
+    let mut success_count = 0;
+    for resp in responses {
+        let resp = resp.expect("task panicked");
+        if resp.status() == 200 {
+            success_count += 1;
+        }
+    }
+
+    assert_eq!(
+        success_count, 5,
+        "All 5 backlogged requests must be processed when the worker starts; {} succeeded",
+        success_count
+    );
+    assert_eq!(_ai_mock.hits(), 5, "Provider must receive all 5 backlogged requests");
+}
+
+/// Security: a tok_ token appearing in the URL query string is forwarded
+/// to the AI provider unchanged.  The proxy only exchanges tokens from the
+/// `Authorization: Bearer` header — query parameters are never intercepted.
+///
+/// This is a deliberately scoped security boundary: the proxy cannot know
+/// which query params are sensitive, so it leaves them all untouched.
+#[tokio::test]
+async fn binary_tok_in_query_string_forwarded_unchanged() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let auth_token = "tok_anthropic_prod_qpauth1";
+    let real_key   = "sk-ant-qparam-real-key";
+    // A second tok_ that appears only in the query string — it must reach the
+    // provider verbatim (not exchanged, not stripped).
+    let query_tok  = "tok_anthropic_prod_inquery1";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models")
+                // Mock only matches when the query parameter is present and
+                // still contains the raw tok_ (i.e. the proxy did NOT exchange it).
+                .query_param("api_key", query_tok);
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"models":[]}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "qparam-workers-001", auth_token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models?api_key={}",
+            proxy_port, query_tok
+        ))
+        .header("Authorization", format!("Bearer {}", auth_token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Request with tok_ in query string must succeed (query token not exchanged)"
+    );
+    assert_eq!(
+        _ai_mock.hits(),
+        1,
+        "Provider must receive the request with tok_ still present in the query string"
+    );
+}
+
+/// Slow provider within timeout: the AI provider takes 2 s to respond.
+/// With a 15 s worker timeout the proxy must wait and return 200 — not 504.
+///
+/// This tests that the proxy timeout is a hard ceiling, not a soft hint:
+/// any response within the window must be returned to the caller.
+#[tokio::test]
+async fn binary_slow_provider_within_timeout_succeeds() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token   = "tok_anthropic_prod_slow001";
+    let real_key = "sk-ant-slow-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_slow_ok"}"#)
+                .delay(Duration::from_secs(2)); // responds after 2 s
+        })
+        .await;
+
+    // Proxy timeout is 15 s — well above the 2 s provider delay.
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy_with_timeout(nats_port, proxy_port, &mock_server.base_url(), 15);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "slow-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(30)) // client timeout wider than proxy timeout
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "A response within the proxy timeout window must be returned as 200, not 504"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_slow_ok");
+}
+
+/// Five providers, five tokens: each of the five supported AI providers
+/// (anthropic, openai, gemini, cohere, mistral) is called with its own
+/// tok_ token and resolves to its own distinct real key.  Each mock only
+/// matches requests bearing the correct real key — a wrong key causes the
+/// mock to return 404, making cross-token contamination immediately visible.
+#[tokio::test]
+async fn binary_five_providers_five_tokens_all_route_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    let providers = [
+        ("anthropic", "/v1/messages",          "tok_anthropic_prod_fp001", "sk-ant-fp-key"),
+        ("openai",    "/v1/chat/completions",   "tok_openai_prod_fp001",    "sk-openai-fp-key"),
+        ("gemini",    "/v1beta/models",         "tok_gemini_prod_fp001",    "sk-gemini-fp-key"),
+        ("cohere",    "/v2/chat",               "tok_cohere_prod_fp001",    "sk-cohere-fp-key"),
+        ("mistral",   "/v1/chat/completions",   "tok_mistral_prod_fp001",   "sk-mistral-fp-key"),
+    ];
+
+    // One mock per provider path + real key combination.
+    let mut mocks = Vec::new();
+    for (provider, path, _tok, real_key) in &providers {
+        let m = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path(*path)
+                    .header("authorization", format!("Bearer {}", real_key));
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(format!(r#"{{"provider":"{}"}}"#, *provider));
+            })
+            .await;
+        mocks.push(m);
+    }
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Single worker holds all five tokens.
+    let mut worker_cmd = Command::new(env!("CARGO_BIN_EXE_worker"));
+    worker_cmd
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "fp-workers-001")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true);
+    for (_provider, _path, tok, real_key) in &providers {
+        worker_cmd.env(format!("VAULT_TOKEN_{}", tok), real_key);
+    }
+    let _worker = worker_cmd.spawn().unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", proxy_port);
+
+    let mut all_ok = true;
+    for (provider, path, tok, _real_key) in &providers {
+        let resp = client
+            .post(format!("{}/{}{}", base, provider, path))
+            .header("Authorization", format!("Bearer {}", tok))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+
+        if resp.status() != 200 {
+            eprintln!("Provider {} returned {}", provider, resp.status());
+            all_ok = false;
+            continue;
+        }
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(
+            body["provider"], *provider,
+            "Token for {} must route to {} provider",
+            provider, provider
+        );
+    }
+
+    assert!(all_ok, "All five provider requests must succeed");
+
+    for (i, m) in mocks.iter().enumerate() {
+        assert_eq!(
+            m.hits(),
+            1,
+            "Provider {} mock must be hit exactly once",
+            providers[i].0
+        );
+    }
+}
