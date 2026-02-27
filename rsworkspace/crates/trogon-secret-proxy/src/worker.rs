@@ -854,4 +854,104 @@ mod tests {
             err
         );
     }
+
+    // ── Gap: HTTP method with leading/trailing whitespace ─────────────────────
+
+    /// `reqwest::Method::from_str` is strict: `" POST"` or `"POST "` are not
+    /// valid HTTP method names.  `forward_request` must return `Err` with an
+    /// "Invalid HTTP method" message rather than panicking.
+    ///
+    /// In practice the method comes from the client request and axum normalises
+    /// it, but a crafted or malformed `OutboundHttpRequest` (e.g. from a NAK'd
+    /// redelivery with corrupted payload) could carry a padded method string.
+    #[tokio::test]
+    async fn forward_request_whitespace_padded_method_returns_error() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let client = ReqwestClient::new();
+
+        for padded in &[" POST", "POST ", " POST "] {
+            let request = OutboundHttpRequest {
+                method: padded.to_string(),
+                url: format!("{}/v1/messages", mock_server.base_url()),
+                headers: vec![],
+                body: vec![],
+                reply_to: "test.reply".to_string(),
+                idempotency_key: "idem-ws".to_string(),
+            };
+
+            let result = forward_request(&client, &request, &[]).await;
+            assert!(
+                result.is_err(),
+                "Whitespace-padded method {:?} must be rejected",
+                padded
+            );
+            assert!(
+                result.unwrap_err().contains("Invalid HTTP method"),
+                "Error must describe the rejection for method {:?}",
+                padded
+            );
+        }
+    }
+
+    // ── Gap: short real key causes over-eager header sanitisation ─────────────
+
+    /// The response-header sanitisation in `process_request` uses
+    /// `String::contains`, which is a simple substring match:
+    ///
+    /// ```text
+    /// resp.headers.retain(|(_, v)| !v.contains(real_key.as_str()));
+    /// ```
+    ///
+    /// When `real_key` is a very short string (e.g. `"sk"`), ANY response
+    /// header whose value contains that substring is stripped — including
+    /// innocuous headers like `x-task-id: risky-path` (which contains "sk").
+    ///
+    /// This test documents the design boundary: the sanitisation is intentionally
+    /// broad (favour security over precision).  Operators should use real keys
+    /// that are long enough to avoid false-positive matches.
+    #[tokio::test]
+    async fn process_request_short_real_key_strips_headers_with_matching_substring() {
+        let mock_server = httpmock::MockServer::start_async().await;
+
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_shortkey1").unwrap();
+        // Intentionally very short key — "sk" appears as a substring in many words.
+        vault.store(&token, "sk").await.unwrap();
+
+        let mock = mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/v1/messages");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    // "risky" contains "sk" (r-i-s-k-y) → will be stripped.
+                    .header("x-flag", "risky-operation")
+                    // "clean" does not contain "sk" → will be preserved.
+                    .header("x-safe", "clean-value")
+                    .body(r#"{"id":"msg_short_key"}"#);
+            })
+            .await;
+
+        let url = format!("{}/v1/messages", mock_server.base_url());
+        let request = make_request(&url, "Bearer tok_anthropic_prod_shortkey1", "idem-sk-01");
+        let client = ReqwestClient::new();
+
+        let resp = process_request(&request, &vault, &client).await;
+
+        assert_eq!(resp.status, 200);
+        mock.assert_async().await;
+
+        // "risky-operation" contains "sk" → stripped as a false positive.
+        let flag_present = resp.headers.iter().any(|(k, _)| k == "x-flag");
+        assert!(
+            !flag_present,
+            "x-flag header (value contains short key) must be stripped — design boundary"
+        );
+
+        // "clean-value" does not contain "sk" → preserved.
+        let safe_present = resp.headers.iter().any(|(k, _)| k == "x-safe");
+        assert!(
+            safe_present,
+            "x-safe header (value does not contain key) must be preserved"
+        );
+    }
 }
