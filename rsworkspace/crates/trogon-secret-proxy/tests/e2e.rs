@@ -4193,3 +4193,154 @@ async fn e2e_whitespace_only_base_url_override_produces_leading_space_in_url() {
     let resp = proxy_handle.await.unwrap().unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+// ── Gap 3 ─────────────────────────────────────────────────────────────────────
+
+/// When `worker_timeout` is `Duration::ZERO`, `tokio::time::timeout` fires
+/// immediately after the JetStream publish completes (before any worker can
+/// reply), causing `ProxyError::Timeout` → `504 Gateway Timeout`.
+///
+/// The config builder already accepts `Duration::ZERO`; this test verifies
+/// that the proxy actually honours it at runtime.
+#[tokio::test]
+async fn e2e_zero_worker_timeout_returns_504() {
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        // Zero timeout: reply wait fires immediately.
+        worker_timeout: Duration::ZERO,
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_zerotout1")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let resp = router(state).oneshot(request).await.unwrap();
+
+    assert_eq!(
+        resp.status(),
+        504,
+        "Zero worker_timeout must produce 504 Gateway Timeout"
+    );
+}
+
+// ── Gap 5 ─────────────────────────────────────────────────────────────────────
+
+/// The worker strips response **headers** that contain the real API key
+/// (`worker.rs:178`), but the response **body** is forwarded unchanged.
+///
+/// This test documents that design boundary: if the upstream provider echoes
+/// the real key in the response body, the caller will see it.  Body
+/// sanitisation is out of scope for this proxy.
+#[tokio::test]
+async fn e2e_real_key_in_response_body_is_not_stripped() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-key-in-body-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-key-in-body-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_bodykey01")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle = tokio::spawn(async move { router(state).oneshot(request).await });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Simulate a misbehaving provider that echoes the real key in the body.
+    // The proxy must forward this body unchanged (no body sanitisation).
+    const REAL_KEY: &str = "sk-ant-real-key-echoed";
+    let reply = trogon_secret_proxy::messages::OutboundHttpResponse {
+        status: 200,
+        headers: vec![("content-type".to_string(), "application/json".to_string())],
+        body: format!(r#"{{"error": "invalid key {REAL_KEY}"}}"#).into_bytes(),
+        error: None,
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap().unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_str = std::str::from_utf8(&body_bytes).unwrap();
+
+    assert!(
+        body_str.contains(REAL_KEY),
+        "Response body must be forwarded unchanged — proxy does not sanitise bodies (design boundary). \
+         Got: {}",
+        body_str
+    );
+}
