@@ -4829,3 +4829,102 @@ async fn e2e_hop_by_hop_headers_are_stripped_before_forwarding() {
     // Unblock the proxy_handle by letting it time out (no worker will reply).
     let _ = proxy_handle.await;
 }
+
+// ── Gap: error field with 5xx status uses that 5xx code ────────────────────
+
+/// When the worker reply has `error: Some("reason")` AND `status` is already
+/// a 5xx server-error code (e.g. 503), `handle_request` must return that 503
+/// directly — NOT fall back to 502.
+///
+/// proxy.rs:170 — `status.is_server_error()` is true for 503, so
+/// `error_status = status = 503`.
+///
+/// Completes the trio:
+///   - error + 2xx → 502  (e2e_worker_error_field_with_status_200_returns_502)
+///   - error + 4xx → 4xx  (e2e_error_field_with_4xx_status_uses_that_status_not_502)
+///   - error + 5xx → 5xx  ← this test
+#[tokio::test]
+async fn e2e_error_field_with_5xx_status_uses_that_5xx_not_502() {
+    use futures_util::StreamExt as _;
+    use tower::ServiceExt as _;
+    use trogon_secret_proxy::messages::OutboundHttpResponse;
+
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let js_stream = jetstream
+        .get_stream(&stream::stream_name("trogon"))
+        .await
+        .unwrap();
+    let consumer = js_stream
+        .get_or_create_consumer(
+            "e2e-err-5xx-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("e2e-err-5xx-worker".to_string()),
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream,
+        prefix: "trogon".to_string(),
+        outbound_subject,
+        worker_timeout: Duration::from_secs(5),
+        base_url_override: Some("http://mock-provider".to_string()),
+    };
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("authorization", "Bearer tok_anthropic_test_err5xx001")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+
+    let proxy_handle =
+        tokio::spawn(async move { router(state).oneshot(request).await.unwrap() });
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), messages.next())
+        .await
+        .expect("Timed out waiting for proxy to publish")
+        .unwrap()
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let reply_to = parsed["reply_to"].as_str().unwrap().to_string();
+
+    // Reply with error field set AND a 5xx status.
+    // proxy.rs:170 — status.is_server_error() is true for 503
+    // → error_status = 503 (not 502).
+    let reply_resp = OutboundHttpResponse {
+        status: 503,
+        headers: vec![],
+        body: vec![],
+        error: Some("upstream service unavailable".to_string()),
+    };
+    nats.publish(reply_to, serde_json::to_vec(&reply_resp).unwrap().into())
+        .await
+        .unwrap();
+    msg.ack().await.unwrap();
+
+    let resp = proxy_handle.await.unwrap();
+    assert_eq!(
+        resp.status(),
+        503,
+        "error field with 5xx status must use that 5xx code, not fall back to 502"
+    );
+}
