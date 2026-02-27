@@ -6122,3 +6122,151 @@ async fn binary_real_key_in_response_body_reaches_caller_unchanged() {
         "Real key in response body must reach the caller (body filtering is out of scope)"
     );
 }
+
+// ── Default WORKER_CONSUMER_NAME ───────────────────────────────────────────
+
+/// When `WORKER_CONSUMER_NAME` is not set, the worker binary defaults to
+/// `"proxy-workers"`.  Both proxy and worker must communicate end-to-end
+/// with this default consumer group.
+///
+/// All other binary tests pass the consumer name explicitly via
+/// `spawn_worker`; this test exercises the default path.
+#[tokio::test]
+async fn binary_worker_default_consumer_name_works() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_defcons01";
+    let real_key = "sk-ant-def-consumer-key";
+
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_defcons_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Spawn worker WITHOUT setting WORKER_CONSUMER_NAME — binary defaults to "proxy-workers".
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        // WORKER_CONSUMER_NAME intentionally omitted
+        .env(format!("VAULT_TOKEN_{}", token), real_key)
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn worker binary");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Worker with default WORKER_CONSUMER_NAME must process requests"
+    );
+    assert_eq!(ai_mock.hits(), 1, "Provider must receive exactly one request");
+}
+
+// ── Concurrent mixed valid/invalid tokens ─────────────────────────────────
+
+/// Under concurrent load, requests with valid tokens must succeed (200) and
+/// requests with unknown tokens must fail with a client error (401), with no
+/// cross-contamination between the two groups.
+///
+/// This verifies error isolation: a flood of failed vault lookups must not
+/// interfere with the successful requests sharing the same worker instance.
+#[tokio::test]
+async fn binary_concurrent_mixed_valid_and_invalid_tokens_isolated() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let valid_token = "tok_anthropic_prod_mixok01";
+    let real_key = "sk-ant-mix-valid-key";
+
+    // Only matches requests that carry the real key.
+    let ok_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_mix_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker vault has only `valid_token` — the unknown token will get 401.
+    let _worker = spawn_worker(nats_port, "mix-workers-001", valid_token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port);
+
+    // 5 requests with the known valid token.
+    let valid_reqs = (0..5).map(|_| {
+        client
+            .post(&base)
+            .header("Authorization", format!("Bearer {}", valid_token))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+    });
+
+    // 5 requests with a token that does NOT exist in the vault.
+    let invalid_reqs = (0..5).map(|_| {
+        client
+            .post(&base)
+            .header("Authorization", "Bearer tok_anthropic_prod_unknown99")
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+    });
+
+    let valid_results: Vec<_> = futures_util::future::join_all(valid_reqs).await;
+    let invalid_results: Vec<_> = futures_util::future::join_all(invalid_reqs).await;
+
+    // All valid-token requests must succeed.
+    for (i, r) in valid_results.iter().enumerate() {
+        let resp = r.as_ref().unwrap();
+        assert_eq!(resp.status(), 200, "Valid-token request #{} must succeed", i);
+    }
+
+    // All unknown-token requests must fail with a client error (401).
+    for (i, r) in invalid_results.iter().enumerate() {
+        let resp = r.as_ref().unwrap();
+        assert!(
+            resp.status().is_client_error(),
+            "Unknown-token request #{} must return 4xx, got {}",
+            i,
+            resp.status()
+        );
+    }
+
+    assert_eq!(
+        ok_mock.hits(),
+        5,
+        "Provider must receive exactly 5 requests (one per valid token)"
+    );
+}
