@@ -4669,3 +4669,251 @@ async fn binary_proxy_port_in_use_exits_nonzero() {
         "Proxy must exit non-zero when the TCP port is already occupied"
     );
 }
+
+// ── New automated verification tests ──────────────────────────────────────────
+
+/// Durability: 10 sequential requests through the same proxy+worker all succeed.
+///
+/// Verifies that no internal state accumulates (subscription leaks, counter
+/// overflows, etc.) that would cause later requests to fail.
+#[tokio::test]
+async fn binary_10_sequential_requests_without_degradation() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_seq001";
+    let real_key = "sk-ant-seq-real-key";
+
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_seq","type":"message"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "seq-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    for i in 1..=10 {
+        let resp = client
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .body(format!(r#"{{"seq":{}}}"#, i))
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("Request {} failed: {}", i, e));
+
+        assert_eq!(
+            resp.status(),
+            200,
+            "Request {} of 10 must succeed — system must not degrade",
+            i
+        );
+    }
+
+    assert_eq!(ai_mock.hits(), 10, "All 10 requests must reach the AI provider");
+}
+
+/// Provider error body forwarded verbatim: when the AI provider returns a 4xx
+/// with a JSON error body, the proxy must forward it unchanged to the caller.
+///
+/// This is critical for usability — callers need the provider's error details
+/// (e.g. validation failures, rate-limit messages) to debug their requests.
+#[tokio::test]
+async fn binary_provider_error_body_forwarded_verbatim() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_errbody1";
+    let real_key = "sk-ant-errbody-real-key";
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens is required"}}"#;
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(400)
+                .header("content-type", "application/json")
+                .body(error_body);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "errbody-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 400, "Provider 400 must be forwarded to caller");
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, error_body,
+        "Provider error body must reach the caller byte-for-byte"
+    );
+}
+
+/// Request body integrity: the exact bytes sent by the caller reach the AI
+/// provider unchanged after token exchange.
+///
+/// This is fundamental to correctness — the proxy must not modify the body
+/// in any way (no re-encoding, no truncation, no padding).
+#[tokio::test]
+async fn binary_request_body_reaches_provider_byte_for_byte() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_body01";
+    let real_key = "sk-ant-body-real-key";
+
+    let exact_body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":1024,"messages":[{"role":"user","content":"Hello, world!"}],"temperature":0.7}"#;
+
+    let body_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .body(exact_body);
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_body_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "body-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(exact_body)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Request with exact body must succeed");
+    assert_eq!(
+        body_mock.hits(),
+        1,
+        "Provider must receive exactly the body sent by the caller, byte for byte"
+    );
+}
+
+/// Multi-provider isolation: Anthropic and OpenAI tokens in the same session
+/// resolve to their respective real keys with no cross-contamination.
+///
+/// The worker holds one Anthropic token and one OpenAI token.  The test
+/// verifies that each provider receives only the correct key.
+#[tokio::test]
+async fn binary_anthropic_and_openai_tokens_resolve_to_correct_keys() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    let anthropic_token = "tok_anthropic_prod_mp001";
+    let anthropic_key   = "sk-ant-anthropic-real-key";
+    let openai_token    = "tok_openai_prod_mp001";
+    let openai_key      = "sk-openai-real-key";
+
+    // Anthropic mock: only accepts the Anthropic key.
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", anthropic_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"provider":"anthropic"}"#);
+        })
+        .await;
+
+    // OpenAI mock: only accepts the OpenAI key.
+    let openai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/chat/completions")
+                .header("authorization", format!("Bearer {}", openai_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"provider":"openai"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Single worker holds both tokens.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "mp-workers-001")
+        .env(format!("VAULT_TOKEN_{}", anthropic_token), anthropic_key)
+        .env(format!("VAULT_TOKEN_{}", openai_token), openai_key)
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", proxy_port);
+
+    // Call Anthropic provider with Anthropic token.
+    let resp_anthropic = client
+        .post(format!("{}/anthropic/v1/messages", base))
+        .header("Authorization", format!("Bearer {}", anthropic_token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // Call OpenAI provider with OpenAI token.
+    let resp_openai = client
+        .post(format!("{}/openai/v1/chat/completions", base))
+        .header("Authorization", format!("Bearer {}", openai_token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp_anthropic.status(), 200, "Anthropic request must succeed");
+    assert_eq!(resp_openai.status(), 200, "OpenAI request must succeed");
+
+    let body_a: serde_json::Value = resp_anthropic.json().await.unwrap();
+    let body_o: serde_json::Value = resp_openai.json().await.unwrap();
+    assert_eq!(body_a["provider"], "anthropic", "Anthropic token must route to Anthropic provider");
+    assert_eq!(body_o["provider"], "openai", "OpenAI token must route to OpenAI provider");
+
+    assert_eq!(anthropic_mock.hits(), 1, "Anthropic key must be used exactly once");
+    assert_eq!(openai_mock.hits(), 1, "OpenAI key must be used exactly once");
+}
