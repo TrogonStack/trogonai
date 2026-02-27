@@ -1554,4 +1554,58 @@ mod tests {
             "BOM before 'Bearer' must be rejected as a non-Bearer token"
         );
     }
+
+    // ── Gap 1 ──────────────────────────────────────────────────────────────
+
+    /// `"Bearer "` with nothing after the prefix produces an empty `raw_token`
+    /// (`""`).  `"".starts_with("tok_")` is false, so the error path at
+    /// `worker.rs:215-218` must fire without any out-of-bounds panic
+    /// (`"".len().min(16) == 0` → empty slice is valid).
+    #[tokio::test]
+    async fn resolve_token_bearer_prefix_only_returns_error_without_panic() {
+        let vault = MemoryVault::new();
+        let headers = vec![(
+            "authorization".to_string(),
+            "Bearer ".to_string(), // prefix only — nothing after the space
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err(), "Empty token after 'Bearer ' must be rejected");
+        assert!(
+            result.unwrap_err().contains("does not look like a proxy token"),
+            "Error must mention the token format expectation"
+        );
+    }
+
+    // ── Gap 2 ──────────────────────────────────────────────────────────────
+
+    /// A CRLF sequence embedded in the Authorization header *value* (not in
+    /// a forwarded request header) passes the `starts_with("tok_")` check but
+    /// must be rejected by `ApiKeyToken::new` because `\r` and `\n` are not
+    /// `[a-zA-Z0-9]` characters.
+    ///
+    /// Distinct from `forward_request_crlf_in_header_value_is_rejected` which
+    /// tests CRLF injected into outgoing HTTP headers; this tests CRLF inside
+    /// the Authorization value itself.
+    #[tokio::test]
+    async fn resolve_token_crlf_in_authorization_value_is_rejected() {
+        let vault = MemoryVault::new();
+        let headers = vec![(
+            "authorization".to_string(),
+            "Bearer tok_anthropic_prod_abc123\r\nX-Injected: yes".to_string(),
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err(), "CRLF in Authorization value must be rejected");
+        // Either the token fails ApiKeyToken validation or the vault doesn't
+        // find it — either way the request must not succeed.
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("Invalid proxy token") || msg.contains("not found in vault"),
+            "Error must indicate token is invalid, got: {}",
+            msg
+        );
+    }
 }
