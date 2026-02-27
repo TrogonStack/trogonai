@@ -1722,6 +1722,93 @@ mod tests {
         mock.assert_async().await;
     }
 
+    // ── Gap: "Bearer" without trailing space ──────────────────────────────────
+
+    /// `"Bearer"` (exactly 6 bytes, no trailing space or token) does NOT match
+    /// `starts_with("Bearer ")` (7 bytes).  The check at line 208 must reject
+    /// it with "not a Bearer token" — no out-of-bounds access since
+    /// `starts_with` is safe on a shorter string.
+    ///
+    /// Distinct from `resolve_token_bearer_prefix_only_returns_error_without_panic`
+    /// which tests `"Bearer "` (with space, empty token); here there is no space
+    /// at all so we never even enter the `raw_token` logic.
+    #[tokio::test]
+    async fn resolve_token_bearer_without_space_returns_not_bearer_error() {
+        let vault = MemoryVault::new();
+        let headers = vec![(
+            "authorization".to_string(),
+            "Bearer".to_string(), // exactly 6 bytes — no trailing space
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err(), "'Bearer' without space must be rejected");
+        assert!(
+            result.unwrap_err().contains("not a Bearer token"),
+            "Error must describe the rejection"
+        );
+    }
+
+    // ── Gap: non-breaking space after "Bearer" ─────────────────────────────────
+
+    /// `"Bearer\u{00A0}tok_..."` uses a Unicode non-breaking space (U+00A0,
+    /// bytes 0xC2 0xA0) instead of an ASCII space (0x20).
+    /// `starts_with("Bearer ")` is a byte-exact comparison — U+00A0 ≠ U+0020
+    /// — so the header must be rejected with "not a Bearer token".
+    #[tokio::test]
+    async fn resolve_token_non_breaking_space_after_bearer_is_rejected() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_nbsptest1").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        // Non-breaking space (U+00A0) instead of ASCII space after "Bearer".
+        let headers = vec![(
+            "authorization".to_string(),
+            "Bearer\u{00A0}tok_anthropic_prod_nbsptest1".to_string(),
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(
+            result.is_err(),
+            "Non-breaking space after 'Bearer' must be rejected"
+        );
+        assert!(
+            result.unwrap_err().contains("not a Bearer token"),
+            "Error must describe the rejection"
+        );
+    }
+
+    // ── Gap: method with internal spaces ──────────────────────────────────────
+
+    /// A method string containing internal spaces (`"P O S T"`) is not a valid
+    /// RFC 7230 HTTP method token — spaces are separators, not token characters.
+    /// `reqwest::Method::from_str("P O S T")` must fail with an error and
+    /// `forward_request` must propagate it as `"Invalid HTTP method: …"`.
+    #[tokio::test]
+    async fn forward_request_method_with_internal_spaces_returns_error() {
+        let client = ReqwestClient::new();
+        let request = OutboundHttpRequest {
+            method: "P O S T".to_string(),
+            url: "http://127.0.0.1:1/v1/messages".to_string(),
+            headers: vec![],
+            body: b"{}".to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-spaced".to_string(),
+        };
+
+        let result = forward_request(&client, &request, &[]).await;
+
+        assert!(
+            result.is_err(),
+            "Method with internal spaces must be rejected"
+        );
+        assert!(
+            result.unwrap_err().contains("Invalid HTTP method"),
+            "Error must contain 'Invalid HTTP method'"
+        );
+    }
+
     // ── Gap 5 ──────────────────────────────────────────────────────────────
 
     /// A 204 No Content response has no body.  `upstream_resp.bytes().await`
