@@ -6270,3 +6270,59 @@ async fn binary_concurrent_mixed_valid_and_invalid_tokens_isolated() {
         "Provider must receive exactly 5 requests (one per valid token)"
     );
 }
+
+// ── Gap: PROXY_BASE_URL_OVERRIDE with trailing slash normalized ───────────────
+
+/// `trim_end_matches('/')` in the proxy removes trailing slashes from the
+/// base URL override.  Passing a URL with a trailing slash (e.g.
+/// `http://mock:PORT/`) must still route to `http://mock:PORT/v1/messages`
+/// — not `http://mock:PORT//v1/messages` — and the request must succeed.
+#[tokio::test]
+async fn binary_base_url_override_with_trailing_slash_is_normalized() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_trailslash1";
+    let real_key = "sk-ant-trailslash-key-001";
+
+    // Expect exactly one hit at /v1/messages (no double slash).
+    let mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_trail"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    // Pass base URL with a trailing slash — proxy must strip it.
+    let base_url_with_slash = format!("{}/", mock_server.base_url());
+    let _proxy = spawn_proxy(nats_port, proxy_port, &base_url_with_slash);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "trail-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Trailing slash in base URL override must be normalized — got {}",
+        resp.status()
+    );
+    assert_eq!(
+        mock.hits(),
+        1,
+        "Provider must receive exactly one request at /v1/messages (no double slash)"
+    );
+}
