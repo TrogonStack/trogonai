@@ -30,4 +30,19 @@ mod tests {
             "trogon.proxy.reply.550e8400-e29b-41d4-a716-446655440000"
         );
     }
+
+    // ── Gap 3.1: empty prefix ─────────────────────────────────────────────────
+
+    /// An empty prefix produces subjects with a leading dot.
+    /// NATS subjects with leading dots are invalid, so callers must ensure
+    /// the prefix is non-empty.  These functions do not validate input.
+    #[test]
+    fn outbound_empty_prefix_produces_leading_dot() {
+        assert_eq!(outbound(""), ".proxy.http.outbound");
+    }
+
+    #[test]
+    fn reply_empty_prefix_produces_leading_dot() {
+        assert_eq!(reply("", "my-correlation-id"), ".proxy.reply.my-correlation-id");
+    }
 }
