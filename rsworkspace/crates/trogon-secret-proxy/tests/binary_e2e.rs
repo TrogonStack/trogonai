@@ -5269,3 +5269,288 @@ async fn binary_five_providers_five_tokens_all_route_correctly() {
         );
     }
 }
+
+/// Provider connection refused: the worker targets a port with nothing
+/// listening.  After exhausting all retries the worker must return 502 to the
+/// caller — not hang, not panic, and not time out the proxy with a 504.
+///
+/// This proves the worker handles transport-level failures (ECONNREFUSED)
+/// gracefully and communicates them back as structured error responses.
+#[tokio::test]
+async fn binary_provider_connection_refused_returns_502() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Pick a port that has nothing listening — we never start any mock server.
+    let dead_port = free_port();
+    let dead_url = format!("http://127.0.0.1:{}", dead_port);
+
+    let token    = "tok_anthropic_prod_cref001";
+    let real_key = "sk-ant-connref-key";
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &dead_url);
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "cref-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        502,
+        "ECONNREFUSED after all retries must produce 502 Bad Gateway, not 504"
+    );
+}
+
+/// Empty vault: worker starts with no VAULT_TOKEN_* environment variables.
+/// Every request — regardless of which tok_ is used — must be rejected with
+/// 401 Unauthorized.
+///
+/// This is the safe default: an unconfigured worker must never forward
+/// requests to the AI provider.
+#[tokio::test]
+async fn binary_worker_empty_vault_rejects_all_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.any_request();
+            then.status(200).body("should not reach here");
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    // Worker with NO vault tokens at all.
+    let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("WORKER_CONSUMER_NAME", "empty-vault-001")
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", proxy_port);
+
+    // Multiple different tokens — all must be rejected.
+    let tokens = [
+        "tok_anthropic_prod_ev001",
+        "tok_openai_prod_ev002",
+        "tok_gemini_prod_ev003",
+    ];
+
+    for tok in &tokens {
+        let resp = client
+            .post(format!("{}/anthropic/v1/messages", base))
+            .header("Authorization", format!("Bearer {}", tok))
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            401,
+            "Token {} must be rejected 401 when vault is empty",
+            tok
+        );
+    }
+
+    assert_eq!(
+        _ai_mock.hits(),
+        0,
+        "Provider must receive zero requests when vault is empty"
+    );
+}
+
+/// Long nested path integrity: a deeply nested URL path
+/// (`/v1/threads/{id}/runs/{id}/steps`) must arrive at the provider exactly
+/// as the caller sent it — no truncation, no segment dropped.
+///
+/// This is a common real-world pattern in OpenAI's Assistants API and similar
+/// resource-oriented APIs.
+#[tokio::test]
+async fn binary_long_nested_path_forwarded_correctly() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_openai_prod_nested1";
+    let real_key = "sk-openai-nested-key";
+
+    let nested_path = "/v1/threads/th_abc123XYZ/runs/run_def456ABC/steps";
+
+    let _path_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET).path(nested_path);
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"object":"list","data":[]}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "nested-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/openai{}",
+            proxy_port, nested_path
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Nested path must be forwarded correctly");
+    assert_eq!(
+        _path_mock.hits(),
+        1,
+        "Provider must receive exactly the nested path sent by the caller"
+    );
+}
+
+/// Stateless proxy restart: the proxy is killed and a fresh instance is
+/// started on the same NATS server.  The worker is restarted too.
+///
+/// Because the proxy is stateless (all durable state lives in JetStream),
+/// the new proxy instance must serve requests correctly without any warm-up
+/// or re-configuration — the stream is already in place.
+#[tokio::test]
+async fn binary_proxy_restart_new_instance_serves_requests() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_anthropic_prod_rst001";
+    let real_key = "sk-ant-restart-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_restart_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+
+    // First proxy + worker: verify the system works normally.
+    {
+        let _proxy1 = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+        wait_for_port(proxy_port, Duration::from_secs(15)).await;
+        let _worker1 = spawn_worker(nats_port, "restart-workers-001", token, real_key);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let resp = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .body(r#"{"req":1}"#)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200, "First proxy instance must serve the request");
+        // _proxy1 and _worker1 dropped here — both killed
+    }
+
+    // Give the OS a moment to release the port.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Second proxy + worker on the same NATS (stream already exists).
+    let _proxy2  = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+    let _worker2 = spawn_worker(nats_port, "restart-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let resp2 = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"req":2}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp2.status(),
+        200,
+        "New proxy instance must serve requests immediately after restart"
+    );
+    assert_eq!(_ai_mock.hits(), 2, "Provider must receive one request per proxy instance");
+}
+
+/// High-volume sequential requests: 50 back-to-back requests all return 200.
+///
+/// A stronger version of the 10-request degradation test.  Verifies there
+/// are no resource leaks (file descriptors, NATS subscriptions, JetStream
+/// consumer state) that accumulate and cause failures at higher request counts.
+#[tokio::test]
+async fn binary_50_sequential_requests_all_succeed() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token    = "tok_anthropic_prod_seq50x";
+    let real_key = "sk-ant-seq50-key";
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_seq"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "seq50-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    for i in 0..50u32 {
+        let resp = client
+            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .body(format!(r#"{{"seq":{}}}"#, i))
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            200,
+            "Request {} of 50 must succeed — no resource leak allowed",
+            i
+        );
+    }
+
+    assert_eq!(_ai_mock.hits(), 50, "All 50 requests must reach the provider");
+}
