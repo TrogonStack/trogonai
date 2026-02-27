@@ -1478,4 +1478,54 @@ mod tests {
             "Error must originate from the HTTP layer"
         );
     }
+
+    // ── Gap 3 ──────────────────────────────────────────────────────────────
+
+    /// A header value with leading whitespace before "Bearer" does NOT match
+    /// `starts_with(BEARER_PREFIX)` — the prefix check is position-exact.
+    /// The token must be rejected with a "not a Bearer token" error.
+    #[tokio::test]
+    async fn resolve_token_leading_whitespace_before_bearer_is_rejected() {
+        let vault = MemoryVault::new();
+        // Two spaces before "Bearer" — common copy-paste mistake.
+        let headers = vec![(
+            "authorization".to_string(),
+            "  Bearer tok_anthropic_prod_abc123".to_string(),
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("not a Bearer token"),
+            "Extra whitespace before 'Bearer' must be rejected"
+        );
+    }
+
+    // ── Gap 4 ──────────────────────────────────────────────────────────────
+
+    /// RFC 7230 §3.1.1 defines an HTTP method as an "HTTP token" — any
+    /// sequence of printable ASCII characters excluding delimiters.
+    /// Lowercase letters ARE valid token characters, so `"post"` (lowercase)
+    /// parses successfully as a custom extension method; it is NOT the same
+    /// as the standard `POST` method.
+    ///
+    /// This means the proxy will forward requests with unconventional method
+    /// casing to the upstream provider unchanged — whether the provider
+    /// accepts them is outside the proxy's responsibility.
+    #[test]
+    fn http_method_lowercase_is_valid_rfc7230_extension_token() {
+        // Reqwest uses the `http` crate which accepts any valid RFC 7230 token.
+        let lowercase = "post".parse::<reqwest::Method>();
+        assert!(
+            lowercase.is_ok(),
+            "'post' must parse as a valid custom extension method"
+        );
+        // It is NOT the standard POST method — casing is preserved.
+        assert_ne!(
+            lowercase.unwrap(),
+            reqwest::Method::POST,
+            "Lowercase 'post' is a different method object from standard POST"
+        );
+    }
 }
