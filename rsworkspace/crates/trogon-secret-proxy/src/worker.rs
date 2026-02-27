@@ -1528,4 +1528,30 @@ mod tests {
             "Lowercase 'post' is a different method object from standard POST"
         );
     }
+
+    // ── Gap 2 ──────────────────────────────────────────────────────────────
+
+    /// A UTF-8 byte-order mark (U+FEFF, bytes EF BB BF) prepended to a
+    /// Bearer value does NOT match `starts_with(BEARER_PREFIX)` because the
+    /// BOM occupies 3 bytes before the 'B' of "Bearer".
+    ///
+    /// The token must be rejected with "not a Bearer token", not with a
+    /// panic or an out-of-bounds slice.
+    #[tokio::test]
+    async fn resolve_token_utf8_bom_before_bearer_is_rejected() {
+        let vault = MemoryVault::new();
+        // U+FEFF is the UTF-8 BOM: three bytes EF BB BF before "Bearer".
+        let headers = vec![(
+            "authorization".to_string(),
+            "\u{FEFF}Bearer tok_anthropic_prod_abc123".to_string(),
+        )];
+
+        let result = resolve_token(&vault, &headers).await;
+
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("not a Bearer token"),
+            "BOM before 'Bearer' must be rejected as a non-Bearer token"
+        );
+    }
 }
