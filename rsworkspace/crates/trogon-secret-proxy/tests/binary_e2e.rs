@@ -5845,3 +5845,280 @@ async fn binary_token_with_long_alphanumeric_id_works() {
     );
     assert_eq!(_ai_mock.hits(), 1, "Provider must receive the request with the real key");
 }
+
+// ── Gap 4: X-Request-Id replacement ───────────────────────────────────────
+
+/// The worker strips the caller's `X-Request-Id` and replaces it with the
+/// proxy-generated correlation UUID (idempotency_key).  The AI provider must
+/// never receive the caller's original header value.
+///
+/// Two mocks are registered:
+/// 1. Matches requests that still carry the original caller header → 500 "LEAKED"
+/// 2. Matches any POST request → 200 (the normal path)
+///
+/// If the caller ID was replaced, mock 1 never fires and mock 2 handles the
+/// request.  If the ID leaked, mock 1 fires first and the test fails.
+#[tokio::test]
+async fn binary_caller_x_request_id_replaced_by_proxy_uuid() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_reqid01";
+    let real_key = "sk-ant-reqid-key";
+
+    // If the caller's X-Request-Id leaks to the provider, this mock fires.
+    let leak_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("x-request-id", "custom-caller-id-12345");
+            then.status(500).body("X-Request-Id leaked to provider");
+        })
+        .await;
+
+    // Normal mock: fires when the caller's ID is absent (replaced by UUID).
+    let ok_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_reqid_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "reqid-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .header("X-Request-Id", "custom-caller-id-12345")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "Request must succeed");
+    assert_eq!(ok_mock.hits(), 1, "Provider must receive the request");
+    assert_eq!(
+        leak_mock.hits(),
+        0,
+        "Caller X-Request-Id must be replaced by proxy UUID — never forwarded to the AI provider"
+    );
+}
+
+// ── Gap 7: hyphenated prefix ───────────────────────────────────────────────
+
+/// A `PROXY_PREFIX` that contains a hyphen (e.g. `my-hyphen`) must be accepted
+/// by both binaries and produce a consistent NATS subject namespace so they
+/// can communicate end-to-end.
+#[tokio::test]
+async fn binary_hyphenated_prefix_both_binaries_communicate() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_hyph01";
+    let real_key = "sk-ant-hyph-key";
+
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", format!("Bearer {}", real_key));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_hyph_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy =
+        spawn_proxy_with_prefix(nats_port, proxy_port, &mock_server.base_url(), "my-hyphen");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker =
+        spawn_worker_with_prefix(nats_port, "hyph-workers-001", token, real_key, "my-hyphen");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Hyphenated PROXY_PREFIX must be accepted and both binaries must communicate"
+    );
+    assert_eq!(ai_mock.hits(), 1, "Provider must receive exactly one request");
+}
+
+// ── Gap 9: empty PROXY_BASE_URL_OVERRIDE ──────────────────────────────────
+
+/// Setting `PROXY_BASE_URL_OVERRIDE` to an empty string causes the proxy to
+/// build a URL with no host (e.g. `"v1/messages"`).  The worker should fail
+/// to forward the request and reply with an error response rather than
+/// panicking or timing out the proxy.
+#[tokio::test]
+async fn binary_empty_base_url_override_returns_error() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let token = "tok_anthropic_prod_emptyurl01";
+    let real_key = "sk-ant-empty-url-key";
+
+    let proxy_port = free_port();
+    // Pass "" as the base URL — proxy will construct a URL without a host.
+    let _proxy = spawn_proxy(nats_port, proxy_port, "");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "emptyurl-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        // Allow time for the worker's 3 retry attempts (100 + 200 + 400 ms backoff).
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    // Empty base URL produces an invalid/relative URL; the worker exhausts
+    // retries and replies with a 502 error response.
+    assert!(
+        resp.status().is_server_error(),
+        "Empty PROXY_BASE_URL_OVERRIDE must return 5xx, got {}",
+        resp.status()
+    );
+}
+
+// ── Gap 12: overflow PROXY_WORKER_TIMEOUT_SECS ────────────────────────────
+
+/// `PROXY_WORKER_TIMEOUT_SECS` is parsed as u64.  A value that overflows u64
+/// fails `.parse::<u64>()`, which returns `None`, and `unwrap_or(60)` kicks in.
+/// The proxy must start normally and serve requests with the 60 s fallback.
+#[tokio::test]
+async fn binary_invalid_worker_timeout_falls_back_to_default() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_badtout01";
+    let real_key = "sk-ant-bad-timeout-key";
+
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_timeout_ok"}"#);
+        })
+        .await;
+
+    let proxy_port = free_port();
+    // Spawn proxy with a u64-overflow timeout value.
+    let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
+        .env("NATS_URL", format!("localhost:{}", nats_port))
+        .env("PROXY_PORT", proxy_port.to_string())
+        .env("PROXY_WORKER_TIMEOUT_SECS", "99999999999999999999") // overflows u64
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
+        .env("RUST_LOG", "warn")
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Failed to spawn proxy binary");
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "badtout-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Proxy with overflow PROXY_WORKER_TIMEOUT_SECS must fall back to 60 s default and serve requests"
+    );
+    assert_eq!(ai_mock.hits(), 1, "Provider must receive the request");
+}
+
+// ── Gap 16: real key in response body is forwarded unchanged ───────────────
+
+/// The worker strips response *headers* that contain the real API key, but
+/// the response *body* is forwarded verbatim.  If the provider includes the
+/// real key in the response body (e.g. in a verbose debug response), the
+/// caller receives it.  This is a documented design boundary: body filtering
+/// is out of scope for the proxy.
+#[tokio::test]
+async fn binary_real_key_in_response_body_reaches_caller_unchanged() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = httpmock::MockServer::start_async().await;
+    let token = "tok_anthropic_prod_bodykey01";
+    let real_key = "sk-ant-body-real-key";
+
+    // Provider echoes the real key back in the JSON response body.
+    let body_with_key = format!(
+        r#"{{"id":"msg_body_key","auth_used":"Bearer {}","type":"message"}}"#,
+        real_key
+    );
+
+    let _ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(body_with_key.clone());
+        })
+        .await;
+
+    let proxy_port = free_port();
+    let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    wait_for_port(proxy_port, Duration::from_secs(15)).await;
+
+    let _worker = spawn_worker(nats_port, "bodykey-workers-001", token, real_key);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-3-5-sonnet"}"#)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+
+    // Design boundary: the proxy forwards the body byte-for-byte.
+    // Only response *headers* containing the real key are filtered.
+    assert_eq!(
+        body, body_with_key,
+        "Response body must be forwarded to the caller byte-for-byte"
+    );
+    assert!(
+        body.contains(real_key),
+        "Real key in response body must reach the caller (body filtering is out of scope)"
+    );
+}
