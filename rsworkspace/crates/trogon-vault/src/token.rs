@@ -164,6 +164,12 @@ impl ApiKeyToken {
         let without_prefix = &self.0["tok_".len()..];
         without_prefix.splitn(3, '_').nth(1).unwrap_or("")
     }
+
+    /// Return the unique ID segment (e.g. `"a1b2c3"`).
+    pub fn id_str(&self) -> &str {
+        let without_prefix = &self.0["tok_".len()..];
+        without_prefix.splitn(3, '_').nth(2).unwrap_or("")
+    }
 }
 
 impl fmt::Display for ApiKeyToken {
@@ -281,6 +287,12 @@ mod tests {
     fn display() {
         let t = ApiKeyToken::new("tok_gemini_dev_zz99").unwrap();
         assert_eq!(t.to_string(), "tok_gemini_dev_zz99");
+    }
+
+    #[test]
+    fn id_str_extracted_correctly() {
+        let t = ApiKeyToken::new("tok_anthropic_prod_abc123").unwrap();
+        assert_eq!(t.id_str(), "abc123");
     }
 
     #[test]
