@@ -27,3 +27,8 @@ pub mod vault;
 pub use backends::memory::{MemoryVault, MemoryVaultError};
 pub use token::{AiProvider, ApiKeyToken, Env, TokenError};
 pub use vault::VaultStore;
+
+#[cfg(feature = "hashicorp-vault")]
+pub use backends::hashicorp_vault::{
+    HashicorpVaultConfig, HashicorpVaultError, HashicorpVaultStore, VaultAuth,
+};
