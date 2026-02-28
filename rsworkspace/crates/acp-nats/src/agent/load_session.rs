@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::config::AcpPrefix;
+use crate::acp_prefix::AcpPrefix;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
