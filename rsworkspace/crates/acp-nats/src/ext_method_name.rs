@@ -7,10 +7,30 @@
 
 use std::sync::Arc;
 
-use crate::config::ValidationError;
 use crate::nats::token;
+use crate::subject_token_violation::SubjectTokenViolation;
 
 const MAX_METHOD_NAME_LENGTH: usize = 128;
+
+/// Error returned when [`ExtMethodName`] validation fails.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtMethodNameError(pub SubjectTokenViolation);
+
+impl std::fmt::Display for ExtMethodNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            SubjectTokenViolation::Empty => write!(f, "method must not be empty"),
+            SubjectTokenViolation::InvalidCharacter(ch) => {
+                write!(f, "method contains invalid character: {:?}", ch)
+            }
+            SubjectTokenViolation::TooLong(len) => {
+                write!(f, "method is too long: {} bytes (max 128)", len)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExtMethodNameError {}
 
 /// NATS-safe extension method name. Guarantees validity at construction—invalid instances are unrepresentable.
 ///
@@ -19,19 +39,23 @@ const MAX_METHOD_NAME_LENGTH: usize = 128;
 pub struct ExtMethodName(Arc<str>);
 
 impl ExtMethodName {
-    pub fn new(method: impl AsRef<str>) -> Result<Self, ValidationError> {
+    pub fn new(method: impl AsRef<str>) -> Result<Self, ExtMethodNameError> {
         let s = method.as_ref();
         if s.is_empty() {
-            return Err(ValidationError::EmptyValue("method"));
+            return Err(ExtMethodNameError(SubjectTokenViolation::Empty));
         }
         if s.len() > MAX_METHOD_NAME_LENGTH {
-            return Err(ValidationError::TooLong("method", s.len()));
+            return Err(ExtMethodNameError(SubjectTokenViolation::TooLong(s.len())));
         }
         if let Some(ch) = token::has_wildcards_or_whitespace(s) {
-            return Err(ValidationError::InvalidCharacter("method", ch));
+            return Err(ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(
+                ch,
+            )));
         }
         if token::has_consecutive_or_boundary_dots(s) {
-            return Err(ValidationError::InvalidCharacter("method", '.'));
+            return Err(ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(
+                '.',
+            )));
         }
         Ok(Self(s.into()))
     }
@@ -70,7 +94,7 @@ mod tests {
     fn ext_method_name_too_long_returns_err() {
         let long = "a".repeat(129);
         let err = ExtMethodName::new(&long).err().unwrap();
-        assert_eq!(err, ValidationError::TooLong("method", 129));
+        assert_eq!(err, ExtMethodNameError(SubjectTokenViolation::TooLong(129)));
     }
 
     #[test]
@@ -92,7 +116,7 @@ mod tests {
     #[test]
     fn ext_method_name_empty_returns_err() {
         let err = ExtMethodName::new("").err().unwrap();
-        assert_eq!(err, ValidationError::EmptyValue("method"));
+        assert_eq!(err, ExtMethodNameError(SubjectTokenViolation::Empty));
     }
 
     #[test]
@@ -113,5 +137,27 @@ mod tests {
         assert_eq!(format!("{}", name), "my_method");
         assert_eq!(name.len(), 9);
         assert!(name.starts_with("my"));
+    }
+
+    #[test]
+    fn ext_method_name_error_display() {
+        assert_eq!(
+            format!("{}", ExtMethodNameError(SubjectTokenViolation::Empty)),
+            "method must not be empty"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(' '))
+            ),
+            "method contains invalid character: ' '"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                ExtMethodNameError(SubjectTokenViolation::TooLong(200))
+            ),
+            "method is too long: 200 bytes (max 128)"
+        );
     }
 }
