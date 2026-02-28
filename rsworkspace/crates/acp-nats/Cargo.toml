@@ -21,5 +21,6 @@ trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "testing"] }
+tokio = { version = "1.49.0", features = ["test-util"] }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
