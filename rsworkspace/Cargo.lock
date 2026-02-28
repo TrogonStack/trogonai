@@ -4285,7 +4285,10 @@ dependencies = [
 name = "trogon-vault"
 version = "0.1.0"
 dependencies = [
+ "httpmock",
+ "reqwest",
  "serde",
+ "serde_json",
  "tokio",
  "trogon-std",
  "uuid",

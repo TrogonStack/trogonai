@@ -7,10 +7,14 @@ edition = "2024"
 serde = { version = "1.0.228", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 trogon-std = { path = "../trogon-std" }
+reqwest    = { version = "0.12", features = ["rustls-tls", "json"], default-features = false, optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+tokio    = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+httpmock = "0.7"
 
 [features]
 default = []
 test-support = []
+hashicorp-vault = ["dep:reqwest", "dep:serde_json"]
