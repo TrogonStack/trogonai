@@ -4,12 +4,14 @@ use trogon_nats::NatsConfig;
 use crate::acp_prefix::AcpPrefix;
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(7200);
 
 #[derive(Clone)]
 pub struct Config {
     pub(crate) acp_prefix: AcpPrefix,
     pub(crate) nats: NatsConfig,
     pub(crate) operation_timeout: Duration,
+    pub(crate) prompt_timeout: Duration,
 }
 
 impl Config {
@@ -18,11 +20,17 @@ impl Config {
             acp_prefix,
             nats,
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
+            prompt_timeout: DEFAULT_PROMPT_TIMEOUT,
         }
     }
 
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
         self.operation_timeout = timeout;
+        self
+    }
+
+    pub fn with_prompt_timeout(mut self, timeout: Duration) -> Self {
+        self.prompt_timeout = timeout;
         self
     }
 
@@ -36,6 +44,11 @@ impl Config {
 
     pub fn operation_timeout(&self) -> Duration {
         self.operation_timeout
+    }
+
+    /// Returns the configured timeout for prompt requests.
+    pub fn prompt_timeout(&self) -> Duration {
+        self.prompt_timeout
     }
 
     #[cfg(test)]
@@ -72,6 +85,13 @@ mod tests {
         let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
             .with_operation_timeout(Duration::from_secs(60));
         assert_eq!(config.operation_timeout(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn config_with_prompt_timeout() {
+        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
+            .with_prompt_timeout(Duration::from_secs(3600));
+        assert_eq!(config.prompt_timeout(), Duration::from_secs(3600));
     }
 
     #[test]

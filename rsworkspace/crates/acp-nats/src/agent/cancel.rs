@@ -5,9 +5,11 @@ use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
 
-/// Publishes the cancel notification to the backend via NATS (fire-and-forget).
-/// The publish failure is logged and recorded as a metric but does not propagate
-/// to the caller, so the client always receives `Ok(())`.
+/// Handles cancel notification requests.
+///
+/// Validates the session ID and publishes the cancellation to the backend (fire-and-forget).
+/// The backend owns session state and will respond to the in-flight prompt with `stopReason: cancelled`.
+/// Publish failure is logged and recorded in metrics but does not propagate to the caller.
 #[instrument(
     name = "acp.session.cancel",
     skip(bridge, args),
@@ -25,9 +27,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         bridge
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
-        bridge
-            .metrics
-            .record_error("session_validate", "invalid_session_id");
+        bridge.metrics.record_error("cancel", "invalid_session_id");
         Error::new(
             ErrorCode::InvalidParams.into(),
             format!("Invalid session ID: {}", e),
@@ -46,7 +46,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     )
     .await;
 
-    if let Err(error) = publish_result {
+    if let Err(error) = &publish_result {
         warn!(
             session_id = %args.session_id,
             error = %error,
@@ -57,9 +57,11 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             .record_error("cancel", "cancel_publish_failed");
     }
 
-    bridge
-        .metrics
-        .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), true);
+    bridge.metrics.record_request(
+        "cancel",
+        bridge.clock.elapsed(start).as_secs_f64(),
+        publish_result.is_ok(),
+    );
 
     Ok(())
 }
@@ -223,8 +225,8 @@ mod tests {
             "expected acp.request.count with method=cancel, success=false on validation failure"
         );
         assert!(
-            has_error_metric(&finished_metrics, "session_validate", "invalid_session_id"),
-            "expected acp.errors.total with operation=session_validate, reason=invalid_session_id"
+            has_error_metric(&finished_metrics, "cancel", "invalid_session_id"),
+            "expected acp.errors.total with operation=cancel, reason=invalid_session_id"
         );
         provider.shutdown().unwrap();
     }
@@ -258,8 +260,8 @@ mod tests {
             "expected acp.errors.total with operation=cancel, reason=cancel_publish_failed"
         );
         assert!(
-            has_request_metric(&finished_metrics, "cancel", true),
-            "publish failure is fire-and-forget; caller still gets Ok, so success=true"
+            has_request_metric(&finished_metrics, "cancel", false),
+            "request metric records publish outcome; success=false when publish fails"
         );
         provider.shutdown().unwrap();
     }
