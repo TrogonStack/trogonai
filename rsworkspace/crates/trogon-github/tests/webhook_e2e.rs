@@ -482,3 +482,80 @@ async fn webhook_different_event_types_use_distinct_nats_subjects() {
     assert_eq!(tag_msg.payload.as_ref(), tag_body.as_ref());
     assert_eq!(tag_msg.subject.as_str(), "github.create");
 }
+
+// ── Health endpoint ───────────────────────────────────────────────────────────
+
+/// `GET /health` must return 200 OK so k8s / Docker can use it as a liveness probe.
+#[tokio::test]
+async fn health_endpoint_returns_200() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port}/health"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200, "expected 200 from /health; got {}", resp.status());
+}
+
+/// `POST /health` is not a registered route — axum returns 405 Method Not Allowed.
+#[tokio::test]
+async fn health_endpoint_only_accepts_get() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/health"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 405, "expected 405 for POST /health; got {}", resp.status());
+}
+
+// ── Stream max_age ────────────────────────────────────────────────────────────
+
+/// The server must accept a custom `GITHUB_STREAM_MAX_AGE_SECS` and still
+/// publish events normally — verifies the stream is created with the config
+/// without requiring introspection of JetStream internals.
+#[tokio::test]
+async fn webhook_custom_stream_max_age_still_publishes() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Use a 1-hour max age instead of the default 7 days.
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("GITHUB_WEBHOOK_PORT", http_port.to_string());
+    env.set("GITHUB_STREAM_MAX_AGE_SECS", "3600");
+    let config = trogon_github::GithubConfig::from_env(&env);
+
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move {
+        trogon_github::serve(config, nats_for_server).await.expect("server error");
+    });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    let nats = nats_client(nats_port).await;
+    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("X-GitHub-Event", "push")
+        .header("X-GitHub-Delivery", "custom-age-test")
+        .body(r#"{"ref":"refs/heads/main"}"#)
+        .send()
+        .await
+        .unwrap();
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out")
+        .expect("subscriber closed");
+
+    assert!(!msg.payload.is_empty());
+}
