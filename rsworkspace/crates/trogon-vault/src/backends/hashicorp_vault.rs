@@ -416,6 +416,12 @@ impl VaultStore for HashicorpVaultStore {
         })
         .await
     }
+
+    async fn rotate(&self, token: &ApiKeyToken, new_plaintext: &str) -> Result<(), Self::Error> {
+        // KV v2: creates a new version; old version stays in history.
+        // Explicit override for future two-phase rotation hooks.
+        self.store(token, new_plaintext).await
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -559,6 +565,25 @@ mod tests {
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.resolve(&token).await;
         assert!(matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })));
+    }
+
+    #[tokio::test]
+    async fn rotate_writes_new_version() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(PUT)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .json_body(serde_json::json!({"data": {"api_key": "sk-ant-rotated"}}));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"request_id":"req1"}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.rotate(&token, "sk-ant-rotated").await;
+        assert!(result.is_ok());
+        mock.assert();
     }
 
     #[tokio::test]
