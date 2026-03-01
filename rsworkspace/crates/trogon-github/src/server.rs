@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use crate::config::GithubConfig;
 use crate::signature;
 use async_nats::jetstream::{self, stream};
-use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::post};
+use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post};
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
 
@@ -15,14 +17,16 @@ struct AppState {
 /// Starts the GitHub webhook HTTP server.
 ///
 /// Ensures the JetStream stream exists (capturing `{prefix}.>`), then listens
-/// for `POST /webhook` requests and publishes each event to NATS JetStream.
+/// for incoming requests:
+/// - `POST /webhook` — receives GitHub webhook events and publishes to NATS JetStream
+/// - `GET  /health`  — liveness probe, always returns 200 OK
 pub async fn serve(
     config: GithubConfig,
     nats: async_nats::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let js = jetstream::new(nats);
 
-    ensure_stream(&js, &config.stream_name, &config.subject_prefix).await?;
+    ensure_stream(&js, &config.stream_name, &config.subject_prefix, config.stream_max_age).await?;
 
     let state = AppState {
         js,
@@ -32,6 +36,7 @@ pub async fn serve(
 
     let app = Router::new()
         .route("/webhook", post(handle_webhook))
+        .route("/health", get(handle_health))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -47,16 +52,22 @@ async fn ensure_stream(
     js: &jetstream::Context,
     stream_name: &str,
     subject_prefix: &str,
+    max_age: Duration,
 ) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
     js.get_or_create_stream(stream::Config {
         name: stream_name.to_string(),
         subjects: vec![format!("{}.>", subject_prefix)],
+        max_age,
         ..Default::default()
     })
     .await?;
 
-    info!(stream = stream_name, "JetStream stream ready");
+    info!(stream = stream_name, max_age_secs = max_age.as_secs(), "JetStream stream ready");
     Ok(())
+}
+
+async fn handle_health() -> StatusCode {
+    StatusCode::OK
 }
 
 #[instrument(
