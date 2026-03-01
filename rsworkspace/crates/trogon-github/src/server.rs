@@ -43,9 +43,26 @@ pub async fn serve(
     info!(addr = %addr, "GitHub webhook server listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
+    info!("GitHub webhook server shut down");
     Ok(())
+}
+
+/// Resolves when SIGTERM or SIGINT is received, allowing in-flight requests
+/// to complete before the process exits.
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => { info!("Received SIGTERM, shutting down"); }
+        _ = sigint.recv()  => { info!("Received SIGINT, shutting down"); }
+    }
 }
 
 async fn ensure_stream(
