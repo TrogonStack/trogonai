@@ -23,4 +23,5 @@ pub mod provider;
 pub mod proxy;
 pub mod stream;
 pub mod subjects;
+pub mod vault_admin;
 pub mod worker;
