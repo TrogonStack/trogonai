@@ -3,11 +3,8 @@ FROM rust:1.87-slim AS builder
 
 WORKDIR /build
 
-# Pre-fetch dependencies before copying source (better layer caching).
 COPY Cargo.toml Cargo.lock ./
-COPY crates/trogon-std         crates/trogon-std
-COPY crates/trogon-nats        crates/trogon-nats
-COPY crates/trogon-github      crates/trogon-github
+COPY crates/ crates/
 
 RUN cargo build --release -p trogon-github
 
