@@ -26,6 +26,7 @@
 //! | `GITHUB_WEBHOOK_PORT` | `8080` | HTTP listening port |
 //! | `GITHUB_SUBJECT_PREFIX` | `github` | NATS subject prefix |
 //! | `GITHUB_STREAM_NAME` | `GITHUB` | JetStream stream name |
+//! | `GITHUB_STREAM_MAX_AGE_SECS` | `604800` | Max age of messages in JetStream (seconds, default 7 days) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 
 pub mod config;
