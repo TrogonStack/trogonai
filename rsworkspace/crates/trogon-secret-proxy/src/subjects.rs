@@ -14,6 +14,21 @@ pub fn reply(prefix: &str, id: &str) -> String {
     format!("{}.proxy.reply.{}", prefix, id)
 }
 
+/// Core NATS subject for vault store requests (admin).
+pub fn vault_store(prefix: &str) -> String {
+    format!("{}.vault.store", prefix)
+}
+
+/// Core NATS subject for vault rotate requests (admin).
+pub fn vault_rotate(prefix: &str) -> String {
+    format!("{}.vault.rotate", prefix)
+}
+
+/// Core NATS subject for vault revoke requests (admin).
+pub fn vault_revoke(prefix: &str) -> String {
+    format!("{}.vault.revoke", prefix)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +81,20 @@ mod tests {
     #[test]
     fn reply_empty_prefix_produces_leading_dot() {
         assert_eq!(reply("", "my-correlation-id"), ".proxy.reply.my-correlation-id");
+    }
+
+    #[test]
+    fn vault_store_subject() {
+        assert_eq!(vault_store("trogon"), "trogon.vault.store");
+    }
+
+    #[test]
+    fn vault_rotate_subject() {
+        assert_eq!(vault_rotate("trogon"), "trogon.vault.rotate");
+    }
+
+    #[test]
+    fn vault_revoke_subject() {
+        assert_eq!(vault_revoke("trogon"), "trogon.vault.revoke");
     }
 }
