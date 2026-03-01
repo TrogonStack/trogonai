@@ -2,6 +2,9 @@
 resolver = "2"
 members = ["crates/*"]
 
+[workspace.lints.rust]
+# No workspace-wide lint overrides yet.
+
 [profile.release]
 lto = "thin"
 strip = "symbols"

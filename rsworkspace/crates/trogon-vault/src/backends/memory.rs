@@ -156,6 +156,16 @@ mod tests {
         assert_eq!(guard.get("tok_openai_prod_bb2222").map(|s| s.as_str()), Some("shared-key"));
     }
 
+    #[tokio::test]
+    async fn rotate_replaces_existing_plaintext() {
+        let vault = MemoryVault::new();
+        let token = tok("tok_anthropic_prod_abc123");
+        vault.store(&token, "key-v1").await.unwrap();
+        vault.rotate(&token, "key-v2").await.unwrap();
+        let result = vault.resolve(&token).await.unwrap();
+        assert_eq!(result, Some("key-v2".to_string()));
+    }
+
     #[test]
     fn error_display() {
         let err = MemoryVaultError("something went wrong".to_string());

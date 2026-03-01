@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use trogon_nats::{NatsConfig, connect};
 use trogon_std::SystemEnv;
-use trogon_secret_proxy::{stream, subjects, worker};
+use trogon_secret_proxy::{stream, subjects, vault_admin, worker};
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
 #[tokio::main]
@@ -91,6 +91,17 @@ async fn main() {
         .expect("Failed to build HTTP client");
 
     tracing::info!(consumer = %consumer_name, "Detokenization worker starting");
+
+    tokio::spawn({
+        let nats = nats.clone();
+        let vault = Arc::clone(&vault);
+        let prefix = prefix.clone();
+        async move {
+            vault_admin::run(nats, vault, &prefix)
+                .await
+                .expect("Vault admin listener exited with error");
+        }
+    });
 
     worker::run(jetstream, nats, vault, http_client, &consumer_name, &sname)
         .await
