@@ -24,6 +24,19 @@ mod tests {
         assert_eq!(std_result.is_ok(), provider_result.is_ok());
     }
 
+    /// `var()` for a key that is guaranteed not to be set must return
+    /// `Err(VarError::NotPresent)` — not an empty string, not a panic.
+    #[test]
+    fn var_returns_not_present_for_missing_variable() {
+        let env = SystemEnv;
+        let result = env.var("TROGON_GUARANTEED_ABSENT_VAR_9f3a82b1");
+        assert!(
+            matches!(result, Err(std::env::VarError::NotPresent)),
+            "missing variable must return Err(NotPresent), got: {:?}",
+            result
+        );
+    }
+
     #[test]
     fn test_generic_function_with_system_env() {
         fn get_value_or_default<E: ReadEnv>(env: &E, key: &str, default: &str) -> String {

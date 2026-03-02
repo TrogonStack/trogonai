@@ -365,6 +365,25 @@ mod tests {
         assert!(fs.dir_exists(Path::new("/x/y")));
     }
 
+    /// `MemAppendWriter::write()` must return `ErrorKind::InvalidData` when
+    /// the buffer contains bytes that are not valid UTF-8.
+    #[test]
+    fn test_mem_append_writer_rejects_non_utf8_bytes() {
+        use std::io::Write;
+
+        let fs = MemFs::new();
+        let path = Path::new("/log.txt");
+        let mut w = fs.open_append(path).unwrap();
+
+        // 0xFF is not valid UTF-8.
+        let result = w.write(&[0xFF, 0xFE]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+
+        // File must remain absent (write failed before any data was stored).
+        assert!(!fs.exists(path));
+    }
+
     #[test]
     fn test_generic_function_with_memfs() {
         use super::super::ReadFile;
