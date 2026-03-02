@@ -145,21 +145,29 @@ async fn handle_webhook(
     nats_headers.insert("X-GitHub-Event", event.as_str());
     nats_headers.insert("X-GitHub-Delivery", delivery.as_str());
 
+    const NATS_ACK_TIMEOUT: Duration = Duration::from_secs(10);
+
     match state
         .js
         .publish_with_headers(subject.clone(), nats_headers, body)
         .await
     {
-        Ok(ack_future) => match ack_future.await {
-            Ok(_) => {
-                info!("Published GitHub event to NATS");
-                StatusCode::OK
+        Ok(ack_future) => {
+            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+                Ok(Ok(_)) => {
+                    info!("Published GitHub event to NATS");
+                    StatusCode::OK
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "NATS ack failed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+                Err(_) => {
+                    warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
             }
-            Err(e) => {
-                warn!(error = %e, "NATS ack failed");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        },
+        }
         Err(e) => {
             warn!(error = %e, "Failed to publish GitHub event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
