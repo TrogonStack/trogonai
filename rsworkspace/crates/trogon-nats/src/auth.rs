@@ -185,6 +185,42 @@ mod tests {
         assert!(matches!(config.auth, NatsAuth::None));
     }
 
+    // ── servers_from_env edge cases ───────────────────────────────────────────
+
+    /// NATS_URL set to whitespace-only entries (e.g. "  ,  ,  ") produces an
+    /// EMPTY server list — NOT the default `localhost:4222`.
+    /// The default is only used when the env var is absent.
+    #[test]
+    fn servers_from_env_whitespace_only_nats_url_produces_empty_vec() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "  ,  ,  ");
+        let config = NatsConfig::from_env(&env);
+        assert!(
+            config.servers.is_empty(),
+            "whitespace-only NATS_URL must produce an empty server list, got: {:?}",
+            config.servers
+        );
+    }
+
+    /// A trailing comma in NATS_URL is silently ignored — the empty segment
+    /// is filtered out and only the valid host remains.
+    #[test]
+    fn servers_from_env_trailing_comma_ignored() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "host1:4222,");
+        let config = NatsConfig::from_env(&env);
+        assert_eq!(config.servers, vec!["host1:4222"]);
+    }
+
+    /// A single-entry NATS_URL with surrounding whitespace is trimmed correctly.
+    #[test]
+    fn servers_from_env_single_entry_with_spaces() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "  nats://host:4222  ");
+        let config = NatsConfig::from_env(&env);
+        assert_eq!(config.servers, vec!["nats://host:4222"]);
+    }
+
     #[test]
     fn description_matches_variant() {
         assert_eq!(
