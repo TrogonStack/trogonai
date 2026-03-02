@@ -181,4 +181,35 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains(msg));
     }
+
+    /// Every unimplemented stub must use `ErrorCode::InternalError` — not an
+    /// application-level code — so clients can distinguish "method not
+    /// available on this bridge" from domain errors.
+    #[tokio::test]
+    async fn stub_methods_use_internal_error_code() {
+        use agent_client_protocol::ErrorCode;
+
+        let bridge = mock_bridge();
+
+        macro_rules! check_code {
+            ($fut:expr) => {{
+                let err = $fut.await.unwrap_err();
+                assert_eq!(
+                    err.code,
+                    ErrorCode::InternalError.into(),
+                    "stub must return InternalError, got {:?}",
+                    err.code
+                );
+            }};
+        }
+
+        check_code!(bridge.authenticate(AuthenticateRequest::new("test")));
+        check_code!(bridge.new_session(NewSessionRequest::new(".")));
+        check_code!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
+        check_code!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
+        check_code!(bridge.prompt(PromptRequest::new("s1", vec![])));
+        check_code!(bridge.cancel(CancelNotification::new("s1")));
+        check_code!(bridge.ext_method(ExtRequest::new("ext", empty_raw_value())));
+        check_code!(bridge.ext_notification(ExtNotification::new("ext", empty_raw_value())));
+    }
 }
