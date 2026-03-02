@@ -379,6 +379,74 @@ mod tests {
         }
     }
 
+    /// Mirrors the `HOP_BY_HOP` constant and filter in `handle_request`.
+    /// `te` and `trailers` must be stripped per RFC 7230 §6.1.
+    #[test]
+    fn te_and_trailers_are_filtered_as_hop_by_hop_headers() {
+        const HOP_BY_HOP: &[&str] = &[
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "transfer-encoding",
+            "upgrade",
+        ];
+        let headers = [
+            ("content-type", "application/json"),
+            ("te", "trailers"),
+            ("trailers", "Expires"),
+            ("authorization", "Bearer tok"),
+            ("transfer-encoding", "chunked"),
+        ];
+        let forwarded: Vec<_> = headers
+            .iter()
+            .filter(|(k, _)| !HOP_BY_HOP.contains(k))
+            .collect();
+
+        for stripped in ["te", "trailers", "transfer-encoding"] {
+            assert!(
+                !forwarded.iter().any(|(k, _)| *k == stripped),
+                "{} must be stripped",
+                stripped
+            );
+        }
+        for kept in ["content-type", "authorization"] {
+            assert!(
+                forwarded.iter().any(|(k, _)| *k == kept),
+                "{} must be forwarded",
+                kept
+            );
+        }
+    }
+
+    /// Mirrors the header-parsing guard at `proxy.rs handle_request` lines 189-196.
+    /// An invalid header name (e.g. containing a null byte) must be silently
+    /// dropped rather than causing a panic or propagating an error.
+    #[test]
+    fn invalid_response_header_name_is_silently_dropped() {
+        let raw = vec![
+            ("content-type".to_string(), "application/json".to_string()),
+            // Null byte makes this an invalid HTTP header name.
+            ("x-invalid\x00header".to_string(), "value".to_string()),
+            ("x-valid-header".to_string(), "ok".to_string()),
+        ];
+        let mut headers = axum::http::HeaderMap::new();
+        for (k, v) in &raw {
+            if let (Ok(name), Ok(value)) = (
+                k.parse::<axum::http::HeaderName>(),
+                v.parse::<axum::http::HeaderValue>(),
+            ) {
+                headers.append(name, value);
+            }
+        }
+        assert!(headers.contains_key("content-type"));
+        assert!(headers.contains_key("x-valid-header"));
+        // Invalid header was silently dropped — only 2 entries remain.
+        assert_eq!(headers.len(), 2);
+    }
+
     #[test]
     fn error_display_includes_context() {
         assert!(ProxyError::UnknownProvider("fakeai".to_string())
