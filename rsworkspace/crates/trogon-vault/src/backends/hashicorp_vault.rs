@@ -611,4 +611,197 @@ mod tests {
         assert!(result.is_ok());
         mock.assert();
     }
+
+    // ── Kubernetes auth ───────────────────────────────────────────────────────
+
+    /// Kubernetes auth: JWT file exists and Vault login succeeds.
+    /// Verifies the JWT is read, trimmed, and sent in the login request body.
+    #[tokio::test]
+    async fn kubernetes_login_succeeds_with_valid_jwt_file() {
+        let jwt_file = std::env::temp_dir().join("test-sa-token-ok.jwt");
+        std::fs::write(&jwt_file, "  my.jwt.token\n").unwrap();
+
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/auth/kubernetes/login")
+                .json_body(serde_json::json!({"role": "my-k8s-role", "jwt": "my.jwt.token"}));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.k8s-token","lease_duration":3600}}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "my-k8s-role".to_string(),
+                jwt_path: Some(jwt_file.to_str().unwrap().to_string()),
+            },
+        );
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(result.is_ok(), "Kubernetes auth must succeed: {:?}", result.err());
+        mock.assert();
+
+        std::fs::remove_file(&jwt_file).ok();
+    }
+
+    /// Kubernetes auth: JWT file does not exist → Io error before any HTTP call.
+    #[tokio::test]
+    async fn kubernetes_login_fails_when_jwt_file_missing() {
+        let server = MockServer::start();
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "my-k8s-role".to_string(),
+                jwt_path: Some("/nonexistent/path/sa.token".to_string()),
+            },
+        );
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Io(_))),
+            "Missing JWT file must return Io error; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Kubernetes auth: Vault login endpoint returns 403 → Api error propagated.
+    #[tokio::test]
+    async fn kubernetes_login_fails_when_vault_returns_403() {
+        let jwt_file = std::env::temp_dir().join("test-sa-token-403.jwt");
+        std::fs::write(&jwt_file, "my.jwt.token").unwrap();
+
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/kubernetes/login");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["permission denied"]}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "bad-role".to_string(),
+                jwt_path: Some(jwt_file.to_str().unwrap().to_string()),
+            },
+        );
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })),
+            "Vault 403 must propagate as Api error; got: {:?}",
+            result.err()
+        );
+
+        std::fs::remove_file(&jwt_file).ok();
+    }
+
+    /// Kubernetes auth: Vault returns 200 but with no `auth.client_token` field → Auth error.
+    #[tokio::test]
+    async fn kubernetes_login_fails_when_client_token_missing_in_response() {
+        let jwt_file = std::env::temp_dir().join("test-sa-token-nofield.jwt");
+        std::fs::write(&jwt_file, "my.jwt.token").unwrap();
+
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/kubernetes/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{}}"#); // missing client_token
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "my-role".to_string(),
+                jwt_path: Some(jwt_file.to_str().unwrap().to_string()),
+            },
+        );
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Auth(_))),
+            "Missing client_token must return Auth error; got: {:?}",
+            result.err()
+        );
+
+        std::fs::remove_file(&jwt_file).ok();
+    }
+
+    /// Kubernetes auth: 403 on a Vault operation triggers re-authentication and retry.
+    /// Verifies the full re-auth cycle works with Kubernetes credentials.
+    #[tokio::test]
+    async fn kubernetes_auth_reauthenticates_on_403() {
+        let jwt_file = std::env::temp_dir().join("test-sa-token-reauth.jwt");
+        std::fs::write(&jwt_file, "my.jwt.token").unwrap();
+
+        let server = MockServer::start();
+
+        // Initial login succeeds (responds once; deleted after store creation so
+        // re-auth falls through to relogin_mock).
+        let mut login_mock = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/kubernetes/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.initial-token"}}"#);
+        });
+
+        // First resolve attempt returns 403.
+        let resolve_403 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/abc123")
+                .header("X-Vault-Token", "hvs.initial-token");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["token expired"]}"#);
+        });
+
+        // Re-authentication returns a new token.
+        let relogin_mock = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/kubernetes/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.new-token"}}"#);
+        });
+
+        // Retry with new token succeeds.
+        let resolve_ok = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/abc123")
+                .header("X-Vault-Token", "hvs.new-token");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"data":{"api_key":"sk-ant-realkey"}}}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "my-k8s-role".to_string(),
+                jwt_path: Some(jwt_file.to_str().unwrap().to_string()),
+            },
+        );
+        let store = HashicorpVaultStore::new(config).await.unwrap();
+        // Initial login fired exactly once; remove it so re-auth uses relogin_mock.
+        assert_eq!(login_mock.hits(), 1, "initial login must be called once");
+        login_mock.delete();
+
+        let token = tok("tok_anthropic_prod_abc123");
+        let result = store.resolve(&token).await.unwrap();
+
+        assert_eq!(result, Some("sk-ant-realkey".to_string()));
+        resolve_403.assert();
+        relogin_mock.assert();
+        resolve_ok.assert();
+
+        std::fs::remove_file(&jwt_file).ok();
+    }
 }
