@@ -549,6 +549,81 @@ mod tests {
         mock.assert();
     }
 
+    /// Revoking a token that doesn't exist in Vault (404) must return Ok(()) —
+    /// the operation is idempotent.
+    #[tokio::test]
+    async fn revoke_returns_ok_when_vault_responds_404() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(DELETE)
+                .path("/v1/ai-keys/metadata/anthropic/prod/a1b2c3");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":[]}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.revoke(&token).await;
+        assert!(result.is_ok(), "404 on revoke must be treated as success (idempotent)");
+        mock.assert();
+    }
+
+    /// When the Vault error response has `errors` as a non-array value
+    /// (e.g. a plain string), `parse_vault_errors` must return an empty Vec
+    /// rather than panicking.
+    #[tokio::test]
+    async fn parse_vault_errors_with_non_array_errors_field_returns_empty() {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(500)
+                .header("content-type", "application/json")
+                // "errors" is a string, not an array
+                .body(r#"{"errors":"internal server error"}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+        match result {
+            Err(HashicorpVaultError::Api { status: 500, errors }) => {
+                assert!(
+                    errors.is_empty(),
+                    "non-array errors field must yield empty Vec, got: {:?}",
+                    errors
+                );
+            }
+            other => panic!("expected Api(500) error, got: {:?}", other.err()),
+        }
+    }
+
+    /// Token auth: a 403 from Vault must be returned immediately without
+    /// any re-authentication attempt (static token has no credentials to renew).
+    /// The resolve endpoint must be called exactly once.
+    #[tokio::test]
+    async fn token_auth_403_returned_immediately_without_retry() {
+        let server = MockServer::start();
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["permission denied"]}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })),
+            "Token auth 403 must propagate without retry; got: {:?}",
+            result.err()
+        );
+        // Exactly one call — no retry attempt.
+        resolve_mock.assert_hits(1);
+    }
+
     #[tokio::test]
     async fn api_error_propagated() {
         let server = MockServer::start();
