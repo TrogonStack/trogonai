@@ -1126,4 +1126,122 @@ mod tests {
         relogin.assert();
         store_ok.assert();
     }
+
+    /// `kubernetes_login` calls `jwt.trim()` before sending to Vault.
+    /// A JWT file containing only whitespace trims to `""` and is sent as-is
+    /// — our layer does not validate content; Vault is responsible for
+    /// rejecting invalid JWTs.  This test verifies the empty string is
+    /// forwarded (i.e. the trim happens and no I/O error is raised).
+    #[tokio::test]
+    async fn kubernetes_login_with_whitespace_only_jwt_sends_empty_string() {
+        let jwt_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(jwt_file.path(), "   \n  ").unwrap();
+
+        let server = MockServer::start();
+
+        let login_mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/auth/kubernetes/login")
+                .body_contains(r#""jwt":""#);
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.tok","lease_duration":3600}}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Kubernetes {
+                role: "my-role".to_string(),
+                jwt_path: Some(jwt_file.path().to_str().unwrap().to_string()),
+            },
+        );
+
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        login_mock.assert_hits(1);
+    }
+
+    /// A 5xx response from the data endpoint is NOT retried — `with_reauth`
+    /// only retries on 403.  The mock must be hit exactly once.
+    #[tokio::test]
+    async fn resolve_returns_api_error_on_5xx_without_retry() {
+        let server = MockServer::start();
+        let store = token_store(&server).await;
+
+        let resolve_500 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(500)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["internal server error"]}"#);
+        });
+
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let err = store.resolve(&token).await.unwrap_err();
+
+        resolve_500.assert_hits(1);
+        assert!(
+            matches!(err, HashicorpVaultError::Api { status: 500, .. }),
+            "expected Api 500, got: {:?}",
+            err
+        );
+    }
+
+    /// When the first resolve returns 403 (triggering re-auth) but the login
+    /// endpoint itself returns 500, the 500 error must propagate — not the
+    /// original 403.
+    #[tokio::test]
+    async fn reauthenticate_fails_with_500_when_first_resolve_403() {
+        let server = MockServer::start();
+
+        let mut initial_login = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.initial","lease_duration":3600}}"#);
+        });
+
+        let resolve_403 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .header("X-Vault-Token", "hvs.initial");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["token expired"]}"#);
+        });
+
+        let relogin_500 = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(500)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["internal error"]}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::AppRole {
+                role_id: "my-role".to_string(),
+                secret_id: "my-secret".to_string(),
+            },
+        );
+        let store = HashicorpVaultStore::new(config).await.unwrap();
+        assert_eq!(initial_login.hits(), 1);
+        initial_login.delete();
+
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let err = store.resolve(&token).await.unwrap_err();
+
+        resolve_403.assert_hits(1);
+        relogin_500.assert_hits(1);
+        // The propagated error must be the 500 from the re-auth call.
+        assert!(
+            matches!(err, HashicorpVaultError::Api { status: 500, .. }),
+            "expected Api 500 from re-auth, got: {:?}",
+            err
+        );
+    }
 }

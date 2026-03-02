@@ -225,6 +225,17 @@ mod tests {
         assert_eq!(config.servers, vec!["nats://host:4222"]);
     }
 
+    /// A whitespace-only segment in the middle of a comma-separated NATS_URL
+    /// is trimmed to an empty string and filtered out, so only the valid
+    /// hosts on either side survive.
+    #[test]
+    fn servers_from_env_middle_whitespace_only_segment_is_filtered() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "host1:4222, ,host2:4222");
+        let config = NatsConfig::from_env(&env);
+        assert_eq!(config.servers, vec!["host1:4222", "host2:4222"]);
+    }
+
     #[test]
     fn description_matches_variant() {
         assert_eq!(
