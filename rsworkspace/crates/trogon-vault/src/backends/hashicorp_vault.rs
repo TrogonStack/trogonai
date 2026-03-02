@@ -259,6 +259,11 @@ async fn kubernetes_login(
     let jwt = std::fs::read_to_string(path)
         .map_err(|e| HashicorpVaultError::Io(e.to_string()))?;
     let jwt = jwt.trim().to_string();
+    if jwt.is_empty() {
+        return Err(HashicorpVaultError::Io(format!(
+            "JWT file '{path}' is empty or contains only whitespace"
+        )));
+    }
 
     let url = format!("{vault_addr}/v1/auth/kubernetes/login");
     let body = serde_json::json!({"role": role, "jwt": jwt});
@@ -1156,26 +1161,15 @@ mod tests {
         );
     }
 
-    /// `kubernetes_login` calls `jwt.trim()` before sending to Vault.
-    /// A JWT file containing only whitespace trims to `""` and is sent as-is
-    /// — our layer does not validate content; Vault is responsible for
-    /// rejecting invalid JWTs.  This test verifies the empty string is
-    /// forwarded (i.e. the trim happens and no I/O error is raised).
+    /// A JWT file containing only whitespace must be rejected **locally**
+    /// with an `Io` error — no HTTP call to Vault is made.
     #[tokio::test]
-    async fn kubernetes_login_with_whitespace_only_jwt_sends_empty_string() {
+    async fn kubernetes_login_with_whitespace_only_jwt_returns_io_error() {
         let jwt_file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(jwt_file.path(), "   \n  ").unwrap();
 
         let server = MockServer::start();
-
-        let login_mock = server.mock(|when, then| {
-            when.method(POST)
-                .path("/v1/auth/kubernetes/login")
-                .body_contains(r#""jwt":""#);
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(r#"{"auth":{"client_token":"hvs.tok","lease_duration":3600}}"#);
-        });
+        // No mock registered — any HTTP call would panic.
 
         let vault_addr = format!("http://{}", server.address());
         let config = HashicorpVaultConfig::new(
@@ -1187,9 +1181,18 @@ mod tests {
             },
         );
 
-        let result = HashicorpVaultStore::new(config).await;
-        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
-        login_mock.assert_hits(1);
+        let err = HashicorpVaultStore::new(config)
+            .await
+            .err()
+            .expect("whitespace-only JWT must be rejected locally");
+        assert!(
+            matches!(err, HashicorpVaultError::Io(_)),
+            "expected Io error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("empty or contains only whitespace"),
+            "error message must mention the cause, got: {err}"
+        );
     }
 
     /// A 5xx response from the data endpoint is NOT retried — `with_reauth`
