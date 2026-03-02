@@ -236,6 +236,35 @@ mod tests {
         assert_eq!(config.servers, vec!["host1:4222", "host2:4222"]);
     }
 
+    /// A double comma in NATS_URL (e.g. `"host1,,host2"`) produces an empty
+    /// segment after splitting on `,`; the trim+filter chain must discard it
+    /// so only the two valid hosts survive.
+    #[test]
+    fn servers_from_env_double_comma_filters_empty_segment() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "host1:4222,,host2:4222");
+        let config = NatsConfig::from_env(&env);
+        assert_eq!(config.servers, vec!["host1:4222", "host2:4222"]);
+    }
+
+    /// When `NATS_PASSWORD` is present but set to `""` (empty string), the
+    /// tuple `(Ok(user), Ok(password))` still matches and
+    /// `NatsAuth::UserPassword` is returned with an empty password — the
+    /// code does NOT fall through to Token or None.  This test documents that
+    /// behaviour so callers know they must validate credentials themselves.
+    #[test]
+    fn auth_from_env_empty_password_string_creates_user_password() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_USER", "alice");
+        env.set("NATS_PASSWORD", "");
+
+        let auth = NatsConfig::from_env(&env).auth;
+        assert!(
+            matches!(auth, NatsAuth::UserPassword { ref password, .. } if password.is_empty()),
+            "empty NATS_PASSWORD must produce UserPassword with empty password"
+        );
+    }
+
     #[test]
     fn description_matches_variant() {
         assert_eq!(
