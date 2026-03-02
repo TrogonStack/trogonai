@@ -15,6 +15,7 @@ struct AppState {
     js: jetstream::Context,
     webhook_secret: Option<String>,
     subject_prefix: String,
+    timestamp_tolerance: Option<Duration>,
 }
 
 /// Starts the Linear webhook HTTP server.
@@ -35,6 +36,7 @@ pub async fn serve(
         js,
         webhook_secret: config.webhook_secret,
         subject_prefix: config.subject_prefix,
+        timestamp_tolerance: config.timestamp_tolerance,
     };
 
     let app = Router::new()
@@ -132,6 +134,22 @@ async fn handle_webhook(
             return StatusCode::BAD_REQUEST;
         }
     };
+
+    // Replay-attack protection: reject events whose `webhookTimestamp` (ms)
+    // falls outside the configured tolerance window.
+    if let Some(tolerance) = state.timestamp_tolerance {
+        if let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64()) {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let age_ms = now_ms.saturating_sub(ts_ms);
+            if age_ms > tolerance.as_millis() as u64 {
+                warn!(age_ms, tolerance_ms = tolerance.as_millis() as u64, "Stale webhookTimestamp — potential replay attack");
+                return StatusCode::BAD_REQUEST;
+            }
+        }
+    }
 
     let Some(event_type) = parsed.get("type").and_then(|v| v.as_str()).map(str::to_owned) else {
         warn!("Missing 'type' field in Linear webhook payload");
