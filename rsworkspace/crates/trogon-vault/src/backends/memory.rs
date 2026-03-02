@@ -166,6 +166,20 @@ mod tests {
         assert_eq!(result, Some("key-v2".to_string()));
     }
 
+    /// `revoke` on a token that was never stored must return `Ok(())`  — the
+    /// operation is idempotent because `HashMap::remove` silently ignores
+    /// absent keys.
+    #[tokio::test]
+    async fn revoke_nonexistent_token_is_idempotent() {
+        let vault = MemoryVault::new();
+        let token = tok("tok_anthropic_prod_xyz999");
+        // Token was never stored; revoke must succeed without error.
+        let result = vault.revoke(&token).await;
+        assert!(result.is_ok());
+        // Vault remains empty after the no-op revoke.
+        assert!(vault.is_empty());
+    }
+
     #[test]
     fn error_display() {
         let err = MemoryVaultError("something went wrong".to_string());
