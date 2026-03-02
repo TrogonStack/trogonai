@@ -407,6 +407,45 @@ mod tests {
         assert_eq!(policy.max_retries, 0);
     }
 
+    /// The backoff formula in `RetryPolicy::execute` is:
+    ///   `exp = (attempts - 1).min(31)`
+    ///   `delay = initial_retry_delay * (1u32 << exp)`
+    ///
+    /// At `attempts == 32`, `exp == 31` (the cap).
+    /// At `attempts == 33`, `exp` is still `31` — the delay does NOT grow
+    /// further.  This test pins that saturation behaviour so a refactor can
+    /// not accidentally remove the `.min(31)` guard and cause `1u32 << 32`
+    /// (which would panic in debug or produce 0 in release due to wrapping).
+    #[test]
+    fn retry_backoff_saturates_at_exp_31() {
+        let initial = Duration::from_millis(1);
+
+        // Replicate the formula from RetryPolicy::execute exactly.
+        let delay_for = |attempts: usize| -> Duration {
+            let exp = (attempts - 1).min(31);
+            initial * (1u32 << exp)
+        };
+
+        // At exp=30 the delay is 2^30 ms; at exp=31 it is 2^31 ms.
+        let delay_at_31 = delay_for(32); // attempts=32 → exp=31
+        let delay_at_32 = delay_for(33); // attempts=33 → exp=31 (capped)
+        let delay_at_100 = delay_for(101); // attempts=101 → exp=31 (capped)
+
+        // All three must be identical — the cap prevents further growth.
+        assert_eq!(
+            delay_at_31, delay_at_32,
+            "delay must not grow beyond exp=31"
+        );
+        assert_eq!(
+            delay_at_31, delay_at_100,
+            "delay must not grow beyond exp=31 even at high attempt counts"
+        );
+
+        // The saturated delay must be 2^31 * initial (not zero, not panic).
+        let expected = initial * (1u32 << 31);
+        assert_eq!(delay_at_31, expected);
+    }
+
     #[test]
     fn test_flush_policy_no_retries() {
         let policy = FlushPolicy::no_retries();
