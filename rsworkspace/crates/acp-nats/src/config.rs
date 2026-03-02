@@ -319,6 +319,30 @@ mod tests {
     /// `char::is_whitespace()` covers Unicode whitespace (e.g. U+00A0 NO-BREAK
     /// SPACE) in addition to ASCII whitespace.  These characters are not safe
     /// in NATS subjects and must be rejected.
+    /// `\r` (carriage return, U+000D) is whitespace per `char::is_whitespace()`
+    /// and must be rejected with `InvalidCharacter`.
+    #[test]
+    fn acp_prefix_rejects_carriage_return() {
+        let err = AcpPrefix::new("acp\rfoo").err().unwrap();
+        assert!(
+            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '\r')),
+            "expected InvalidCharacter('\\r'), got: {:?}",
+            err
+        );
+    }
+
+    /// `\x0C` (form feed, U+000C) is whitespace per `char::is_whitespace()`
+    /// and must be rejected with `InvalidCharacter`.
+    #[test]
+    fn acp_prefix_rejects_form_feed() {
+        let err = AcpPrefix::new("acp\x0Cfoo").err().unwrap();
+        assert!(
+            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '\x0C')),
+            "expected InvalidCharacter('\\x0C'), got: {:?}",
+            err
+        );
+    }
+
     #[test]
     fn acp_prefix_rejects_unicode_whitespace() {
         let err = AcpPrefix::new("acp\u{00A0}foo").err().unwrap();
