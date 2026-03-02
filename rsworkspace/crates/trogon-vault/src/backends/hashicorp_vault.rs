@@ -804,4 +804,251 @@ mod tests {
 
         std::fs::remove_file(&jwt_file).ok();
     }
+
+    // ── resolve: malformed Vault response ─────────────────────────────────────
+
+    /// Vault returns 200 but `api_key` field is JSON null → Deserialize error.
+    #[tokio::test]
+    async fn resolve_returns_deserialize_error_when_api_key_is_null() {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"data":{"api_key":null},"metadata":{}}}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Deserialize(_))),
+            "api_key=null must yield Deserialize error; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Vault returns 200 but the nested `data.data` object has no `api_key` key
+    /// at all → Deserialize error.
+    #[tokio::test]
+    async fn resolve_returns_deserialize_error_when_api_key_field_absent() {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"data":{},"metadata":{}}}"#);
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Deserialize(_))),
+            "absent api_key must yield Deserialize error; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Vault returns a non-JSON 500 response: `parse_vault_errors` must return
+    /// an empty vec (no panic) and the error carries the 500 status code.
+    #[tokio::test]
+    async fn resolve_non_json_error_response_propagates_status_with_empty_errors() {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(500)
+                .header("content-type", "text/plain")
+                .body("internal server error");
+        });
+
+        let store = token_store(&server).await;
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+        match result {
+            Err(HashicorpVaultError::Api { status, errors }) => {
+                assert_eq!(status, 500);
+                assert!(errors.is_empty(), "non-JSON body must produce empty errors vec");
+            }
+            other => panic!("expected Api error, got: {:?}", other.err()),
+        }
+    }
+
+    // ── with_reauth: re-authentication itself fails ───────────────────────────
+
+    /// When a Vault operation returns 403 and the re-authentication call itself
+    /// also returns 403 (e.g. AppRole credentials revoked), the error from the
+    /// re-auth attempt is propagated to the caller — not the original 403.
+    #[tokio::test]
+    async fn reauthenticate_fails_when_reauth_itself_returns_403() {
+        let server = MockServer::start();
+
+        // Initial AppRole login succeeds.
+        let mut initial_login = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.initial","lease_duration":3600}}"#);
+        });
+
+        // Resolve returns 403 → triggers re-auth.
+        let _resolve_403 = server.mock(|when, then| {
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["permission denied"]}"#);
+        });
+
+        // Re-auth login also returns 403 (credentials revoked).
+        let relogin_403 = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["invalid role or secret id"]}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::AppRole {
+                role_id: "my-role".to_string(),
+                secret_id: "my-secret".to_string(),
+            },
+        );
+        let store = HashicorpVaultStore::new(config).await.unwrap();
+        assert_eq!(initial_login.hits(), 1);
+        initial_login.delete(); // remove so re-auth hits relogin_403
+
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await;
+        assert!(
+            matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })),
+            "failed re-auth must propagate 403 error; got: {:?}",
+            result.err()
+        );
+        relogin_403.assert();
+    }
+
+    // ── with_reauth: AppRole full re-auth cycle ────────────────────────────────
+
+    /// AppRole: 403 on resolve triggers re-authentication and successful retry.
+    /// Mirrors `kubernetes_auth_reauthenticates_on_403` but for AppRole auth.
+    #[tokio::test]
+    async fn approle_reauthenticates_on_403() {
+        let server = MockServer::start();
+
+        // Initial AppRole login.
+        let mut initial_login = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.initial","lease_duration":3600}}"#);
+        });
+
+        // First resolve returns 403.
+        let resolve_403 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .header("X-Vault-Token", "hvs.initial");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["token expired"]}"#);
+        });
+
+        // Re-login returns a fresh token.
+        let relogin = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.fresh","lease_duration":3600}}"#);
+        });
+
+        // Retry with fresh token succeeds.
+        let resolve_ok = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .header("X-Vault-Token", "hvs.fresh");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"data":{"api_key":"sk-ant-real"}}}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::AppRole {
+                role_id: "my-role".to_string(),
+                secret_id: "my-secret".to_string(),
+            },
+        );
+        let store = HashicorpVaultStore::new(config).await.unwrap();
+        assert_eq!(initial_login.hits(), 1);
+        initial_login.delete();
+
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        let result = store.resolve(&token).await.unwrap();
+        assert_eq!(result, Some("sk-ant-real".to_string()));
+        resolve_403.assert();
+        relogin.assert();
+        resolve_ok.assert();
+    }
+
+    /// AppRole: 403 on store triggers re-authentication and successful retry.
+    #[tokio::test]
+    async fn approle_store_reauthenticates_on_403() {
+        let server = MockServer::start();
+
+        let mut initial_login = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.initial","lease_duration":3600}}"#);
+        });
+
+        let store_403 = server.mock(|when, then| {
+            when.method(PUT)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .header("X-Vault-Token", "hvs.initial");
+            then.status(403)
+                .header("content-type", "application/json")
+                .body(r#"{"errors":["token expired"]}"#);
+        });
+
+        let relogin = server.mock(|when, then| {
+            when.method(POST).path("/v1/auth/approle/login");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"auth":{"client_token":"hvs.fresh","lease_duration":3600}}"#);
+        });
+
+        let store_ok = server.mock(|when, then| {
+            when.method(PUT)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3")
+                .header("X-Vault-Token", "hvs.fresh");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"request_id":"req1"}"#);
+        });
+
+        let vault_addr = format!("http://{}", server.address());
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::AppRole {
+                role_id: "my-role".to_string(),
+                secret_id: "my-secret".to_string(),
+            },
+        );
+        let hv_store = HashicorpVaultStore::new(config).await.unwrap();
+        assert_eq!(initial_login.hits(), 1);
+        initial_login.delete();
+
+        let token = tok("tok_anthropic_prod_a1b2c3");
+        hv_store.store(&token, "sk-ant-real").await.unwrap();
+        store_403.assert();
+        relogin.assert();
+        store_ok.assert();
+    }
 }

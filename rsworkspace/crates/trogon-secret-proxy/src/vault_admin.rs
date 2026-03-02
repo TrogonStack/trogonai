@@ -279,4 +279,94 @@ mod tests {
         assert_eq!(v["ok"], false);
         assert_eq!(v["error"], "something went wrong");
     }
+
+    // ── VaultAdminError Display ────────────────────────────────────────────────
+
+    #[test]
+    fn vault_admin_error_display_includes_subject_and_source() {
+        let err = VaultAdminError::Subscribe {
+            subject: "trogon.vault.store".to_string(),
+            source: "connection refused".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("trogon.vault.store"), "display must include subject");
+        assert!(msg.contains("connection refused"), "display must include source error");
+    }
+
+    #[test]
+    fn vault_admin_error_is_std_error() {
+        // Verifies that VaultAdminError implements std::error::Error (compile-time check).
+        fn assert_error<E: std::error::Error>() {}
+        assert_error::<VaultAdminError>();
+    }
+
+    // ── VaultAdminResponse builder edge cases ─────────────────────────────────
+
+    #[test]
+    fn vault_admin_response_ok_serializes_without_error_key() {
+        let json = serde_json::to_string(&VaultAdminResponse::ok()).unwrap();
+        assert!(!json.contains("error"), "ok response must not contain 'error' key");
+        assert!(json.contains("\"ok\":true"));
+    }
+
+    #[test]
+    fn vault_admin_response_err_with_empty_string_message() {
+        let resp = VaultAdminResponse::err("");
+        let json = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"], "");
+    }
+
+    #[test]
+    fn vault_admin_response_err_with_very_long_message() {
+        let long_msg = "x".repeat(10_000);
+        let resp = VaultAdminResponse::err(&*long_msg);
+        let json = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["error"].as_str().unwrap().len(), 10_000);
+    }
+
+    // ── Request deserialization edge cases ────────────────────────────────────
+
+    #[test]
+    fn vault_store_request_rejects_missing_plaintext() {
+        let json = r#"{"token":"tok_anthropic_prod_abc123"}"#;
+        let result = serde_json::from_str::<VaultStoreRequest>(json);
+        assert!(result.is_err(), "missing plaintext must fail to deserialize");
+    }
+
+    #[test]
+    fn vault_store_request_rejects_missing_token() {
+        let json = r#"{"plaintext":"sk-ant-key"}"#;
+        let result = serde_json::from_str::<VaultStoreRequest>(json);
+        assert!(result.is_err(), "missing token must fail to deserialize");
+    }
+
+    #[test]
+    fn vault_rotate_request_rejects_missing_new_plaintext() {
+        let json = r#"{"token":"tok_openai_prod_xyz789"}"#;
+        let result = serde_json::from_str::<VaultRotateRequest>(json);
+        assert!(result.is_err(), "missing new_plaintext must fail to deserialize");
+    }
+
+    #[test]
+    fn vault_revoke_request_rejects_missing_token() {
+        let result = serde_json::from_str::<VaultRevokeRequest>(r#"{}"#);
+        assert!(result.is_err(), "missing token must fail to deserialize");
+    }
+
+    #[test]
+    fn vault_store_request_rejects_empty_json() {
+        let result = serde_json::from_str::<VaultStoreRequest>(r#"{}"#);
+        assert!(result.is_err(), "empty JSON must fail to deserialize");
+    }
+
+    #[test]
+    fn vault_store_request_accepts_extra_fields() {
+        // serde ignores unknown fields by default
+        let json = r#"{"token":"tok_anthropic_prod_abc","plaintext":"sk-ant","extra":"ignored"}"#;
+        let req = serde_json::from_str::<VaultStoreRequest>(json).unwrap();
+        assert_eq!(req.token, "tok_anthropic_prod_abc");
+    }
 }
