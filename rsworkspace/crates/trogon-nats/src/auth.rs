@@ -83,7 +83,9 @@ fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
         return NatsAuth::NKey(nkey);
     }
     if let (Ok(user), Ok(password)) = (env.var(ENV_NATS_USER), env.var(ENV_NATS_PASSWORD)) {
-        return NatsAuth::UserPassword { user, password };
+        if !user.is_empty() && !password.is_empty() {
+            return NatsAuth::UserPassword { user, password };
+        }
     }
     if let Ok(token) = env.var(ENV_NATS_TOKEN) {
         return NatsAuth::Token(token);
@@ -247,21 +249,35 @@ mod tests {
         assert_eq!(config.servers, vec!["host1:4222", "host2:4222"]);
     }
 
-    /// When `NATS_PASSWORD` is present but set to `""` (empty string), the
-    /// tuple `(Ok(user), Ok(password))` still matches and
-    /// `NatsAuth::UserPassword` is returned with an empty password — the
-    /// code does NOT fall through to Token or None.  This test documents that
-    /// behaviour so callers know they must validate credentials themselves.
+    /// `NATS_PASSWORD=""` (present but empty) must fall through to `None` —
+    /// an empty password is treated the same as an absent one so that
+    /// misconfigured deployments fail at connection time with a clear
+    /// "no auth configured" message rather than a confusing NATS auth error.
     #[test]
-    fn auth_from_env_empty_password_string_creates_user_password() {
+    fn auth_from_env_empty_password_falls_through_to_none() {
         let env = InMemoryEnv::new();
         env.set("NATS_USER", "alice");
         env.set("NATS_PASSWORD", "");
 
         let auth = NatsConfig::from_env(&env).auth;
         assert!(
-            matches!(auth, NatsAuth::UserPassword { ref password, .. } if password.is_empty()),
-            "empty NATS_PASSWORD must produce UserPassword with empty password"
+            matches!(auth, NatsAuth::None),
+            "empty NATS_PASSWORD must fall through to NatsAuth::None, got: {auth:?}"
+        );
+    }
+
+    /// `NATS_USER=""` (present but empty) must also fall through — an empty
+    /// user is equally a misconfiguration.
+    #[test]
+    fn auth_from_env_empty_user_falls_through_to_none() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_USER", "");
+        env.set("NATS_PASSWORD", "secret");
+
+        let auth = NatsConfig::from_env(&env).auth;
+        assert!(
+            matches!(auth, NatsAuth::None),
+            "empty NATS_USER must fall through to NatsAuth::None, got: {auth:?}"
         );
     }
 
