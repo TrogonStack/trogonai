@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::config::SESSION_READY_DELAY;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
@@ -8,24 +9,9 @@ use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Error, ErrorCode, NewSessionRequest, NewSessionResponse, Result, SessionId,
 };
-use std::time::Duration;
 use tracing::{Span, info, instrument, warn};
 use trogon_nats::NatsError;
 use trogon_std::time::GetElapsed;
-
-/// Delay before publishing `session.ready` to NATS.
-///
-/// The `Agent` trait returns the response value *before* the transport layer
-/// serializes and writes it to the client. Without a delay the spawned task
-/// could publish `session.ready` to NATS before the client has received the
-/// `session/new` response, violating the ordering guarantee documented on
-/// [`ExtSessionReady`].
-///
-/// A post-send callback from the transport would be the ideal fix, but the
-/// external `agent_client_protocol` crate does not expose one. This constant
-/// delay provides a practical safety margin (serialization + write is typically
-/// sub-millisecond).
-const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
 fn map_new_session_error(e: NatsError) -> Error {
     match &e {

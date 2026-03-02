@@ -1,5 +1,6 @@
 use super::Bridge;
 use crate::acp_prefix::AcpPrefix;
+use crate::config::SESSION_READY_DELAY;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
@@ -8,12 +9,9 @@ use crate::nats::{
 use crate::session_id::AcpSessionId;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
-use std::time::Duration;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
 use trogon_std::time::GetElapsed;
-
-const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
 fn map_load_session_error(e: NatsError) -> Error {
     match &e {
