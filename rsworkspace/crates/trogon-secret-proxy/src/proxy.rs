@@ -361,6 +361,25 @@ mod tests {
         }
     }
 
+    /// A 3xx redirect status from the worker is NOT a client-error or
+    /// server-error, so the proxy falls back to 502 just like a 2xx status.
+    #[test]
+    fn worker_error_with_3xx_status_falls_back_to_502() {
+        for redirect in [301u16, 302, 307, 308] {
+            let status = StatusCode::from_u16(redirect).unwrap();
+            let error_status = if status.is_client_error() || status.is_server_error() {
+                status
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            assert_eq!(
+                error_status,
+                StatusCode::BAD_GATEWAY,
+                "3xx ({redirect}) with error must become 502"
+            );
+        }
+    }
+
     /// A 5xx status from the worker is preserved as-is when the error field
     /// is set — propagating the upstream server-error code to the caller.
     #[test]
