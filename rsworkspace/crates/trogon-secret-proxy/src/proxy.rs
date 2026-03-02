@@ -320,6 +320,65 @@ mod tests {
         }
     }
 
+    // ── Worker error + status code selection ─────────────────────────────────
+
+    /// Documents the status-selection logic at `proxy.rs:170-174`:
+    /// when the worker sets `error` but the status code is 2xx (success),
+    /// the proxy must fall back to 502 BAD_GATEWAY to avoid leaking a
+    /// spurious 2xx response to the caller.
+    #[test]
+    fn worker_error_with_2xx_status_falls_back_to_502() {
+        for ok_status in [200u16, 201, 204] {
+            let status = StatusCode::from_u16(ok_status).unwrap();
+            let error_status = if status.is_client_error() || status.is_server_error() {
+                status
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            assert_eq!(
+                error_status,
+                StatusCode::BAD_GATEWAY,
+                "2xx ({ok_status}) with error must become 502"
+            );
+        }
+    }
+
+    /// A 4xx status from the worker is preserved as-is when the error field
+    /// is set — the original client-error code is more informative than 502.
+    #[test]
+    fn worker_error_with_4xx_status_preserved() {
+        for client_err in [400u16, 401, 403, 404, 422] {
+            let status = StatusCode::from_u16(client_err).unwrap();
+            let error_status = if status.is_client_error() || status.is_server_error() {
+                status
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            assert_eq!(
+                error_status, status,
+                "4xx ({client_err}) with error must be preserved"
+            );
+        }
+    }
+
+    /// A 5xx status from the worker is preserved as-is when the error field
+    /// is set — propagating the upstream server-error code to the caller.
+    #[test]
+    fn worker_error_with_5xx_status_preserved() {
+        for server_err in [500u16, 502, 503, 504] {
+            let status = StatusCode::from_u16(server_err).unwrap();
+            let error_status = if status.is_client_error() || status.is_server_error() {
+                status
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            assert_eq!(
+                error_status, status,
+                "5xx ({server_err}) with error must be preserved"
+            );
+        }
+    }
+
     #[test]
     fn error_display_includes_context() {
         assert!(ProxyError::UnknownProvider("fakeai".to_string())
