@@ -855,3 +855,163 @@ async fn webhook_returns_error_when_nats_connection_lost() {
         Err(e) => panic!("unexpected HTTP error: {e}"),
     }
 }
+
+// ── Replay attack protection ──────────────────────────────────────────────────
+
+/// A webhook with a current `webhookTimestamp` must be accepted.
+#[tokio::test]
+async fn webhook_current_timestamp_accepted() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Use a 60-second tolerance (the default).
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "60");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let body = format!(
+        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{now_ms}}}"#
+    );
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200, "current timestamp must be accepted; got {}", resp.status());
+}
+
+/// A webhook with a `webhookTimestamp` older than the tolerance must be
+/// rejected with 400 Bad Request to prevent replay attacks.
+#[tokio::test]
+async fn webhook_stale_timestamp_rejected_with_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Use a 5-second tolerance so we can reliably send a stale timestamp.
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "5");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    // Timestamp from 60 seconds ago — well outside the 5-second window.
+    let stale_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        - 60_000;
+
+    let body = format!(
+        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{stale_ms}}}"#
+    );
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        400,
+        "stale timestamp must be rejected with 400; got {}",
+        resp.status()
+    );
+}
+
+/// When `webhookTimestamp` is absent, the replay check is skipped and the
+/// request is accepted normally.
+#[tokio::test]
+async fn webhook_missing_timestamp_skips_replay_check() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "60");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    // No webhookTimestamp field.
+    let body = r#"{"type":"Issue","action":"create","data":{}}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "missing webhookTimestamp must not cause rejection; got {}",
+        resp.status()
+    );
+}
+
+/// When `LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS=0`, the replay check is
+/// disabled entirely and even a stale timestamp is accepted.
+#[tokio::test]
+async fn webhook_timestamp_check_disabled_accepts_stale() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "0");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    // Timestamp from an hour ago.
+    let old_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        - 3_600_000;
+
+    let body = format!(
+        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{old_ms}}}"#
+    );
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "stale timestamp must be accepted when check is disabled; got {}",
+        resp.status()
+    );
+}
