@@ -1127,6 +1127,35 @@ mod tests {
         store_ok.assert();
     }
 
+    /// `with_tls_skip_verify()` sets the flag and must not cause an error when
+    /// the store is created — the `danger_accept_invalid_certs(true)` branch
+    /// must successfully build a `reqwest::Client`.
+    ///
+    /// Token auth is used so no network call is made during `new()`.
+    #[tokio::test]
+    async fn tls_skip_verify_builds_store_without_error() {
+        let server = MockServer::start();
+        let vault_addr = format!("http://{}", server.address());
+
+        let config = HashicorpVaultConfig::new(
+            &vault_addr,
+            "ai-keys",
+            VaultAuth::Token("static-token".to_string()),
+        )
+        .with_tls_skip_verify();
+
+        assert!(config.tls_skip_verify, "flag must be true after with_tls_skip_verify()");
+
+        // Creating the store must succeed — the dangerous-cert client builds
+        // without error even though we are not actually bypassing TLS here.
+        let result = HashicorpVaultStore::new(config).await;
+        assert!(
+            result.is_ok(),
+            "store creation must succeed with tls_skip_verify=true, got: {:?}",
+            result.err()
+        );
+    }
+
     /// `kubernetes_login` calls `jwt.trim()` before sending to Vault.
     /// A JWT file containing only whitespace trims to `""` and is sent as-is
     /// — our layer does not validate content; Vault is responsible for
