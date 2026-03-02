@@ -5,14 +5,16 @@ mod ext_notification;
 mod initialize;
 mod load_session;
 mod new_session;
+mod prompt;
 mod set_session_mode;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient};
+use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
+use crate::prompt_slot_counter::PromptSlotCounter;
 use crate::telemetry::metrics::Metrics;
-use agent_client_protocol::ErrorCode;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     Result, SetSessionModeRequest, SetSessionModeResponse,
@@ -23,17 +25,22 @@ use trogon_std::time::GetElapsed;
 pub struct Bridge<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> {
     pub(crate) nats: N,
     pub(crate) clock: C,
-    pub(crate) config: Config,
     pub(crate) metrics: Metrics,
+    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
+    pub(crate) prompt_slot_counter: PromptSlotCounter,
+    pub(crate) config: Config,
 }
 
 impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C> {
     pub fn new(nats: N, clock: C, meter: &Meter, config: Config) -> Self {
+        let max_concurrent = config.max_concurrent_client_tasks();
         Self {
             nats,
             clock,
             config,
             metrics: Metrics::new(meter),
+            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
+            prompt_slot_counter: PromptSlotCounter::new(max_concurrent),
         }
     }
 
@@ -67,11 +74,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         set_session_mode::handle(self, args).await
     }
 
-    async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
+        prompt::handle(self, args).await
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
@@ -88,37 +92,14 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
 }
 
 #[cfg(test)]
-mod tests {
+mod send_sync_tests {
     use super::Bridge;
-    use crate::config::Config;
-    use agent_client_protocol::{Agent, PromptRequest};
     use trogon_nats::AdvancedMockNatsClient;
+    use trogon_std::time::SystemClock;
 
-    fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
-        Bridge::new(
-            AdvancedMockNatsClient::new(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            Config::for_test("acp"),
-        )
-    }
-
-    #[tokio::test]
-    async fn stub_methods_return_not_implemented() {
-        let bridge = mock_bridge();
-        let msg = "not yet implemented";
-
-        assert!(
-            bridge
-                .prompt(PromptRequest::new("s1", vec![]))
-                .await
-                .is_err()
-        );
-
-        let err = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains(msg));
+    #[test]
+    fn bridge_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Bridge<AdvancedMockNatsClient, SystemClock>>();
     }
 }
