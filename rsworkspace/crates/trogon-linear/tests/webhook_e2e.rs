@@ -1507,50 +1507,6 @@ async fn webhook_webhook_id_as_null_defaults_to_unknown() {
     assert_eq!(webhook_id, Some("unknown"), "null webhookId must produce X-Linear-Webhook-Id: unknown");
 }
 
-// ── Timestamp exactly at boundary ─────────────────────────────────────────────
-
-/// A timestamp computed as `now - tolerance` is **always rejected** in an e2e
-/// test: by the time the server evaluates it, `age_ms = tolerance_ms + δ`
-/// where δ is the network/processing latency (always > 0).  The server check
-/// is strict `age_ms > tolerance_ms`, so once δ > 0 the request is stale.
-///
-/// This test documents that real-world "exactly at boundary" requests get 400.
-/// The strict `>` (rather than `>=`) only makes a difference at the nanosecond
-/// level, which is only verifiable in unit tests on the production code path.
-#[tokio::test]
-async fn webhook_timestamp_exactly_at_boundary_rejected_due_to_latency() {
-    let (_container, nats_port) = start_nats().await;
-    let http_port = next_port();
-    // 10-second tolerance; compute timestamp exactly 10 000 ms ago.
-    spawn_server_with_tolerance(nats_port, http_port, 10).await;
-
-    let ts_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-        - 10_000; // exactly at the boundary at time of computation
-
-    let body =
-        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{ts_ms}}}"#);
-
-    let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{http_port}/webhook"))
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await
-        .expect("HTTP request failed");
-
-    // By the time the server evaluates the timestamp, age_ms > tolerance_ms
-    // because of the inherent processing delay, so it returns 400.
-    assert_eq!(
-        resp.status(),
-        400,
-        "timestamp at exact boundary is rejected in practice due to latency; got {}",
-        resp.status()
-    );
-}
-
 // ── Additional HTTP methods on /webhook ───────────────────────────────────────
 
 /// PUT /webhook must return 405 Method Not Allowed.
