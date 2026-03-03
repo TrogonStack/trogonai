@@ -1978,3 +1978,64 @@ async fn webhook_type_with_null_byte_returns_400() {
 
     assert_eq!(resp.status(), 400, "null byte in 'type' must return 400; got {}", resp.status());
 }
+
+// ── JetStream persistence after recovery ──────────────────────────────────────
+
+/// After the recovery path (stream deleted → ack fails → ensure_stream →
+/// retry publish), the retried message must be durably stored in the
+/// newly re-created JetStream stream, readable by a pull consumer.
+///
+/// This is distinct from `webhook_message_is_persisted_in_jetstream` (happy
+/// path) and `webhook_recovery_publishes_correct_message_to_nats` (core-NATS
+/// delivery): it verifies the full JetStream persistence guarantee after
+/// recovery — not just that the HTTP handler returned 200.
+#[tokio::test]
+async fn webhook_message_is_persisted_after_stream_recovery() {
+    use async_nats::jetstream::consumer::{pull, DeliverPolicy};
+
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let js = async_nats::jetstream::new(nats);
+
+    // 1. Delete the stream to force the recovery path.
+    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+
+    let body = r#"{"type":"Issue","action":"create","webhookId":"wh-persist","data":{}}"#;
+
+    // 2. The server detects the ack failure, re-creates the stream, and retries.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(resp.status(), 200, "server must self-heal; got {}", resp.status());
+
+    // 3. Verify the retried message is durably stored in the re-created stream.
+    let stream = js.get_stream("LINEAR").await.expect("stream must exist after recovery");
+    let consumer = stream
+        .create_consumer(pull::Config {
+            deliver_policy: DeliverPolicy::All,
+            ..Default::default()
+        })
+        .await
+        .expect("failed to create pull consumer");
+
+    let mut batch = consumer
+        .fetch()
+        .max_messages(1)
+        .messages()
+        .await
+        .expect("fetch failed");
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), batch.next())
+        .await
+        .expect("timed out waiting for persisted JetStream message after recovery")
+        .expect("batch stream closed")
+        .expect("message error");
+
+    assert_eq!(msg.subject.as_str(), "linear.Issue.create");
+    assert_eq!(msg.payload.as_ref(), body.as_bytes());
+}
