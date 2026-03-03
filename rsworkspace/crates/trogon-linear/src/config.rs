@@ -157,4 +157,14 @@ mod tests {
 
         assert_eq!(config.port, DEFAULT_PORT);
     }
+
+    #[test]
+    fn stream_max_age_zero_produces_zero_duration() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_STREAM_MAX_AGE_SECS", "0");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.stream_max_age, Duration::from_secs(0));
+    }
 }
