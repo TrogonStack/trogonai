@@ -16,6 +16,8 @@ struct AppState {
     webhook_secret: Option<String>,
     subject_prefix: String,
     timestamp_tolerance: Option<Duration>,
+    stream_name: String,
+    stream_max_age: Duration,
 }
 
 /// Starts the Linear webhook HTTP server.
@@ -37,6 +39,8 @@ pub async fn serve(
         webhook_secret: config.webhook_secret,
         subject_prefix: config.subject_prefix,
         timestamp_tolerance: config.timestamp_tolerance,
+        stream_name: config.stream_name,
+        stream_max_age: config.stream_max_age,
     };
 
     let app = Router::new()
@@ -287,7 +291,7 @@ async fn handle_webhook(
 
     match state
         .js
-        .publish_with_headers(subject.clone(), nats_headers, body)
+        .publish_with_headers(subject.clone(), nats_headers, body.clone())
         .await
     {
         Ok(ack_future) => {
@@ -297,8 +301,60 @@ async fn handle_webhook(
                     StatusCode::OK
                 }
                 Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
+                    // Ack failed — the stream may have been lost (e.g. NATS restarted).
+                    // Re-create the stream and retry the publish once.
+                    warn!(error = %e, "NATS ack failed — attempting stream re-creation");
+                    let recreate = tokio::time::timeout(
+                        NATS_ACK_TIMEOUT,
+                        ensure_stream(
+                            &state.js,
+                            &state.stream_name,
+                            &state.subject_prefix,
+                            state.stream_max_age,
+                        ),
+                    )
+                    .await;
+                    match recreate {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            warn!(error = %e, "Failed to re-create JetStream stream");
+                            return StatusCode::INTERNAL_SERVER_ERROR;
+                        }
+                        Err(_) => {
+                            warn!("Timed out waiting for JetStream stream re-creation");
+                            return StatusCode::INTERNAL_SERVER_ERROR;
+                        }
+                    }
+                    let mut retry_headers = async_nats::HeaderMap::new();
+                    retry_headers.insert("X-Linear-Type", event_type.as_str());
+                    retry_headers.insert("X-Linear-Action", action.as_str());
+                    retry_headers.insert("X-Linear-Webhook-Id", webhook_id.as_str());
+                    match state
+                        .js
+                        .publish_with_headers(subject, retry_headers, body)
+                        .await
+                    {
+                        Ok(ack_future) => {
+                            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+                                Ok(Ok(_)) => {
+                                    info!("Published Linear event to NATS after stream re-creation");
+                                    StatusCode::OK
+                                }
+                                Ok(Err(e)) => {
+                                    warn!(error = %e, "NATS ack failed after stream re-creation");
+                                    StatusCode::INTERNAL_SERVER_ERROR
+                                }
+                                Err(_) => {
+                                    warn!("NATS ack timed out after stream re-creation");
+                                    StatusCode::INTERNAL_SERVER_ERROR
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to publish Linear event to NATS after stream re-creation");
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        }
+                    }
                 }
                 Err(_) => {
                     warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
