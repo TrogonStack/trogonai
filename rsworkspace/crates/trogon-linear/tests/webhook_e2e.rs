@@ -1445,6 +1445,108 @@ async fn server_creates_stream_with_custom_max_age() {
     );
 }
 
+/// The JetStream stream must be configured with `{prefix}.>` as the subjects
+/// filter so it captures every event regardless of type and action.
+#[tokio::test]
+async fn stream_subjects_filter_matches_prefix_wildcard() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let admin = nats_client(nats_port).await;
+    let js = async_nats::jetstream::new(admin);
+
+    let stream = js.get_stream("LINEAR").await.expect("stream must exist");
+    let info = stream.cached_info();
+
+    assert_eq!(
+        info.config.subjects,
+        vec!["linear.>"],
+        "stream must capture all subjects under the prefix; got {:?}",
+        info.config.subjects
+    );
+}
+
+/// With a custom `LINEAR_SUBJECT_PREFIX`, the stream subjects filter must use
+/// `{custom_prefix}.>` instead of the default `linear.>`.
+#[tokio::test]
+async fn stream_subjects_filter_uses_custom_prefix() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_SUBJECT_PREFIX", "mylin");
+    env.set("LINEAR_STREAM_NAME", "MYLIN_STREAM");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    let admin = nats_client(nats_port).await;
+    let js = async_nats::jetstream::new(admin);
+
+    let stream = js.get_stream("MYLIN_STREAM").await.expect("stream must exist");
+    let info = stream.cached_info();
+
+    assert_eq!(
+        info.config.subjects,
+        vec!["mylin.>"],
+        "stream must use the custom prefix in its subjects filter; got {:?}",
+        info.config.subjects
+    );
+}
+
+/// A published webhook event must be readable by a JetStream pull consumer —
+/// not just delivered via core-NATS push.  This verifies the full persistence
+/// guarantee that is the purpose of the integration.
+#[tokio::test]
+async fn webhook_message_is_persisted_in_jetstream() {
+    use async_nats::jetstream::consumer::{pull, DeliverPolicy};
+
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let js = async_nats::jetstream::new(nats);
+
+    let body = r#"{"type":"Issue","action":"create","data":{}}"#;
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(resp.status(), 200);
+
+    // Read from the stream via a JetStream pull consumer to confirm persistence.
+    let stream = js.get_stream("LINEAR").await.expect("stream must exist");
+    let consumer = stream
+        .create_consumer(pull::Config {
+            deliver_policy: DeliverPolicy::All,
+            ..Default::default()
+        })
+        .await
+        .expect("failed to create pull consumer");
+
+    let mut batch = consumer
+        .fetch()
+        .max_messages(1)
+        .messages()
+        .await
+        .expect("fetch failed");
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), batch.next())
+        .await
+        .expect("timed out waiting for persisted JetStream message")
+        .expect("batch stream closed")
+        .expect("message error");
+
+    assert_eq!(msg.subject.as_str(), "linear.Issue.create");
+    assert_eq!(msg.payload.as_ref(), body.as_bytes());
+}
+
 // ── Body edge cases ────────────────────────────────────────────────────────────
 
 /// A completely empty request body is not valid JSON → 400.
