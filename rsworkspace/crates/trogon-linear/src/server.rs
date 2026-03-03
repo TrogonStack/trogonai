@@ -155,11 +155,19 @@ async fn handle_webhook(
         warn!("Missing 'type' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
+    if event_type.is_empty() {
+        warn!("Empty 'type' field in Linear webhook payload");
+        return StatusCode::BAD_REQUEST;
+    }
 
     let Some(action) = parsed.get("action").and_then(|v| v.as_str()).map(str::to_owned) else {
         warn!("Missing 'action' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
+    if action.is_empty() {
+        warn!("Empty 'action' field in Linear webhook payload");
+        return StatusCode::BAD_REQUEST;
+    }
 
     let webhook_id = parsed
         .get("webhookId")
