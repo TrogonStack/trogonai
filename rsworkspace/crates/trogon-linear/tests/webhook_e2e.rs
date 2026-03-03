@@ -1719,6 +1719,43 @@ async fn webhook_type_with_dot_returns_400() {
     assert_eq!(resp.status(), 400, "'.' in 'type' must return 400; got {}", resp.status());
 }
 
+/// `action` containing `*` (NATS wildcard) must be rejected with 400.
+#[tokio::test]
+async fn webhook_action_with_nats_wildcard_star_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"cre*ate","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "'*' in 'action' must return 400; got {}", resp.status());
+}
+
+/// `action` containing a control character (tab, `\t`) must be rejected with 400.
+/// This exercises branch 2 (`b < 32`) of `has_invalid_nats_chars` for `action`.
+#[tokio::test]
+async fn webhook_action_with_control_char_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body("{\"type\":\"Issue\",\"action\":\"cre\\u0009ate\",\"data\":{}}")
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "control char in 'action' must return 400; got {}", resp.status());
+}
+
 /// `type` containing a null byte (U+0000) is valid JSON but produces a NATS
 /// subject with a control character. Must be rejected with 400.
 #[tokio::test]
