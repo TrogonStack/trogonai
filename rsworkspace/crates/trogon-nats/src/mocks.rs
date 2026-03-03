@@ -430,6 +430,22 @@ mod tests {
         );
     }
 
+    /// `set_response()` with an empty `Bytes::new()` payload — the returned
+    /// message must have an empty payload and `length == 0`.
+    #[tokio::test]
+    async fn advanced_mock_set_response_with_empty_payload() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.set_response("sub", bytes::Bytes::new());
+
+        let msg = mock
+            .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
+            .await
+            .expect("expected a response for empty payload");
+
+        assert!(msg.payload.is_empty(), "payload must be empty");
+        assert_eq!(msg.length, 0, "length must be 0 for empty payload");
+    }
+
     /// `fail_next_request()` causes exactly one failure, then the next
     /// request succeeds (if a response is configured).
     #[tokio::test]
