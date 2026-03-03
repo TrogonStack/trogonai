@@ -1624,3 +1624,117 @@ async fn webhook_timestamp_just_inside_boundary_accepted() {
         resp.status()
     );
 }
+
+// ── Invalid NATS subject characters in type / action ──────────────────────────
+
+/// `type` containing a space would produce `linear.Issue Comment.create` —
+/// an invalid NATS subject token. Must be rejected with 400.
+#[tokio::test]
+async fn webhook_type_with_space_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue Comment","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "space in 'type' must return 400; got {}", resp.status());
+}
+
+/// `action` containing a space must also be rejected with 400.
+#[tokio::test]
+async fn webhook_action_with_space_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create now","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "space in 'action' must return 400; got {}", resp.status());
+}
+
+/// `type` containing `*` (NATS single-token wildcard) must be rejected with 400.
+#[tokio::test]
+async fn webhook_type_with_nats_wildcard_star_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue*","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "'*' in 'type' must return 400; got {}", resp.status());
+}
+
+/// `type` containing `>` (NATS full-wildcard) must be rejected with 400.
+#[tokio::test]
+async fn webhook_type_with_nats_wildcard_gt_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue>","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "'>' in 'type' must return 400; got {}", resp.status());
+}
+
+/// `type` containing `.` would silently add extra subject levels
+/// (e.g. `linear.foo.bar.create`). Must be rejected with 400.
+#[tokio::test]
+async fn webhook_type_with_dot_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"foo.bar","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "'.' in 'type' must return 400; got {}", resp.status());
+}
+
+/// `type` containing a null byte (U+0000) is valid JSON but produces a NATS
+/// subject with a control character. Must be rejected with 400.
+#[tokio::test]
+async fn webhook_type_with_null_byte_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    // JSON \u0000 is the null byte
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body("{\"type\":\"foo\\u0000bar\",\"action\":\"create\",\"data\":{}}")
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "null byte in 'type' must return 400; got {}", resp.status());
+}
