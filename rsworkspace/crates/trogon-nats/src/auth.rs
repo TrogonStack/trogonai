@@ -249,6 +249,19 @@ mod tests {
         assert_eq!(config.servers, vec!["host1:4222", "host2:4222"]);
     }
 
+    /// An explicit empty string for `NATS_URL` also results in an empty list.
+    #[test]
+    fn from_env_nats_url_empty_string_produces_empty_servers() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "");
+        let config = NatsConfig::from_env(&env);
+        assert!(
+            config.servers.is_empty(),
+            "empty NATS_URL should produce an empty server list; got {:?}",
+            config.servers
+        );
+    }
+
     /// `NATS_PASSWORD=""` (present but empty) must fall through to `None` —
     /// an empty password is treated the same as an absent one so that
     /// misconfigured deployments fail at connection time with a clear

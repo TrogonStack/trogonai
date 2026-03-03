@@ -26,6 +26,9 @@
 //! | `LINEAR_SUBJECT_PREFIX` | `linear` | NATS subject prefix |
 //! | `LINEAR_STREAM_NAME` | `LINEAR` | JetStream stream name |
 //! | `LINEAR_STREAM_MAX_AGE_SECS` | `604800` | Max age of messages in JetStream (seconds, default 7 days) |
+//! | `LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS` | `60` | Replay-attack window in seconds (set to 0 to disable) |
+//! | `LINEAR_NATS_ACK_TIMEOUT_MS` | `10000` | How long to wait for a JetStream ACK (milliseconds) |
+//! | `LINEAR_NATS_STREAM_OP_TIMEOUT_MS` | `10000` | How long to wait for stream operations (milliseconds) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 
 pub mod config;
