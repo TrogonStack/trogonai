@@ -92,6 +92,13 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
+/// Returns `true` if `s` contains characters that are illegal in a NATS subject
+/// token: `.` (level separator), ` ` (space), `*`/`>` (wildcards), or any
+/// control character (bytes 0–31 and 127).
+fn has_invalid_nats_chars(s: &str) -> bool {
+    s.contains(['.', ' ', '*', '>']) || s.bytes().any(|b| b < 32 || b == 127)
+}
+
 #[instrument(
     name = "linear.webhook",
     skip_all,
@@ -159,6 +166,10 @@ async fn handle_webhook(
         warn!("Empty 'type' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     }
+    if has_invalid_nats_chars(&event_type) {
+        warn!("Invalid NATS subject characters in 'type' field");
+        return StatusCode::BAD_REQUEST;
+    }
 
     let Some(action) = parsed.get("action").and_then(|v| v.as_str()).map(str::to_owned) else {
         warn!("Missing 'action' field in Linear webhook payload");
@@ -166,6 +177,10 @@ async fn handle_webhook(
     };
     if action.is_empty() {
         warn!("Empty 'action' field in Linear webhook payload");
+        return StatusCode::BAD_REQUEST;
+    }
+    if has_invalid_nats_chars(&action) {
+        warn!("Invalid NATS subject characters in 'action' field");
         return StatusCode::BAD_REQUEST;
     }
 
