@@ -895,14 +895,9 @@ async fn spawn_server_with_tolerance(
     nats_client(nats_port).await
 }
 
-/// After a full NATS server restart the JetStream stream is lost (NATS stores
-/// it in memory by default in the test image).  async-nats reconnects at the
-/// TCP level, but every subsequent `publish_with_headers` returns an error
-/// When the JetStream stream is deleted while the server is running (which
-/// models what happens when NATS restarts with ephemeral in-memory storage),
-/// the server self-heals: on the first request after the loss it detects the
-/// ack failure, re-creates the stream via `get_or_create_stream`, and retries
-/// the publish — returning 200 without requiring a server restart.
+/// Variant of `webhook_recovers_when_jetstream_stream_is_gone` that first
+/// completes a successful publish, then deletes the stream, and verifies the
+/// server self-heals on the very next request.
 ///
 /// Note: a testcontainers container.stop()/start() cycle reassigns ephemeral
 /// host ports, so the existing NATS client cannot reconnect.  Deleting the
