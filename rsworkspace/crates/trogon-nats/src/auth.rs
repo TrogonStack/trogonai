@@ -191,6 +191,38 @@ mod tests {
         assert!(matches!(config.auth, NatsAuth::None));
     }
 
+    /// `NatsConfig::new()` stores the given servers and auth as-is.
+    #[test]
+    fn new_stores_servers_and_auth() {
+        let servers = vec!["host1:4222".to_string(), "host2:4222".to_string()];
+        let config = NatsConfig::new(servers.clone(), NatsAuth::Token("tok".into()));
+
+        assert_eq!(config.servers, servers);
+        assert!(matches!(config.auth, NatsAuth::Token(t) if t == "tok"));
+    }
+
+    /// `NatsConfig::new()` with empty server list preserves the empty list
+    /// (callers are responsible for validation before connecting).
+    #[test]
+    fn new_with_empty_servers() {
+        let config = NatsConfig::new(vec![], NatsAuth::None);
+        assert!(config.servers.is_empty());
+    }
+
+    /// `from_url("")` wraps the empty string directly in the server list —
+    /// it does NOT apply the trim+filter that `from_env` does.
+    /// This asymmetry is intentional: `from_url` is a direct constructor.
+    #[test]
+    fn from_url_empty_string_preserves_empty_entry() {
+        let config = NatsConfig::from_url("");
+
+        assert_eq!(
+            config.servers,
+            vec!["".to_string()],
+            "from_url stores the value verbatim, unlike from_env which filters empty segments"
+        );
+    }
+
     // ── servers_from_env edge cases ───────────────────────────────────────────
 
     /// NATS_URL set to whitespace-only entries (e.g. "  ,  ,  ") produces an

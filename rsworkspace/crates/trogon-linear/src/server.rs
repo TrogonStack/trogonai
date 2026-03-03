@@ -179,6 +179,29 @@ mod tests {
         assert!(has_invalid_nats_chars("foo\x7fbar"));
     }
 
+    // ── UTF-8 multibyte sequences (bytes ≥ 128) ───────────────────────────────
+    //
+    // NATS subjects are byte strings and do support UTF-8 characters.
+    // `has_invalid_nats_chars` only blocks the chars that NATS reserves
+    // (separators, wildcards, control chars 0-31, DEL 127).
+    // Bytes ≥ 128 that form valid UTF-8 code points must pass.
+
+    #[test]
+    fn latin_extended_char_passes() {
+        assert!(!has_invalid_nats_chars("Issu\u{00e9}")); // é — U+00E9, two bytes
+        assert!(!has_invalid_nats_chars("caf\u{00e9}"));  // café
+    }
+
+    #[test]
+    fn cjk_char_passes() {
+        assert!(!has_invalid_nats_chars("\u{7968}")); // 票 — U+7968, three bytes
+    }
+
+    #[test]
+    fn emoji_passes() {
+        assert!(!has_invalid_nats_chars("\u{1f980}")); // 🦀 — U+1F980, four bytes
+    }
+
     // ── Edge: empty string is not flagged (caught by is_empty() upstream) ─────
 
     #[test]
