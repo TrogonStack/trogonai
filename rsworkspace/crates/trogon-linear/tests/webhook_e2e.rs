@@ -672,10 +672,11 @@ async fn server_starts_normally_when_stream_already_exists() {
     assert_eq!(msg.payload.as_ref(), body.as_ref());
 }
 
-/// When the JetStream stream is deleted while the server is running,
-/// the next publish must fail and the server must return 500.
+/// When the JetStream stream is deleted while the server is running, the
+/// server self-heals: it detects the ack failure, re-creates the stream, and
+/// retries the publish — returning 200 without requiring a server restart.
 #[tokio::test]
-async fn webhook_returns_500_when_jetstream_stream_is_gone() {
+async fn webhook_recovers_when_jetstream_stream_is_gone() {
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
 
@@ -697,8 +698,8 @@ async fn webhook_returns_500_when_jetstream_stream_is_gone() {
 
     assert_eq!(
         resp.status(),
-        500,
-        "server must return 500 when NATS publish fails; got {}",
+        200,
+        "server must self-heal after stream deletion; got {}",
         resp.status()
     );
 }
@@ -842,15 +843,21 @@ async fn spawn_server_with_tolerance(
 /// After a full NATS server restart the JetStream stream is lost (NATS stores
 /// it in memory by default in the test image).  async-nats reconnects at the
 /// TCP level, but every subsequent `publish_with_headers` returns an error
-/// because no stream matches the subject any more.
+/// When the JetStream stream is deleted while the server is running (which
+/// models what happens when NATS restarts with ephemeral in-memory storage),
+/// the server self-heals: on the first request after the loss it detects the
+/// ack failure, re-creates the stream via `get_or_create_stream`, and retries
+/// the publish — returning 200 without requiring a server restart.
 ///
-/// The server therefore continues to return 500 after NATS comes back — it
-/// can only recover by being restarted (so `ensure_stream` runs again).
+/// Note: a testcontainers container.stop()/start() cycle reassigns ephemeral
+/// host ports, so the existing NATS client cannot reconnect.  Deleting the
+/// stream directly is the reliable way to exercise this exact code path.
 #[tokio::test]
-async fn webhook_returns_500_after_nats_full_restart() {
-    let (container, nats_port) = start_nats().await;
+async fn webhook_recovers_after_stream_deletion() {
+    let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
-    spawn_server(nats_port, http_port, None).await;
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let js = async_nats::jetstream::new(nats);
 
     // 1. Normal operation — must succeed.
     let resp = reqwest::Client::new()
@@ -859,46 +866,32 @@ async fn webhook_returns_500_after_nats_full_restart() {
         .body(r#"{"type":"Issue","action":"create","data":{}}"#)
         .send()
         .await
-        .expect("pre-stop request failed");
-    assert_eq!(resp.status(), 200, "expected 200 before NATS stops; got {}", resp.status());
+        .expect("first request failed");
+    assert_eq!(resp.status(), 200, "expected 200 before stream deletion; got {}", resp.status());
 
-    // 2. Stop NATS and wait for TCP connection to drop.
-    container.stop().await.expect("failed to stop NATS container");
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // 2. Delete the stream to simulate the loss that occurs after a NATS restart
+    //    with ephemeral (in-memory) JetStream storage.
+    js.delete_stream("LINEAR").await.expect("failed to delete stream");
 
-    // 3. Restart NATS — stream is gone (ephemeral JetStream state).
-    container.start().await.expect("failed to restart NATS container");
-
-    // 4. Wait for async-nats to reconnect at the TCP level.
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    // 5. Server returns 500: async-nats is connected but the JetStream stream
-    //    no longer exists, so publish_with_headers fails.
-    let resp = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .unwrap()
+    // 3. Server detects the ack failure, re-creates the stream, retries — returns 200.
+    let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
         .header("Content-Type", "application/json")
         .body(r#"{"type":"Issue","action":"create","data":{}}"#)
         .send()
-        .await;
-    match resp {
-        Ok(r) => assert_eq!(
-            r.status(),
-            500,
-            "server must return 500 after NATS full restart (stream gone); got {}",
-            r.status()
-        ),
-        Err(e) if e.is_timeout() => {
-            panic!("server hung after NATS restart — handler must not block: {e}")
-        }
-        Err(e) => panic!("unexpected HTTP error after NATS restart: {e}"),
-    }
+        .await
+        .expect("second request failed");
+    assert_eq!(
+        resp.status(),
+        200,
+        "server must self-heal after stream deletion; got {}",
+        resp.status()
+    );
 }
 
-/// When the NATS connection is lost while the server is running, a webhook
-/// request must complete (returning 500) and must NOT hang indefinitely.
+/// When NATS is permanently gone, the server must eventually return 500 rather
+/// than hanging.  The recovery path (ack timeout + ensure_stream timeout) adds
+/// latency so we allow up to 25 s for the response.
 #[tokio::test]
 async fn webhook_returns_error_when_nats_connection_lost() {
     let (container, nats_port) = start_nats().await;
@@ -910,7 +903,7 @@ async fn webhook_returns_error_when_nats_connection_lost() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(25))
         .build()
         .unwrap()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
