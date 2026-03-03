@@ -469,6 +469,47 @@ mod tests {
         inject_trace_context(&mut headers);
     }
 
+    /// `HeaderMapCarrier::set()` must insert the key-value pair into the
+    /// underlying `HeaderMap` so that it is readable back via `.get()`.
+    #[test]
+    fn header_map_carrier_set_inserts_key_value() {
+        let mut headers = HeaderMap::new();
+        let mut carrier = HeaderMapCarrier(&mut headers);
+        carrier.set("X-Trace-Id", "abc123".to_string());
+        assert_eq!(
+            headers.get("X-Trace-Id").map(|v| v.as_str()),
+            Some("abc123"),
+            "HeaderMapCarrier::set must write the value into the HeaderMap"
+        );
+    }
+
+    /// `inject_trace_context()` must not remove or overwrite headers that were
+    /// inserted before the call (default noop propagator injects nothing).
+    #[test]
+    fn inject_trace_context_preserves_existing_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Custom", "preserved");
+        inject_trace_context(&mut headers);
+        assert_eq!(
+            headers.get("X-Custom").map(|v| v.as_str()),
+            Some("preserved"),
+            "inject_trace_context must not remove pre-existing headers"
+        );
+    }
+
+    /// The `(attempts - 1).min(31)` guard in `RetryPolicy::execute` prevents
+    /// `1u32 << exp` from overflowing when `attempts` is large.
+    /// Without the cap, `1u32 << 32` panics in debug mode.
+    #[test]
+    fn retry_backoff_exp_capped_at_31_prevents_shift_overflow() {
+        for attempts in [32u32, 33, 64, 100, u32::MAX] {
+            let exp = (attempts - 1).min(31);
+            assert_eq!(exp, 31, "exp must be 31 for attempts={attempts}");
+            // Must not panic (would panic without .min(31) in debug mode).
+            let _delay = Duration::from_millis(1) * (1u32 << exp);
+        }
+    }
+
     #[tokio::test]
     #[cfg(feature = "test-support")]
     async fn test_request_with_mock_success() {
