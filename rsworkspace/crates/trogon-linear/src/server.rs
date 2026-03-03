@@ -99,6 +99,86 @@ fn has_invalid_nats_chars(s: &str) -> bool {
     s.contains(['.', ' ', '*', '>']) || s.bytes().any(|b| b < 32 || b == 127)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::has_invalid_nats_chars;
+
+    // ── Valid tokens ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn valid_alphanumeric_passes() {
+        assert!(!has_invalid_nats_chars("Issue"));
+        assert!(!has_invalid_nats_chars("create"));
+        assert!(!has_invalid_nats_chars("ProjectUpdate"));
+    }
+
+    #[test]
+    fn valid_with_hyphen_and_underscore_passes() {
+        assert!(!has_invalid_nats_chars("foo_bar"));
+        assert!(!has_invalid_nats_chars("foo-bar"));
+    }
+
+    // ── Separator / wildcard chars (branch 1) ─────────────────────────────────
+
+    #[test]
+    fn dot_fails() {
+        assert!(has_invalid_nats_chars("foo.bar"));
+        assert!(has_invalid_nats_chars("."));
+    }
+
+    #[test]
+    fn space_fails() {
+        assert!(has_invalid_nats_chars("foo bar"));
+        assert!(has_invalid_nats_chars(" "));
+    }
+
+    #[test]
+    fn star_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo*"));
+        assert!(has_invalid_nats_chars("*"));
+    }
+
+    #[test]
+    fn gt_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo>"));
+        assert!(has_invalid_nats_chars(">"));
+    }
+
+    // ── Control characters (branch 2) ─────────────────────────────────────────
+
+    #[test]
+    fn null_byte_fails() {
+        assert!(has_invalid_nats_chars("foo\0bar"));
+    }
+
+    #[test]
+    fn tab_fails() {
+        assert!(has_invalid_nats_chars("foo\tbar"));
+    }
+
+    #[test]
+    fn newline_fails() {
+        assert!(has_invalid_nats_chars("foo\nbar"));
+    }
+
+    #[test]
+    fn carriage_return_fails() {
+        assert!(has_invalid_nats_chars("foo\rbar"));
+    }
+
+    #[test]
+    fn del_byte_127_fails() {
+        assert!(has_invalid_nats_chars("foo\x7fbar"));
+    }
+
+    // ── Edge: empty string is not flagged (caught by is_empty() upstream) ─────
+
+    #[test]
+    fn empty_string_passes() {
+        assert!(!has_invalid_nats_chars(""));
+    }
+}
+
 #[instrument(
     name = "linear.webhook",
     skip_all,
