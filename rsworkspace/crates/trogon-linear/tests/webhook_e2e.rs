@@ -1979,6 +1979,213 @@ async fn webhook_type_with_null_byte_returns_400() {
     assert_eq!(resp.status(), 400, "null byte in 'type' must return 400; got {}", resp.status());
 }
 
+// ── NATS authentication ────────────────────────────────────────────────────────
+
+/// When NATS requires a token, the binary must connect using `NATS_TOKEN`
+/// and publish events normally — exercising the Token auth branch of `connect()`.
+#[tokio::test]
+async fn binary_connects_with_nats_token_auth() {
+    let token = "test-token-auth";
+    let container: ContainerAsync<Nats> = Nats::default()
+        .with_cmd(["--jetstream", "--auth", token])
+        .start()
+        .await
+        .expect("Failed to start NATS container");
+    let nats_port = container.get_host_port_ipv4(4222).await.unwrap();
+    let http_port = next_port();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-linear");
+    let mut child = tokio::process::Command::new(bin)
+        .env("NATS_URL", format!("localhost:{nats_port}"))
+        .env("NATS_TOKEN", token)
+        .env("LINEAR_WEBHOOK_PORT", http_port.to_string())
+        .env("RUST_LOG", "error")
+        .spawn()
+        .expect("failed to spawn binary");
+
+    wait_for_port(http_port, Duration::from_secs(10)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    let status = resp.status();
+    child.kill().await.ok();
+    let _ = child.wait().await;
+
+    assert_eq!(status, 200, "binary must publish to NATS with token auth; got {status}");
+}
+
+/// When NATS requires user/password, the binary must connect using
+/// `NATS_USER` + `NATS_PASSWORD` — exercising the UserPassword auth branch.
+#[tokio::test]
+async fn binary_connects_with_nats_user_password_auth() {
+    let user = "myuser";
+    let password = "mypassword";
+    let container: ContainerAsync<Nats> = Nats::default()
+        .with_cmd(["--jetstream", "--user", user, "--pass", password])
+        .start()
+        .await
+        .expect("Failed to start NATS container");
+    let nats_port = container.get_host_port_ipv4(4222).await.unwrap();
+    let http_port = next_port();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-linear");
+    let mut child = tokio::process::Command::new(bin)
+        .env("NATS_URL", format!("localhost:{nats_port}"))
+        .env("NATS_USER", user)
+        .env("NATS_PASSWORD", password)
+        .env("LINEAR_WEBHOOK_PORT", http_port.to_string())
+        .env("RUST_LOG", "error")
+        .spawn()
+        .expect("failed to spawn binary");
+
+    wait_for_port(http_port, Duration::from_secs(10)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    let status = resp.status();
+    child.kill().await.ok();
+    let _ = child.wait().await;
+
+    assert_eq!(status, 200, "binary must publish to NATS with user/password auth; got {status}");
+}
+
+// ── main.rs tracing configuration ─────────────────────────────────────────────
+
+/// When `RUST_LOG` contains an invalid filter directive, `try_from_default_env`
+/// returns `Err` and the `unwrap_or_else(|_| EnvFilter::new("info"))` fallback
+/// kicks in.  The binary must start normally and respond to requests.
+#[tokio::test]
+async fn binary_starts_with_invalid_rust_log_falls_back_to_info() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let bin = env!("CARGO_BIN_EXE_trogon-linear");
+    let mut child = tokio::process::Command::new(bin)
+        .env("NATS_URL", format!("localhost:{nats_port}"))
+        .env("LINEAR_WEBHOOK_PORT", http_port.to_string())
+        // "[" is an incomplete span specifier — an invalid EnvFilter directive.
+        .env("RUST_LOG", "[")
+        .spawn()
+        .expect("failed to spawn binary");
+
+    wait_for_port(http_port, Duration::from_secs(10)).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port}/health"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    let status = resp.status();
+    child.kill().await.ok();
+    let _ = child.wait().await;
+
+    assert_eq!(status, 200, "binary must start normally with invalid RUST_LOG; got {status}");
+}
+
+// ── NATS reconnect ─────────────────────────────────────────────────────────────
+
+/// When NATS drops and a new instance starts at the same address, async-nats
+/// reconnects automatically and the server resumes publishing without a restart.
+/// Because the stream is gone after the restart, the first request also exercises
+/// the recovery path (ack fail → ensure_stream → retry → 200).
+#[tokio::test]
+async fn server_resumes_publishing_after_nats_reconnects() {
+    use testcontainers_modules::testcontainers::core::IntoContainerPort;
+
+    // Allocate a free port then release it so both NATS containers can bind
+    // to the same fixed host address.
+    let fixed_nats_port: u16 = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let http_port = next_port();
+
+    // 1. Start first NATS at the fixed port.
+    let container1: ContainerAsync<Nats> = Nats::default()
+        .with_cmd(["--jetstream"])
+        .with_mapped_port(fixed_nats_port, 4222u16.tcp())
+        .start()
+        .await
+        .expect("failed to start first NATS container");
+
+    spawn_server(fixed_nats_port, http_port, None).await;
+
+    // 2. Verify initial operation.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "initial publish must succeed");
+
+    // 3. Drop NATS — server loses its connection.
+    drop(container1);
+
+    // Wait until the port is actually free before starting the second container.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{fixed_nats_port}"))
+            .await
+            .is_err()
+        {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("port {fixed_nats_port} not freed within 10s");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // 4. Start a new NATS instance at the same address.
+    let _container2: ContainerAsync<Nats> = Nats::default()
+        .with_cmd(["--jetstream"])
+        .with_mapped_port(fixed_nats_port, 4222u16.tcp())
+        .start()
+        .await
+        .expect("failed to start second NATS container");
+
+    wait_for_port(fixed_nats_port, Duration::from_secs(10)).await;
+
+    // Give async-nats time to detect the new server and complete reconnection.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // 5. The first request after reconnect triggers the recovery path because
+    //    the stream is gone.  Allow up to 35 s: ack timeout (10 s) +
+    //    ensure_stream timeout (10 s) + retry ack (10 s).
+    let resp = reqwest::Client::builder()
+        .timeout(Duration::from_secs(35))
+        .build()
+        .unwrap()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("request failed after NATS reconnect");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "server must resume publishing after NATS reconnects; got {}",
+        resp.status()
+    );
+}
+
 // ── JetStream persistence after recovery ──────────────────────────────────────
 
 /// After the recovery path (stream deleted → ack fails → ensure_stream →
