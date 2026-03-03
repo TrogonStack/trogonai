@@ -820,6 +820,25 @@ async fn binary_exits_with_error_when_nats_unreachable() {
     );
 }
 
+// ── Additional helpers ────────────────────────────────────────────────────────
+
+/// Starts a server with a specific timestamp tolerance (in seconds).
+async fn spawn_server_with_tolerance(
+    nats_port: u16,
+    http_port: u16,
+    tolerance_secs: u64,
+) -> async_nats::Client {
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", tolerance_secs.to_string());
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+    nats_client(nats_port).await
+}
+
 /// When the NATS connection is lost while the server is running, a webhook
 /// request must complete (returning 500) and must NOT hang indefinitely.
 #[tokio::test]
@@ -1012,6 +1031,431 @@ async fn webhook_timestamp_check_disabled_accepts_stale() {
         resp.status(),
         200,
         "stale timestamp must be accepted when check is disabled; got {}",
+        resp.status()
+    );
+}
+
+// ── Timestamp edge cases ──────────────────────────────────────────────────────
+
+/// A `webhookTimestamp` in the future must be accepted.
+/// The code uses `saturating_sub(ts_ms)` which returns 0 when ts_ms > now_ms,
+/// and `0 > tolerance_ms` is false — so future timestamps always pass.
+#[tokio::test]
+async fn webhook_future_timestamp_accepted() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server_with_tolerance(nats_port, http_port, 5).await;
+
+    let future_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 3_600_000; // 1 hour in the future
+
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{future_ms}}}"#);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200, "future timestamp must be accepted; got {}", resp.status());
+}
+
+/// When `webhookTimestamp` is a JSON float, `serde_json::Value::as_u64()` returns None,
+/// the replay check is skipped entirely, and the request is accepted regardless of age.
+#[tokio::test]
+async fn webhook_float_timestamp_skips_replay_check() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server_with_tolerance(nats_port, http_port, 5).await;
+
+    // Float value from long ago — would be rejected if parsed as integer ms,
+    // but as_u64() returns None for floats → replay check is skipped → 200.
+    let body = r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":1234567890.5}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "float timestamp must skip replay check and be accepted; got {}",
+        resp.status()
+    );
+}
+
+/// When `webhookTimestamp` is a JSON string, `serde_json::Value::as_u64()` returns None,
+/// the replay check is skipped, and the request is accepted regardless of age.
+#[tokio::test]
+async fn webhook_string_timestamp_skips_replay_check() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server_with_tolerance(nats_port, http_port, 5).await;
+
+    // String timestamp from long ago — as_u64() returns None for strings → check skipped.
+    let body =
+        r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":"1234567890000"}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "string timestamp must skip replay check and be accepted; got {}",
+        resp.status()
+    );
+}
+
+// ── Type / action field type mismatches ───────────────────────────────────────
+
+/// When `type` is a JSON number instead of a string, `as_str()` returns None → 400.
+#[tokio::test]
+async fn webhook_type_as_number_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":123,"action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "numeric 'type' must be rejected with 400; got {}", resp.status());
+}
+
+/// When `action` is a JSON boolean instead of a string, `as_str()` returns None → 400.
+#[tokio::test]
+async fn webhook_action_as_boolean_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":true,"data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        400,
+        "boolean 'action' must be rejected with 400; got {}",
+        resp.status()
+    );
+}
+
+/// When `webhookId` is a JSON number (not a string), `as_str()` returns None
+/// and `X-Linear-Webhook-Id` must default to "unknown".
+#[tokio::test]
+async fn webhook_webhook_id_as_number_defaults_to_unknown() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let body = br#"{"type":"Issue","action":"create","data":{},"webhookId":42}"#;
+
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .unwrap();
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out")
+        .expect("subscriber closed");
+
+    let headers = msg.headers.expect("NATS message must have headers");
+    let webhook_id = headers.get("X-Linear-Webhook-Id").map(|v| v.as_str()).unwrap_or("");
+    assert_eq!(
+        webhook_id, "unknown",
+        "numeric webhookId must default to 'unknown'; got: {webhook_id:?}"
+    );
+}
+
+// ── Non-object JSON body ───────────────────────────────────────────────────────
+
+/// A JSON `null` body is valid JSON but `parsed.get("type")` returns None → 400.
+#[tokio::test]
+async fn webhook_json_null_body_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body("null")
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "JSON null body must return 400; got {}", resp.status());
+}
+
+/// A JSON array body is valid JSON but `parsed.get("type")` returns None → 400.
+#[tokio::test]
+async fn webhook_json_array_body_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"[{"type":"Issue","action":"create"}]"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "JSON array body must return 400; got {}", resp.status());
+}
+
+/// A JSON string body is valid JSON but `parsed.get("type")` returns None → 400.
+#[tokio::test]
+async fn webhook_json_string_body_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#""Issue""#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "JSON string body must return 400; got {}", resp.status());
+}
+
+// ── Signature edge cases ───────────────────────────────────────────────────────
+
+/// An empty `linear-signature` header value fails HMAC hex verification → 401.
+/// `hex::decode("")` returns Ok(vec![]), but verify_slice(&[]) fails since
+/// the expected HMAC digest is 32 bytes.
+#[tokio::test]
+async fn webhook_empty_signature_returns_401() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, Some("some-secret")).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("linear-signature", "")
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        401,
+        "empty signature must be rejected with 401; got {}",
+        resp.status()
+    );
+}
+
+// ── Stream configuration ───────────────────────────────────────────────────────
+
+/// When `LINEAR_STREAM_NAME` is customised, the server must create a JetStream
+/// stream with that name (not the default `LINEAR`) and publish events into it.
+#[tokio::test]
+async fn server_creates_stream_with_custom_name() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_STREAM_NAME", "MYLINEAR");
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    let admin = nats_client(nats_port).await;
+    let js = async_nats::jetstream::new(admin);
+
+    // Custom stream must exist.
+    js.get_stream("MYLINEAR").await.expect("MYLINEAR stream must exist");
+
+    // Default stream must NOT exist.
+    let default_result = js.get_stream("LINEAR").await;
+    assert!(
+        default_result.is_err(),
+        "LINEAR stream must NOT exist when a custom name is configured"
+    );
+}
+
+/// When `LINEAR_STREAM_MAX_AGE_SECS` is customised, the JetStream stream must
+/// be created with the specified `max_age` in its configuration.
+#[tokio::test]
+async fn server_creates_stream_with_custom_max_age() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
+    env.set("LINEAR_STREAM_MAX_AGE_SECS", "3600");
+    env.set("LINEAR_STREAM_NAME", "LINEAR_AGE_TEST"); // isolated stream name
+    let config = LinearConfig::from_env(&env);
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+
+    let admin = nats_client(nats_port).await;
+    let js = async_nats::jetstream::new(admin);
+
+    let stream = js.get_stream("LINEAR_AGE_TEST").await.expect("stream must exist");
+    let info = stream.cached_info();
+
+    assert_eq!(
+        info.config.max_age,
+        Duration::from_secs(3600),
+        "stream max_age must match LINEAR_STREAM_MAX_AGE_SECS; got {:?}",
+        info.config.max_age
+    );
+}
+
+// ── Body edge cases ────────────────────────────────────────────────────────────
+
+/// A completely empty request body is not valid JSON → 400.
+#[tokio::test]
+async fn webhook_empty_body_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body("")
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "empty body must return 400; got {}", resp.status());
+}
+
+// ── Signature header case sensitivity ─────────────────────────────────────────
+
+/// HTTP headers are case-insensitive per RFC 7230. A `Linear-Signature` header
+/// (capitalised) must be treated identically to `linear-signature`.
+#[tokio::test]
+async fn webhook_signature_header_case_insensitive() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let secret = "test-secret";
+    let body = br#"{"type":"Issue","action":"create","data":{}}"#;
+
+    spawn_server(nats_port, http_port, Some(secret)).await;
+
+    let sig = compute_sig(secret, body);
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Linear-Signature", sig) // capitalised
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "signature header must be accepted regardless of case; got {}",
+        resp.status()
+    );
+}
+
+// ── Timestamp additional edge cases ───────────────────────────────────────────
+
+/// A negative `webhookTimestamp` (e.g. -1000) is a valid JSON number but
+/// `as_u64()` returns None for negative values, so the replay check is
+/// skipped and the request is accepted.
+#[tokio::test]
+async fn webhook_negative_timestamp_skips_replay_check() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server_with_tolerance(nats_port, http_port, 5).await;
+
+    let body = r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":-1000}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "negative timestamp must skip replay check and be accepted; got {}",
+        resp.status()
+    );
+}
+
+/// A `webhookTimestamp` just inside the tolerance boundary must be accepted.
+/// The check is `age_ms > tolerance_ms` (strict greater-than), so a timestamp
+/// exactly one second before the boundary passes.
+#[tokio::test]
+async fn webhook_timestamp_just_inside_boundary_accepted() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Use a 30-second tolerance. Send a timestamp 29 seconds ago — safely inside.
+    spawn_server_with_tolerance(nats_port, http_port, 30).await;
+
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        - 29_000; // 29s ago, tolerance is 30s
+
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{ts_ms}}}"#);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "timestamp just inside tolerance must be accepted; got {}",
         resp.status()
     );
 }
