@@ -858,6 +858,99 @@ mod tests {
         }
     }
 
+    /// `request_with_timeout()` must return `NatsError::Timeout` when the
+    /// client future never resolves and the timeout elapses.
+    #[tokio::test]
+    async fn request_with_timeout_returns_timeout_when_client_hangs() {
+        #[derive(Debug, Clone)]
+        struct LocalErr;
+        impl std::fmt::Display for LocalErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "local err")
+            }
+        }
+        impl std::error::Error for LocalErr {}
+
+        #[derive(Clone)]
+        struct HangingClient;
+
+        impl RequestClient for HangingClient {
+            type RequestError = LocalErr;
+
+            async fn request_with_headers<S: async_nats::subject::ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: bytes::Bytes,
+            ) -> Result<async_nats::Message, Self::RequestError> {
+                std::future::pending().await
+            }
+        }
+
+        let req = TestRequest {
+            message: "hi".to_string(),
+        };
+
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&HangingClient, "test.subj", &req, Duration::ZERO).await;
+
+        assert!(
+            matches!(result, Err(NatsError::Timeout { ref subject }) if subject == "test.subj"),
+            "expected NatsError::Timeout, got: {:?}",
+            result
+        );
+    }
+
+    /// `request_with_timeout()` must return `NatsError::Serialize` when
+    /// `serde_json::to_vec()` fails.  Uses a custom `Serialize` impl that
+    /// always returns an error to guarantee the failure regardless of
+    /// serde_json version.
+    #[tokio::test]
+    async fn request_with_timeout_returns_serialize_error_for_unserializable_request() {
+        struct AlwaysFailsSer;
+
+        impl serde::Serialize for AlwaysFailsSer {
+            fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("forced serialization failure"))
+            }
+        }
+
+        #[derive(Debug, Clone)]
+        struct LocalErr;
+        impl std::fmt::Display for LocalErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "local err")
+            }
+        }
+        impl std::error::Error for LocalErr {}
+
+        #[derive(Clone)]
+        struct UnreachableClient;
+
+        impl RequestClient for UnreachableClient {
+            type RequestError = LocalErr;
+
+            async fn request_with_headers<S: async_nats::subject::ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: bytes::Bytes,
+            ) -> Result<async_nats::Message, Self::RequestError> {
+                unreachable!("serialization error must abort before any client call")
+            }
+        }
+
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&UnreachableClient, "test.subj", &AlwaysFailsSer, Duration::from_secs(5))
+                .await;
+
+        assert!(
+            matches!(result, Err(NatsError::Serialize(_))),
+            "forced ser failure must produce NatsError::Serialize; got: {:?}",
+            result
+        );
+    }
+
     #[tokio::test]
     #[cfg(feature = "test-support")]
     async fn test_request_with_timeout_returns_timeout_error() {
