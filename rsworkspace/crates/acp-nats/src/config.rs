@@ -68,9 +68,11 @@ impl Config {
         self.prompt_timeout
     }
 
-    /// Returns the maximum concurrent prompt requests (backpressure limit).
+    /// Returns the maximum concurrent client tasks (backpressure limit).
+    ///
+    /// A minimum of 1 avoids misconfiguration that would permanently reject all client messages.
     pub fn max_concurrent_client_tasks(&self) -> usize {
-        self.max_concurrent_client_tasks
+        self.max_concurrent_client_tasks.max(1)
     }
 
     #[cfg(test)]
@@ -127,6 +129,13 @@ mod tests {
     fn config_default_max_concurrent_client_tasks_is_256() {
         let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats());
         assert_eq!(config.max_concurrent_client_tasks(), 256);
+    }
+
+    #[test]
+    fn config_max_concurrent_client_tasks_zero_is_clamped_to_one() {
+        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
+            .with_max_concurrent_client_tasks(0);
+        assert_eq!(config.max_concurrent_client_tasks(), 1);
     }
 
     #[test]
