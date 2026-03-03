@@ -38,9 +38,35 @@ pub mod agent {
     }
 }
 
+pub mod client {
+    pub fn session_update(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.session.update", prefix, session_id)
+    }
+
+    pub mod wildcards {
+        pub fn all(prefix: &str) -> String {
+            format!("{}.*.client.>", prefix)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::agent;
+    use super::client;
+
+    #[test]
+    fn client_session_update_subject() {
+        assert_eq!(
+            client::session_update("acp", "s1"),
+            "acp.s1.client.session.update"
+        );
+    }
+
+    #[test]
+    fn client_wildcards_all() {
+        assert_eq!(client::wildcards::all("foo"), "foo.*.client.>");
+    }
 
     #[test]
     fn initialize_subject() {
