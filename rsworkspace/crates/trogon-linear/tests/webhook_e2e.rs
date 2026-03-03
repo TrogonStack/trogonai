@@ -1424,6 +1424,215 @@ async fn webhook_negative_timestamp_skips_replay_check() {
     );
 }
 
+// ── Empty type / action ────────────────────────────────────────────────────────
+
+/// A `type` field that is an empty string must be rejected with 400.
+/// Without validation the server would try to publish to `linear..create`
+/// (empty NATS subject token), which is an invalid subject.
+#[tokio::test]
+async fn webhook_empty_type_field_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let body = r#"{"type":"","action":"create","data":{}}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "empty 'type' must return 400; got {}", resp.status());
+}
+
+/// An `action` field that is an empty string must be rejected with 400.
+/// Without validation the server would publish to `linear.Issue.`
+/// (trailing-dot NATS subject), which is invalid.
+#[tokio::test]
+async fn webhook_empty_action_field_returns_400() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let body = r#"{"type":"Issue","action":"","data":{}}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 400, "empty 'action' must return 400; got {}", resp.status());
+}
+
+// ── webhookId as JSON null ─────────────────────────────────────────────────────
+
+/// A `webhookId` field with JSON `null` value must be treated the same as a
+/// missing field: the header `X-Linear-Webhook-Id` is set to `"unknown"`.
+#[tokio::test]
+async fn webhook_webhook_id_as_null_defaults_to_unknown() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+
+    let body = r#"{"type":"Issue","action":"create","data":{},"webhookId":null}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200, "null webhookId must be accepted; got {}", resp.status());
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for NATS message")
+        .expect("subscriber closed");
+
+    let webhook_id = msg
+        .headers
+        .as_ref()
+        .and_then(|h| h.get("X-Linear-Webhook-Id"))
+        .map(|v| v.as_str());
+
+    assert_eq!(webhook_id, Some("unknown"), "null webhookId must produce X-Linear-Webhook-Id: unknown");
+}
+
+// ── Timestamp exactly at boundary ─────────────────────────────────────────────
+
+/// A timestamp computed as `now - tolerance` is **always rejected** in an e2e
+/// test: by the time the server evaluates it, `age_ms = tolerance_ms + δ`
+/// where δ is the network/processing latency (always > 0).  The server check
+/// is strict `age_ms > tolerance_ms`, so once δ > 0 the request is stale.
+///
+/// This test documents that real-world "exactly at boundary" requests get 400.
+/// The strict `>` (rather than `>=`) only makes a difference at the nanosecond
+/// level, which is only verifiable in unit tests on the production code path.
+#[tokio::test]
+async fn webhook_timestamp_exactly_at_boundary_rejected_due_to_latency() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    // 10-second tolerance; compute timestamp exactly 10 000 ms ago.
+    spawn_server_with_tolerance(nats_port, http_port, 10).await;
+
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        - 10_000; // exactly at the boundary at time of computation
+
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{ts_ms}}}"#);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    // By the time the server evaluates the timestamp, age_ms > tolerance_ms
+    // because of the inherent processing delay, so it returns 400.
+    assert_eq!(
+        resp.status(),
+        400,
+        "timestamp at exact boundary is rejected in practice due to latency; got {}",
+        resp.status()
+    );
+}
+
+// ── Additional HTTP methods on /webhook ───────────────────────────────────────
+
+/// PUT /webhook must return 405 Method Not Allowed.
+#[tokio::test]
+async fn webhook_put_returns_405() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .put(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 405, "PUT /webhook must return 405; got {}", resp.status());
+}
+
+/// DELETE /webhook must return 405 Method Not Allowed.
+#[tokio::test]
+async fn webhook_delete_returns_405() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .delete(format!("http://127.0.0.1:{http_port}/webhook"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 405, "DELETE /webhook must return 405; got {}", resp.status());
+}
+
+/// PATCH /webhook must return 405 Method Not Allowed.
+#[tokio::test]
+async fn webhook_patch_returns_405() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    let resp = reqwest::Client::new()
+        .patch(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 405, "PATCH /webhook must return 405; got {}", resp.status());
+}
+
+// ── webhookTimestamp = 0 ──────────────────────────────────────────────────────
+
+/// A `webhookTimestamp` of 0 (Unix epoch, Jan 1 1970) must be rejected as
+/// a replay: its age is ~56 years, far beyond any reasonable tolerance.
+#[tokio::test]
+async fn webhook_zero_timestamp_rejected() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server_with_tolerance(nats_port, http_port, 60).await;
+
+    let body = r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":0}"#;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        400,
+        "webhookTimestamp=0 (epoch) must be rejected as stale; got {}",
+        resp.status()
+    );
+}
+
 /// A `webhookTimestamp` just inside the tolerance boundary must be accepted.
 /// The check is `age_ms > tolerance_ms` (strict greater-than), so a timestamp
 /// exactly one second before the boundary passes.

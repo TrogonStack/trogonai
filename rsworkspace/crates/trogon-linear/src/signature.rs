@@ -58,4 +58,18 @@ mod tests {
         let sig = compute_sig("secret", b"");
         assert!(verify("secret", b"", &sig));
     }
+
+    #[test]
+    fn uppercase_hex_signature_passes() {
+        let sig = compute_sig("secret", b"body");
+        assert!(verify("secret", b"body", &sig.to_uppercase()));
+    }
+
+    #[test]
+    fn truncated_signature_fails() {
+        let sig = compute_sig("secret", b"body");
+        // Remove last two hex chars (one byte) — wrong length, verify_slice must reject
+        let truncated = &sig[..sig.len() - 2];
+        assert!(!verify("secret", b"body", truncated));
+    }
 }
