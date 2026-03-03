@@ -704,6 +704,61 @@ async fn webhook_recovers_when_jetstream_stream_is_gone() {
     );
 }
 
+/// After the recovery path (stream deleted → ack fails → ensure_stream →
+/// retry), the retried publish must arrive on the correct NATS subject with
+/// the correct headers and body — not just return HTTP 200.
+#[tokio::test]
+async fn webhook_recovery_publishes_correct_message_to_nats() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let nats = spawn_server(nats_port, http_port, None).await;
+
+    // Subscribe to the expected subject BEFORE triggering the recovery path.
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
+
+    // Delete the stream to force the recovery path.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+
+    let body = r#"{"type":"Issue","action":"create","webhookId":"wh-42","data":{}}"#;
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(resp.status(), 200);
+
+    // The retried publish must arrive on the correct subject.
+    let msg = tokio::time::timeout(Duration::from_secs(3), sub.next())
+        .await
+        .expect("timed out waiting for NATS message after recovery")
+        .expect("subscriber closed");
+
+    // Subject
+    assert_eq!(msg.subject.as_str(), "linear.Issue.create");
+    // Body preserved
+    assert_eq!(msg.payload.as_ref(), body.as_bytes());
+    // Headers
+    let headers = msg.headers.expect("no headers on retried message");
+    assert_eq!(
+        headers.get("X-Linear-Type").map(|v| v.as_str()),
+        Some("Issue")
+    );
+    assert_eq!(
+        headers.get("X-Linear-Action").map(|v| v.as_str()),
+        Some("create")
+    );
+    assert_eq!(
+        headers.get("X-Linear-Webhook-Id").map(|v| v.as_str()),
+        Some("wh-42")
+    );
+}
+
 /// When NATS is started without `--jetstream`, `ensure_stream` fails and
 /// `serve()` must return `Err` immediately.
 #[tokio::test]
