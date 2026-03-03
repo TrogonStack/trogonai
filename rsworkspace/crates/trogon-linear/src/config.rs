@@ -134,4 +134,27 @@ mod tests {
 
         assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
     }
+
+    #[test]
+    fn invalid_tolerance_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "not-a-number");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(
+            config.timestamp_tolerance,
+            Some(Duration::from_secs(DEFAULT_TIMESTAMP_TOLERANCE_SECS))
+        );
+    }
+
+    #[test]
+    fn port_overflow_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_PORT", "65536"); // u16::MAX is 65535
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.port, DEFAULT_PORT);
+    }
 }
