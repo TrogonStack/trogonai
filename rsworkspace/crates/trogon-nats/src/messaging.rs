@@ -377,11 +377,13 @@ mod tests {
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
+    #[allow(dead_code)]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
+    #[allow(dead_code)]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,

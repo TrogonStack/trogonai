@@ -2246,3 +2246,98 @@ async fn webhook_message_is_persisted_after_stream_recovery() {
     assert_eq!(msg.subject.as_str(), "linear.Issue.create");
     assert_eq!(msg.payload.as_ref(), body.as_bytes());
 }
+
+// ── ACK / stream-operation timeout error paths ────────────────────────────────
+
+/// Helper: spawn the server with custom ACK and stream-op timeouts.
+async fn spawn_server_with_timeouts(
+    nats_port: u16,
+    http_port: u16,
+    secret: Option<&str>,
+    ack_timeout: Duration,
+    stream_op_timeout: Duration,
+) -> async_nats::Client {
+    let mut config = make_config(nats_port, http_port, secret);
+    config.nats_ack_timeout = ack_timeout;
+    config.nats_stream_op_timeout = stream_op_timeout;
+    let nats_for_server = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
+    wait_for_port(http_port, Duration::from_secs(5)).await;
+    nats_client(nats_port).await
+}
+
+/// When the JetStream ACK does not arrive within `ack_timeout`, the server must
+/// return 500 Internal Server Error.
+///
+/// Setting `ack_timeout = Duration::ZERO` ensures the timeout fires before the
+/// ACK is received (the future is never ready on its first poll for a
+/// network-round-trip operation).
+#[tokio::test]
+async fn webhook_ack_timeout_returns_500() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Zero ack_timeout → every ACK wait times out immediately.
+    spawn_server_with_timeouts(nats_port, http_port, None, Duration::ZERO, Duration::from_secs(10))
+        .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        500,
+        "ACK timeout must return 500; got {}",
+        resp.status()
+    );
+}
+
+/// When the JetStream stream is gone (ACK fails) and the `stream_op_timeout`
+/// expires before `ensure_stream` can re-create it, the server must return 500.
+///
+/// Setup:
+/// - Delete the stream so the publish ACK returns an error immediately.
+/// - Set `stream_op_timeout = Duration::ZERO` so the `get_or_create_stream`
+///   call times out on its first async poll (before any network round-trip).
+/// - `ack_timeout` is kept large (5 s) so the ACK *error* arrives (stream not
+///   found) rather than timing out — ensuring we reach the recovery branch.
+#[tokio::test]
+async fn webhook_stream_recreation_timeout_returns_500() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // ack_timeout = 5 s: enough to receive the "stream not found" ack error.
+    // stream_op_timeout = 0: ensure_stream immediately times out.
+    let nats = spawn_server_with_timeouts(
+        nats_port,
+        http_port,
+        None,
+        Duration::from_secs(5),
+        Duration::ZERO,
+    )
+    .await;
+
+    // Delete the stream so the ack returns an error → triggers recovery path.
+    let js = async_nats::jetstream::new(nats);
+    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(
+        resp.status(),
+        500,
+        "stream recreation timeout must return 500; got {}",
+        resp.status()
+    );
+}

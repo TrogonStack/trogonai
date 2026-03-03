@@ -185,6 +185,38 @@ mod tests {
         assert!(matches!(config.auth, NatsAuth::None));
     }
 
+    /// A `NATS_URL` consisting only of commas and whitespace produces an empty
+    /// server list after the trim+filter step.  Callers are responsible for
+    /// detecting this before attempting a connection.
+    #[test]
+    fn from_env_nats_url_all_whitespace_and_commas_produces_empty_servers() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "  ,  ,  ");
+
+        let config = NatsConfig::from_env(&env);
+
+        assert!(
+            config.servers.is_empty(),
+            "all-whitespace NATS_URL should produce an empty server list; got {:?}",
+            config.servers
+        );
+    }
+
+    /// An explicit empty string for `NATS_URL` also results in an empty list.
+    #[test]
+    fn from_env_nats_url_empty_string_produces_empty_servers() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "");
+
+        let config = NatsConfig::from_env(&env);
+
+        assert!(
+            config.servers.is_empty(),
+            "empty NATS_URL should produce an empty server list; got {:?}",
+            config.servers
+        );
+    }
+
     #[test]
     fn description_matches_variant() {
         assert_eq!(
