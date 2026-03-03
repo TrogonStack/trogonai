@@ -72,4 +72,29 @@ mod tests {
         let truncated = &sig[..sig.len() - 2];
         assert!(!verify("secret", b"body", truncated));
     }
+
+    /// An odd-length hex string consists only of valid hex characters but
+    /// cannot be decoded (each byte needs exactly two nibbles).
+    /// `hex::decode` returns an error → `verify` must return false.
+    #[test]
+    fn odd_length_hex_fails() {
+        assert!(!verify("secret", b"body", "abc"));   // 3 valid hex chars
+        assert!(!verify("secret", b"body", "abcde")); // 5 valid hex chars
+        assert!(!verify("secret", b"body", "a"));     // 1 valid hex char
+    }
+
+    /// HMAC-SHA256 is well-defined for an empty key.  `verify` must succeed
+    /// when both sides use the same (empty) secret.
+    #[test]
+    fn empty_secret_computes_and_verifies() {
+        let sig = compute_sig("", b"hello");
+        assert!(verify("", b"hello", &sig));
+    }
+
+    /// A wrong body with an empty secret must still fail.
+    #[test]
+    fn empty_secret_wrong_body_fails() {
+        let sig = compute_sig("", b"original");
+        assert!(!verify("", b"tampered", &sig));
+    }
 }
