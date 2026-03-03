@@ -839,6 +839,64 @@ async fn spawn_server_with_tolerance(
     nats_client(nats_port).await
 }
 
+/// After a full NATS server restart the JetStream stream is lost (NATS stores
+/// it in memory by default in the test image).  async-nats reconnects at the
+/// TCP level, but every subsequent `publish_with_headers` returns an error
+/// because no stream matches the subject any more.
+///
+/// The server therefore continues to return 500 after NATS comes back — it
+/// can only recover by being restarted (so `ensure_stream` runs again).
+#[tokio::test]
+async fn webhook_returns_500_after_nats_full_restart() {
+    let (container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    spawn_server(nats_port, http_port, None).await;
+
+    // 1. Normal operation — must succeed.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await
+        .expect("pre-stop request failed");
+    assert_eq!(resp.status(), 200, "expected 200 before NATS stops; got {}", resp.status());
+
+    // 2. Stop NATS and wait for TCP connection to drop.
+    container.stop().await.expect("failed to stop NATS container");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // 3. Restart NATS — stream is gone (ephemeral JetStream state).
+    container.start().await.expect("failed to restart NATS container");
+
+    // 4. Wait for async-nats to reconnect at the TCP level.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // 5. Server returns 500: async-nats is connected but the JetStream stream
+    //    no longer exists, so publish_with_headers fails.
+    let resp = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(r#"{"type":"Issue","action":"create","data":{}}"#)
+        .send()
+        .await;
+    match resp {
+        Ok(r) => assert_eq!(
+            r.status(),
+            500,
+            "server must return 500 after NATS full restart (stream gone); got {}",
+            r.status()
+        ),
+        Err(e) if e.is_timeout() => {
+            panic!("server hung after NATS restart — handler must not block: {e}")
+        }
+        Err(e) => panic!("unexpected HTTP error after NATS restart: {e}"),
+    }
+}
+
 /// When the NATS connection is lost while the server is running, a webhook
 /// request must complete (returning 500) and must NOT hang indefinitely.
 #[tokio::test]
