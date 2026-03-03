@@ -167,4 +167,96 @@ mod tests {
 
         assert_eq!(config.stream_max_age, Duration::from_secs(0));
     }
+
+    // ── Parser edge cases: port ───────────────────────────────────────────────
+
+    #[test]
+    fn negative_port_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_PORT", "-1");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn float_port_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_PORT", "8080.5");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn port_with_trailing_chars_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_PORT", "8080abc");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.port, DEFAULT_PORT);
+    }
+
+    // ── Parser edge cases: max_age ────────────────────────────────────────────
+
+    #[test]
+    fn negative_max_age_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_STREAM_MAX_AGE_SECS", "-1");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
+    }
+
+    #[test]
+    fn float_max_age_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_STREAM_MAX_AGE_SECS", "3600.5");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
+    }
+
+    // ── Parser edge cases: timestamp tolerance ────────────────────────────────
+
+    #[test]
+    fn tolerance_secs_one_is_minimum_non_zero() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "1");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(config.timestamp_tolerance, Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn negative_tolerance_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "-1");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(
+            config.timestamp_tolerance,
+            Some(Duration::from_secs(DEFAULT_TIMESTAMP_TOLERANCE_SECS))
+        );
+    }
+
+    #[test]
+    fn float_tolerance_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", "60.5");
+
+        let config = LinearConfig::from_env(&env);
+
+        assert_eq!(
+            config.timestamp_tolerance,
+            Some(Duration::from_secs(DEFAULT_TIMESTAMP_TOLERANCE_SECS))
+        );
+    }
 }
