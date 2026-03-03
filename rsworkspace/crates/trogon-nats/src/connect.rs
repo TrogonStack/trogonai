@@ -275,4 +275,28 @@ mod tests {
             "ConnectionFailed must expose a source error"
         );
     }
+
+    /// Calling `connect()` with `NatsAuth::Credentials` pointing to a
+    /// non-existent file must return `ConnectError::InvalidCredentials`
+    /// (exercises the `Err(e)` branch of `with_credentials_file()`).
+    #[tokio::test]
+    async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
+        let config = NatsConfig::new(
+            vec!["nats://127.0.0.1:4222".to_string()],
+            NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
+        );
+
+        let err = connect(&config, Duration::from_millis(100))
+            .await
+            .expect_err("expected an error for missing credentials file");
+
+        assert!(
+            matches!(err, ConnectError::InvalidCredentials(_)),
+            "missing credentials file must produce ConnectError::InvalidCredentials; got: {err}"
+        );
+        assert!(
+            err.to_string().contains("Failed to load credentials file"),
+            "error message must mention credentials file; got: {err}"
+        );
+    }
 }
