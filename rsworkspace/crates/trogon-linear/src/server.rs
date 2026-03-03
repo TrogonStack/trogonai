@@ -18,6 +18,8 @@ struct AppState {
     timestamp_tolerance: Option<Duration>,
     stream_name: String,
     stream_max_age: Duration,
+    ack_timeout: Duration,
+    stream_op_timeout: Duration,
 }
 
 /// Starts the Linear webhook HTTP server.
@@ -41,6 +43,8 @@ pub async fn serve(
         timestamp_tolerance: config.timestamp_tolerance,
         stream_name: config.stream_name,
         stream_max_age: config.stream_max_age,
+        ack_timeout: config.nats_ack_timeout,
+        stream_op_timeout: config.nats_stream_op_timeout,
     };
 
     let app = Router::new()
@@ -287,15 +291,13 @@ async fn handle_webhook(
     nats_headers.insert("X-Linear-Action", action.as_str());
     nats_headers.insert("X-Linear-Webhook-Id", webhook_id.as_str());
 
-    const NATS_ACK_TIMEOUT: Duration = Duration::from_secs(10);
-
     match state
         .js
         .publish_with_headers(subject.clone(), nats_headers, body.clone())
         .await
     {
         Ok(ack_future) => {
-            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+            match tokio::time::timeout(state.ack_timeout, ack_future).await {
                 Ok(Ok(_)) => {
                     info!("Published Linear event to NATS");
                     StatusCode::OK
@@ -305,7 +307,7 @@ async fn handle_webhook(
                     // Re-create the stream and retry the publish once.
                     warn!(error = %e, "NATS ack failed — attempting stream re-creation");
                     let recreate = tokio::time::timeout(
-                        NATS_ACK_TIMEOUT,
+                        state.stream_op_timeout,
                         ensure_stream(
                             &state.js,
                             &state.stream_name,
@@ -335,7 +337,7 @@ async fn handle_webhook(
                         .await
                     {
                         Ok(ack_future) => {
-                            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+                            match tokio::time::timeout(state.ack_timeout, ack_future).await {
                                 Ok(Ok(_)) => {
                                     info!("Published Linear event to NATS after stream re-creation");
                                     StatusCode::OK
@@ -357,7 +359,7 @@ async fn handle_webhook(
                     }
                 }
                 Err(_) => {
-                    warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
+                    warn!(ack_timeout_ms = state.ack_timeout.as_millis(), "NATS ack timed out");
                     StatusCode::INTERNAL_SERVER_ERROR
                 }
             }

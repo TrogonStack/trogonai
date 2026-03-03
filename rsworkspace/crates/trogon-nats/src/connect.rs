@@ -283,4 +283,44 @@ mod tests {
             }
         }
     }
+
+    /// Display for `ConnectionFailed` must include the server list and the
+    /// underlying async-nats error message.
+    #[tokio::test]
+    async fn connect_error_display_connection_failed() {
+        let raw_err = async_nats::connect("nats://127.0.0.1:1")
+            .await
+            .expect_err("expected connection refused on port 1");
+
+        let servers = vec!["nats://127.0.0.1:1".to_string()];
+        let err = ConnectError::ConnectionFailed {
+            servers: servers.clone(),
+            error: raw_err,
+        };
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Failed to connect to NATS servers"),
+            "display missing prefix; got: {msg}"
+        );
+        assert!(msg.contains("127.0.0.1:1"), "display missing server; got: {msg}");
+    }
+
+    /// `source()` on `ConnectionFailed` must return `Some`.
+    #[tokio::test]
+    async fn connect_error_source_connection_failed() {
+        let raw_err = async_nats::connect("nats://127.0.0.1:1")
+            .await
+            .expect_err("expected connection refused on port 1");
+
+        let err = ConnectError::ConnectionFailed {
+            servers: vec!["nats://127.0.0.1:1".to_string()],
+            error: raw_err,
+        };
+
+        assert!(
+            std::error::Error::source(&err).is_some(),
+            "ConnectionFailed must expose a source error"
+        );
+    }
 }
