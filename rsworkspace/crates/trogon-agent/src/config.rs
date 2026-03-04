@@ -22,6 +22,10 @@ pub struct AgentConfig {
     pub model: String,
     /// Maximum number of tool-use iterations before giving up.
     pub max_iterations: u32,
+    /// JetStream stream name for GitHub events (default: `GITHUB`).
+    pub github_stream_name: Option<String>,
+    /// JetStream stream name for Linear events (default: `LINEAR`).
+    pub linear_stream_name: Option<String>,
 }
 
 impl AgentConfig {
@@ -43,6 +47,8 @@ impl AgentConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_MAX_ITERATIONS),
+            github_stream_name: env.var("GITHUB_STREAM_NAME").ok(),
+            linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
         }
     }
 }
@@ -63,6 +69,8 @@ mod tests {
         assert!(cfg.anthropic_token.is_empty());
         assert!(cfg.github_token.is_empty());
         assert!(cfg.linear_token.is_empty());
+        assert!(cfg.github_stream_name.is_none());
+        assert!(cfg.linear_stream_name.is_none());
     }
 
     #[test]
@@ -83,6 +91,17 @@ mod tests {
         assert_eq!(cfg.linear_token, "tok_linear_prod_qrs");
         assert_eq!(cfg.model, "claude-haiku-4-5-20251001");
         assert_eq!(cfg.max_iterations, 5);
+    }
+
+    #[test]
+    fn stream_names_override_defaults() {
+        let env = InMemoryEnv::new();
+        env.set("GITHUB_STREAM_NAME", "GH_EVENTS");
+        env.set("LINEAR_STREAM_NAME", "LIN_EVENTS");
+
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.github_stream_name.as_deref(), Some("GH_EVENTS"));
+        assert_eq!(cfg.linear_stream_name.as_deref(), Some("LIN_EVENTS"));
     }
 
     #[test]
