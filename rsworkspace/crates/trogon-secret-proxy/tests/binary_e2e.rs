@@ -6336,6 +6336,12 @@ async fn binary_base_url_override_with_trailing_slash_is_normalized() {
 /// NOTE: This test requires port 8080 to be available on the test host.
 #[tokio::test]
 async fn binary_invalid_proxy_port_falls_back_to_8080() {
+    // Guard: port 8080 must be free for the proxy to bind its fallback address.
+    assert!(
+        tokio::net::TcpStream::connect("127.0.0.1:8080").await.is_err(),
+        "Port 8080 is already in use — stop any proxy running on that port before running this test"
+    );
+
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
