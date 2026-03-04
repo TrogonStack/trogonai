@@ -50,7 +50,7 @@ jobs:
         uses: insightsengineering/coverage-action@v3
         with:
           path: rsworkspace/coverage.xml
-          threshold: 90
+          threshold: 95
           fail: true
           publish: true
           diff: true

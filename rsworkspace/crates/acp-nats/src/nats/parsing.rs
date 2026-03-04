@@ -21,6 +21,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_fs_read_text_file() {
+        let subject = "acp.sess123.client.fs.read_text_file";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(parsed.method, ClientMethod::FsReadTextFile);
+    }
+
+    #[test]
     fn test_parse_session_update() {
         let subject = "acp.sess123.client.session.update";
         let parsed = parse_client_subject(subject).unwrap();
@@ -62,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_parse_unknown_method() {
-        assert!(parse_client_subject("acp.sess123.client.fs.read_text_file").is_none());
+        assert!(parse_client_subject("acp.sess123.client.unknown.method").is_none());
     }
 
     #[test]

@@ -76,6 +76,8 @@ pub struct AdvancedMockNatsClient {
     /// Number of publishes to fail before succeeding. fail_next_publish() sets this to 1.
     /// Use fail_publish_count(n) to fail n times (e.g. 4 for standard retry: 1 + 3 retries).
     publish_fail_count: Arc<Mutex<u32>>,
+    /// Number of flushes to fail before succeeding. fail_next_flush() sets this to 1.
+    flush_fail_count: Arc<Mutex<u32>>,
 }
 
 impl std::fmt::Debug for AdvancedMockNatsClient {
@@ -91,6 +93,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
             )
             .field("should_fail_request", &self.should_fail_request)
             .field("publish_fail_count", &self.publish_fail_count)
+            .field("flush_fail_count", &self.flush_fail_count)
             .finish()
     }
 }
@@ -102,7 +105,12 @@ impl AdvancedMockNatsClient {
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
             publish_fail_count: Arc::new(Mutex::new(0)),
+            flush_fail_count: Arc::new(Mutex::new(0)),
         }
+    }
+
+    pub fn fail_next_flush(&self) {
+        *self.flush_fail_count.lock().unwrap() = 1;
     }
 
     pub fn fail_next_publish(&self) {
@@ -280,6 +288,18 @@ impl FlushClient for AdvancedMockNatsClient {
     type FlushError = MockError;
 
     async fn flush(&self) -> Result<(), MockError> {
+        let should_fail = {
+            let mut count = self.flush_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated flush failure".to_string()));
+        }
         self.base.flush().await
     }
 }

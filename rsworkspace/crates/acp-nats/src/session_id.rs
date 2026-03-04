@@ -91,6 +91,7 @@ impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::SessionId;
 
     #[test]
     fn acp_session_id_too_long_returns_err() {
@@ -140,8 +141,6 @@ mod tests {
 
     #[test]
     fn acp_session_id_try_from_session_id() {
-        use agent_client_protocol::SessionId;
-
         let valid = SessionId::from("valid-session");
         assert!(AcpSessionId::try_from(&valid).is_ok());
         assert_eq!(
