@@ -3481,6 +3481,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-agent"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
