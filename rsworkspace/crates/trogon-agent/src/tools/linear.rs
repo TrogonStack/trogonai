@@ -1,16 +1,16 @@
 //! Linear API tools via GraphQL — all HTTP calls route through
 //! `trogon-secret-proxy`.
 //!
-//! URL pattern: `{proxy_url}/linear/api.linear.app/graphql`
+//! URL pattern: `{proxy_url}/linear/graphql`
 //!
 //! The proxy maps the `linear` provider prefix to `https://api.linear.app`,
-//! so the real API token is resolved from Vault at request time.
+//! forwarding `/linear/graphql` → `https://api.linear.app/graphql`.
 
 use serde_json::{Value, json};
 
 use super::ToolContext;
 
-const GRAPHQL_PATH: &str = "/linear/api.linear.app/graphql";
+const GRAPHQL_PATH: &str = "/linear/graphql";
 
 /// Fetch a Linear issue by ID.
 pub async fn get_issue(ctx: &ToolContext, input: &Value) -> Result<String, String> {
