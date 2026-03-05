@@ -1,4 +1,9 @@
+mod authenticate;
+mod cancel;
 mod initialize;
+mod load_session;
+mod new_session;
+mod set_session_mode;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient};
@@ -41,35 +46,23 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         initialize::handle(self, args).await
     }
 
-    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        authenticate::handle(self, args).await
     }
 
-    async fn new_session(&self, _args: NewSessionRequest) -> Result<NewSessionResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
+        new_session::handle(self, args).await
     }
 
-    async fn load_session(&self, _args: LoadSessionRequest) -> Result<LoadSessionResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
+        load_session::handle(self, args).await
     }
 
     async fn set_session_mode(
         &self,
-        _args: SetSessionModeRequest,
+        args: SetSessionModeRequest,
     ) -> Result<SetSessionModeResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+        set_session_mode::handle(self, args).await
     }
 
     async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
@@ -79,11 +72,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         ))
     }
 
-    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn cancel(&self, args: CancelNotification) -> Result<()> {
+        cancel::handle(self, args).await
     }
 
     async fn ext_method(&self, _args: ExtRequest) -> Result<ExtResponse> {
@@ -107,10 +97,7 @@ mod tests {
 
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{
-        Agent, AuthenticateRequest, CancelNotification, ExtNotification, ExtRequest,
-        LoadSessionRequest, NewSessionRequest, PromptRequest, SetSessionModeRequest,
-    };
+    use agent_client_protocol::{Agent, ExtNotification, ExtRequest, PromptRequest};
     use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
@@ -133,35 +120,10 @@ mod tests {
 
         assert!(
             bridge
-                .authenticate(AuthenticateRequest::new("test"))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .new_session(NewSessionRequest::new("."))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .load_session(LoadSessionRequest::new("s1", "."))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .set_session_mode(SetSessionModeRequest::new("s1", "m1"))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
                 .prompt(PromptRequest::new("s1", vec![]))
                 .await
                 .is_err()
         );
-        assert!(bridge.cancel(CancelNotification::new("s1")).await.is_err());
         assert!(
             bridge
                 .ext_method(ExtRequest::new("ext", empty_raw_value()))
@@ -176,7 +138,7 @@ mod tests {
         );
 
         let err = bridge
-            .authenticate(AuthenticateRequest::new("test"))
+            .prompt(PromptRequest::new("s1", vec![]))
             .await
             .unwrap_err();
         assert!(err.to_string().contains(msg));
