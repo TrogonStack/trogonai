@@ -4020,6 +4020,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-util",
+ "httpmock",
  "reqwest",
  "serde",
  "serde_json",
