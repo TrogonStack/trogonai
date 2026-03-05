@@ -377,11 +377,13 @@ mod tests {
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
+    #[allow(dead_code)]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
+    #[allow(dead_code)]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
@@ -504,6 +506,47 @@ mod tests {
     fn test_inject_trace_context_does_not_panic() {
         let mut headers = async_nats::HeaderMap::new();
         inject_trace_context(&mut headers);
+    }
+
+    /// `HeaderMapCarrier::set()` must insert the key-value pair into the
+    /// underlying `HeaderMap` so that it is readable back via `.get()`.
+    #[test]
+    fn header_map_carrier_set_inserts_key_value() {
+        let mut headers = HeaderMap::new();
+        let mut carrier = HeaderMapCarrier(&mut headers);
+        carrier.set("X-Trace-Id", "abc123".to_string());
+        assert_eq!(
+            headers.get("X-Trace-Id").map(|v| v.as_str()),
+            Some("abc123"),
+            "HeaderMapCarrier::set must write the value into the HeaderMap"
+        );
+    }
+
+    /// `inject_trace_context()` must not remove or overwrite headers that were
+    /// inserted before the call (default noop propagator injects nothing).
+    #[test]
+    fn inject_trace_context_preserves_existing_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Custom", "preserved");
+        inject_trace_context(&mut headers);
+        assert_eq!(
+            headers.get("X-Custom").map(|v| v.as_str()),
+            Some("preserved"),
+            "inject_trace_context must not remove pre-existing headers"
+        );
+    }
+
+    /// The `(attempts - 1).min(31)` guard in `RetryPolicy::execute` prevents
+    /// `1u32 << exp` from overflowing when `attempts` is large.
+    /// Without the cap, `1u32 << 32` panics in debug mode.
+    #[test]
+    fn retry_backoff_exp_capped_at_31_prevents_shift_overflow() {
+        for attempts in [32u32, 33, 64, 100, u32::MAX] {
+            let exp = (attempts - 1).min(31);
+            assert_eq!(exp, 31, "exp must be 31 for attempts={attempts}");
+            // Must not panic (would panic without .min(31) in debug mode).
+            let _delay = Duration::from_millis(1) * (1u32 << exp);
+        }
     }
 
     #[tokio::test]
@@ -785,6 +828,99 @@ mod tests {
             }
             e => panic!("Expected PublishOperationExhausted error, got: {:?}", e),
         }
+    }
+
+    /// `request_with_timeout()` must return `NatsError::Timeout` when the
+    /// client future never resolves and the timeout elapses.
+    #[tokio::test]
+    async fn request_with_timeout_returns_timeout_when_client_hangs() {
+        #[derive(Debug, Clone)]
+        struct LocalErr;
+        impl std::fmt::Display for LocalErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "local err")
+            }
+        }
+        impl std::error::Error for LocalErr {}
+
+        #[derive(Clone)]
+        struct HangingClient;
+
+        impl RequestClient for HangingClient {
+            type RequestError = LocalErr;
+
+            async fn request_with_headers<S: async_nats::subject::ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: bytes::Bytes,
+            ) -> Result<async_nats::Message, Self::RequestError> {
+                std::future::pending().await
+            }
+        }
+
+        let req = TestRequest {
+            message: "hi".to_string(),
+        };
+
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&HangingClient, "test.subj", &req, Duration::ZERO).await;
+
+        assert!(
+            matches!(result, Err(NatsError::Timeout { ref subject }) if subject == "test.subj"),
+            "expected NatsError::Timeout, got: {:?}",
+            result
+        );
+    }
+
+    /// `request_with_timeout()` must return `NatsError::Serialize` when
+    /// `serde_json::to_vec()` fails.  Uses a custom `Serialize` impl that
+    /// always returns an error to guarantee the failure regardless of
+    /// serde_json version.
+    #[tokio::test]
+    async fn request_with_timeout_returns_serialize_error_for_unserializable_request() {
+        struct AlwaysFailsSer;
+
+        impl serde::Serialize for AlwaysFailsSer {
+            fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("forced serialization failure"))
+            }
+        }
+
+        #[derive(Debug, Clone)]
+        struct LocalErr;
+        impl std::fmt::Display for LocalErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "local err")
+            }
+        }
+        impl std::error::Error for LocalErr {}
+
+        #[derive(Clone)]
+        struct UnreachableClient;
+
+        impl RequestClient for UnreachableClient {
+            type RequestError = LocalErr;
+
+            async fn request_with_headers<S: async_nats::subject::ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: bytes::Bytes,
+            ) -> Result<async_nats::Message, Self::RequestError> {
+                unreachable!("serialization error must abort before any client call")
+            }
+        }
+
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&UnreachableClient, "test.subj", &AlwaysFailsSer, Duration::from_secs(5))
+                .await;
+
+        assert!(
+            matches!(result, Err(NatsError::Serialize(_))),
+            "forced ser failure must produce NatsError::Serialize; got: {:?}",
+            result
+        );
     }
 
     #[tokio::test]

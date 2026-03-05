@@ -394,4 +394,75 @@ mod tests {
         assert_eq!(err.to_string(), "test");
         assert!(std::error::Error::source(&err).is_none());
     }
+
+    /// `fail_publish_count(0)` must not fail any publish — the counter starts
+    /// at 0 and publishes succeed immediately.
+    #[tokio::test]
+    async fn advanced_mock_fail_publish_count_zero_does_not_fail() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_publish_count(0);
+
+        let result = mock
+            .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
+            .await;
+
+        assert!(result.is_ok(), "fail_publish_count(0) must not fail any publish");
+        assert_eq!(mock.published_messages(), vec!["foo"]);
+    }
+
+    /// `set_response()` called twice for the same subject must overwrite —
+    /// only the second payload is returned on request.
+    #[tokio::test]
+    async fn advanced_mock_set_response_overwrites_previous() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.set_response("sub", bytes::Bytes::from("first"));
+        mock.set_response("sub", bytes::Bytes::from("second"));
+
+        let msg = mock
+            .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
+            .await
+            .expect("expected a response");
+
+        assert_eq!(
+            msg.payload,
+            bytes::Bytes::from("second"),
+            "second set_response must overwrite the first"
+        );
+    }
+
+    /// `set_response()` with an empty `Bytes::new()` payload — the returned
+    /// message must have an empty payload and `length == 0`.
+    #[tokio::test]
+    async fn advanced_mock_set_response_with_empty_payload() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.set_response("sub", bytes::Bytes::new());
+
+        let msg = mock
+            .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
+            .await
+            .expect("expected a response for empty payload");
+
+        assert!(msg.payload.is_empty(), "payload must be empty");
+        assert_eq!(msg.length, 0, "length must be 0 for empty payload");
+    }
+
+    /// `fail_next_request()` causes exactly one failure, then the next
+    /// request succeeds (if a response is configured).
+    #[tokio::test]
+    async fn advanced_mock_fail_next_request_fails_once_then_succeeds() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.set_response("sub", bytes::Bytes::from("ok"));
+        mock.fail_next_request();
+
+        let first = mock
+            .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
+            .await;
+        assert!(first.is_err(), "first request must fail");
+
+        let second = mock
+            .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
+            .await;
+        assert!(second.is_ok(), "second request must succeed after the flag is cleared");
+        assert_eq!(second.unwrap().payload, bytes::Bytes::from("ok"));
+    }
 }

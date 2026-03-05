@@ -232,42 +232,66 @@ mod tests {
 
     /// `ConnectError::ConnectionFailed` display must include both the server
     /// list and the inner error message.  Source must return `Some`.
-    ///
-    /// We obtain a real `async_nats::ConnectError` by attempting to connect to
-    /// a port that is almost certainly not listening, **without**
-    /// `retry_on_initial_connect()` so the call returns immediately.
     #[tokio::test]
-    async fn connect_error_connection_failed_display_and_source() {
-        // Use a port in the ephemeral range that is unlikely to be in use.
-        let bad_addr = "nats://127.0.0.1:19122";
+    async fn connect_error_display_connection_failed() {
+        let raw_err = async_nats::connect("nats://127.0.0.1:1")
+            .await
+            .expect_err("expected connection refused on port 1");
 
-        // Call async_nats directly — without retry_on_initial_connect() the
-        // connection attempt fails immediately when the server is absent.
-        let result = async_nats::ConnectOptions::new()
-            .connect(bad_addr)
-            .await;
+        let servers = vec!["nats://127.0.0.1:1".to_string()];
+        let err = ConnectError::ConnectionFailed {
+            servers: servers.clone(),
+            error: raw_err,
+        };
 
-        match result {
-            Err(nats_err) => {
-                let err = ConnectError::ConnectionFailed {
-                    servers: vec![bad_addr.to_string()],
-                    error: nats_err,
-                };
-                let msg = err.to_string();
-                assert!(
-                    msg.contains("Failed to connect to NATS servers"),
-                    "display must mention the failure: {}",
-                    msg
-                );
-                assert!(msg.contains("19122"), "display must include the server: {}", msg);
-                assert!(
-                    std::error::Error::source(&err).is_some(),
-                    "source() must expose the inner async_nats error"
-                );
-            }
-            Ok(_) => {
-                // A server happened to be running on port 19122; skip.
-            }
-        }
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Failed to connect to NATS servers"),
+            "display missing prefix; got: {msg}"
+        );
+        assert!(msg.contains("127.0.0.1:1"), "display missing server; got: {msg}");
+    }
+
+    /// `source()` on `ConnectionFailed` must return `Some` so callers can
+    /// inspect the root cause via the standard error chain.
+    #[tokio::test]
+    async fn connect_error_source_connection_failed() {
+        let raw_err = async_nats::connect("nats://127.0.0.1:1")
+            .await
+            .expect_err("expected connection refused on port 1");
+
+        let err = ConnectError::ConnectionFailed {
+            servers: vec!["nats://127.0.0.1:1".to_string()],
+            error: raw_err,
+        };
+
+        assert!(
+            std::error::Error::source(&err).is_some(),
+            "ConnectionFailed must expose a source error"
+        );
+    }
+
+    /// Calling `connect()` with `NatsAuth::Credentials` pointing to a
+    /// non-existent file must return `ConnectError::InvalidCredentials`
+    /// (exercises the `Err(e)` branch of `with_credentials_file()`).
+    #[tokio::test]
+    async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
+        let config = NatsConfig::new(
+            vec!["nats://127.0.0.1:4222".to_string()],
+            NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
+        );
+
+        let err = connect(&config, Duration::from_millis(100))
+            .await
+            .expect_err("expected an error for missing credentials file");
+
+        assert!(
+            matches!(err, ConnectError::InvalidCredentials(_)),
+            "missing credentials file must produce ConnectError::InvalidCredentials; got: {err}"
+        );
+        assert!(
+            err.to_string().contains("Failed to load credentials file"),
+            "error message must mention credentials file; got: {err}"
+        );
     }
 }
