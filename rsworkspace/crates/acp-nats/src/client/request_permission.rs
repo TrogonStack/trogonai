@@ -196,8 +196,8 @@ mod tests {
     use super::*;
     use agent_client_protocol::{
         ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind,
-        RequestPermissionOutcome, RequestPermissionResponse, SessionNotification, ToolCallUpdate,
-        ToolCallUpdateFields, SessionUpdate,
+        RequestPermissionOutcome, RequestPermissionResponse, SessionNotification, SessionUpdate,
+        ToolCallUpdate, ToolCallUpdateFields,
     };
     use std::error::Error;
     use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
