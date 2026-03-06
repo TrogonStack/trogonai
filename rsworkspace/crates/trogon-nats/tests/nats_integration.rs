@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync};
+use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
 use trogon_nats::{
     ConnectError, FlushClient, NatsAuth, NatsConfig, PublishClient, PublishOptions,
     SubscribeClient, connect, publish, request_with_timeout,
@@ -230,3 +230,68 @@ async fn connect_fails_on_invalid_credentials_file() {
         "expected InvalidCredentials variant"
     );
 }
+
+/// `NatsAuth::Token` connects successfully when the server requires a matching token.
+#[tokio::test]
+async fn connect_with_token_auth_succeeds() {
+    let token = "secret-nats-token";
+    let container = Nats::default()
+        .with_cmd(["--auth", token])
+        .start()
+        .await
+        .expect("Failed to start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+
+    let config = NatsConfig::new(
+        vec![format!("127.0.0.1:{port}")],
+        NatsAuth::Token(token.to_string()),
+    );
+
+    let result = connect(&config, Duration::from_secs(5)).await;
+    assert!(result.is_ok(), "Token auth must succeed with correct token; got: {:?}", result.unwrap_err());
+
+    // Verify the client is functional.
+    let client = result.unwrap();
+    let pub_result = PublishClient::publish_with_headers(
+        &client,
+        "auth.token.test",
+        async_nats::HeaderMap::new(),
+        b"hello".as_ref().into(),
+    )
+    .await;
+    assert!(pub_result.is_ok(), "publish after token auth must succeed");
+}
+
+
+/// `NatsAuth::UserPassword` connects successfully when the server requires
+/// matching user/password credentials.
+#[tokio::test]
+async fn connect_with_user_password_auth_succeeds() {
+    let user = "trogon";
+    let password = "s3cret";
+    let container = Nats::default()
+        .with_cmd(["--user", user, "--pass", password])
+        .start()
+        .await
+        .expect("Failed to start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+
+    let config = NatsConfig::new(
+        vec![format!("127.0.0.1:{port}")],
+        NatsAuth::UserPassword { user: user.to_string(), password: password.to_string() },
+    );
+
+    let result = connect(&config, Duration::from_secs(5)).await;
+    assert!(result.is_ok(), "UserPassword auth must succeed with correct credentials; got: {:?}", result.unwrap_err());
+
+    let client = result.unwrap();
+    let pub_result = PublishClient::publish_with_headers(
+        &client,
+        "auth.userpass.test",
+        async_nats::HeaderMap::new(),
+        b"hello".as_ref().into(),
+    )
+    .await;
+    assert!(pub_result.is_ok(), "publish after user/password auth must succeed");
+}
+

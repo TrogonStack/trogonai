@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
 use crate::tools::{ToolDef, tool_def};
-use super::run_agent;
+use super::{fetch_memory, run_agent};
 
 /// Actions that trigger a review.
 const REVIEW_ACTIONS: &[&str] = &["opened", "reopened", "synchronize"];
@@ -48,16 +48,24 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let prompt = format!(
         "You are a code reviewer. Review the pull request #{pr_number} in {owner}/{repo}.\n\
-         1. Use `list_pr_files` to see which files changed.\n\
-         2. Use `get_pr_diff` to read the unified diff.\n\
-         3. Use `get_file_contents` when you need more context around a change.\n\
-         4. Post a concise, actionable review comment using `post_pr_comment`.\n\
+         1. Use `get_file_contents` with path `.trogon/memory.md` to load team conventions and prior decisions.\n\
+         2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
+         3. Use `list_pr_files` to see which files changed.\n\
+         4. Use `get_pr_diff` to read the unified diff.\n\
+         5. Use `get_file_contents` when you need more context around a change.\n\
+         6. Post a concise, actionable review comment using `post_pr_comment`.\n\
+         7. If you learned something important about the repo conventions, update `.trogon/memory.md`\n\
+            using `update_file` on a new branch, then open a PR with `create_pull_request`.\n\
          Focus on correctness, security, and clarity. Be constructive."
     );
 
     let tools = pr_review_tools();
 
-    match run_agent(agent, prompt, tools).await {
+    // Pre-fetch .trogon/memory.md and inject as Anthropic system prompt.
+    // Returns None gracefully when the file doesn't exist yet.
+    let memory = fetch_memory(agent, owner, repo).await;
+
+    match run_agent(agent, prompt, tools, memory).await {
         Ok(text) => {
             info!(pr_number, "PR review completed");
             Some(Ok(text))
@@ -112,6 +120,19 @@ fn pr_review_tools() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "get_pr_comments",
+            "Get all comments on a pull request — use this to recall prior decisions and context.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["owner", "repo", "pr_number"],
+                "properties": {
+                    "owner":     { "type": "string" },
+                    "repo":      { "type": "string" },
+                    "pr_number": { "type": "integer" }
+                }
+            }),
+        ),
+        tool_def(
             "post_pr_comment",
             "Post a comment on a pull request.",
             serde_json::json!({
@@ -125,6 +146,39 @@ fn pr_review_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
+        tool_def(
+            "update_file",
+            "Create or update a file in the repository. Use this to update .trogon/memory.md with learned context.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["owner", "repo", "path", "message", "content"],
+                "properties": {
+                    "owner":   { "type": "string" },
+                    "repo":    { "type": "string" },
+                    "path":    { "type": "string", "description": "File path (e.g. .trogon/memory.md)" },
+                    "message": { "type": "string", "description": "Commit message" },
+                    "content": { "type": "string", "description": "Full file content (plain UTF-8)" },
+                    "branch":  { "type": "string", "description": "Target branch. Defaults to main." },
+                    "sha":     { "type": "string", "description": "Current blob SHA — required when updating an existing file." }
+                }
+            }),
+        ),
+        tool_def(
+            "create_pull_request",
+            "Open a pull request. Use this to propose changes such as memory file updates.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["owner", "repo", "title", "head"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "title": { "type": "string", "description": "PR title" },
+                    "head":  { "type": "string", "description": "Branch containing the changes" },
+                    "base":  { "type": "string", "description": "Target branch. Defaults to main." },
+                    "body":  { "type": "string", "description": "PR description (Markdown)" }
+                }
+            }),
+        ),
     ]
 }
 
@@ -133,8 +187,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pr_review_tools_has_four_entries() {
-        assert_eq!(pr_review_tools().len(), 4);
+    fn pr_review_tools_has_seven_entries() {
+        assert_eq!(pr_review_tools().len(), 7);
+    }
+
+    #[test]
+    fn pr_review_tools_includes_memory_tools() {
+        let tools = pr_review_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"get_pr_comments"));
+        assert!(names.contains(&"update_file"));
+        assert!(names.contains(&"create_pull_request"));
     }
 
     #[test]

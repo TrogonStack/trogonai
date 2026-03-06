@@ -29,6 +29,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
         }),
+        memory_owner: None,
+        memory_repo: None,
     }
 }
 
@@ -56,7 +58,7 @@ async fn agent_loop_end_turn_returns_text() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent.run(vec![Message::user_text("Review this PR")], &no_tools()).await;
+    let result = agent.run(vec![Message::user_text("Review this PR")], &no_tools(), None).await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "LGTM — no issues found.");
@@ -81,7 +83,7 @@ async fn agent_loop_end_turn_joins_multiple_text_blocks() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent.run(vec![Message::user_text("hello")], &no_tools()).await.unwrap();
+    let result = agent.run(vec![Message::user_text("hello")], &no_tools(), None).await.unwrap();
     assert_eq!(result, "Line one.\nLine two.");
 }
 
@@ -136,7 +138,7 @@ async fn agent_loop_tool_use_then_end_turn() {
     )];
 
     let agent = make_agent(&server.base_url());
-    let result = agent.run(vec![Message::user_text("go")], &tools).await.unwrap();
+    let result = agent.run(vec![Message::user_text("go")], &tools, None).await.unwrap();
 
     assert_eq!(result, "Done after tool.");
     first.assert_hits_async(1).await;
@@ -177,9 +179,11 @@ async fn agent_loop_max_iterations_reached() {
             github_token: String::new(),
             linear_token: String::new(),
         }),
+        memory_owner: None,
+        memory_repo: None,
     };
 
-    let result = agent.run(vec![Message::user_text("loop")], &no_tools()).await;
+    let result = agent.run(vec![Message::user_text("loop")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
 }
 
@@ -199,7 +203,7 @@ async fn agent_loop_unexpected_stop_reason() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent.run(vec![Message::user_text("hi")], &no_tools()).await;
+    let result = agent.run(vec![Message::user_text("hi")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::UnexpectedStopReason(r)) if r == "stop_sequence"));
 }
 
@@ -216,7 +220,7 @@ async fn agent_loop_http_error_on_bad_response() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent.run(vec![Message::user_text("hi")], &no_tools()).await;
+    let result = agent.run(vec![Message::user_text("hi")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::Http(_))));
 }
 
@@ -239,7 +243,7 @@ async fn agent_loop_sends_opaque_token_not_real_key() {
     });
 
     let agent = make_agent(&server.base_url());
-    agent.run(vec![Message::user_text("hi")], &no_tools()).await.unwrap();
+    agent.run(vec![Message::user_text("hi")], &no_tools(), None).await.unwrap();
     mock.assert_hits_async(1).await;
 }
 
@@ -261,6 +265,6 @@ async fn agent_loop_sends_anthropic_version_header() {
     });
 
     let agent = make_agent(&server.base_url());
-    agent.run(vec![Message::user_text("hi")], &no_tools()).await.unwrap();
+    agent.run(vec![Message::user_text("hi")], &no_tools(), None).await.unwrap();
     mock.assert_hits_async(1).await;
 }

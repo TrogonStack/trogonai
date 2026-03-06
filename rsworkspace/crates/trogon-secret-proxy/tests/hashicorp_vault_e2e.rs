@@ -13,7 +13,7 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{
     core::ContainerPort, runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt,
 };
-use trogon_secret_proxy::{subjects, vault_admin};
+use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, vault_admin, worker};
 use trogon_vault::{ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, VaultAuth, VaultStore};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -67,6 +67,16 @@ async fn wait_for_vault(addr: &str) {
 
 async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     let container = Nats::default()
+        .start()
+        .await
+        .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+    (container, port)
+}
+
+async fn start_nats_with_jetstream() -> (ContainerAsync<Nats>, u16) {
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
         .start()
         .await
         .expect("Failed to start NATS container — is Docker running?");
@@ -359,6 +369,110 @@ async fn vault_admin_hashicorp_store_rotate_revoke_lifecycle() {
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "revoke: {v}");
     assert_eq!(store.resolve(&tok(token_str)).await.unwrap(), None);
+}
+
+/// Full HTTP proxy + worker pipeline backed by HashiCorp Vault.
+///
+/// All other pipeline tests use MemoryVault.  This is the only test that
+/// sends a real HTTP request through the proxy+worker with the worker
+/// resolving the opaque token via a live HashiCorp Vault instance.
+#[tokio::test]
+async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
+    let (_vault_container, vault_addr) = start_vault().await;
+    let (_nats_container, nats_port) = start_nats_with_jetstream().await;
+
+    // Mock AI provider — must receive the REAL key, not the opaque token.
+    let mock_server = httpmock::MockServer::start_async().await;
+    let ai_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-from-hashicorp");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"msg_hv","type":"message","content":[]}"#);
+        })
+        .await;
+
+    // Seed the token directly into HashiCorp Vault.
+    let store = Arc::new(make_store(&vault_addr).await);
+    let token = tok("tok_anthropic_prod_hvpipeline1");
+    store.store(&token, "sk-ant-from-hashicorp").await.unwrap();
+
+    // NATS + JetStream.
+    let nats = nats_client(nats_port).await;
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .expect("Failed to ensure PROXY_REQUESTS stream");
+
+    // Start proxy.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let proxy_state = ProxyState {
+        nats: nats.clone(),
+        jetstream: Arc::clone(&jetstream),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
+
+    // Start worker backed by HashiCorp Vault (not MemoryVault).
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let worker_js = Arc::clone(&jetstream);
+    let worker_nats = nats.clone();
+    let worker_vault = Arc::clone(&store);
+    let worker_stream = stream::stream_name("trogon");
+    tokio::spawn(async move {
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            http_client,
+            "hashicorp-pipeline-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Send an HTTP request through the proxy using the opaque token.
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
+        .header("Authorization", "Bearer tok_anthropic_prod_hvpipeline1")
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .expect("Request to proxy failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Proxy must return 200 when token resolves via HashiCorp Vault; got {}",
+        resp.status()
+    );
+
+    // The critical check: the mock only responds to Bearer sk-ant-from-hashicorp.
+    // If the worker used an empty MemoryVault or forwarded the opaque token
+    // unchanged, the mock would not match and this assertion would fail.
+    ai_mock.assert_async().await;
 }
 
 /// Invalid token sent to vault_admin must return an error, not panic.

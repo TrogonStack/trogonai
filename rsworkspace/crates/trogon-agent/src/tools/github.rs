@@ -116,6 +116,114 @@ pub async fn get_file_contents(ctx: &ToolContext, input: &Value) -> Result<Strin
     String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode error: {e}"))
 }
 
+/// Get all comments on a pull request (uses the Issues comments endpoint).
+///
+/// Returns a JSON array of comments — suitable for injecting as prior-conversation memory.
+pub async fn get_pr_comments(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+    let owner = input["owner"].as_str().ok_or("missing owner")?;
+    let repo = input["repo"].as_str().ok_or("missing repo")?;
+    let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
+
+    let url = format!(
+        "{}/github/repos/{owner}/{repo}/issues/{pr_number}/comments",
+        ctx.proxy_url,
+    );
+
+    let comments: Value = ctx
+        .http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    serde_json::to_string_pretty(&comments).map_err(|e| e.to_string())
+}
+
+/// Create or update a file in a repository.
+///
+/// If the file already exists, `sha` (the current blob SHA) must be provided.
+/// The `content` field must be plain UTF-8 text — this function base64-encodes it.
+pub async fn update_file(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+    let owner = input["owner"].as_str().ok_or("missing owner")?;
+    let repo = input["repo"].as_str().ok_or("missing repo")?;
+    let path = input["path"].as_str().ok_or("missing path")?;
+    let message = input["message"].as_str().ok_or("missing message")?;
+    let content = input["content"].as_str().ok_or("missing content")?;
+    let branch = input["branch"].as_str().unwrap_or("main");
+
+    let encoded = general_purpose::STANDARD.encode(content.as_bytes());
+
+    let mut body = serde_json::json!({
+        "message": message,
+        "content": encoded,
+        "branch": branch,
+    });
+
+    if let Some(sha) = input["sha"].as_str() {
+        body["sha"] = serde_json::json!(sha);
+    }
+
+    let url = format!(
+        "{}/github/repos/{owner}/{repo}/contents/{path}",
+        ctx.proxy_url,
+    );
+
+    let response: Value = ctx
+        .http_client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let commit_sha = response["commit"]["sha"].as_str().unwrap_or("(no sha)");
+    Ok(format!("File updated: {path} — commit {commit_sha}"))
+}
+
+/// Open a pull request.
+pub async fn create_pull_request(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+    let owner = input["owner"].as_str().ok_or("missing owner")?;
+    let repo = input["repo"].as_str().ok_or("missing repo")?;
+    let title = input["title"].as_str().ok_or("missing title")?;
+    let head = input["head"].as_str().ok_or("missing head")?;
+    let base = input["base"].as_str().unwrap_or("main");
+    let body = input["body"].as_str().unwrap_or("");
+
+    let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
+
+    let response: Value = ctx
+        .http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .json(&serde_json::json!({
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let html_url = response["html_url"].as_str().unwrap_or("(no url)");
+    let number = response["number"].as_u64().unwrap_or(0);
+    Ok(format!("Pull request #{number} opened: {html_url}"))
+}
+
 /// Post a comment on a pull request (uses the Issues comments endpoint).
 pub async fn post_pr_comment(ctx: &ToolContext, input: &Value) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
