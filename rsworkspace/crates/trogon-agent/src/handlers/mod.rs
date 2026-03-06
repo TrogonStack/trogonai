@@ -3,8 +3,12 @@
 //! Each handler receives a raw NATS message payload, extracts the relevant
 //! context, runs the agentic loop, and returns the final model output.
 
+pub mod ci_completed;
+pub mod comment_added;
 pub mod issue_triage;
+pub mod pr_merged;
 pub mod pr_review;
+pub mod push_to_branch;
 
 use std::sync::Arc;
 
