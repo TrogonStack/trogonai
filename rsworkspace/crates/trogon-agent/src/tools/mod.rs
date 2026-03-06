@@ -143,4 +143,18 @@ mod tests {
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
     }
+
+    /// `request_reviewers` is routed and returns a Tool error when inputs are missing.
+    #[tokio::test]
+    async fn dispatch_request_reviewers_routes_correctly() {
+        let ctx = ToolContext {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:8080".to_string(),
+            github_token: "tok_github_prod_test01".to_string(),
+            linear_token: "tok_linear_prod_test01".to_string(),
+        };
+        let result = dispatch_tool(&ctx, "request_reviewers", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
 }
