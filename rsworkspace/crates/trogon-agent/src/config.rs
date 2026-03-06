@@ -170,4 +170,71 @@ mod tests {
         let cfg = AgentConfig::from_env(&env);
         assert!(cfg.memory_path.is_none());
     }
+
+    #[test]
+    fn parse_mcp_servers_valid_input() {
+        let servers = parse_mcp_servers("search=http://localhost:3000,db=http://localhost:3001");
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name, "search");
+        assert_eq!(servers[0].url, "http://localhost:3000");
+        assert_eq!(servers[1].name, "db");
+        assert_eq!(servers[1].url, "http://localhost:3001");
+    }
+
+    #[test]
+    fn parse_mcp_servers_url_with_equals_sign() {
+        // URL contains '=' (e.g. query param) — splitn(2) must not split on it.
+        let servers = parse_mcp_servers("search=http://host/mcp?token=abc123");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "search");
+        assert_eq!(servers[0].url, "http://host/mcp?token=abc123");
+    }
+
+    #[test]
+    fn parse_mcp_servers_empty_string_returns_empty_vec() {
+        let servers = parse_mcp_servers("");
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn parse_mcp_servers_malformed_entry_ignored() {
+        // "no-equals" has no '=' so it's skipped; valid entry still parsed.
+        let servers = parse_mcp_servers("no-equals,valid=http://localhost:9000");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "valid");
+        assert_eq!(servers[0].url, "http://localhost:9000");
+    }
+
+    #[test]
+    fn parse_mcp_servers_whitespace_trimmed() {
+        let servers = parse_mcp_servers(" search = http://localhost:3000 ");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "search");
+        assert_eq!(servers[0].url, "http://localhost:3000");
+    }
+
+    #[test]
+    fn parse_mcp_servers_empty_name_or_url_ignored() {
+        // "=url" has empty name; "name=" has empty url — both skipped.
+        let servers = parse_mcp_servers("=http://localhost,name=,valid=http://ok");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "valid");
+    }
+
+    #[test]
+    fn mcp_servers_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("MCP_SERVERS", "tool=http://localhost:8080");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.mcp_servers.len(), 1);
+        assert_eq!(cfg.mcp_servers[0].name, "tool");
+        assert_eq!(cfg.mcp_servers[0].url, "http://localhost:8080");
+    }
+
+    #[test]
+    fn mcp_servers_empty_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.mcp_servers.is_empty());
+    }
 }
