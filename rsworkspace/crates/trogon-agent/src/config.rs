@@ -26,6 +26,12 @@ pub struct AgentConfig {
     pub github_stream_name: Option<String>,
     /// JetStream stream name for Linear events (default: `LINEAR`).
     pub linear_stream_name: Option<String>,
+    /// GitHub repo owner for reading `.trogon/memory.md` in Linear handlers
+    /// (e.g. `"my-org"`).  Not needed for PR handlers — they use the PR repo.
+    pub memory_owner: Option<String>,
+    /// GitHub repo name for reading `.trogon/memory.md` in Linear handlers
+    /// (e.g. `"my-repo"`).
+    pub memory_repo: Option<String>,
 }
 
 impl AgentConfig {
@@ -49,6 +55,8 @@ impl AgentConfig {
                 .unwrap_or(DEFAULT_MAX_ITERATIONS),
             github_stream_name: env.var("GITHUB_STREAM_NAME").ok(),
             linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
+            memory_owner: env.var("MEMORY_OWNER").ok(),
+            memory_repo: env.var("MEMORY_REPO").ok(),
         }
     }
 }

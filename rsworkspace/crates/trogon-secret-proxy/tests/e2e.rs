@@ -5356,3 +5356,125 @@ async fn e2e_real_key_in_response_body_is_not_filtered() {
 
     ai_mock.assert_async().await;
 }
+
+/// The worker retries upstream 5xx responses up to `HTTP_MAX_RETRIES` (3)
+/// times.  This test verifies the happy-path of that retry logic: the upstream
+/// returns 503 on the first two attempts and 200 on the third, so the proxy
+/// ultimately returns 200 to the caller.
+///
+/// Implementation note: httpmock's `matches` API only accepts raw function
+/// pointers (no closures), so we use a minimal custom axum server instead of
+/// httpmock to serve sequential responses controlled by an `Arc<AtomicU32>`.
+#[tokio::test]
+async fn e2e_worker_retries_transient_5xx_and_eventually_succeeds() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use axum::extract::State as AxumState;
+    use axum::http::StatusCode;
+
+    #[derive(Clone)]
+    struct SeqState {
+        call_count: Arc<AtomicU32>,
+    }
+
+    async fn seq_handler(AxumState(s): AxumState<SeqState>) -> (StatusCode, String) {
+        let n = s.call_count.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            (StatusCode::SERVICE_UNAVAILABLE, "upstream temporarily unavailable".into())
+        } else {
+            (StatusCode::OK, r#"{"id":"msg_retry_ok","type":"message"}"#.into())
+        }
+    }
+
+    let call_count = Arc::new(AtomicU32::new(0));
+    let seq_state = SeqState { call_count: Arc::clone(&call_count) };
+
+    let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mock_port = mock_listener.local_addr().unwrap().port();
+    let mock_url = format!("http://127.0.0.1:{mock_port}");
+
+    let mock_router: axum::Router = axum::Router::new()
+        .route("/v1/messages", axum::routing::post(seq_handler))
+        .with_state(seq_state);
+
+    tokio::spawn(async move {
+        axum::serve(mock_listener, mock_router).await.ok()
+    });
+
+    // ── NATS + proxy + worker ──────────────────────────────────────────────
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_retry01").unwrap();
+    vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{nats_port}")],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: Arc::clone(&jetstream),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_url),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.ok() });
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    tokio::spawn(async move {
+        worker::run(
+            jetstream,
+            nats,
+            vault,
+            http_client,
+            "e2e-retry-worker",
+            &stream::stream_name("trogon"),
+        )
+        .await
+        .expect("Worker error");
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
+        .header("Authorization", "Bearer tok_anthropic_test_retry01")
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .expect("Request to proxy failed");
+
+    assert_eq!(
+        resp.status(),
+        200,
+        "Proxy must return 200 after worker retried the transient 5xx; got {}",
+        resp.status()
+    );
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "msg_retry_ok");
+
+    // The mock must have been hit exactly 3 times: 503 × 2 then 200 × 1.
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        3,
+        "Worker must have made exactly 3 upstream attempts (2 × 503 + 1 × 200)"
+    );
+}

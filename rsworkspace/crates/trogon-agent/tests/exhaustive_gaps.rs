@@ -43,6 +43,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
         }),
+        memory_owner: None,
+        memory_repo: None,
     }
 }
 

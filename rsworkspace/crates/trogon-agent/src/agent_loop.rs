@@ -72,10 +72,38 @@ pub struct ToolResult {
     pub content: String,
 }
 
+/// A single block in the Anthropic `system` array.
+///
+/// Using an array (rather than a plain string) allows `cache_control` to be
+/// attached, which enables prompt caching on the system prompt.
+#[derive(Debug, Serialize)]
+struct SystemBlock<'a> {
+    #[serde(rename = "type")]
+    block_type: &'static str,
+    text: &'a str,
+    cache_control: CacheControl,
+}
+
+/// Anthropic prompt-caching control block (`{"type":"ephemeral"}`).
+#[derive(Debug, Clone, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: &'static str,
+}
+
+impl CacheControl {
+    const fn ephemeral() -> Self {
+        Self { cache_type: "ephemeral" }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct AnthropicRequest<'a> {
     model: &'a str,
     max_tokens: u32,
+    /// System prompt sent as a cacheable content block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<Vec<SystemBlock<'a>>>,
     tools: &'a [ToolDef],
     messages: &'a [Message],
 }
@@ -124,10 +152,19 @@ pub struct AgentLoop {
     pub max_iterations: u32,
     /// Shared context passed to every tool execution.
     pub tool_context: Arc<ToolContext>,
+    /// GitHub repo owner for pre-fetching `.trogon/memory.md` in handlers
+    /// that don't have an implicit repo (e.g. Linear issue triage).
+    pub memory_owner: Option<String>,
+    /// GitHub repo name for pre-fetching `.trogon/memory.md`.
+    pub memory_repo: Option<String>,
 }
 
 impl AgentLoop {
     /// Run the agentic loop starting from `initial_messages`.
+    ///
+    /// `system_prompt` is injected as the Anthropic `system` field — use it to
+    /// provide persistent memory (e.g. the contents of `.trogon/memory.md`).
+    /// Pass `None` when no system prompt is needed.
     ///
     /// Returns the final text produced by the model when it stops requesting
     /// tools.
@@ -135,16 +172,30 @@ impl AgentLoop {
         &self,
         initial_messages: Vec<Message>,
         tools: &[ToolDef],
+        system_prompt: Option<&str>,
     ) -> Result<String, AgentError> {
         let mut messages = initial_messages;
+
+        // Clone tools once and mark the last with cache_control so Anthropic
+        // caches the entire tool definitions block across repeated requests.
+        let mut cached_tools: Vec<ToolDef> = tools.to_vec();
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
+        }
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Agent loop iteration");
 
+            // Build the cacheable system block on each iteration (cheap — just wraps a &str).
+            let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
+                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+            });
+
             let request = AnthropicRequest {
                 model: &self.model,
                 max_tokens: 4096,
-                tools,
+                system,
+                tools: &cached_tools,
                 messages: &messages,
             };
 
@@ -272,5 +323,53 @@ mod tests {
         assert!(
             std::error::Error::source(&AgentError::MaxIterationsReached).is_none()
         );
+    }
+
+    /// When `system_prompt` is `Some`, the serialized request body contains a
+    /// `"system"` array with a single block whose `"type"` is `"text"` and
+    /// `"cache_control"` is `{"type":"ephemeral"}`.
+    #[test]
+    fn anthropic_request_serializes_system_block_when_present() {
+        use crate::tools::tool_def;
+        use serde_json::json;
+
+        let tools = vec![tool_def("t", "d", json!({"type": "object"}))];
+        let text = "You are helpful.";
+        let system: Option<Vec<SystemBlock<'_>>> = Some(vec![
+            SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() },
+        ]);
+        let req = AnthropicRequest {
+            model: "test-model",
+            max_tokens: 1024,
+            system,
+            tools: &tools,
+            messages: &[],
+        };
+        let body = serde_json::to_value(&req).unwrap();
+
+        let sys_arr = body["system"].as_array().expect("system should be an array");
+        assert_eq!(sys_arr.len(), 1);
+        assert_eq!(sys_arr[0]["type"], "text");
+        assert_eq!(sys_arr[0]["text"], text);
+        assert_eq!(sys_arr[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    /// When `system_prompt` is `None`, the `"system"` key is absent from the
+    /// serialized body (thanks to `skip_serializing_if = "Option::is_none"`).
+    #[test]
+    fn anthropic_request_omits_system_block_when_none() {
+        use crate::tools::tool_def;
+        use serde_json::json;
+
+        let tools = vec![tool_def("t", "d", json!({"type": "object"}))];
+        let req = AnthropicRequest::<'_> {
+            model: "test-model",
+            max_tokens: 1024,
+            system: None,
+            tools: &tools,
+            messages: &[],
+        };
+        let body = serde_json::to_value(&req).unwrap();
+        assert!(body.get("system").is_none(), "system key should be absent when None");
     }
 }

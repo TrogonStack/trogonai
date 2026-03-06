@@ -4080,18 +4080,27 @@ name = "trogon-agent"
 version = "0.1.0"
 dependencies = [
  "async-nats 0.45.0",
+ "axum 0.8.8",
  "base64 0.22.1",
  "bytes",
  "futures-util",
+ "hex",
+ "hmac",
  "httpmock",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-github",
+ "trogon-linear",
  "trogon-nats",
+ "trogon-secret-proxy",
  "trogon-std",
+ "trogon-vault",
 ]
 
 [[package]]
