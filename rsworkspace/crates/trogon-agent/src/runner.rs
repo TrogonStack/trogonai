@@ -21,9 +21,9 @@ use futures_util::StreamExt;
 use tracing::{error, info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, McpServerConfig};
 use crate::handlers::{self, make_tool_context};
-use crate::tools::ToolContext;
+use crate::tools::{ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -69,6 +69,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         cfg.linear_token.clone(),
     );
 
+    let (mcp_tool_defs, mcp_dispatch) =
+        init_mcp_servers(&http_client, &cfg.mcp_servers).await;
+
     let agent = Arc::new(AgentLoop {
         http_client,
         proxy_url: cfg.proxy_url.clone(),
@@ -78,6 +81,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         tool_context: tool_ctx,
         memory_owner: cfg.memory_owner.clone(),
         memory_repo: cfg.memory_repo.clone(),
+        mcp_tool_defs,
+        mcp_dispatch,
     });
 
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
@@ -152,6 +157,59 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     info!("Agent runner stopped");
     Ok(())
+}
+
+/// Connect to each configured MCP server, discover tools, and build the
+/// tool definitions + dispatch table for the [`AgentLoop`].
+///
+/// Servers that fail to initialize are skipped with a warning so a single
+/// misconfigured server cannot block the agent from starting.
+async fn init_mcp_servers(
+    http_client: &reqwest::Client,
+    servers: &[McpServerConfig],
+) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
+    let mut tool_defs = Vec::new();
+    let mut dispatch = Vec::new();
+
+    for server in servers {
+        let client = Arc::new(trogon_mcp::McpClient::new(
+            http_client.clone(),
+            &server.url,
+        ));
+
+        if let Err(e) = client.initialize().await {
+            warn!(server = %server.name, error = %e, "Failed to initialize MCP server — skipping");
+            continue;
+        }
+
+        match client.list_tools().await {
+            Err(e) => warn!(server = %server.name, error = %e, "Failed to list MCP tools — skipping server"),
+            Ok(tools) => {
+                info!(server = %server.name, count = tools.len(), "MCP tools loaded");
+                for tool in tools {
+                    let prefixed = format!(
+                        "mcp__{}__{}", sanitize_name(&server.name), sanitize_name(&tool.name)
+                    );
+                    tool_defs.push(ToolDef {
+                        name: prefixed.clone(),
+                        description: tool.description.clone(),
+                        input_schema: tool.input_schema.clone(),
+                        cache_control: None,
+                    });
+                    dispatch.push((prefixed, tool.name, Arc::clone(&client)));
+                }
+            }
+        }
+    }
+
+    (tool_defs, dispatch)
+}
+
+/// Replace characters not valid in Anthropic tool names with `_`.
+fn sanitize_name(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect()
 }
 
 async fn bind_consumer(
