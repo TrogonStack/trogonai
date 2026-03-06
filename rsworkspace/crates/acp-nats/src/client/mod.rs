@@ -1,5 +1,6 @@
 pub(crate) mod fs_read_text_file;
 pub(crate) mod request_permission;
+pub(crate) mod rpc_reply;
 pub(crate) mod session_update;
 
 use crate::agent::Bridge;
@@ -8,9 +9,9 @@ use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{
     ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, client,
-    headers_with_trace_context, parse_client_subject,
+    parse_client_subject,
 };
-use agent_client_protocol::{Client, Error, ErrorCode, Response};
+use agent_client_protocol::{Client, ErrorCode};
 use async_nats::Message;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -20,9 +21,6 @@ use tracing::{Span, error, info, instrument, warn};
 use trogon_std::JsonSerialize;
 use trogon_std::time::GetElapsed;
 
-const CONTENT_TYPE_JSON: &str = "application/json";
-const CONTENT_TYPE_PLAIN: &str = "text/plain";
-
 async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: JsonSerialize>(
     nats: &N,
     payload: &[u8],
@@ -30,38 +28,20 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: Jso
     serializer: &S,
 ) {
     let request_id = extract_request_id(payload);
-    let response = Response::<()>::Error {
-        id: request_id,
-        error: Error::new(
-            i32::from(ErrorCode::Other(AGENT_UNAVAILABLE)),
-            "Client proxy overloaded; retry with backoff",
-        ),
-    };
-    let (bytes, content_type) = serializer
-        .to_vec(&response)
-        .or_else(|e| {
-            warn!(error = %e, "JSON serialization of backpressure error failed, using fallback");
-            serializer.to_vec(&Response::<()>::Error {
-                id: agent_client_protocol::RequestId::Null,
-                error: Error::new(-32603, "Internal error"),
-            })
-        })
-        .map(|v| (Bytes::from(v), CONTENT_TYPE_JSON))
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "Fallback JSON serialization failed, response may not be valid JSON-RPC");
-            (Bytes::from("Internal error"), CONTENT_TYPE_PLAIN)
-        });
-    let mut headers = headers_with_trace_context();
-    headers.insert("Content-Type", content_type);
-    if let Err(e) = nats
-        .publish_with_headers(reply_to.to_string(), headers, bytes)
-        .await
-    {
-        warn!(error = %e, "Failed to publish backpressure error reply");
-    }
-    if let Err(e) = nats.flush().await {
-        warn!(error = %e, "Failed to flush backpressure error reply");
-    }
+    let (bytes, content_type) = rpc_reply::error_response_bytes(
+        serializer,
+        request_id,
+        ErrorCode::Other(AGENT_UNAVAILABLE),
+        "Client proxy overloaded; retry with backoff",
+    );
+    rpc_reply::publish_reply(
+        nats,
+        reply_to,
+        bytes,
+        content_type,
+        "backpressure error reply",
+    )
+    .await;
 }
 
 /// Runs the client proxy, subscribing to client subjects and dispatching to handlers.

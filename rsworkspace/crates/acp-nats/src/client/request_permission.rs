@@ -1,71 +1,13 @@
+use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
-use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
+use crate::nats::{FlushClient, PublishClient};
 use agent_client_protocol::{
-    Client, Error, ErrorCode, Request, RequestId, RequestPermissionRequest,
-    RequestPermissionResponse, Response,
+    Client, ErrorCode, Request, RequestPermissionRequest, RequestPermissionResponse, Response,
 };
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
-
-const CONTENT_TYPE_JSON: &str = "application/json";
-const CONTENT_TYPE_PLAIN: &str = "text/plain";
-
-fn error_response_fallback_bytes<S: JsonSerialize>(serializer: &S) -> (Bytes, &'static str) {
-    match serializer.to_vec(&Response::<()>::Error {
-        id: RequestId::Null,
-        error: Error::new(-32603, "Internal error"),
-    }) {
-        Ok(v) => (Bytes::from(v), CONTENT_TYPE_JSON),
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Fallback JSON serialization failed, response may not be valid JSON-RPC"
-            );
-            (Bytes::from("Internal error"), CONTENT_TYPE_PLAIN)
-        }
-    }
-}
-
-async fn publish_reply<N: PublishClient + FlushClient>(
-    nats: &N,
-    reply_to: &str,
-    bytes: Bytes,
-    content_type: &str,
-    context: &str,
-) {
-    let mut headers = headers_with_trace_context();
-    headers.insert("Content-Type", content_type);
-    if let Err(e) = nats
-        .publish_with_headers(reply_to.to_string(), headers, bytes)
-        .await
-    {
-        warn!(error = %e, "Failed to publish {}", context);
-    }
-    if let Err(e) = nats.flush().await {
-        warn!(error = %e, "Failed to flush {}", context);
-    }
-}
-
-fn error_response_bytes<S: JsonSerialize>(
-    serializer: &S,
-    request_id: RequestId,
-    code: ErrorCode,
-    message: &str,
-) -> (Bytes, &'static str) {
-    let response = Response::<()>::Error {
-        id: request_id,
-        error: Error::new(i32::from(code), message),
-    };
-    match serializer.to_vec(&response) {
-        Ok(v) => (Bytes::from(v), CONTENT_TYPE_JSON),
-        Err(e) => {
-            warn!(error = %e, "JSON serialization failed, using fallback error");
-            error_response_fallback_bytes(serializer)
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum RequestPermissionError {
@@ -127,24 +69,24 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     };
 
     let request_id = extract_request_id(payload);
-    match forward_to_client(payload, client).await {
+    match forward_to_client(payload, client, session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
                 .to_vec(&Response::Result {
                     id: request_id.clone(),
                     result: response,
                 })
-                .map(|v| (Bytes::from(v), CONTENT_TYPE_JSON))
+                .map(|v| (Bytes::from(v), rpc_reply::CONTENT_TYPE_JSON))
                 .unwrap_or_else(|e| {
                     warn!(error = %e, "JSON serialization of response failed, sending error reply");
-                    error_response_bytes(
+                    rpc_reply::error_response_bytes(
                         serializer,
                         request_id,
                         ErrorCode::InternalError,
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            publish_reply(
+            rpc_reply::publish_reply(
                 nats,
                 reply_to,
                 response_bytes,
@@ -161,8 +103,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 "Failed to handle request_permission"
             );
             let (bytes, content_type) =
-                error_response_bytes(serializer, request_id, code, &message);
-            publish_reply(
+                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(
                 nats,
                 reply_to,
                 bytes,
@@ -177,6 +119,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
 async fn forward_to_client<C: Client>(
     payload: &[u8],
     client: &C,
+    expected_session_id: &str,
 ) -> Result<RequestPermissionResponse, RequestPermissionError> {
     let envelope: Request<RequestPermissionRequest> =
         serde_json::from_slice(payload).map_err(RequestPermissionError::InvalidRequest)?;
@@ -185,6 +128,15 @@ async fn forward_to_client<C: Client>(
             "params is null or missing",
         ))
     })?;
+    let params_session_id = request.session_id.to_string();
+    if params_session_id != expected_session_id {
+        return Err(RequestPermissionError::InvalidRequest(
+            serde_json::Error::custom(format!(
+                "params.sessionId ({}) does not match subject session id ({})",
+                params_session_id, expected_session_id
+            )),
+        ));
+    }
     client
         .request_permission(request)
         .await
@@ -195,7 +147,7 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind,
+        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestId,
         RequestPermissionOutcome, RequestPermissionResponse, SessionNotification, SessionUpdate,
         ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -295,7 +247,7 @@ mod tests {
         let request = RequestPermissionRequest::new("session-001", tool_call, options);
         let payload = make_envelope(request);
 
-        let result = forward_to_client(&payload, &client).await;
+        let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_ok());
         let response = result.unwrap();
         assert_eq!(response.outcome, RequestPermissionOutcome::Cancelled);
@@ -304,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn request_permission_returns_error_when_payload_is_invalid_json() {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let result = forward_to_client(b"not json", &client).await;
+        let result = forward_to_client(b"not json", &client, "session-001").await;
         assert!(result.is_err());
     }
 
@@ -315,7 +267,7 @@ mod tests {
         let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
         let payload = make_envelope(request);
 
-        let result = forward_to_client(&payload, &client).await;
+        let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -333,7 +285,22 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        let result = forward_to_client(&payload, &client).await;
+        let result = forward_to_client(&payload, &client, "session-001").await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            RequestPermissionError::InvalidRequest(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn request_permission_returns_invalid_request_when_session_id_mismatch() {
+        let client = MockClient::new(RequestPermissionOutcome::Cancelled);
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
+        let payload = make_envelope(request);
+
+        let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -421,6 +388,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_session_id_mismatch_publishes_error_reply() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new(RequestPermissionOutcome::Cancelled);
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
+        let payload = make_envelope(request);
+
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    }
+
+    #[tokio::test]
     async fn handle_invalid_payload_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
@@ -479,39 +467,6 @@ mod tests {
         .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
-    }
-
-    #[test]
-    fn error_response_bytes_first_fallback_uses_null_id() {
-        let mock = FailNextSerialize::new(1);
-        let (bytes, content_type) = error_response_bytes(
-            &mock,
-            RequestId::Number(42),
-            ErrorCode::InvalidParams,
-            "test message",
-        );
-        assert_eq!(content_type, "application/json");
-        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(parsed["id"], serde_json::Value::Null);
-        assert_eq!(parsed["error"]["code"], -32603);
-    }
-
-    #[test]
-    fn error_response_bytes_last_resort_returns_plain_text() {
-        let mock = FailNextSerialize::new(2);
-        let (bytes, content_type) =
-            error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
-        assert_eq!(content_type, "text/plain");
-        assert_eq!(bytes.as_ref(), b"Internal error");
-    }
-
-    #[test]
-    fn error_response_fallback_bytes_std_serializer_returns_json() {
-        let (bytes, content_type) = error_response_fallback_bytes(&StdJsonSerialize);
-        assert_eq!(content_type, "application/json");
-        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(parsed["id"], serde_json::Value::Null);
-        assert_eq!(parsed["error"]["code"], -32603);
     }
 
     #[tokio::test]

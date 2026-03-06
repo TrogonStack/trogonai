@@ -56,7 +56,7 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: true
-          new-uncovered-statements-failure: true
+          uncovered-statements-increase-failure: true # DO NOT CHANGE THIS, ADD TESTS
+          new-uncovered-statements-failure: true # DO NOT CHANGE THIS, ADD TESTS
           coverage-rate-reduction-failure: true
           togglable-report: true
