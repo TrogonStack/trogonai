@@ -1,18 +1,94 @@
-use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
-use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, Response};
+use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
+use agent_client_protocol::{
+    Client, Error, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, RequestId,
+    Response,
+};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug, thiserror::Error)]
+const CONTENT_TYPE_JSON: &str = "application/json";
+const CONTENT_TYPE_PLAIN: &str = "text/plain";
+
+fn error_response_fallback_bytes<S: JsonSerialize>(serializer: &S) -> (Bytes, &'static str) {
+    match serializer.to_vec(&Response::<()>::Error {
+        id: RequestId::Null,
+        error: Error::new(-32603, "Internal error"),
+    }) {
+        Ok(v) => (Bytes::from(v), CONTENT_TYPE_JSON),
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Fallback JSON serialization failed, response may not be valid JSON-RPC"
+            );
+            (Bytes::from("Internal error"), CONTENT_TYPE_PLAIN)
+        }
+    }
+}
+
+async fn publish_reply<N: PublishClient + FlushClient>(
+    nats: &N,
+    reply_to: &str,
+    bytes: Bytes,
+    content_type: &str,
+    context: &str,
+) {
+    let mut headers = headers_with_trace_context();
+    headers.insert("Content-Type", content_type);
+    if let Err(e) = nats
+        .publish_with_headers(reply_to.to_string(), headers, bytes)
+        .await
+    {
+        warn!(error = %e, "Failed to publish {}", context);
+    }
+    if let Err(e) = nats.flush().await {
+        warn!(error = %e, "Failed to flush {}", context);
+    }
+}
+
+fn error_response_bytes<S: JsonSerialize>(
+    serializer: &S,
+    request_id: RequestId,
+    code: ErrorCode,
+    message: &str,
+) -> (Bytes, &'static str) {
+    let response = Response::<()>::Error {
+        id: request_id,
+        error: Error::new(i32::from(code), message),
+    };
+    match serializer.to_vec(&response) {
+        Ok(v) => (Bytes::from(v), CONTENT_TYPE_JSON),
+        Err(e) => {
+            warn!(error = %e, "JSON serialization failed, using fallback error");
+            error_response_fallback_bytes(serializer)
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum FsReadTextFileError {
-    #[error("invalid request: {0}")]
-    InvalidRequest(#[source] serde_json::Error),
-    #[error("client error: {0}")]
-    ClientError(#[source] agent_client_protocol::Error),
+    InvalidRequest(serde_json::Error),
+    ClientError(agent_client_protocol::Error),
+}
+
+impl std::fmt::Display for FsReadTextFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRequest(e) => write!(f, "invalid request: {}", e),
+            Self::ClientError(e) => write!(f, "client error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for FsReadTextFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidRequest(e) => Some(e),
+            Self::ClientError(e) => Some(e),
+        }
+    }
 }
 
 pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
@@ -27,7 +103,10 @@ pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
 
 /// Handles read_text_file: parses request, calls client, wraps response in JSON-RPC envelope,
 /// and publishes to reply subject. Reply is required (request-reply pattern).
-#[instrument(name = "acp.client.fs.read_text_file", skip(payload, client, nats, serializer))]
+#[instrument(
+    name = "acp.client.fs.read_text_file",
+    skip(payload, client, nats, serializer)
+)]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -55,17 +134,24 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                     id: request_id.clone(),
                     result: response,
                 })
-                .map(|v| (Bytes::from(v), rpc_reply::CONTENT_TYPE_JSON))
+                .map(|v| (Bytes::from(v), CONTENT_TYPE_JSON))
                 .unwrap_or_else(|e| {
                     warn!(error = %e, "JSON serialization of response failed, sending error reply");
-                    rpc_reply::error_response_bytes(
+                    error_response_bytes(
                         serializer,
                         request_id,
                         ErrorCode::InternalError,
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "fs_read_text_file reply").await;
+            publish_reply(
+                nats,
+                reply_to,
+                response_bytes,
+                content_type,
+                "fs_read_text_file reply",
+            )
+            .await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -74,18 +160,29 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle fs_read_text_file"
             );
-            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "fs_read_text_file error reply").await;
+            let (bytes, content_type) =
+                error_response_bytes(serializer, request_id, code, &message);
+            publish_reply(
+                nats,
+                reply_to,
+                bytes,
+                content_type,
+                "fs_read_text_file error reply",
+            )
+            .await;
         }
     }
 }
 
-async fn forward_to_client<C: Client>(payload: &[u8], client: &C) -> Result<ReadTextFileResponse, FsReadTextFileError> {
+async fn forward_to_client<C: Client>(
+    payload: &[u8],
+    client: &C,
+) -> Result<ReadTextFileResponse, FsReadTextFileError> {
     let envelope: Request<ReadTextFileRequest> =
         serde_json::from_slice(payload).map_err(FsReadTextFileError::InvalidRequest)?;
-    let request = envelope
-        .params
-        .ok_or_else(|| FsReadTextFileError::InvalidRequest(serde_json::Error::custom("params is null or missing")))?;
+    let request = envelope.params.ok_or_else(|| {
+        FsReadTextFileError::InvalidRequest(serde_json::Error::custom("params is null or missing"))
+    })?;
     client
         .read_text_file(request)
         .await
@@ -118,7 +215,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -132,7 +232,10 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new(self.content.clone()))
         }
     }
@@ -141,7 +244,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -155,7 +261,10 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Err(agent_client_protocol::Error::new(
                 i32::from(ErrorCode::InvalidParams),
                 "file not found",
@@ -227,7 +336,10 @@ mod tests {
 
         let result = forward_to_client(&payload, &client).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FsReadTextFileError::ClientError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            FsReadTextFileError::ClientError(_)
+        ));
     }
 
     #[tokio::test]
@@ -245,7 +357,15 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "sess-1",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -329,7 +449,15 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(&payload, &client, Some("_INBOX.err"), &nats, "sess-1", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "sess-1",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     }
@@ -372,7 +500,8 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         let (code, message) = error_code_and_message(&fs_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -475,7 +604,10 @@ mod tests {
 
         let result = forward_to_client(&payload, &client).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FsReadTextFileError::InvalidRequest(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            FsReadTextFileError::InvalidRequest(_)
+        ));
     }
 
     #[test]
@@ -484,7 +616,8 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.to_string().contains("invalid request"));
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.to_string().contains("client error"));
     }
@@ -495,9 +628,25 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.source().is_some());
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.source().is_some());
+    }
+
+    #[test]
+    fn error_response_bytes_first_fallback_uses_null_id() {
+        let mock = FailNextSerialize::new(1);
+        let (bytes, content_type) = error_response_bytes(
+            &mock,
+            RequestId::Number(42),
+            ErrorCode::InvalidParams,
+            "test message",
+        );
+        assert_eq!(content_type, "application/json");
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["id"], serde_json::Value::Null);
+        assert_eq!(parsed["error"]["code"], -32603);
     }
 
     #[tokio::test]
@@ -524,5 +673,23 @@ mod tests {
         .unwrap();
         let result = client.request_permission(req).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn error_response_bytes_last_resort_returns_plain_text() {
+        let mock = FailNextSerialize::new(2);
+        let (bytes, content_type) =
+            error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
+        assert_eq!(content_type, "text/plain");
+        assert_eq!(bytes.as_ref(), b"Internal error");
+    }
+
+    #[test]
+    fn error_response_fallback_bytes_std_serializer_returns_json() {
+        let (bytes, content_type) = error_response_fallback_bytes(&StdJsonSerialize);
+        assert_eq!(content_type, "application/json");
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["id"], serde_json::Value::Null);
+        assert_eq!(parsed["error"]["code"], -32603);
     }
 }

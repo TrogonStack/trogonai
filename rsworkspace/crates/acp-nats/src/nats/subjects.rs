@@ -39,6 +39,10 @@ pub mod agent {
 }
 
 pub mod client {
+    pub fn fs_read_text_file(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.fs.read_text_file", prefix, session_id)
+    }
+
     pub fn session_update(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.client.session.update", prefix, session_id)
     }
@@ -54,6 +58,14 @@ pub mod client {
 mod tests {
     use super::agent;
     use super::client;
+
+    #[test]
+    fn client_fs_read_text_file_subject() {
+        assert_eq!(
+            client::fs_read_text_file("acp", "s1"),
+            "acp.s1.client.fs.read_text_file"
+        );
+    }
 
     #[test]
     fn client_session_update_subject() {
