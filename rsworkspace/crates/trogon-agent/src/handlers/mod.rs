@@ -93,6 +93,7 @@ mod tests {
                 proxy_url: proxy_url.to_string(),
                 github_token: "tok_github_prod_test01".to_string(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -171,6 +172,7 @@ pub fn make_tool_context(
     proxy_url: String,
     github_token: String,
     linear_token: String,
+    slack_token: String,
 ) -> Arc<ToolContext> {
-    Arc::new(ToolContext { http_client, proxy_url, github_token, linear_token })
+    Arc::new(ToolContext { http_client, proxy_url, github_token, linear_token, slack_token })
 }

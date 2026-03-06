@@ -76,6 +76,7 @@ fn dummy_ctx() -> ToolContext {
         proxy_url: "http://localhost:9999".to_string(),
         github_token: String::new(),
         linear_token: String::new(),
+            slack_token: String::new(),
     }
 }
 

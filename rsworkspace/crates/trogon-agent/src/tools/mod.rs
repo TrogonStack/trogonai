@@ -1,5 +1,6 @@
 pub mod github;
 pub mod linear;
+pub mod slack;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +26,8 @@ pub struct ToolContext {
     pub github_token: String,
     /// Opaque proxy token for the Linear API.
     pub linear_token: String,
+    /// Opaque proxy token for the Slack API.
+    pub slack_token: String,
 }
 
 /// Build a [`ToolDef`] from name, description and a JSON Schema object.
@@ -54,6 +57,8 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "update_linear_issue" => linear::update_issue(ctx, input).await,
         "post_linear_comment" => linear::post_comment(ctx, input).await,
         "get_linear_comments" => linear::get_comments(ctx, input).await,
+        "send_slack_message" => slack::send_message(ctx, input).await,
+        "read_slack_channel" => slack::read_channel(ctx, input).await,
         unknown => Err(format!("Unknown tool: {unknown}")),
     };
     result.unwrap_or_else(|e| format!("Tool error: {e}"))
@@ -82,6 +87,7 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await;
         assert!(result.contains("Unknown tool"));
@@ -96,6 +102,7 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "get_pr_comments", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
@@ -110,6 +117,7 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "update_file", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
@@ -124,6 +132,7 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "create_pull_request", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
@@ -138,6 +147,7 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "get_linear_comments", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
@@ -152,8 +162,37 @@ mod tests {
             proxy_url: "http://localhost:8080".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         };
         let result = dispatch_tool(&ctx, "request_reviewers", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_send_slack_message_routes_correctly() {
+        let ctx = ToolContext {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:8080".to_string(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: "tok_slack_prod_test01".to_string(),
+        };
+        let result = dispatch_tool(&ctx, "send_slack_message", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_read_slack_channel_routes_correctly() {
+        let ctx = ToolContext {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:8080".to_string(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: "tok_slack_prod_test01".to_string(),
+        };
+        let result = dispatch_tool(&ctx, "read_slack_channel", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
     }

@@ -19,7 +19,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def};
+use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent};
 
 /// Actions that trigger a review.
@@ -81,7 +81,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 }
 
 fn pr_review_tools() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         tool_def(
             "list_pr_files",
             "List the files changed in a pull request.",
@@ -200,7 +200,9 @@ fn pr_review_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-    ]
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
 }
 
 #[cfg(test)]
@@ -209,7 +211,7 @@ mod tests {
 
     #[test]
     fn pr_review_tools_has_eight_entries() {
-        assert_eq!(pr_review_tools().len(), 8);
+        assert_eq!(pr_review_tools().len(), 10);
     }
 
     #[test]

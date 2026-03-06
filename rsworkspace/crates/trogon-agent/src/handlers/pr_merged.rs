@@ -9,7 +9,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def};
+use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
 
 /// Run the PR-merged agent from a raw GitHub `pull_request` webhook payload.
@@ -64,7 +64,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 }
 
 fn merged_tools() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         tool_def("get_pr_diff", "Get the unified diff of a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number"],
@@ -124,7 +124,9 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-    ]
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
 }
 
 #[cfg(test)]
@@ -133,7 +135,7 @@ mod tests {
 
     #[test]
     fn merged_tools_has_six_entries() {
-        assert_eq!(merged_tools().len(), 6);
+        assert_eq!(merged_tools().len(), 8);
     }
 
     #[tokio::test]
@@ -152,6 +154,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -184,6 +187,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,

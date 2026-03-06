@@ -17,7 +17,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def};
+use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent};
 
 /// Run the issue-triage agent from a raw Linear webhook payload.
@@ -75,7 +75,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 }
 
 fn triage_tools() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         tool_def(
             "get_linear_issue",
             "Fetch a Linear issue by ID, including state, assignee, labels, and team.",
@@ -124,7 +124,9 @@ fn triage_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-    ]
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
 }
 
 #[cfg(test)]
@@ -133,7 +135,7 @@ mod tests {
 
     #[test]
     fn triage_tools_has_four_entries() {
-        assert_eq!(triage_tools().len(), 4);
+        assert_eq!(triage_tools().len(), 6);
     }
 
     #[test]
@@ -169,6 +171,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -197,6 +200,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -230,6 +234,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,

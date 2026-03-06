@@ -8,7 +8,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def};
+use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
 
 /// Run the comment-added agent from a raw GitHub `issue_comment` webhook payload.
@@ -61,7 +61,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 }
 
 fn comment_tools() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         tool_def("get_pr_comments", "Get all comments on a pull request or issue.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number"],
@@ -91,7 +91,9 @@ fn comment_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-    ]
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
 }
 
 #[cfg(test)]
@@ -100,7 +102,7 @@ mod tests {
 
     #[test]
     fn comment_tools_has_three_entries() {
-        assert_eq!(comment_tools().len(), 3);
+        assert_eq!(comment_tools().len(), 5);
     }
 
     #[tokio::test]
@@ -119,6 +121,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,

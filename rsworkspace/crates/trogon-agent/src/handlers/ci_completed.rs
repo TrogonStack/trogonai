@@ -8,7 +8,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def};
+use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
 
 /// Run the CI-completed agent from a raw GitHub `check_run` webhook payload.
@@ -75,7 +75,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 }
 
 fn ci_tools() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         tool_def("get_file_contents",
             "Read a file from the repository. Returns JSON with `sha` and `content`.",
             serde_json::json!({
@@ -95,7 +95,9 @@ fn ci_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-    ]
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
 }
 
 #[cfg(test)]
@@ -104,7 +106,7 @@ mod tests {
 
     #[test]
     fn ci_tools_has_two_entries() {
-        assert_eq!(ci_tools().len(), 2);
+        assert_eq!(ci_tools().len(), 4);
     }
 
     #[tokio::test]
@@ -123,6 +125,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -154,6 +157,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
+            slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,

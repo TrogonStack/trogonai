@@ -39,6 +39,8 @@ pub struct AgentConfig {
     pub github_token: String,
     /// Opaque proxy token for the Linear API (e.g. `tok_linear_prod_xxx`).
     pub linear_token: String,
+    /// Opaque proxy token for the Slack API (e.g. `tok_slack_prod_xxx`).
+    pub slack_token: String,
     /// Anthropic model to use in the agentic loop.
     pub model: String,
     /// Maximum number of tool-use iterations before giving up.
@@ -72,6 +74,7 @@ impl AgentConfig {
             anthropic_token: env.var("ANTHROPIC_TOKEN").unwrap_or_default(),
             github_token: env.var("GITHUB_TOKEN").unwrap_or_default(),
             linear_token: env.var("LINEAR_TOKEN").unwrap_or_default(),
+            slack_token: env.var("SLACK_TOKEN").unwrap_or_default(),
             model: env
                 .var("AGENT_MODEL")
                 .unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
@@ -236,5 +239,20 @@ mod tests {
         let env = InMemoryEnv::new();
         let cfg = AgentConfig::from_env(&env);
         assert!(cfg.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn slack_token_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("SLACK_TOKEN", "tok_slack_prod_abc");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.slack_token, "tok_slack_prod_abc");
+    }
+
+    #[test]
+    fn slack_token_empty_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.slack_token.is_empty());
     }
 }
