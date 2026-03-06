@@ -4,11 +4,15 @@ use serde::{Deserialize, Serialize};
 
 /// A configured automation: maps an event trigger to a custom agent behaviour.
 ///
-/// Stored as a JSON blob in NATS KV bucket `AUTOMATIONS`, keyed by `id`.
+/// Stored as a JSON blob in NATS KV bucket `AUTOMATIONS`, keyed by
+/// `{tenant_id}.{id}` to enforce tenant isolation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Automation {
     /// Unique ID (UUID v4).
     pub id: String,
+
+    /// Tenant this automation belongs to.
+    pub tenant_id: String,
 
     /// Human-readable name, e.g. `"PR review — engineering"`.
     pub name: String,
@@ -63,6 +67,7 @@ mod tests {
     fn sample() -> Automation {
         Automation {
             id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            tenant_id: "acme".to_string(),
             name: "PR review".to_string(),
             trigger: "github.pull_request:opened".to_string(),
             prompt: "Review the PR.".to_string(),
@@ -87,6 +92,13 @@ mod tests {
     }
 
     #[test]
+    fn tenant_id_survives_serialization() {
+        let a = sample();
+        let v: serde_json::Value = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["tenant_id"], "acme");
+    }
+
+    #[test]
     fn disabled_automation_serializes_enabled_false() {
         let mut a = sample();
         a.enabled = false;
@@ -108,5 +120,13 @@ mod tests {
         a.memory_path = None;
         let v: serde_json::Value = serde_json::to_value(&a).unwrap();
         assert!(v["memory_path"].is_null());
+    }
+
+    #[test]
+    fn different_tenants_are_not_equal() {
+        let a = sample();
+        let mut b = sample();
+        b.tenant_id = "other-org".to_string();
+        assert_ne!(a, b);
     }
 }
