@@ -289,7 +289,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 }
 
 /// Spawn one task per automation and wait for all to finish.
-async fn dispatch_automations(
+pub(crate) async fn dispatch_automations(
     agent: &Arc<AgentLoop>,
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
@@ -365,7 +365,79 @@ fn sanitize_name(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_name;
+    use super::{dispatch_automations, sanitize_name};
+    use std::sync::Arc;
+
+    fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
+        let http_client = reqwest::Client::new();
+        Arc::new(crate::agent_loop::AgentLoop {
+            http_client: http_client.clone(),
+            proxy_url: proxy_url.to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(crate::tools::ToolContext {
+                http_client,
+                proxy_url: proxy_url.to_string(),
+                github_token: "tok_github_prod_test01".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+        })
+    }
+
+    fn make_automation(name: &str) -> trogon_automations::Automation {
+        trogon_automations::Automation {
+            id: format!("id-{name}"),
+            tenant_id: "acme".to_string(),
+            name: name.to_string(),
+            trigger: "github.push".to_string(),
+            prompt: "Do something.".to_string(),
+            tools: vec![],
+            memory_path: None,
+            mcp_servers: vec![],
+            enabled: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    /// dispatch_automations runs every automation and waits for all tasks.
+    #[tokio::test]
+    async fn dispatch_automations_runs_all() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "ok"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        dispatch_automations(&agent, automations, "github.push", &payload).await;
+
+        mock.assert_hits_async(2).await;
+    }
+
+    /// dispatch_automations with an empty list completes immediately without errors.
+    #[tokio::test]
+    async fn dispatch_automations_empty_list_is_noop() {
+        let agent = make_agent("http://127.0.0.1:1"); // no server needed
+        let payload = bytes::Bytes::from_static(b"{}");
+        // Should complete without hanging or panicking.
+        dispatch_automations(&agent, vec![], "github.push", &payload).await;
+    }
 
     #[test]
     fn sanitize_name_keeps_alphanumeric_and_dash() {
