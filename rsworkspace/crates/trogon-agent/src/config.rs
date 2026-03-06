@@ -61,6 +61,10 @@ pub struct AgentConfig {
     /// MCP servers to connect to at startup.
     /// Parsed from `MCP_SERVERS=name1=url1,name2=url2`.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// TCP port for the automations management HTTP API.
+    /// Set via `AUTOMATIONS_API_PORT` (default: 8090).
+    /// Set to `0` to disable the API server.
+    pub api_port: u16,
 }
 
 impl AgentConfig {
@@ -93,6 +97,11 @@ impl AgentConfig {
                 .ok()
                 .map(|s| parse_mcp_servers(&s))
                 .unwrap_or_default(),
+            api_port: env
+                .var("AUTOMATIONS_API_PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8090),
         }
     }
 }
@@ -254,5 +263,36 @@ mod tests {
         let env = InMemoryEnv::new();
         let cfg = AgentConfig::from_env(&env);
         assert!(cfg.slack_token.is_empty());
+    }
+
+    #[test]
+    fn api_port_defaults_to_8090() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.api_port, 8090);
+    }
+
+    #[test]
+    fn api_port_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("AUTOMATIONS_API_PORT", "9090");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.api_port, 9090);
+    }
+
+    #[test]
+    fn api_port_zero_disables_server() {
+        let env = InMemoryEnv::new();
+        env.set("AUTOMATIONS_API_PORT", "0");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.api_port, 0);
+    }
+
+    #[test]
+    fn api_port_invalid_falls_back_to_default() {
+        let env = InMemoryEnv::new();
+        env.set("AUTOMATIONS_API_PORT", "not-a-port");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.api_port, 8090);
     }
 }
