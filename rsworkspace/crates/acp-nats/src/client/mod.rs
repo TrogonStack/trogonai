@@ -585,6 +585,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_client_method_dispatches_request_permission_client_error_publishes_error_reply()
+    {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let request = RequestPermissionRequest::new(
+            "sess-1",
+            agent_client_protocol::ToolCallUpdate::new(
+                "call-1",
+                agent_client_protocol::ToolCallUpdateFields::new(),
+            ),
+            vec![],
+        );
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionRequestPermission,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_request_permission_with_advanced_mock() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let request = RequestPermissionRequest::new(
+            "sess-1",
+            agent_client_protocol::ToolCallUpdate::new(
+                "call-1",
+                agent_client_protocol::ToolCallUpdateFields::new(),
+            ),
+            vec![],
+        );
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionRequestPermission,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_request_permission_client_error_serialization_fallback(
+    ) {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let serializer = FailNextSerialize::new(1);
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let request = RequestPermissionRequest::new(
+            "sess-1",
+            agent_client_protocol::ToolCallUpdate::new(
+                "call-1",
+                agent_client_protocol::ToolCallUpdateFields::new(),
+            ),
+            vec![],
+        );
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionRequestPermission,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &serializer,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    }
+
+    #[tokio::test]
     async fn process_message_invalid_subject_no_reply_does_not_publish() {
         let nats = MockNatsClient::new();
         let bridge = make_bridge(nats.clone());
