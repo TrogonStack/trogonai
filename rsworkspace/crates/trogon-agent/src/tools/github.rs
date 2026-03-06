@@ -231,6 +231,41 @@ pub async fn create_pull_request(ctx: &ToolContext, input: &Value) -> Result<Str
     Ok(format!("Pull request #{number} opened: {html_url}"))
 }
 
+/// Request reviewers on a pull request.
+pub async fn request_reviewers(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+    let owner = input["owner"].as_str().ok_or("missing owner")?;
+    let repo = input["repo"].as_str().ok_or("missing repo")?;
+    let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
+
+    let reviewers: Vec<&str> = input["reviewers"]
+        .as_array()
+        .ok_or("missing reviewers array")?
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+
+    let url = format!(
+        "{}/github/repos/{owner}/{repo}/pulls/{pr_number}/requested_reviewers",
+        ctx.proxy_url,
+    );
+
+    let response: Value = ctx
+        .http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .json(&serde_json::json!({ "reviewers": reviewers }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let number = response["number"].as_u64().unwrap_or(pr_number);
+    Ok(format!("Reviewers requested on PR #{number}"))
+}
+
 /// Post a comment on a pull request (uses the Issues comments endpoint).
 pub async fn post_pr_comment(ctx: &ToolContext, input: &Value) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
