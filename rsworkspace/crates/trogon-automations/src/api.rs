@@ -1,10 +1,14 @@
 //! Axum HTTP API for managing automations.
 //!
-//! Routes:
+//! ## Tenant identification
+//! Every request must carry the `X-Tenant-Id` header.  Missing or empty
+//! values are rejected with `400 Bad Request`.
+//!
+//! ## Routes
 //!
 //! | Method | Path                          | Action              |
 //! |--------|-------------------------------|---------------------|
-//! | GET    | `/automations`                | List all            |
+//! | GET    | `/automations`                | List tenant's       |
 //! | POST   | `/automations`                | Create              |
 //! | GET    | `/automations/:id`            | Get one             |
 //! | PUT    | `/automations/:id`            | Replace             |
@@ -15,7 +19,7 @@
 use axum::{
     Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, patch},
 };
@@ -30,6 +34,15 @@ use crate::store::AutomationStore;
 #[derive(Clone)]
 pub struct AppState {
     pub store: AutomationStore,
+}
+
+// ── Tenant extraction ─────────────────────────────────────────────────────────
+
+fn tenant_id(headers: &HeaderMap) -> Result<String, Response> {
+    match headers.get("x-tenant-id").and_then(|v| v.to_str().ok()) {
+        Some(t) if !t.is_empty() => Ok(t.to_string()),
+        _ => Err(err(StatusCode::BAD_REQUEST, "missing X-Tenant-Id header")),
+    }
 }
 
 // ── Error helper ──────────────────────────────────────────────────────────────
@@ -76,6 +89,7 @@ fn default_true() -> bool {
 #[derive(Debug, Serialize)]
 struct AutomationResponse {
     id: String,
+    tenant_id: String,
     name: String,
     trigger: String,
     prompt: String,
@@ -91,6 +105,7 @@ impl From<Automation> for AutomationResponse {
     fn from(a: Automation) -> Self {
         Self {
             id: a.id,
+            tenant_id: a.tenant_id,
             name: a.name,
             trigger: a.trigger,
             prompt: a.prompt,
@@ -112,36 +127,28 @@ fn now_iso8601() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Minimal ISO-8601 UTC representation without extra deps.
     let (y, mo, d, h, mi, s) = epoch_to_parts(secs);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
-/// Convert UNIX seconds to (year, month, day, hour, min, sec) UTC.
 fn epoch_to_parts(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let s = secs % 60;
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;
     let days = secs / 86400;
-
-    // Gregorian calendar computation.
     let mut year = 1970u64;
     let mut remaining = days;
     loop {
         let days_in_year = if is_leap(year) { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
+        if remaining < days_in_year { break; }
         remaining -= days_in_year;
         year += 1;
     }
     let months = [31u64, if is_leap(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1u64;
-    for &days_in_month in &months {
-        if remaining < days_in_month {
-            break;
-        }
-        remaining -= days_in_month;
+    for &dim in &months {
+        if remaining < dim { break; }
+        remaining -= dim;
         month += 1;
     }
     (year, month, remaining + 1, h, m, s)
@@ -153,8 +160,12 @@ fn is_leap(y: u64) -> bool {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_automations(State(state): State<AppState>) -> Response {
-    match state.store.list().await {
+async fn list_automations(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.store.list(&tid).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(automations) => {
             let resp: Vec<AutomationResponse> = automations.into_iter().map(Into::into).collect();
@@ -164,12 +175,15 @@ async fn list_automations(State(state): State<AppState>) -> Response {
 }
 
 async fn create_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     axum::Json(body): axum::Json<CreateRequest>,
 ) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
     let now = now_iso8601();
     let automation = Automation {
         id: uuid::Uuid::new_v4().to_string(),
+        tenant_id: tid,
         name: body.name,
         trigger: body.trigger,
         prompt: body.prompt,
@@ -180,43 +194,40 @@ async fn create_automation(
         created_at: now.clone(),
         updated_at: now,
     };
-
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => {
-            let resp: AutomationResponse = automation.into();
-            (StatusCode::CREATED, axum::Json(resp)).into_response()
-        }
+        Ok(()) => (StatusCode::CREATED, axum::Json(AutomationResponse::from(automation))).into_response(),
     }
 }
 
 async fn get_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    match state.store.get(&id).await {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.store.get(&tid, &id).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
-        Ok(Some(a)) => {
-            let resp: AutomationResponse = a.into();
-            (StatusCode::OK, axum::Json(resp)).into_response()
-        }
+        Ok(Some(a)) => (StatusCode::OK, axum::Json(AutomationResponse::from(a))).into_response(),
     }
 }
 
 async fn update_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateRequest>,
 ) -> Response {
-    let existing = match state.store.get(&id).await {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let existing = match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
         Ok(Some(a)) => a,
     };
-
     let updated = Automation {
         id: existing.id,
+        tenant_id: existing.tenant_id,
         name: body.name,
         trigger: body.trigger,
         prompt: body.prompt,
@@ -227,73 +238,62 @@ async fn update_automation(
         created_at: existing.created_at,
         updated_at: now_iso8601(),
     };
-
     match state.store.put(&updated).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => {
-            let resp: AutomationResponse = updated.into();
-            (StatusCode::OK, axum::Json(resp)).into_response()
-        }
+        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(updated))).into_response(),
     }
 }
 
 async fn delete_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    match state.store.get(&id).await {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
         Ok(Some(_)) => {}
     }
-
-    match state.store.delete(&id).await {
+    match state.store.delete(&tid, &id).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
     }
 }
 
 async fn enable_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    set_enabled(state, id, true).await
+    set_enabled(headers, state, id, true).await
 }
 
 async fn disable_automation(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    set_enabled(state, id, false).await
+    set_enabled(headers, state, id, false).await
 }
 
-async fn set_enabled(state: AppState, id: String, enabled: bool) -> Response {
-    let mut automation = match state.store.get(&id).await {
+async fn set_enabled(headers: HeaderMap, state: AppState, id: String, enabled: bool) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let mut automation = match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
         Ok(Some(a)) => a,
     };
-
     automation.enabled = enabled;
     automation.updated_at = now_iso8601();
-
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => {
-            let resp: AutomationResponse = automation.into();
-            (StatusCode::OK, axum::Json(resp)).into_response()
-        }
+        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(automation))).into_response(),
     }
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-/// Build the Axum router.  Bind it to a `TcpListener` in your `main`:
-///
-/// ```ignore
-/// let listener = tokio::net::TcpListener::bind("0.0.0.0:8090").await?;
-/// axum::serve(listener, router(state)).await?;
-/// ```
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/automations", get(list_automations).post(create_automation))
@@ -311,6 +311,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tenant_id_missing_header_returns_err() {
+        let headers = HeaderMap::new();
+        assert!(tenant_id(&headers).is_err());
+    }
+
+    #[test]
+    fn tenant_id_empty_header_returns_err() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant-id", "".parse().unwrap());
+        assert!(tenant_id(&headers).is_err());
+    }
+
+    #[test]
+    fn tenant_id_valid_header_returns_ok() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant-id", "acme".parse().unwrap());
+        assert_eq!(tenant_id(&headers).unwrap(), "acme");
+    }
+
+    #[test]
     fn epoch_to_parts_epoch_zero() {
         let (y, mo, d, h, mi, s) = epoch_to_parts(0);
         assert_eq!((y, mo, d, h, mi, s), (1970, 1, 1, 0, 0, 0));
@@ -319,14 +339,8 @@ mod tests {
     #[test]
     fn now_iso8601_has_correct_format() {
         let ts = now_iso8601();
-        // Must be "YYYY-MM-DDTHH:MM:SSZ" — 20 chars.
         assert_eq!(ts.len(), 20, "unexpected length: {ts}");
-        assert!(ts.ends_with('Z'), "must end with Z: {ts}");
-        assert_eq!(&ts[4..5], "-");
-        assert_eq!(&ts[7..8], "-");
-        assert_eq!(&ts[10..11], "T");
-        assert_eq!(&ts[13..14], ":");
-        assert_eq!(&ts[16..17], ":");
+        assert!(ts.ends_with('Z'));
     }
 
     #[test]

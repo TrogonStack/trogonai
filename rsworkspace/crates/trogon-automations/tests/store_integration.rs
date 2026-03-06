@@ -13,6 +13,7 @@ use trogon_automations::{Automation, AutomationStore, McpServer};
 fn sample_automation(id: &str, trigger: &str) -> Automation {
     Automation {
         id: id.to_string(),
+        tenant_id: "test-tenant".to_string(),
         name: format!("Test automation {id}"),
         trigger: trigger.to_string(),
         prompt: "Do something useful.".to_string(),
@@ -41,14 +42,14 @@ async fn put_and_get_round_trips() {
     let (store, _c) = make_store().await;
     let a = sample_automation("a1", "github.pull_request:opened");
     store.put(&a).await.expect("put");
-    let fetched = store.get("a1").await.expect("get").expect("should exist");
+    let fetched = store.get("test-tenant", "a1").await.expect("get").expect("should exist");
     assert_eq!(fetched, a);
 }
 
 #[tokio::test]
 async fn get_missing_returns_none() {
     let (store, _c) = make_store().await;
-    let result = store.get("nonexistent").await.expect("get");
+    let result = store.get("no-tenant", "nonexistent").await.expect("get");
     assert!(result.is_none());
 }
 
@@ -57,8 +58,8 @@ async fn delete_removes_entry() {
     let (store, _c) = make_store().await;
     let a = sample_automation("del1", "github.push");
     store.put(&a).await.expect("put");
-    store.delete("del1").await.expect("delete");
-    assert!(store.get("del1").await.expect("get").is_none());
+    store.delete("test-tenant", "del1").await.expect("delete");
+    assert!(store.get("test-tenant", "del1").await.expect("get").is_none());
 }
 
 #[tokio::test]
@@ -69,7 +70,7 @@ async fn list_returns_all_entries() {
     store.put(&a1).await.expect("put a1");
     store.put(&a2).await.expect("put a2");
 
-    let list = store.list().await.expect("list");
+    let list = store.list("test-tenant").await.expect("list");
     assert_eq!(list.len(), 2);
     let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"l1"));
@@ -79,7 +80,7 @@ async fn list_returns_all_entries() {
 #[tokio::test]
 async fn list_empty_store_returns_empty_vec() {
     let (store, _c) = make_store().await;
-    let list = store.list().await.expect("list");
+    let list = store.list("test-tenant").await.expect("list");
     assert!(list.is_empty());
 }
 
@@ -92,7 +93,7 @@ async fn put_overwrites_existing_entry() {
     a.name = "Updated name".to_string();
     store.put(&a).await.expect("put updated");
 
-    let fetched = store.get("upd1").await.expect("get").expect("exists");
+    let fetched = store.get("test-tenant", "upd1").await.expect("get").expect("exists");
     assert_eq!(fetched.name, "Updated name");
 }
 
@@ -112,7 +113,7 @@ async fn matching_returns_only_enabled_and_triggered() {
     store.put(&push).await.expect("put");
 
     let payload = serde_json::json!({"action": "opened"});
-    let matched = store.matching("github.pull_request", &payload).await.expect("matching");
+    let matched = store.matching("test-tenant", "github.pull_request", &payload).await.expect("matching");
 
     let ids: Vec<&str> = matched.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"m1"), "m1 should match");
@@ -188,7 +189,7 @@ async fn automation_with_mcp_servers_round_trips() {
         McpServer { name: "db".to_string(), url: "http://localhost:3001".to_string() },
     ];
     store.put(&a).await.expect("put");
-    let fetched = store.get("mcp1").await.expect("get").expect("exists");
+    let fetched = store.get("test-tenant", "mcp1").await.expect("get").expect("exists");
     assert_eq!(fetched.mcp_servers.len(), 2);
     assert_eq!(fetched.mcp_servers[0].name, "search");
 }
