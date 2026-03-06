@@ -171,6 +171,8 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
         };
 
         let result = handle(&agent, &bytes).await;
@@ -196,6 +198,8 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
         };
 
         let payload = serde_json::json!({
@@ -226,6 +230,8 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
         };
 
         let result = handle(&agent, b"not json").await;

@@ -157,6 +157,10 @@ pub struct AgentLoop {
     pub memory_owner: Option<String>,
     /// GitHub repo name for pre-fetching `.trogon/memory.md`.
     pub memory_repo: Option<String>,
+    /// Extra tool definitions from MCP servers — appended to every `run` call.
+    pub mcp_tool_defs: Vec<ToolDef>,
+    /// Dispatch map for MCP tools: prefixed_name → (client, original_tool_name).
+    pub mcp_dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
 }
 
 impl AgentLoop {
@@ -176,9 +180,13 @@ impl AgentLoop {
     ) -> Result<String, AgentError> {
         let mut messages = initial_messages;
 
-        // Clone tools once and mark the last with cache_control so Anthropic
-        // caches the entire tool definitions block across repeated requests.
-        let mut cached_tools: Vec<ToolDef> = tools.to_vec();
+        // Merge caller-supplied tools with MCP tool definitions.
+        let mut all_tools: Vec<ToolDef> = tools.to_vec();
+        all_tools.extend(self.mcp_tool_defs.iter().cloned());
+
+        // Mark the last tool with cache_control so Anthropic caches the entire
+        // tool definitions block across repeated requests.
+        let mut cached_tools: Vec<ToolDef> = all_tools;
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
         }
@@ -256,7 +264,19 @@ impl AgentLoop {
         for block in content {
             if let ContentBlock::ToolUse { id, name, input } = block {
                 debug!(tool = %name, "Executing tool");
-                let output = dispatch_tool(&self.tool_context, name, input).await;
+
+                // Check MCP dispatch first, then fall back to built-in tools.
+                let output = if let Some((_, original, client)) =
+                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                {
+                    match client.call_tool(original, input).await {
+                        Ok(out) => out,
+                        Err(e) => format!("Tool error: {e}"),
+                    }
+                } else {
+                    dispatch_tool(&self.tool_context, name, input).await
+                };
+
                 results.push(ToolResult {
                     tool_use_id: id.clone(),
                     content: output,

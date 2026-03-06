@@ -237,6 +237,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         linear_stream_name: None,
         memory_owner: None,
         memory_repo: None,
+        mcp_servers: vec![],
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -421,6 +422,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         linear_stream_name: None,
         memory_owner: None,
         memory_repo: None,
+        mcp_servers: vec![],
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();

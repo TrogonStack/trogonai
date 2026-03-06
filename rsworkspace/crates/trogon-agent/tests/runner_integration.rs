@@ -58,6 +58,7 @@ fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
         linear_stream_name: None,
         memory_owner: None,
         memory_repo: None,
+        mcp_servers: vec![],
     }
 }
 
@@ -118,6 +119,7 @@ async fn runner_nats_connect_error_missing_credentials() {
         linear_stream_name: None,
         memory_owner: None,
         memory_repo: None,
+        mcp_servers: vec![],
     };
 
     let result = trogon_agent::run(cfg).await;
