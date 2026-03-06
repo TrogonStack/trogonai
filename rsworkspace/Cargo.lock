@@ -4097,6 +4097,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-github",
  "trogon-linear",
+ "trogon-mcp",
  "trogon-nats",
  "trogon-secret-proxy",
  "trogon-std",
@@ -4142,6 +4143,18 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-mcp"
+version = "0.1.0"
+dependencies = [
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

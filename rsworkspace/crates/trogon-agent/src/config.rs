@@ -5,6 +5,27 @@ const DEFAULT_PROXY_URL: &str = "http://localhost:8080";
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 const DEFAULT_MAX_ITERATIONS: u32 = 10;
 
+/// Configuration for a single MCP server connection.
+#[derive(Debug, Clone)]
+pub struct McpServerConfig {
+    /// Short identifier used to prefix tool names (e.g. `"search"` → tool `mcp__search__my_tool`).
+    pub name: String,
+    /// HTTP endpoint of the MCP server (e.g. `"http://server:8080/mcp"`).
+    pub url: String,
+}
+
+/// Parse the `MCP_SERVERS` env var: `"name1=url1,name2=url2"`.
+pub(crate) fn parse_mcp_servers(s: &str) -> Vec<McpServerConfig> {
+    s.split(',')
+        .filter_map(|entry| {
+            let mut parts = entry.splitn(2, '=');
+            let name = parts.next()?.trim().to_string();
+            let url = parts.next()?.trim().to_string();
+            if name.is_empty() || url.is_empty() { None } else { Some(McpServerConfig { name, url }) }
+        })
+        .collect()
+}
+
 /// Runtime configuration for the agent, loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -32,6 +53,9 @@ pub struct AgentConfig {
     /// GitHub repo name for reading `.trogon/memory.md` in Linear handlers
     /// (e.g. `"my-repo"`).
     pub memory_repo: Option<String>,
+    /// MCP servers to connect to at startup.
+    /// Parsed from `MCP_SERVERS=name1=url1,name2=url2`.
+    pub mcp_servers: Vec<McpServerConfig>,
 }
 
 impl AgentConfig {
@@ -57,6 +81,11 @@ impl AgentConfig {
             linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
             memory_owner: env.var("MEMORY_OWNER").ok(),
             memory_repo: env.var("MEMORY_REPO").ok(),
+            mcp_servers: env
+                .var("MCP_SERVERS")
+                .ok()
+                .map(|s| parse_mcp_servers(&s))
+                .unwrap_or_default(),
         }
     }
 }

@@ -31,6 +31,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         }),
         memory_owner: None,
         memory_repo: None,
+    mcp_tool_defs: vec![],
+    mcp_dispatch: vec![],
     }
 }
 

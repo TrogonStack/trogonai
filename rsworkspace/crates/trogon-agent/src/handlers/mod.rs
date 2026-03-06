@@ -87,6 +87,8 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
         }
     }
 
