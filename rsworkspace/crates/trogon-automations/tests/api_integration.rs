@@ -59,7 +59,7 @@ fn create_body() -> Value {
 async fn create_returns_201_with_id() {
     let s = start_server().await;
     let res = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.expect("send");
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.expect("send");
 
     assert_eq!(res.status(), 201);
     let body: Value = res.json().await.expect("json");
@@ -73,8 +73,8 @@ async fn create_returns_201_with_id() {
 async fn list_returns_all_automations() {
     let s = start_server().await;
 
-    s.client.post(format!("{}/automations", s.base_url)).json(&create_body()).send().await.unwrap();
-    s.client.post(format!("{}/automations", s.base_url)).json(&json!({
+    s.client.post(format!("{}/automations", s.base_url)).header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap();
+    s.client.post(format!("{}/automations", s.base_url)).header("x-tenant-id", "acme").json(&json!({
         "name": "Push monitor",
         "trigger": "github.push",
         "prompt": "Check push.",
@@ -82,7 +82,7 @@ async fn list_returns_all_automations() {
         "mcp_servers": []
     })).send().await.unwrap();
 
-    let res = s.client.get(format!("{}/automations", s.base_url)).send().await.unwrap();
+    let res = s.client.get(format!("{}/automations", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 200);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body.as_array().unwrap().len(), 2);
@@ -92,10 +92,10 @@ async fn list_returns_all_automations() {
 async fn get_existing_returns_200() {
     let s = start_server().await;
     let create_res: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
     let id = create_res["id"].as_str().unwrap();
 
-    let res = s.client.get(format!("{}/automations/{id}", s.base_url)).send().await.unwrap();
+    let res = s.client.get(format!("{}/automations/{id}", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 200);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["id"], id);
@@ -104,15 +104,44 @@ async fn get_existing_returns_200() {
 #[tokio::test]
 async fn get_missing_returns_404() {
     let s = start_server().await;
-    let res = s.client.get(format!("{}/automations/does-not-exist", s.base_url)).send().await.unwrap();
+    let res = s.client.get(format!("{}/automations/does-not-exist", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn missing_tenant_header_returns_400() {
+    let s = start_server().await;
+    let res = s.client.get(format!("{}/automations", s.base_url)).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn tenant_isolation_different_tenants_see_different_automations() {
+    let s = start_server().await;
+    // acme creates one automation
+    s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap();
+    // other-org creates one automation
+    s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "other-org").json(&create_body()).send().await.unwrap();
+
+    let acme_list: serde_json::Value = s.client.get(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    let other_list: serde_json::Value = s.client.get(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "other-org").send().await.unwrap().json().await.unwrap();
+
+    assert_eq!(acme_list.as_array().unwrap().len(), 1, "acme sees only its own");
+    assert_eq!(other_list.as_array().unwrap().len(), 1, "other-org sees only its own");
+    // IDs are different
+    assert_ne!(acme_list[0]["id"], other_list[0]["id"]);
 }
 
 #[tokio::test]
 async fn update_returns_updated_fields() {
     let s = start_server().await;
     let create_res: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
     let id = create_res["id"].as_str().unwrap();
 
     let update = json!({
@@ -126,7 +155,7 @@ async fn update_returns_updated_fields() {
     });
 
     let res = s.client.put(format!("{}/automations/{id}", s.base_url))
-        .json(&update).send().await.unwrap();
+        .header("x-tenant-id", "acme").json(&update).send().await.unwrap();
     assert_eq!(res.status(), 200);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["name"], "Updated name");
@@ -143,7 +172,7 @@ async fn update_missing_returns_404() {
         "tools": [], "mcp_servers": [], "enabled": true
     });
     let res = s.client.put(format!("{}/automations/no-such-id", s.base_url))
-        .json(&update).send().await.unwrap();
+        .header("x-tenant-id", "acme").json(&update).send().await.unwrap();
     assert_eq!(res.status(), 404);
 }
 
@@ -151,20 +180,20 @@ async fn update_missing_returns_404() {
 async fn delete_returns_204() {
     let s = start_server().await;
     let create_res: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
     let id = create_res["id"].as_str().unwrap();
 
-    let del = s.client.delete(format!("{}/automations/{id}", s.base_url)).send().await.unwrap();
+    let del = s.client.delete(format!("{}/automations/{id}", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(del.status(), 204);
 
-    let get = s.client.get(format!("{}/automations/{id}", s.base_url)).send().await.unwrap();
+    let get = s.client.get(format!("{}/automations/{id}", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(get.status(), 404);
 }
 
 #[tokio::test]
 async fn delete_missing_returns_404() {
     let s = start_server().await;
-    let res = s.client.delete(format!("{}/automations/ghost", s.base_url)).send().await.unwrap();
+    let res = s.client.delete(format!("{}/automations/ghost", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 404);
 }
 
@@ -177,10 +206,10 @@ async fn enable_sets_enabled_true() {
         "tools": [], "mcp_servers": [], "enabled": false
     });
     let created: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&body).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&body).send().await.unwrap().json().await.unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let res = s.client.patch(format!("{}/automations/{id}/enable", s.base_url)).send().await.unwrap();
+    let res = s.client.patch(format!("{}/automations/{id}/enable", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 200);
     let resp: Value = res.json().await.unwrap();
     assert_eq!(resp["enabled"], true);
@@ -190,11 +219,11 @@ async fn enable_sets_enabled_true() {
 async fn disable_sets_enabled_false() {
     let s = start_server().await;
     let created: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
     let id = created["id"].as_str().unwrap();
     assert_eq!(created["enabled"], true);
 
-    let res = s.client.patch(format!("{}/automations/{id}/disable", s.base_url)).send().await.unwrap();
+    let res = s.client.patch(format!("{}/automations/{id}/disable", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 200);
     let resp: Value = res.json().await.unwrap();
     assert_eq!(resp["enabled"], false);
@@ -203,14 +232,14 @@ async fn disable_sets_enabled_false() {
 #[tokio::test]
 async fn enable_missing_returns_404() {
     let s = start_server().await;
-    let res = s.client.patch(format!("{}/automations/no-id/enable", s.base_url)).send().await.unwrap();
+    let res = s.client.patch(format!("{}/automations/no-id/enable", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 404);
 }
 
 #[tokio::test]
 async fn list_empty_returns_empty_array() {
     let s = start_server().await;
-    let res = s.client.get(format!("{}/automations", s.base_url)).send().await.unwrap();
+    let res = s.client.get(format!("{}/automations", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
     assert_eq!(res.status(), 200);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body, json!([]));
@@ -220,7 +249,7 @@ async fn list_empty_returns_empty_array() {
 async fn created_at_preserved_on_update() {
     let s = start_server().await;
     let created: Value = s.client.post(format!("{}/automations", s.base_url))
-        .json(&create_body()).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
     let id = created["id"].as_str().unwrap();
     let created_at = created["created_at"].as_str().unwrap().to_string();
 
@@ -229,7 +258,7 @@ async fn created_at_preserved_on_update() {
         "tools": [], "mcp_servers": [], "enabled": true
     });
     let updated: Value = s.client.put(format!("{}/automations/{id}", s.base_url))
-        .json(&update).send().await.unwrap().json().await.unwrap();
+        .header("x-tenant-id", "acme").json(&update).send().await.unwrap().json().await.unwrap();
 
     assert_eq!(updated["created_at"], created_at, "created_at must not change on update");
 }
