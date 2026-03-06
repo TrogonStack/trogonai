@@ -154,4 +154,20 @@ mod tests {
         let cfg = AgentConfig::from_env(&env);
         assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
     }
+
+    #[test]
+    fn memory_path_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("MEMORY_PATH", ".trogon/custom-memory.md");
+
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.memory_path.as_deref(), Some(".trogon/custom-memory.md"));
+    }
+
+    #[test]
+    fn memory_path_is_none_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.memory_path.is_none());
+    }
 }
