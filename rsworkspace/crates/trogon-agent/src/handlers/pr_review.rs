@@ -182,6 +182,24 @@ fn pr_review_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
+        tool_def(
+            "request_reviewers",
+            "Request reviewers on a pull request.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["owner", "repo", "pr_number", "reviewers"],
+                "properties": {
+                    "owner":     { "type": "string" },
+                    "repo":      { "type": "string" },
+                    "pr_number": { "type": "integer" },
+                    "reviewers": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "GitHub usernames to request as reviewers"
+                    }
+                }
+            }),
+        ),
     ]
 }
 
@@ -190,8 +208,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pr_review_tools_has_seven_entries() {
-        assert_eq!(pr_review_tools().len(), 7);
+    fn pr_review_tools_has_eight_entries() {
+        assert_eq!(pr_review_tools().len(), 8);
     }
 
     #[test]

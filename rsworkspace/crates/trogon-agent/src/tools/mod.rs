@@ -49,6 +49,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "update_file" => github::update_file(ctx, input).await,
         "create_pull_request" => github::create_pull_request(ctx, input).await,
         "post_pr_comment" => github::post_pr_comment(ctx, input).await,
+        "request_reviewers" => github::request_reviewers(ctx, input).await,
         "get_linear_issue" => linear::get_issue(ctx, input).await,
         "update_linear_issue" => linear::update_issue(ctx, input).await,
         "post_linear_comment" => linear::post_comment(ctx, input).await,
