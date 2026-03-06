@@ -316,7 +316,7 @@ pub(crate) async fn dispatch_automations(
     }
 }
 
-async fn init_mcp_servers(
+pub(crate) async fn init_mcp_servers(
     http_client: &reqwest::Client,
     servers: &[McpServerConfig],
 ) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
@@ -357,7 +357,7 @@ async fn init_mcp_servers(
     (tool_defs, dispatch)
 }
 
-fn sanitize_name(s: &str) -> String {
+pub(crate) fn sanitize_name(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
         .collect()
