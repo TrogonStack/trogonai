@@ -4,6 +4,7 @@
 //!
 //! | Concern | Trait(s) | Production | Test |
 //! |---------|----------|------------|------|
+//! | JSON serialization | [`JsonSerialize`] | [`StdJsonSerialize`] | `FailNextSerialize`* |
 //! | Directories | [`HomeDir`], [`ConfigDir`], [`CacheDir`], [`DataDir`], [`DataLocalDir`], [`StateDir`] | [`SystemDirs`] | `FixedDirs`* |
 //! | Env vars | [`ReadEnv`] | [`SystemEnv`] | `InMemoryEnv`* |
 //! | Filesystem | [`ReadFile`], [`WriteFile`], [`ExistsFile`], [`CreateDirAll`], [`OpenAppendFile`] | [`SystemFs`] | `MemFs`* |
@@ -30,9 +31,13 @@
 pub mod dirs;
 pub mod env;
 pub mod fs;
+pub mod json;
 pub mod time;
 
 pub use dirs::{CacheDir, ConfigDir, DataDir, DataLocalDir, HomeDir, StateDir, SystemDirs};
 pub use env::{ReadEnv, SystemEnv};
 pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, WriteFile};
+#[cfg(any(test, feature = "test-support"))]
+pub use json::FailNextSerialize;
+pub use json::{JsonSerialize, StdJsonSerialize};
 pub use time::{GetElapsed, GetNow, SystemClock};
