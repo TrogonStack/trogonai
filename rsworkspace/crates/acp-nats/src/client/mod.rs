@@ -1,4 +1,5 @@
 pub(crate) mod fs_read_text_file;
+pub(crate) mod request_permission;
 pub(crate) mod session_update;
 
 use crate::agent::Bridge;
@@ -206,6 +207,17 @@ async fn dispatch_client_method<
             )
             .await;
         }
+        ClientMethod::SessionRequestPermission => {
+            request_permission::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.serializer,
+            )
+            .await;
+        }
         ClientMethod::SessionUpdate => {
             session_update::handle(&payload, ctx.client, &parsed.session_id).await;
         }
@@ -218,7 +230,8 @@ mod tests {
     use crate::session_id::AcpSessionId;
     use agent_client_protocol::{
         ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, Request, RequestId,
-        RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+        RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+        SessionNotification, SessionUpdate,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -489,6 +502,78 @@ mod tests {
         };
         dispatch_client_method(
             "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[derive(Debug)]
+    struct RpcMockClient;
+
+    #[async_trait(?Send)]
+    impl Client for RpcMockClient {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
+            Ok(())
+        }
+
+        async fn request_permission(
+            &self,
+            _: RequestPermissionRequest,
+        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+            Ok(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ))
+        }
+
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+            Ok(ReadTextFileResponse::new("file contents".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_request_permission() {
+        let nats = MockNatsClient::new();
+        let client = RpcMockClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let request = RequestPermissionRequest::new(
+            "sess-1",
+            agent_client_protocol::ToolCallUpdate::new(
+                "call-1",
+                agent_client_protocol::ToolCallUpdateFields::new(),
+            ),
+            vec![],
+        );
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionRequestPermission,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
