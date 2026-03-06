@@ -298,11 +298,11 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/automations", get(list_automations).post(create_automation))
         .route(
-            "/automations/:id",
+            "/automations/{id}",
             get(get_automation).put(update_automation).delete(delete_automation),
         )
-        .route("/automations/:id/enable", patch(enable_automation))
-        .route("/automations/:id/disable", patch(disable_automation))
+        .route("/automations/{id}/enable", patch(enable_automation))
+        .route("/automations/{id}/disable", patch(disable_automation))
         .with_state(state)
 }
 

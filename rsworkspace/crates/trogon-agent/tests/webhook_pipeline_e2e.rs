@@ -240,6 +240,8 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -427,6 +429,8 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();

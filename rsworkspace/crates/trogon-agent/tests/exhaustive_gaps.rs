@@ -282,6 +282,7 @@ async fn update_linear_issue_empty_patch_still_sends_request() {
         proxy_url: server.base_url(),
         github_token: String::new(),
         linear_token: "tok_linear_prod_test01".to_string(),
+        slack_token: String::new(),
     };
     let result = dispatch_tool(&ctx, "update_linear_issue", &json!({ "issue_id": "ISS-1" })).await;
 
