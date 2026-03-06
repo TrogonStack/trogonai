@@ -78,14 +78,16 @@ async fn get_file_contents_decodes_base64() {
             .header("authorization", "Bearer tok_github_prod_test01");
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({ "content": encoded, "encoding": "base64" }));
+            .json_body(json!({ "content": encoded, "encoding": "base64", "sha": "deadbeef01" }));
     });
 
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "owner", "repo": "repo", "path": "src/main.rs" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
 
-    assert_eq!(result, content);
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
+    assert_eq!(parsed["content"].as_str().unwrap(), content);
+    assert_eq!(parsed["sha"].as_str().unwrap(), "deadbeef01");
 }
 
 #[tokio::test]
