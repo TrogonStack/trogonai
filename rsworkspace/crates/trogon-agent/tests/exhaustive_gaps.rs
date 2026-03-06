@@ -26,6 +26,7 @@ fn dummy_ctx() -> ToolContext {
         proxy_url: "http://localhost:9999".to_string(),
         github_token: String::new(),
         linear_token: String::new(),
+            slack_token: String::new(),
     }
 }
 
@@ -42,6 +43,7 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
             proxy_url: proxy_url.to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
         }),
         memory_owner: None,
         memory_repo: None,
