@@ -65,6 +65,10 @@ pub struct AgentConfig {
     /// Set via `AUTOMATIONS_API_PORT` (default: 8090).
     /// Set to `0` to disable the API server.
     pub api_port: u16,
+    /// Tenant identifier for this agent instance.
+    /// Set via `TENANT_ID` env var (default: `"default"`).
+    /// Used to scope automation lookups and KV keys.
+    pub tenant_id: String,
 }
 
 impl AgentConfig {
@@ -102,6 +106,9 @@ impl AgentConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8090),
+            tenant_id: env
+                .var("TENANT_ID")
+                .unwrap_or_else(|_| "default".to_string()),
         }
     }
 }
@@ -294,5 +301,20 @@ mod tests {
         env.set("AUTOMATIONS_API_PORT", "not-a-port");
         let cfg = AgentConfig::from_env(&env);
         assert_eq!(cfg.api_port, 8090);
+    }
+
+    #[test]
+    fn tenant_id_defaults_to_default() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.tenant_id, "default");
+    }
+
+    #[test]
+    fn tenant_id_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("TENANT_ID", "acme");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.tenant_id, "acme");
     }
 }

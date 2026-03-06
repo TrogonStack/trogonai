@@ -103,6 +103,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .await
             .map_err(|e| RunnerError::JetStream(format!("AutomationStore: {e}")))?,
     );
+    let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Start the automations HTTP API server unless disabled (port == 0).
     if cfg.api_port != 0 {
@@ -147,10 +148,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.pull_request";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
@@ -182,10 +184,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.issue_comment";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 match handlers::comment_added::handle(&agent, &msg.payload).await {
                                     Some(Ok(o)) => info!(output = %o, "Comment-added done"),
@@ -207,10 +210,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.push";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 match handlers::push_to_branch::handle(&agent, &msg.payload).await {
                                     Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
@@ -232,10 +236,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.check_run";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 match handlers::ci_completed::handle(&agent, &msg.payload).await {
                                     Some(Ok(o)) => info!(output = %o, "CI-completed done"),
@@ -257,10 +262,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "linear.Issue";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 match handlers::issue_triage::handle(&agent, &msg.payload).await {
                                     Some(Ok(o)) => info!(output = %o, "Issue triage done"),
