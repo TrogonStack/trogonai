@@ -76,7 +76,10 @@ pub async fn list_pr_files(ctx: &ToolContext, input: &Value) -> Result<String, S
 /// Read the UTF-8 contents of a file at a specific ref.
 ///
 /// GitHub returns base64-encoded content in the `content` field; this
-/// function decodes it before returning.
+/// function decodes it and returns a JSON object with two fields:
+///
+/// - `"sha"` — the blob SHA (store this; required by `update_file` when the file already exists)
+/// - `"content"` — the decoded UTF-8 text
 pub async fn get_file_contents(ctx: &ToolContext, input: &Value) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
@@ -113,7 +116,11 @@ pub async fn get_file_contents(ctx: &ToolContext, input: &Value) -> Result<Strin
         .decode(&raw)
         .map_err(|e| format!("base64 decode error: {e}"))?;
 
-    String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode error: {e}"))
+    let content = String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode error: {e}"))?;
+    let sha = response["sha"].as_str().unwrap_or("").to_string();
+
+    serde_json::to_string(&serde_json::json!({ "sha": sha, "content": content }))
+        .map_err(|e| e.to_string())
 }
 
 /// Get all comments on a pull request (uses the Issues comments endpoint).

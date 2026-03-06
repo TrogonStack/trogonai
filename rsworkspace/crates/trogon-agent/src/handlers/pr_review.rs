@@ -48,14 +48,16 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let prompt = format!(
         "You are a code reviewer. Review the pull request #{pr_number} in {owner}/{repo}.\n\
-         1. Use `get_file_contents` with path `.trogon/memory.md` to load team conventions and prior decisions.\n\
+         1. Use `get_file_contents` with path `.trogon/memory.md` — the result is a JSON object \
+            with `sha` and `content`; note the `sha` (you will need it to update the file later).\n\
          2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
          3. Use `list_pr_files` to see which files changed.\n\
          4. Use `get_pr_diff` to read the unified diff.\n\
-         5. Use `get_file_contents` when you need more context around a change.\n\
+         5. Use `get_file_contents` when you need more context around a specific change.\n\
          6. Post a concise, actionable review comment using `post_pr_comment`.\n\
-         7. If you learned something important about the repo conventions, update `.trogon/memory.md`\n\
-            using `update_file` on a new branch, then open a PR with `create_pull_request`.\n\
+         7. If you learned something important about the repo conventions, update `.trogon/memory.md` \
+            using `update_file` (pass the `sha` from step 1, use a new branch), \
+            then open a PR with `create_pull_request`.\n\
          Focus on correctness, security, and clarity. Be constructive."
     );
 
@@ -107,7 +109,7 @@ fn pr_review_tools() -> Vec<ToolDef> {
         ),
         tool_def(
             "get_file_contents",
-            "Read the contents of a file at a specific git ref.",
+            "Read the contents of a file at a specific git ref. Returns a JSON object with `sha` (blob SHA — required for update_file on existing files) and `content` (decoded UTF-8 text).",
             serde_json::json!({
                 "type": "object",
                 "required": ["owner", "repo", "path"],

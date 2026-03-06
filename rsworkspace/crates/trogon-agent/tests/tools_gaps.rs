@@ -40,14 +40,16 @@ async fn get_file_contents_strips_newlines_in_base64() {
             .path("/github/repos/owner/repo/contents/src/main.rs");
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({ "content": chunked, "encoding": "base64" }));
+            .json_body(json!({ "content": chunked, "encoding": "base64", "sha": "sha-chunked" }));
     });
 
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "owner", "repo": "repo", "path": "src/main.rs" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
 
-    assert_eq!(result, content, "embedded newlines must be stripped before decoding");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
+    assert_eq!(parsed["content"].as_str().unwrap(), content, "embedded newlines must be stripped before decoding");
+    assert_eq!(parsed["sha"].as_str().unwrap(), "sha-chunked");
 }
 
 /// When `ref` is provided it must appear in the query string.
@@ -64,7 +66,7 @@ async fn get_file_contents_passes_ref_in_query() {
             .query_param("ref", "main");
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({ "content": encoded, "encoding": "base64" }));
+            .json_body(json!({ "content": encoded, "encoding": "base64", "sha": "sha-ref-main" }));
     });
 
     let ctx = make_ctx(&server.base_url());
@@ -76,7 +78,9 @@ async fn get_file_contents_passes_ref_in_query() {
     });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
 
-    assert_eq!(result, content);
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
+    assert_eq!(parsed["content"].as_str().unwrap(), content);
+    assert_eq!(parsed["sha"].as_str().unwrap(), "sha-ref-main");
 }
 
 /// When `ref` is omitted, the default `HEAD` is used in the query string.
@@ -92,14 +96,16 @@ async fn get_file_contents_defaults_to_head_ref() {
             .query_param("ref", "HEAD");
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({ "content": encoded }));
+            .json_body(json!({ "content": encoded, "sha": "sha-head" }));
     });
 
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "o", "repo": "r", "path": "f.txt" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
 
-    assert_eq!(result, "data");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
+    assert_eq!(parsed["content"].as_str().unwrap(), "data");
+    assert_eq!(parsed["sha"].as_str().unwrap(), "sha-head");
 }
 
 // ── update_linear_issue failure ───────────────────────────────────────────────
