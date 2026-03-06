@@ -1,17 +1,27 @@
 //! JetStream pull-consumer runner — wires incoming events to agent handlers.
 //!
-//! The runner binds two durable pull consumers and dispatches each message to
-//! the appropriate handler.  Messages are acked only after the handler returns,
-//! giving at-least-once delivery if the agent crashes mid-processing.
+//! ## Dispatch strategy
 //!
-//! | JetStream stream | Filter subject       | Handler                            |
-//! |------------------|----------------------|------------------------------------|
-//! | `GITHUB`         | `github.pull_request`| [`handlers::pr_review::handle`]    |
-//! | `LINEAR`         | `linear.Issue.>`     | [`handlers::issue_triage::handle`] |
+//! For each incoming NATS event the runner:
 //!
-//! Stream names and filter subjects match the defaults used by `trogon-github`
-//! and `trogon-linear`.  They can be overridden via env vars
-//! `GITHUB_STREAM_NAME` and `LINEAR_STREAM_NAME`.
+//! 1. Queries the [`AutomationStore`] for enabled automations whose `trigger`
+//!    matches the event's subject and payload action.
+//! 2. If one or more automations match, **each is executed in a separate
+//!    `tokio::spawn`** (parallel execution).
+//! 3. If **no** automations match, the runner falls back to the built-in
+//!    hardcoded handler so the agent works out-of-the-box without any
+//!    configuration.
+//!
+//! This means automations can be added, edited, enabled, or disabled at any
+//! time via the [`trogon_automations::api`] HTTP API — no restart required.
+//!
+//! | JetStream stream | Filter subject        | Fallback handler                   |
+//! |------------------|-----------------------|------------------------------------|
+//! | `GITHUB`         | `github.pull_request` | pr_review / pr_merged              |
+//! | `GITHUB`         | `github.issue_comment`| comment_added                      |
+//! | `GITHUB`         | `github.push`         | push_to_branch                     |
+//! | `GITHUB`         | `github.check_run`    | ci_completed                       |
+//! | `LINEAR`         | `linear.Issue.>`      | issue_triage                       |
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +29,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, consumer::pull, consumer::AckPolicy, consumer::DeliverPolicy};
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
+use trogon_automations::AutomationStore;
 
 use crate::agent_loop::AgentLoop;
 use crate::config::{AgentConfig, McpServerConfig};
@@ -27,15 +38,10 @@ use crate::tools::{ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Durable consumer name for the GitHub pull_request stream.
 const GITHUB_CONSUMER: &str = "trogon-agent-pr-review";
-/// Durable consumer name for the GitHub issue_comment stream.
 const COMMENT_CONSUMER: &str = "trogon-agent-comment-added";
-/// Durable consumer name for the GitHub push stream.
 const PUSH_CONSUMER: &str = "trogon-agent-push-to-branch";
-/// Durable consumer name for the GitHub check_run stream.
 const CI_CONSUMER: &str = "trogon-agent-ci-completed";
-/// Durable consumer name for the Linear Issue stream.
 const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
 
 #[derive(Debug)]
@@ -61,7 +67,6 @@ impl From<trogon_nats::ConnectError> for RunnerError {
     }
 }
 
-/// Connect to NATS and start processing events from JetStream.
 pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let nats = trogon_nats::connect(&cfg.nats, NATS_CONNECT_TIMEOUT).await?;
     let js = jetstream::new(nats);
@@ -93,48 +98,20 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         mcp_dispatch,
     });
 
+    let store = Arc::new(
+        AutomationStore::open(&js)
+            .await
+            .map_err(|e| RunnerError::JetStream(format!("AutomationStore: {e}")))?,
+    );
+
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
 
-    let mut pr_messages = bind_consumer(
-        &js,
-        github_stream_name,
-        GITHUB_CONSUMER,
-        "github.pull_request",
-    )
-    .await?;
-
-    let mut comment_messages = bind_consumer(
-        &js,
-        github_stream_name,
-        COMMENT_CONSUMER,
-        "github.issue_comment",
-    )
-    .await?;
-
-    let mut push_messages = bind_consumer(
-        &js,
-        github_stream_name,
-        PUSH_CONSUMER,
-        "github.push",
-    )
-    .await?;
-
-    let mut ci_messages = bind_consumer(
-        &js,
-        github_stream_name,
-        CI_CONSUMER,
-        "github.check_run",
-    )
-    .await?;
-
-    let mut issue_messages = bind_consumer(
-        &js,
-        linear_stream_name,
-        LINEAR_CONSUMER,
-        "linear.Issue.>",
-    )
-    .await?;
+    let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
+    let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
+    let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
+    let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
+    let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
 
     info!(
         proxy_url = %cfg.proxy_url,
@@ -152,29 +129,31 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Err(e) => warn!(error = %e, "Error receiving PR message"),
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
                         tokio::spawn(async move {
-                            // Route merged vs open/sync based on action + merged flag.
-                            let is_merged = serde_json::from_slice::<serde_json::Value>(&msg.payload)
-                                .map(|v| v["action"].as_str() == Some("closed")
-                                    && v["pull_request"]["merged"].as_bool() == Some(true))
-                                .unwrap_or(false);
-
-                            if is_merged {
-                                match handlers::pr_merged::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "PR merged done"),
-                                    Some(Err(e)) => error!(error = %e, "PR merged error"),
-                                    None => {}
+                            let subject = "github.pull_request";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                let is_merged = pv["action"].as_str() == Some("closed")
+                                    && pv["pull_request"]["merged"].as_bool() == Some(true);
+                                if is_merged {
+                                    match handlers::pr_merged::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "PR merged done"),
+                                        Some(Err(e)) => error!(error = %e, "PR merged error"),
+                                        None => {}
+                                    }
+                                } else {
+                                    match handlers::pr_review::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "PR review done"),
+                                        Some(Err(e)) => error!(error = %e, "PR review error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
-                                match handlers::pr_review::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "PR review done"),
-                                    Some(Err(e)) => error!(error = %e, "PR review error"),
-                                    None => {}
-                                }
+                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
                             }
-                            if let Err(e) = msg.ack().await {
-                                warn!(error = %e, "Failed to ack PR message");
-                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
                         });
                     }
                 }
@@ -185,15 +164,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Err(e) => warn!(error = %e, "Error receiving comment message"),
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
                         tokio::spawn(async move {
-                            match handlers::comment_added::handle(&agent, &msg.payload).await {
-                                Some(Ok(o)) => info!(output = %o, "Comment-added done"),
-                                Some(Err(e)) => error!(error = %e, "Comment-added error"),
-                                None => {}
+                            let subject = "github.issue_comment";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                match handlers::comment_added::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "Comment-added done"),
+                                    Some(Err(e)) => error!(error = %e, "Comment-added error"),
+                                    None => {}
+                                }
+                            } else {
+                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
                             }
-                            if let Err(e) = msg.ack().await {
-                                warn!(error = %e, "Failed to ack comment message");
-                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
                         });
                     }
                 }
@@ -204,15 +189,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Err(e) => warn!(error = %e, "Error receiving push message"),
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
                         tokio::spawn(async move {
-                            match handlers::push_to_branch::handle(&agent, &msg.payload).await {
-                                Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
-                                Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
-                                None => {}
+                            let subject = "github.push";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                match handlers::push_to_branch::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
+                                    Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
+                                    None => {}
+                                }
+                            } else {
+                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
                             }
-                            if let Err(e) = msg.ack().await {
-                                warn!(error = %e, "Failed to ack push message");
-                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
                         });
                     }
                 }
@@ -223,15 +214,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Err(e) => warn!(error = %e, "Error receiving CI message"),
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
                         tokio::spawn(async move {
-                            match handlers::ci_completed::handle(&agent, &msg.payload).await {
-                                Some(Ok(o)) => info!(output = %o, "CI-completed done"),
-                                Some(Err(e)) => error!(error = %e, "CI-completed error"),
-                                None => {}
+                            let subject = "github.check_run";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                match handlers::ci_completed::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "CI-completed done"),
+                                    Some(Err(e)) => error!(error = %e, "CI-completed error"),
+                                    None => {}
+                                }
+                            } else {
+                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
                             }
-                            if let Err(e) = msg.ack().await {
-                                warn!(error = %e, "Failed to ack CI message");
-                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
                         });
                     }
                 }
@@ -242,15 +239,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Err(e) => warn!(error = %e, "Error receiving issue message"),
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
                         tokio::spawn(async move {
-                            match handlers::issue_triage::handle(&agent, &msg.payload).await {
-                                Some(Ok(o)) => info!(output = %o, "Issue triage done"),
-                                Some(Err(e)) => error!(error = %e, "Issue triage error"),
-                                None => {}
+                            let subject = "linear.Issue";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                match handlers::issue_triage::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "Issue triage done"),
+                                    Some(Err(e)) => error!(error = %e, "Issue triage error"),
+                                    None => {}
+                                }
+                            } else {
+                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
                             }
-                            if let Err(e) = msg.ack().await {
-                                warn!(error = %e, "Failed to ack issue message");
-                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
                         });
                     }
                 }
@@ -262,11 +265,34 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     Ok(())
 }
 
-/// Connect to each configured MCP server, discover tools, and build the
-/// tool definitions + dispatch table for the [`AgentLoop`].
-///
-/// Servers that fail to initialize are skipped with a warning so a single
-/// misconfigured server cannot block the agent from starting.
+/// Spawn one task per automation and wait for all to finish.
+async fn dispatch_automations(
+    agent: &Arc<AgentLoop>,
+    automations: Vec<trogon_automations::Automation>,
+    nats_subject: &str,
+    payload: &bytes::Bytes,
+) {
+    let handles: Vec<_> = automations
+        .into_iter()
+        .map(|auto| {
+            let agent = Arc::clone(agent);
+            let payload = payload.clone();
+            let subject = nats_subject.to_string();
+            tokio::spawn(async move {
+                info!(automation = %auto.name, "Running automation");
+                match handlers::run_automation(&agent, &auto, &subject, &payload).await {
+                    Ok(o) => info!(automation = %auto.name, output = %o, "Automation done"),
+                    Err(e) => error!(automation = %auto.name, error = %e, "Automation failed"),
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.await.ok();
+    }
+}
+
 async fn init_mcp_servers(
     http_client: &reqwest::Client,
     servers: &[McpServerConfig],
@@ -308,7 +334,6 @@ async fn init_mcp_servers(
     (tool_defs, dispatch)
 }
 
-/// Replace characters not valid in Anthropic tool names with `_`.
 fn sanitize_name(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
