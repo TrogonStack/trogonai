@@ -50,6 +50,7 @@ fn make_agent_with_mcp(
         tool_context: make_tool_ctx(proxy_url),
         memory_owner: None,
         memory_repo: None,
+        memory_path: None,
         mcp_tool_defs: vec![mcp_tool_def(prefixed_name, description)],
         mcp_dispatch: vec![(
             prefixed_name.to_string(),
