@@ -104,6 +104,23 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .map_err(|e| RunnerError::JetStream(format!("AutomationStore: {e}")))?,
     );
 
+    // Start the automations HTTP API server unless disabled (port == 0).
+    if cfg.api_port != 0 {
+        let api_state = trogon_automations::api::AppState { store: (*store).clone() };
+        let api_port = cfg.api_port;
+        tokio::spawn(async move {
+            match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
+                Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind automations API"),
+                Ok(listener) => {
+                    tracing::info!(port = api_port, "Automations API listening");
+                    if let Err(e) = axum::serve(listener, trogon_automations::api::router(api_state)).await {
+                        tracing::error!(error = %e, "Automations API server error");
+                    }
+                }
+            }
+        });
+    }
+
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
 
