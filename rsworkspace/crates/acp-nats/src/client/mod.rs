@@ -586,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_client_method_dispatches_request_permission_client_error_publishes_error_reply()
-    {
+     {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -672,8 +672,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_request_permission_client_error_serialization_fallback(
-    ) {
+    async fn dispatch_client_method_dispatches_request_permission_client_error_serialization_fallback()
+     {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let serializer = FailNextSerialize::new(1);
