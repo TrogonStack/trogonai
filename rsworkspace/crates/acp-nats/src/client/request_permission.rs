@@ -195,8 +195,9 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-        RequestPermissionResponse, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
+        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind,
+        RequestPermissionOutcome, RequestPermissionResponse, SessionNotification, ToolCallUpdate,
+        ToolCallUpdateFields, SessionUpdate,
     };
     use std::error::Error;
     use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
@@ -249,6 +250,28 @@ mod tests {
                 "permission denied",
             ))
         }
+    }
+
+    #[tokio::test]
+    async fn mock_client_session_notification_returns_ok() {
+        let client = MockClient::new(RequestPermissionOutcome::Cancelled);
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let result = client.session_notification(notification).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn failing_client_session_notification_returns_ok() {
+        let client = FailingClient;
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let result = client.session_notification(notification).await;
+        assert!(result.is_ok());
     }
 
     fn make_envelope(request: RequestPermissionRequest) -> Vec<u8> {
