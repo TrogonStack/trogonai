@@ -338,14 +338,48 @@ pub async fn run_automation(
     nats_subject: &str,
     payload: &[u8],
 ) -> Result<String, String> {
-    // Build the tool list.
+    // Build the built-in tool list (optionally filtered by the automation config).
     let all = crate::tools::all_tool_defs();
-    let tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
+    let mut tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
         all
     } else {
         all.into_iter()
             .filter(|t| automation.tools.contains(&t.name))
             .collect()
+    };
+
+    // Initialise automation-specific MCP servers and extend the tool list.
+    let auto_mcp_configs: Vec<crate::config::McpServerConfig> = automation
+        .mcp_servers
+        .iter()
+        .map(|s| crate::config::McpServerConfig { name: s.name.clone(), url: s.url.clone() })
+        .collect();
+    let (auto_mcp_defs, auto_mcp_dispatch) =
+        crate::runner::init_mcp_servers(&agent.http_client, &auto_mcp_configs).await;
+    tools.extend(auto_mcp_defs);
+
+    // If there are automation-level MCP servers, build a temporary AgentLoop
+    // that merges their dispatch entries with the base agent's dispatch.
+    let merged;
+    let effective: &AgentLoop = if auto_mcp_dispatch.is_empty() {
+        agent
+    } else {
+        let mut merged_dispatch = agent.mcp_dispatch.clone();
+        merged_dispatch.extend(auto_mcp_dispatch);
+        merged = AgentLoop {
+            http_client: agent.http_client.clone(),
+            proxy_url: agent.proxy_url.clone(),
+            anthropic_token: agent.anthropic_token.clone(),
+            model: agent.model.clone(),
+            max_iterations: agent.max_iterations,
+            tool_context: Arc::clone(&agent.tool_context),
+            memory_owner: agent.memory_owner.clone(),
+            memory_repo: agent.memory_repo.clone(),
+            memory_path: agent.memory_path.clone(),
+            mcp_tool_defs: agent.mcp_tool_defs.clone(),
+            mcp_dispatch: merged_dispatch,
+        };
+        &merged
     };
 
     // Format the user prompt: event context + automation-specific instructions.
@@ -362,15 +396,15 @@ pub async fn run_automation(
     let mem_path = automation
         .memory_path
         .as_deref()
-        .or(agent.memory_path.as_deref())
+        .or(effective.memory_path.as_deref())
         .unwrap_or(DEFAULT_MEMORY_PATH);
 
-    let memory = match (&agent.memory_owner, &agent.memory_repo) {
-        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
+    let memory = match (&effective.memory_owner, &effective.memory_repo) {
+        (Some(owner), Some(repo)) => fetch_memory(effective, owner, repo, mem_path).await,
         _ => None,
     };
 
-    run_agent(agent, full_prompt, tools, memory)
+    run_agent(effective, full_prompt, tools, memory)
         .await
         .map_err(|e| e.to_string())
 }
