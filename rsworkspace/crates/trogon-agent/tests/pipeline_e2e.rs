@@ -237,6 +237,8 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
 
     tokio::spawn(async move {
@@ -408,6 +410,8 @@ async fn pipeline_tool_use_github_api_detokenized() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -515,6 +519,8 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -696,6 +702,8 @@ async fn pipeline_tool_use_linear_api_detokenized() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -877,6 +885,8 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -1030,6 +1040,8 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -1169,6 +1181,8 @@ async fn pipeline_concurrent_events_processed_independently() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -1332,6 +1346,8 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1434,6 +1450,8 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1533,6 +1551,8 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1611,6 +1631,8 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1720,6 +1742,8 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1819,6 +1843,8 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1923,6 +1949,8 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2002,6 +2030,8 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2134,6 +2164,8 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2214,6 +2246,8 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2294,6 +2328,8 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2379,6 +2415,8 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2487,6 +2525,8 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2568,6 +2608,8 @@ async fn pipeline_custom_stream_names_route_correctly() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2668,6 +2710,8 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2769,6 +2813,8 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2874,6 +2920,8 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -2974,6 +3022,8 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3074,6 +3124,8 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3150,6 +3202,8 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3235,6 +3289,8 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3334,6 +3390,8 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3409,6 +3467,8 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3548,6 +3608,8 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3651,6 +3713,8 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3727,6 +3791,8 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3831,6 +3897,8 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -3948,6 +4016,8 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4005,6 +4075,8 @@ async fn pipeline_runner_startup_fails_when_github_stream_missing() {
     memory_repo: None,
     memory_path: None,
     mcp_servers: vec![],
+    api_port: 0,
+    tenant_id: "default".to_string(),
     };
 
     let result = run(agent_cfg).await;
@@ -4094,6 +4166,8 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4172,6 +4246,8 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4290,6 +4366,8 @@ async fn pipeline_hashicorp_vault_token_resolution() {
         memory_owner: None, memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4409,6 +4487,8 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
             memory_owner: None, memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
+            api_port: 0,
+            tenant_id: "default".to_string(),
         }).await.ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4528,6 +4608,8 @@ async fn pipeline_update_file_tool_detokenized() {
             memory_owner: None, memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
+            api_port: 0,
+            tenant_id: "default".to_string(),
         }).await.ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4647,6 +4729,8 @@ async fn pipeline_create_pull_request_tool_detokenized() {
             memory_owner: None, memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
+            api_port: 0,
+            tenant_id: "default".to_string(),
         }).await.ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4768,6 +4852,8 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
             memory_owner: None, memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
+            api_port: 0,
+            tenant_id: "default".to_string(),
         }).await.ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4829,6 +4915,7 @@ async fn setup_full_pipeline(nats_port: u16, mock_server: &MockServer) -> (u16, 
         model: "claude-opus-4-6".to_string(), max_iterations: 1,
         github_stream_name: None, linear_stream_name: None,
         memory_owner: None, memory_repo: None, memory_path: None, mcp_servers: vec![],
+        api_port: 0, tenant_id: "default".to_string(),
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(400)).await;

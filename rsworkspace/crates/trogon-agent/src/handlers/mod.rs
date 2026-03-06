@@ -80,6 +80,153 @@ mod tests {
     use base64::engine::general_purpose;
     use httpmock::MockServer;
 
+    fn make_automation(tools: Vec<String>) -> trogon_automations::Automation {
+        trogon_automations::Automation {
+            id: "test-auto-1".to_string(),
+            tenant_id: "acme".to_string(),
+            name: "Test automation".to_string(),
+            trigger: "github.push".to_string(),
+            prompt: "Review this push.".to_string(),
+            tools,
+            memory_path: None,
+            mcp_servers: vec![],
+            enabled: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn end_turn_json() -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "automation output"}]
+        })
+    }
+
+    /// run_automation includes the NATS subject and event JSON in the prompt.
+    #[tokio::test]
+    async fn run_automation_prompt_includes_subject_and_payload() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Event subject: github.push")
+                .body_contains("ref_name"); // key appears in the JSON-escaped prompt
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_json());
+        });
+
+        let agent = make_agent(&server.base_url());
+        let automation = make_automation(vec![]);
+        let payload = serde_json::to_vec(&serde_json::json!({"ref_name": "main"})).unwrap();
+        let result = run_automation(&agent, &automation, "github.push", &payload).await;
+        assert!(result.is_ok(), "expected Ok: {result:?}");
+        assert_eq!(result.unwrap(), "automation output");
+    }
+
+    /// Empty tools list → all 14 built-in tools are forwarded to the model.
+    #[tokio::test]
+    async fn run_automation_empty_tools_sends_all_builtins() {
+        let server = MockServer::start_async().await;
+        // Both a GitHub tool and a Slack tool must be present when tools == all.
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("list_pr_files")
+                .body_contains("read_slack_channel");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_json());
+        });
+
+        let agent = make_agent(&server.base_url());
+        let automation = make_automation(vec![]); // empty = all tools
+        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        assert!(result.is_ok(), "expected Ok: {result:?}");
+        mock.assert_async().await;
+    }
+
+    /// Specific tools list → only named tools appear; others are excluded.
+    #[tokio::test]
+    async fn run_automation_specific_tools_filters_others() {
+        let server = MockServer::start_async().await;
+        // If "list_pr_files" appears in the request the filter is broken → return error.
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("list_pr_files");
+            then.status(500)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({"error": "unexpected tool list_pr_files"}));
+        });
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("get_pr_diff");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_json());
+        });
+
+        let agent = make_agent(&server.base_url());
+        let automation =
+            make_automation(vec!["get_pr_diff".to_string(), "post_pr_comment".to_string()]);
+        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        assert!(result.is_ok(), "list_pr_files was incorrectly included: {result:?}");
+    }
+
+    /// Automation memory_path overrides the agent's default memory path.
+    #[tokio::test]
+    async fn run_automation_memory_path_override_used() {
+        let server = MockServer::start_async().await;
+        // Mock: custom memory path fetch succeeds.
+        let raw = general_purpose::STANDARD.encode("# Custom memory\n");
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains("custom/notes.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": raw }));
+        });
+        // Mock: Anthropic responds (system prompt present = memory was fetched).
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Custom memory");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_json());
+        });
+
+        // Agent has memory_owner/repo set so fetch_memory is attempted.
+        let http_client = reqwest::Client::new();
+        let agent = AgentLoop {
+            http_client: http_client.clone(),
+            proxy_url: server.base_url(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(crate::tools::ToolContext {
+                http_client,
+                proxy_url: server.base_url(),
+                github_token: "tok_github_prod_test01".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: Some("owner".to_string()),
+            memory_repo: Some("repo".to_string()),
+            memory_path: Some(".trogon/memory.md".to_string()), // agent default
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+        };
+        let mut automation = make_automation(vec![]);
+        automation.memory_path = Some("custom/notes.md".to_string()); // override
+
+        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        assert!(result.is_ok(), "expected Ok: {result:?}");
+    }
+
     fn make_agent(proxy_url: &str) -> AgentLoop {
         let http_client = reqwest::Client::new();
         AgentLoop {

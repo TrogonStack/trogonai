@@ -7,7 +7,7 @@
 //! or let the testcontainers setup spin up NATS automatically.
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner};
+use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
 use trogon_automations::{Automation, AutomationStore, McpServer};
 
 fn sample_automation(id: &str, trigger: &str) -> Automation {
@@ -27,7 +27,7 @@ fn sample_automation(id: &str, trigger: &str) -> Automation {
 }
 
 async fn make_store() -> (AutomationStore, impl Drop) {
-    let container = Nats::default().start().await.expect("NATS container");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS container");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -140,7 +140,7 @@ async fn watch_delivers_snapshot_and_updates() {
         .await
         .expect("timeout")
         .expect("stream ended");
-    assert_eq!(key, "w1");
+    assert_eq!(key, "test-tenant.w1");
     assert!(auto.is_some());
 
     // Write a second entry — should arrive as an incremental update.
@@ -151,7 +151,7 @@ async fn watch_delivers_snapshot_and_updates() {
         .await
         .expect("timeout")
         .expect("stream ended");
-    assert_eq!(key2, "w2");
+    assert_eq!(key2, "test-tenant.w2");
     assert_eq!(auto2.unwrap().trigger, "linear.Issue:create");
 }
 
@@ -171,13 +171,48 @@ async fn watch_delivers_delete_as_none() {
     timeout(Duration::from_secs(3), stream.next()).await.expect("t").expect("s");
 
     // Delete and observe the None.
-    store.delete("wd1").await.expect("delete");
+    store.delete("test-tenant", "wd1").await.expect("delete");
     let (key, auto) = timeout(Duration::from_secs(3), stream.next())
         .await
         .expect("timeout")
         .expect("stream");
-    assert_eq!(key, "wd1");
+    assert_eq!(key, "test-tenant.wd1");
     assert!(auto.is_none());
+}
+
+#[tokio::test]
+async fn cross_tenant_get_returns_none() {
+    let (store, _c) = make_store().await;
+    let a = sample_automation("iso1", "github.push"); // tenant_id = "test-tenant"
+    store.put(&a).await.expect("put");
+
+    // A different tenant cannot see tenant-a's automation.
+    let result = store.get("other-tenant", "iso1").await.expect("get");
+    assert!(result.is_none(), "other-tenant must not see test-tenant's automation");
+}
+
+#[tokio::test]
+async fn cross_tenant_list_returns_empty() {
+    let (store, _c) = make_store().await;
+    let a = sample_automation("iso2", "github.push"); // tenant_id = "test-tenant"
+    store.put(&a).await.expect("put");
+
+    let list = store.list("other-tenant").await.expect("list");
+    assert!(list.is_empty(), "other-tenant must see an empty list");
+}
+
+#[tokio::test]
+async fn cross_tenant_delete_does_not_remove_other_tenants_data() {
+    let (store, _c) = make_store().await;
+    let a = sample_automation("iso3", "github.push"); // tenant_id = "test-tenant"
+    store.put(&a).await.expect("put");
+
+    // Deleting with the wrong tenant has no effect (NATS KV key doesn't exist).
+    store.delete("other-tenant", "iso3").await.expect("delete");
+
+    // Original entry still exists for the correct tenant.
+    let fetched = store.get("test-tenant", "iso3").await.expect("get");
+    assert!(fetched.is_some(), "test-tenant's entry should still exist");
 }
 
 #[tokio::test]

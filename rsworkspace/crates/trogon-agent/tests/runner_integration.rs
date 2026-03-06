@@ -61,6 +61,8 @@ fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     }
 }
 
@@ -124,6 +126,8 @@ async fn runner_nats_connect_error_missing_credentials() {
         memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
     };
 
     let result = trogon_agent::run(cfg).await;

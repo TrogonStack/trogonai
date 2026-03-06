@@ -62,6 +62,7 @@ fn make_tool_context_stores_all_fields() {
         "http://proxy:8080".to_string(),
         "tok_github_prod_abc".to_string(),
         "tok_linear_prod_abc".to_string(),
+        String::new(),
     );
     assert_eq!(ctx.proxy_url, "http://proxy:8080");
     assert_eq!(ctx.github_token, "tok_github_prod_abc");
@@ -160,6 +161,7 @@ async fn get_file_contents_missing_content_field_returns_error() {
         proxy_url: server.base_url(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: String::new(),
+        slack_token: String::new(),
     };
     let input = json!({ "owner": "o", "repo": "r", "path": "f.txt" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
@@ -184,6 +186,7 @@ async fn get_file_contents_invalid_base64_returns_error() {
         proxy_url: server.base_url(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: String::new(),
+        slack_token: String::new(),
     };
     let input = json!({ "owner": "o", "repo": "r", "path": "f.txt" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
@@ -212,6 +215,7 @@ async fn get_file_contents_non_utf8_bytes_returns_error() {
         proxy_url: server.base_url(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: String::new(),
+        slack_token: String::new(),
     };
     let input = json!({ "owner": "o", "repo": "r", "path": "binary.bin" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;

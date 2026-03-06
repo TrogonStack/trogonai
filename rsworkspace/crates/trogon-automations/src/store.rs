@@ -119,14 +119,15 @@ impl AutomationStore {
     /// The runner filters items by `automation.tenant_id`.
     pub async fn watch(
         &self,
-    ) -> Result<impl futures_util::Stream<Item = (String, Option<Automation>)>, StoreError> {
+    ) -> Result<futures_util::stream::BoxStream<'static, (String, Option<Automation>)>, StoreError>
+    {
         let watcher = self
             .kv
             .watch_with_history(">")
             .await
             .map_err(|e| StoreError(e.to_string()))?;
 
-        Ok(watcher.filter_map(|entry| async move {
+        Ok(Box::pin(watcher.filter_map(|entry| async move {
             let entry = entry.ok()?;
             let key = entry.key.clone();
             match entry.operation {
@@ -136,7 +137,7 @@ impl AutomationStore {
                     Some((key, Some(a)))
                 }
             }
-        }))
+        })))
     }
 
     /// Return all enabled automations for `tenant_id` whose trigger matches
