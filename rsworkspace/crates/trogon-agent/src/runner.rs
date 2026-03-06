@@ -463,6 +463,60 @@ mod tests {
     fn sanitize_name_all_special_chars() {
         assert_eq!(sanitize_name("..."), "___");
     }
+
+    /// An MCP server that fails `initialize` is skipped — no tools, no panic.
+    #[tokio::test]
+    async fn init_mcp_servers_skips_server_that_fails_initialize() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "error": { "code": -32600, "message": "not supported" }
+                }));
+        });
+
+        let cfg = vec![crate::config::McpServerConfig {
+            name: "bad-server".to_string(),
+            url: format!("{}/mcp", server.base_url()),
+        }];
+        let http_client = reqwest::Client::new();
+        let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
+
+        assert!(tools.is_empty(), "no tools expected when server fails to initialize");
+        assert!(dispatch.is_empty(), "no dispatch entries expected");
+    }
+
+    /// An MCP server that initialises successfully but then fails `list_tools` is also skipped.
+    #[tokio::test]
+    async fn init_mcp_servers_skips_server_that_fails_list_tools() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": { "protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {} }
+                }));
+        });
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("tools/list");
+            then.status(500);
+        });
+
+        let cfg = vec![crate::config::McpServerConfig {
+            name: "flaky-server".to_string(),
+            url: format!("{}/mcp", server.base_url()),
+        }];
+        let http_client = reqwest::Client::new();
+        let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
+
+        assert!(tools.is_empty(), "no tools expected when list_tools fails");
+        assert!(dispatch.is_empty(), "no dispatch entries expected");
+    }
 }
 
 async fn bind_consumer(
