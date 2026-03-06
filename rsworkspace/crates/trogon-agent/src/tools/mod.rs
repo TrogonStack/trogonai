@@ -197,3 +197,100 @@ mod tests {
         assert!(!result.contains("Unknown tool"));
     }
 }
+
+/// Return definitions for every built-in tool — used by the automation runner
+/// to build a per-automation tool list filtered by `Automation::tools`.
+pub fn all_tool_defs() -> Vec<ToolDef> {
+    use serde_json::json;
+    let mut tools = vec![
+        // ── GitHub ────────────────────────────────────────────────────────────
+        tool_def("get_pr_diff",
+            "Get the unified diff of a pull request.",
+            json!({"type":"object","required":["owner","repo","pr_number"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "pr_number":{"type":"integer"}}})),
+        tool_def("list_pr_files",
+            "List the files changed in a pull request.",
+            json!({"type":"object","required":["owner","repo","pr_number"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "pr_number":{"type":"integer"}}})),
+        tool_def("get_pr_comments",
+            "Get all comments on a pull request.",
+            json!({"type":"object","required":["owner","repo","pr_number"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "pr_number":{"type":"integer"}}})),
+        tool_def("post_pr_comment",
+            "Post a comment on a pull request.",
+            json!({"type":"object","required":["owner","repo","pr_number","body"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "pr_number":{"type":"integer"},"body":{"type":"string"}}})),
+        tool_def("get_file_contents",
+            "Read the contents of a file at a specific git ref. Returns JSON with `sha` and `content`.",
+            json!({"type":"object","required":["owner","repo","path"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "path":{"type":"string"},"ref":{"type":"string"}}})),
+        tool_def("update_file",
+            "Create or update a file in the repository.",
+            json!({"type":"object","required":["owner","repo","path","message","content"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "path":{"type":"string"},"message":{"type":"string"},
+                                 "content":{"type":"string"},"branch":{"type":"string"},
+                                 "sha":{"type":"string"}}})),
+        tool_def("create_pull_request",
+            "Open a pull request.",
+            json!({"type":"object","required":["owner","repo","title","head"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "title":{"type":"string"},"head":{"type":"string"},
+                                 "base":{"type":"string"},"body":{"type":"string"}}})),
+        tool_def("request_reviewers",
+            "Request reviewers on a pull request.",
+            json!({"type":"object","required":["owner","repo","pr_number","reviewers"],
+                   "properties":{"owner":{"type":"string"},"repo":{"type":"string"},
+                                 "pr_number":{"type":"integer"},
+                                 "reviewers":{"type":"array","items":{"type":"string"}}}})),
+        // ── Linear ────────────────────────────────────────────────────────────
+        tool_def("get_linear_issue",
+            "Fetch a Linear issue by ID, including state, assignee, labels, and team.",
+            json!({"type":"object","required":["issue_id"],
+                   "properties":{"issue_id":{"type":"string"}}})),
+        tool_def("get_linear_comments",
+            "Get all comments on a Linear issue.",
+            json!({"type":"object","required":["issue_id"],
+                   "properties":{"issue_id":{"type":"string"}}})),
+        tool_def("post_linear_comment",
+            "Post a comment on a Linear issue.",
+            json!({"type":"object","required":["issue_id","body"],
+                   "properties":{"issue_id":{"type":"string"},"body":{"type":"string"}}})),
+        tool_def("update_linear_issue",
+            "Update a Linear issue's state, assignee, or priority.",
+            json!({"type":"object","required":["issue_id"],
+                   "properties":{"issue_id":{"type":"string"},"state_id":{"type":"string"},
+                                 "assignee_id":{"type":"string"},"priority":{"type":"integer"}}})),
+    ];
+    tools.extend(slack::slack_tool_defs());
+    tools
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    #[test]
+    fn all_tool_defs_contains_expected_names() {
+        let defs = all_tool_defs();
+        let names: Vec<&str> = defs.iter().map(|t| t.name.as_str()).collect();
+        for expected in &[
+            "get_pr_diff", "list_pr_files", "post_pr_comment", "get_file_contents",
+            "update_file", "create_pull_request", "request_reviewers", "get_pr_comments",
+            "get_linear_issue", "get_linear_comments", "post_linear_comment",
+            "update_linear_issue", "send_slack_message", "read_slack_channel",
+        ] {
+            assert!(names.contains(expected), "missing tool: {expected}");
+        }
+    }
+
+    #[test]
+    fn all_tool_defs_has_fourteen_entries() {
+        assert_eq!(all_tool_defs().len(), 14);
+    }
+}
