@@ -6,7 +6,7 @@
 use async_nats::jetstream;
 use reqwest::Client;
 use serde_json::{Value, json};
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner};
+use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
 use tokio::net::TcpListener;
 use trogon_automations::api::{AppState, router};
 use trogon_automations::AutomationStore;
@@ -20,7 +20,7 @@ struct TestServer {
 }
 
 async fn start_server() -> TestServer {
-    let container = Nats::default().start().await.expect("NATS container");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS container");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -67,6 +67,7 @@ async fn create_returns_201_with_id() {
     assert_eq!(body["name"], "PR review");
     assert_eq!(body["trigger"], "github.pull_request:opened");
     assert_eq!(body["enabled"], true);
+    assert_eq!(body["tenant_id"], "acme");
 }
 
 #[tokio::test]
