@@ -4739,3 +4739,177 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     anthropic_tool_call.assert_async().await;
     linear_mock.assert_async().await;
 }
+
+// ── New event types ────────────────────────────────────────────────────────────
+
+/// Helper: spin up NATS + proxy + worker + agent with github.> stream.
+async fn setup_full_pipeline(nats_port: u16, mock_server: &MockServer) -> (u16, Arc<jetstream::Context>) {
+    let vault = Arc::new(MemoryVault::new());
+    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+
+    let (nats, js) = js_client(nats_port).await;
+    let js = Arc::new(js);
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    // Use github.> so all GitHub consumers (PR, comment, push, check_run) can bind.
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    let proxy_state = ProxyState {
+        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+
+    let worker_js = Arc::clone(&js);
+    let worker_nats = nats.clone();
+    let worker_vault = Arc::clone(&vault);
+    let worker_stream = stream::stream_name("trogon");
+    tokio::spawn(async move {
+        worker::run(worker_js, worker_nats, worker_vault,
+            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
+            "new-events-worker", &worker_stream).await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let agent_cfg = AgentConfig {
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        proxy_url: format!("http://127.0.0.1:{proxy_port}"),
+        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: "tok_github_prod_test01".to_string(),
+        linear_token: "tok_linear_prod_test01".to_string(),
+        model: "claude-opus-4-6".to_string(), max_iterations: 1,
+        github_stream_name: None, linear_stream_name: None,
+        memory_owner: None, memory_repo: None, memory_path: None, mcp_servers: vec![],
+    };
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    (proxy_port, js)
+}
+
+/// PR merged event (closed + merged=true) reaches Anthropic through the full pipeline.
+#[tokio::test]
+async fn pipeline_pr_merged_event_reaches_anthropic() {
+    let (_c, nats_port) = start_nats().await;
+    let mock_server = MockServer::start_async().await;
+
+    let anthropic_mock = mock_server.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/v1/messages")
+            .header("authorization", "Bearer sk-ant-realkey");
+        then.status(200).header("content-type", "application/json")
+            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Merge noted."}]}"#);
+    }).await;
+
+    let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "closed",
+        "number": 77,
+        "pull_request": { "merged": true, "title": "Add feature", "merged_by": { "login": "alice" } },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    })).unwrap();
+    js.publish("github.pull_request", bytes::Bytes::from(payload)).await.unwrap();
+
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic was not called for PR merged event through full pipeline"
+    );
+}
+
+/// issue_comment created event reaches Anthropic through the full pipeline.
+#[tokio::test]
+async fn pipeline_issue_comment_event_reaches_anthropic() {
+    let (_c, nats_port) = start_nats().await;
+    let mock_server = MockServer::start_async().await;
+
+    let anthropic_mock = mock_server.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/v1/messages")
+            .header("authorization", "Bearer sk-ant-realkey");
+        then.status(200).header("content-type", "application/json")
+            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Replied."}]}"#);
+    }).await;
+
+    let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "created",
+        "issue": { "number": 12, "pull_request": {} },
+        "comment": { "body": "What does this do?", "user": { "login": "carol" } },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    })).unwrap();
+    js.publish("github.issue_comment", bytes::Bytes::from(payload)).await.unwrap();
+
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic was not called for issue_comment event through full pipeline"
+    );
+}
+
+/// push to branch event reaches Anthropic through the full pipeline.
+#[tokio::test]
+async fn pipeline_push_to_branch_event_reaches_anthropic() {
+    let (_c, nats_port) = start_nats().await;
+    let mock_server = MockServer::start_async().await;
+
+    let anthropic_mock = mock_server.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/v1/messages")
+            .header("authorization", "Bearer sk-ant-realkey");
+        then.status(200).header("content-type", "application/json")
+            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Push looks safe."}]}"#);
+    }).await;
+
+    let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
+
+    let payload = serde_json::to_vec(&json!({
+        "ref": "refs/heads/feature-y",
+        "deleted": false,
+        "pusher": { "name": "dave" },
+        "commits": [{ "id": "abc123" }],
+        "head_commit": { "message": "add feature y" },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    })).unwrap();
+    js.publish("github.push", bytes::Bytes::from(payload)).await.unwrap();
+
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic was not called for push event through full pipeline"
+    );
+}
+
+/// CI check_run failure event reaches Anthropic through the full pipeline.
+#[tokio::test]
+async fn pipeline_ci_failure_event_reaches_anthropic() {
+    let (_c, nats_port) = start_nats().await;
+    let mock_server = MockServer::start_async().await;
+
+    let anthropic_mock = mock_server.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/v1/messages")
+            .header("authorization", "Bearer sk-ant-realkey");
+        then.status(200).header("content-type", "application/json")
+            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"CI failure diagnosed."}]}"#);
+    }).await;
+
+    let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "completed",
+        "check_run": {
+            "name": "cargo test",
+            "conclusion": "failure",
+            "details_url": "https://ci.example.com/1",
+            "pull_requests": [{ "number": 42 }]
+        },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    })).unwrap();
+    js.publish("github.check_run", bytes::Bytes::from(payload)).await.unwrap();
+
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic was not called for CI failure event through full pipeline"
+    );
+}
