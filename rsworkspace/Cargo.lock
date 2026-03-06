@@ -4095,6 +4095,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-automations",
  "trogon-github",
  "trogon-linear",
  "trogon-mcp",
@@ -4102,6 +4103,26 @@ dependencies = [
  "trogon-secret-proxy",
  "trogon-std",
  "trogon-vault",
+]
+
+[[package]]
+name = "trogon-automations"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.8",
+ "bytes",
+ "futures-util",
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]

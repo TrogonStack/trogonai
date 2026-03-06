@@ -176,3 +176,54 @@ pub fn make_tool_context(
 ) -> Arc<ToolContext> {
     Arc::new(ToolContext { http_client, proxy_url, github_token, linear_token, slack_token })
 }
+
+/// Run a single automation against a raw NATS event payload.
+///
+/// - Prepends the NATS subject and raw event JSON to `automation.prompt` so
+///   the model always has the full event context.
+/// - If `automation.tools` is empty, all built-in tools are available;
+///   otherwise only the named tools are included.
+/// - `automation.memory_path` overrides the per-handler default; if both are
+///   `None` the global [`DEFAULT_MEMORY_PATH`] is used.
+pub async fn run_automation(
+    agent: &AgentLoop,
+    automation: &trogon_automations::Automation,
+    nats_subject: &str,
+    payload: &[u8],
+) -> Result<String, String> {
+    // Build the tool list.
+    let all = crate::tools::all_tool_defs();
+    let tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
+        all
+    } else {
+        all.into_iter()
+            .filter(|t| automation.tools.contains(&t.name))
+            .collect()
+    };
+
+    // Format the user prompt: event context + automation-specific instructions.
+    let event_json = serde_json::from_slice::<serde_json::Value>(payload)
+        .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+        .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
+
+    let full_prompt = format!(
+        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{}",
+        automation.prompt
+    );
+
+    // Resolve the memory path: automation override → agent default → built-in default.
+    let mem_path = automation
+        .memory_path
+        .as_deref()
+        .or(agent.memory_path.as_deref())
+        .unwrap_or(DEFAULT_MEMORY_PATH);
+
+    let memory = match (&agent.memory_owner, &agent.memory_repo) {
+        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
+        _ => None,
+    };
+
+    run_agent(agent, full_prompt, tools, memory)
+        .await
+        .map_err(|e| e.to_string())
+}
