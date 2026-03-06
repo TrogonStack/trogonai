@@ -21,9 +21,19 @@ trogon-nats = { path = "../trogon-nats" }
 trogon-std  = { path = "../trogon-std" }
 
 [dev-dependencies]
-trogon-std  = { path = "../trogon-std", features = ["test-support"] }
-httpmock    = "0.7"
-tokio       = { version = "1.49.0", features = ["full"] }
+trogon-std          = { path = "../trogon-std", features = ["test-support"] }
+trogon-secret-proxy = { path = "../trogon-secret-proxy" }
+trogon-vault        = { path = "../trogon-vault", features = ["hashicorp-vault"] }
+trogon-github       = { path = "../trogon-github" }
+trogon-linear       = { path = "../trogon-linear" }
+httpmock            = "0.7"
+tokio               = { version = "1.49.0", features = ["full"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+axum                = "0.8"
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+hmac                = "0.12"
+sha2                = "0.10"
+hex                 = "0.4"
 
 [[bin]]
 name = "agent"

@@ -76,6 +76,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         model: cfg.model.clone(),
         max_iterations: cfg.max_iterations,
         tool_context: tool_ctx,
+        memory_owner: cfg.memory_owner.clone(),
+        memory_repo: cfg.memory_repo.clone(),
     });
 
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");

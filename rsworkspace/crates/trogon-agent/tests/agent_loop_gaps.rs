@@ -26,6 +26,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
         }),
+        memory_owner: None,
+        memory_repo: None,
     }
 }
 
@@ -72,7 +74,7 @@ async fn agent_loop_multiple_tool_use_blocks_in_one_response() {
 
     let agent = make_agent(&server.base_url());
     let result = agent
-        .run(vec![Message::user_text("go")], &tools)
+        .run(vec![Message::user_text("go")], &tools, None)
         .await
         .unwrap();
 
@@ -93,7 +95,7 @@ async fn agent_loop_end_turn_empty_content_returns_empty_string() {
 
     let agent = make_agent(&server.base_url());
     let result = agent
-        .run(vec![Message::user_text("hi")], &[])
+        .run(vec![Message::user_text("hi")], &[], None)
         .await
         .unwrap();
 
@@ -120,7 +122,7 @@ async fn agent_loop_end_turn_with_only_non_text_blocks_returns_empty() {
 
     let agent = make_agent(&server.base_url());
     let result = agent
-        .run(vec![Message::user_text("hi")], &[])
+        .run(vec![Message::user_text("hi")], &[], None)
         .await
         .unwrap();
 
