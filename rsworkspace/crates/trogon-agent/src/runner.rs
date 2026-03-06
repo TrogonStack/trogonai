@@ -314,6 +314,36 @@ fn sanitize_name(s: &str) -> String {
         .collect()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::sanitize_name;
+
+    #[test]
+    fn sanitize_name_keeps_alphanumeric_and_dash() {
+        assert_eq!(sanitize_name("my-server"), "my-server");
+        assert_eq!(sanitize_name("server123"), "server123");
+        assert_eq!(sanitize_name("abc-XYZ-789"), "abc-XYZ-789");
+    }
+
+    #[test]
+    fn sanitize_name_replaces_spaces_and_special_chars() {
+        assert_eq!(sanitize_name("my server"), "my_server");
+        assert_eq!(sanitize_name("my.server"), "my_server");
+        assert_eq!(sanitize_name("my/tool"), "my_tool");
+        assert_eq!(sanitize_name("tool:v2"), "tool_v2");
+    }
+
+    #[test]
+    fn sanitize_name_empty_string() {
+        assert_eq!(sanitize_name(""), "");
+    }
+
+    #[test]
+    fn sanitize_name_all_special_chars() {
+        assert_eq!(sanitize_name("..."), "___");
+    }
+}
+
 async fn bind_consumer(
     js: &jetstream::Context,
     stream_name: &str,
