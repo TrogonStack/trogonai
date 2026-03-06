@@ -56,8 +56,9 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let tools = triage_tools();
 
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
-        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo).await,
+        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
     };
 
@@ -171,6 +172,7 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+            memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         };
@@ -198,6 +200,7 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+            memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         };
@@ -230,6 +233,7 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+            memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         };

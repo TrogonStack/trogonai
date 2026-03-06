@@ -81,6 +81,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         tool_context: tool_ctx,
         memory_owner: cfg.memory_owner.clone(),
         memory_repo: cfg.memory_repo.clone(),
+        memory_path: cfg.memory_path.clone(),
         mcp_tool_defs,
         mcp_dispatch,
     });

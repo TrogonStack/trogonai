@@ -63,9 +63,10 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let tools = pr_review_tools();
 
-    // Pre-fetch .trogon/memory.md and inject as Anthropic system prompt.
+    // Pre-fetch memory file and inject as Anthropic system prompt.
     // Returns None gracefully when the file doesn't exist yet.
-    let memory = fetch_memory(agent, owner, repo).await;
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let memory = fetch_memory(agent, owner, repo, mem_path).await;
 
     match run_agent(agent, prompt, tools, memory).await {
         Ok(text) => {

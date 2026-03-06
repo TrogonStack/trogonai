@@ -30,8 +30,12 @@ pub async fn run_agent(
     agent.run(messages, &tools, system_prompt.as_deref()).await
 }
 
-/// Fetch `.trogon/memory.md` from a GitHub repository via the proxy.
+/// Default memory file path used when none is configured.
+pub const DEFAULT_MEMORY_PATH: &str = ".trogon/memory.md";
+
+/// Fetch the agent memory file from a GitHub repository via the proxy.
 ///
+/// `path` is the file path inside the repo (e.g. `.trogon/memory.md`).
 /// Returns `Some(content)` when the file exists and is valid UTF-8.
 /// Returns `None` silently on 404 (file not yet created) or any error — the
 /// agent continues without a system prompt rather than failing.
@@ -39,9 +43,10 @@ pub async fn fetch_memory(
     agent: &AgentLoop,
     owner: &str,
     repo: &str,
+    path: &str,
 ) -> Option<String> {
     let url = format!(
-        "{}/github/repos/{owner}/{repo}/contents/.trogon/memory.md",
+        "{}/github/repos/{owner}/{repo}/contents/{path}",
         agent.proxy_url,
     );
 
@@ -87,6 +92,7 @@ mod tests {
             }),
             memory_owner: None,
             memory_repo: None,
+            memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         }
@@ -103,7 +109,7 @@ mod tests {
         });
 
         let agent = make_agent(&server.base_url());
-        let result = fetch_memory(&agent, "owner", "repo").await;
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
 
@@ -122,8 +128,27 @@ mod tests {
         });
 
         let agent = make_agent(&server.base_url());
-        let result = fetch_memory(&agent, "owner", "repo").await;
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert_eq!(result.as_deref(), Some("# Memory\nAgent notes.\n"));
+    }
+
+    /// Custom memory path is used in the URL.
+    #[tokio::test]
+    async fn fetch_memory_uses_custom_path() {
+        let server = MockServer::start_async().await;
+        let raw = general_purpose::STANDARD.encode("custom memory");
+        let mock = server.mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains("custom/notes.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": raw }));
+        }).await;
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", "custom/notes.md").await;
+        assert_eq!(result.as_deref(), Some("custom memory"));
+        mock.assert_async().await;
     }
 
     /// Network error → fetch_memory returns None rather than propagating error.
@@ -131,7 +156,7 @@ mod tests {
     async fn fetch_memory_returns_none_on_network_error() {
         // Point at a port where nothing listens.
         let agent = make_agent("http://127.0.0.1:1");
-        let result = fetch_memory(&agent, "owner", "repo").await;
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
 }
