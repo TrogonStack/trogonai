@@ -53,6 +53,9 @@ pub struct AgentConfig {
     /// GitHub repo name for reading `.trogon/memory.md` in Linear handlers
     /// (e.g. `"my-repo"`).
     pub memory_repo: Option<String>,
+    /// Path of the memory file inside the repository (default: `.trogon/memory.md`).
+    /// Overridable via `MEMORY_PATH` so the UI can configure per-automation files.
+    pub memory_path: Option<String>,
     /// MCP servers to connect to at startup.
     /// Parsed from `MCP_SERVERS=name1=url1,name2=url2`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -81,6 +84,7 @@ impl AgentConfig {
             linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
             memory_owner: env.var("MEMORY_OWNER").ok(),
             memory_repo: env.var("MEMORY_REPO").ok(),
+            memory_path: env.var("MEMORY_PATH").ok(),
             mcp_servers: env
                 .var("MCP_SERVERS")
                 .ok()
@@ -108,6 +112,7 @@ mod tests {
         assert!(cfg.linear_token.is_empty());
         assert!(cfg.github_stream_name.is_none());
         assert!(cfg.linear_stream_name.is_none());
+        assert!(cfg.memory_path.is_none());
     }
 
     #[test]

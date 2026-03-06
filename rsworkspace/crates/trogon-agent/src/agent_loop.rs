@@ -152,11 +152,14 @@ pub struct AgentLoop {
     pub max_iterations: u32,
     /// Shared context passed to every tool execution.
     pub tool_context: Arc<ToolContext>,
-    /// GitHub repo owner for pre-fetching `.trogon/memory.md` in handlers
+    /// GitHub repo owner for pre-fetching the memory file in handlers
     /// that don't have an implicit repo (e.g. Linear issue triage).
     pub memory_owner: Option<String>,
-    /// GitHub repo name for pre-fetching `.trogon/memory.md`.
+    /// GitHub repo name for pre-fetching the memory file.
     pub memory_repo: Option<String>,
+    /// Path of the memory file inside the repository.
+    /// Defaults to `.trogon/memory.md` when `None`.
+    pub memory_path: Option<String>,
     /// Extra tool definitions from MCP servers — appended to every `run` call.
     pub mcp_tool_defs: Vec<ToolDef>,
     /// Dispatch map for MCP tools: prefixed_name → (client, original_tool_name).
