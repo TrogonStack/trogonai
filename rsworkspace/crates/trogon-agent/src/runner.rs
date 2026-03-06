@@ -29,6 +29,12 @@ const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Durable consumer name for the GitHub pull_request stream.
 const GITHUB_CONSUMER: &str = "trogon-agent-pr-review";
+/// Durable consumer name for the GitHub issue_comment stream.
+const COMMENT_CONSUMER: &str = "trogon-agent-comment-added";
+/// Durable consumer name for the GitHub push stream.
+const PUSH_CONSUMER: &str = "trogon-agent-push-to-branch";
+/// Durable consumer name for the GitHub check_run stream.
+const CI_CONSUMER: &str = "trogon-agent-ci-completed";
 /// Durable consumer name for the Linear Issue stream.
 const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
 
@@ -97,6 +103,30 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     )
     .await?;
 
+    let mut comment_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        COMMENT_CONSUMER,
+        "github.issue_comment",
+    )
+    .await?;
+
+    let mut push_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        PUSH_CONSUMER,
+        "github.push",
+    )
+    .await?;
+
+    let mut ci_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        CI_CONSUMER,
+        "github.check_run",
+    )
+    .await?;
+
     let mut issue_messages = bind_consumer(
         &js,
         linear_stream_name,
@@ -122,13 +152,84 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         tokio::spawn(async move {
-                            match handlers::pr_review::handle(&agent, &msg.payload).await {
-                                Some(Ok(output)) => info!(output = %output, "PR review done"),
-                                Some(Err(e))     => error!(error = %e, "PR review error"),
-                                None             => {}
+                            // Route merged vs open/sync based on action + merged flag.
+                            let is_merged = serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                                .map(|v| v["action"].as_str() == Some("closed")
+                                    && v["pull_request"]["merged"].as_bool() == Some(true))
+                                .unwrap_or(false);
+
+                            if is_merged {
+                                match handlers::pr_merged::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "PR merged done"),
+                                    Some(Err(e)) => error!(error = %e, "PR merged error"),
+                                    None => {}
+                                }
+                            } else {
+                                match handlers::pr_review::handle(&agent, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "PR review done"),
+                                    Some(Err(e)) => error!(error = %e, "PR review error"),
+                                    None => {}
+                                }
                             }
                             if let Err(e) = msg.ack().await {
                                 warn!(error = %e, "Failed to ack PR message");
+                            }
+                        });
+                    }
+                }
+            }
+            msg = comment_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving comment message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        tokio::spawn(async move {
+                            match handlers::comment_added::handle(&agent, &msg.payload).await {
+                                Some(Ok(o)) => info!(output = %o, "Comment-added done"),
+                                Some(Err(e)) => error!(error = %e, "Comment-added error"),
+                                None => {}
+                            }
+                            if let Err(e) = msg.ack().await {
+                                warn!(error = %e, "Failed to ack comment message");
+                            }
+                        });
+                    }
+                }
+            }
+            msg = push_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving push message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        tokio::spawn(async move {
+                            match handlers::push_to_branch::handle(&agent, &msg.payload).await {
+                                Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
+                                Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
+                                None => {}
+                            }
+                            if let Err(e) = msg.ack().await {
+                                warn!(error = %e, "Failed to ack push message");
+                            }
+                        });
+                    }
+                }
+            }
+            msg = ci_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving CI message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        tokio::spawn(async move {
+                            match handlers::ci_completed::handle(&agent, &msg.payload).await {
+                                Some(Ok(o)) => info!(output = %o, "CI-completed done"),
+                                Some(Err(e)) => error!(error = %e, "CI-completed error"),
+                                None => {}
+                            }
+                            if let Err(e) = msg.ack().await {
+                                warn!(error = %e, "Failed to ack CI message");
                             }
                         });
                     }
@@ -142,9 +243,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         tokio::spawn(async move {
                             match handlers::issue_triage::handle(&agent, &msg.payload).await {
-                                Some(Ok(output)) => info!(output = %output, "Issue triage done"),
-                                Some(Err(e))     => error!(error = %e, "Issue triage error"),
-                                None             => {}
+                                Some(Ok(o)) => info!(output = %o, "Issue triage done"),
+                                Some(Err(e)) => error!(error = %e, "Issue triage error"),
+                                None => {}
                             }
                             if let Err(e) = msg.ack().await {
                                 warn!(error = %e, "Failed to ack issue message");
