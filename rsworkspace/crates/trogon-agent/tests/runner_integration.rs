@@ -554,6 +554,164 @@ async fn runner_issue_handler_agent_error_does_not_crash() {
     );
 }
 
+/// A merged PR event (action=closed, merged=true) is routed to pr_merged handler.
+#[tokio::test]
+async fn runner_dispatches_pr_merged_event_to_anthropic() {
+    let (_container, nats_port) = start_nats().await;
+    let nats = nats_client(nats_port).await;
+    let js = jetstream::new(nats);
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.>"]).await;
+
+    let proxy = MockServer::start_async().await;
+    let mock = proxy.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_response());
+    }).await;
+
+    let cfg = make_config(nats_port, &proxy.base_url());
+    tokio::spawn(async move { trogon_agent::run(cfg).await });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let payload = json!({
+        "action": "closed",
+        "number": 99,
+        "pull_request": {
+            "merged": true,
+            "title": "Add feature X",
+            "merged_by": { "login": "alice" }
+        },
+        "repository": { "owner": { "login": "acme" }, "name": "backend" }
+    });
+    js.publish("github.pull_request", payload.to_string().into())
+        .await
+        .expect("JetStream publish failed");
+
+    assert!(
+        wait_for_hit(&mock, Duration::from_secs(10)).await,
+        "timed out — Anthropic proxy was never called for PR merged event"
+    );
+}
+
+/// A github.issue_comment event (action=created) is dispatched to Anthropic.
+#[tokio::test]
+async fn runner_dispatches_issue_comment_event_to_anthropic() {
+    let (_container, nats_port) = start_nats().await;
+    let nats = nats_client(nats_port).await;
+    let js = jetstream::new(nats);
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.>"]).await;
+
+    let proxy = MockServer::start_async().await;
+    let mock = proxy.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_response());
+    }).await;
+
+    let cfg = make_config(nats_port, &proxy.base_url());
+    tokio::spawn(async move { trogon_agent::run(cfg).await });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let payload = json!({
+        "action": "created",
+        "issue": { "number": 7, "pull_request": {} },
+        "comment": { "body": "Can you help?", "user": { "login": "bob" } },
+        "repository": { "owner": { "login": "acme" }, "name": "backend" }
+    });
+    js.publish("github.issue_comment", payload.to_string().into())
+        .await
+        .expect("JetStream publish failed");
+
+    assert!(
+        wait_for_hit(&mock, Duration::from_secs(10)).await,
+        "timed out — Anthropic proxy was never called for issue_comment event"
+    );
+}
+
+/// A github.push event to a branch is dispatched to Anthropic.
+#[tokio::test]
+async fn runner_dispatches_push_event_to_anthropic() {
+    let (_container, nats_port) = start_nats().await;
+    let nats = nats_client(nats_port).await;
+    let js = jetstream::new(nats);
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.>"]).await;
+
+    let proxy = MockServer::start_async().await;
+    let mock = proxy.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_response());
+    }).await;
+
+    let cfg = make_config(nats_port, &proxy.base_url());
+    tokio::spawn(async move { trogon_agent::run(cfg).await });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let payload = json!({
+        "ref": "refs/heads/feature-x",
+        "deleted": false,
+        "pusher": { "name": "carol" },
+        "commits": [{ "id": "abc123" }],
+        "head_commit": { "message": "add feature" },
+        "repository": { "owner": { "login": "acme" }, "name": "backend" }
+    });
+    js.publish("github.push", payload.to_string().into())
+        .await
+        .expect("JetStream publish failed");
+
+    assert!(
+        wait_for_hit(&mock, Duration::from_secs(10)).await,
+        "timed out — Anthropic proxy was never called for push event"
+    );
+}
+
+/// A github.check_run event with conclusion=failure is dispatched to Anthropic.
+#[tokio::test]
+async fn runner_dispatches_ci_failure_event_to_anthropic() {
+    let (_container, nats_port) = start_nats().await;
+    let nats = nats_client(nats_port).await;
+    let js = jetstream::new(nats);
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.>"]).await;
+
+    let proxy = MockServer::start_async().await;
+    let mock = proxy.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_response());
+    }).await;
+
+    let cfg = make_config(nats_port, &proxy.base_url());
+    tokio::spawn(async move { trogon_agent::run(cfg).await });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let payload = json!({
+        "action": "completed",
+        "check_run": {
+            "name": "cargo test",
+            "conclusion": "failure",
+            "details_url": "https://ci.example.com/1",
+            "pull_requests": [{ "number": 42 }]
+        },
+        "repository": { "owner": { "login": "acme" }, "name": "backend" }
+    });
+    js.publish("github.check_run", payload.to_string().into())
+        .await
+        .expect("JetStream publish failed");
+
+    assert!(
+        wait_for_hit(&mock, Duration::from_secs(10)).await,
+        "timed out — Anthropic proxy was never called for CI failure event"
+    );
+}
+
 /// Custom stream names set in AgentConfig are respected by bind_consumer.
 #[tokio::test]
 async fn runner_respects_custom_stream_names() {

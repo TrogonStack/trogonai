@@ -253,3 +253,31 @@ async fn github_tool_uses_opaque_token_not_real_key() {
 
     mock.assert_hits_async(1).await;
 }
+
+#[tokio::test]
+async fn request_reviewers_calls_correct_proxy_path() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/github/repos/owner/repo/pulls/10/requested_reviewers")
+            .header("authorization", "Bearer tok_github_prod_test01");
+        then.status(201)
+            .header("content-type", "application/json")
+            .json_body(json!({ "url": "https://api.github.com/repos/owner/repo/pulls/10" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({
+        "owner": "owner",
+        "repo": "repo",
+        "pr_number": 10,
+        "reviewers": ["alice", "bob"]
+    });
+    let result = dispatch_tool(&ctx, "request_reviewers", &input).await;
+
+    assert!(
+        result.contains("Reviewers requested on PR #10"),
+        "unexpected result: {result}"
+    );
+}
