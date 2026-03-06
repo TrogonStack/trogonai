@@ -1362,7 +1362,7 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
                 .header("authorization", "Bearer sk-gh-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"name":"lib.rs","content":"aGVsbG8gd29ybGQ=","encoding":"base64"}"#);
+                .body(r#"{"name":"lib.rs","content":"aGVsbG8gd29ybGQ=","encoding":"base64","sha":"deadbeef01"}"#);
         })
         .await;
 
@@ -3510,7 +3510,7 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
                 .header("authorization", "Bearer sk-gh-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"name":"README.md","content":"aGVsbG8=","encoding":"base64"}"#);
+                .body(r#"{"name":"README.md","content":"aGVsbG8=","encoding":"base64","sha":"deadbeef02"}"#);
         })
         .await;
 
