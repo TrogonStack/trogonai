@@ -9,7 +9,7 @@ use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
     agent_loop::AgentLoop,
-    handlers::{pr_review, issue_triage},
+    handlers::{pr_review, issue_triage, pr_merged, comment_added, push_to_branch, ci_completed},
     tools::ToolContext,
 };
 
@@ -226,4 +226,257 @@ async fn issue_triage_handle_missing_issue_id_returns_none() {
     .unwrap();
 
     assert!(issue_triage::handle(&agent, &payload).await.is_none());
+}
+
+// ── pr_merged::handle ─────────────────────────────────────────────────────────
+
+/// closed + merged=true → agent runs → returns Some(Ok(...)).
+#[tokio::test]
+async fn pr_merged_handle_merged_runs_agent() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_mock_body("Merge acknowledged."));
+    });
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "closed",
+        "number": 99,
+        "pull_request": {
+            "merged": true,
+            "title": "Add feature X",
+            "merged_by": { "login": "alice" }
+        },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    }))
+    .unwrap();
+
+    let agent = make_agent(&server.base_url());
+    let result = pr_merged::handle(&agent, &payload).await;
+
+    assert!(matches!(result, Some(Ok(ref s)) if s.contains("Merge acknowledged")));
+}
+
+/// closed but merged=false → returns None.
+#[tokio::test]
+async fn pr_merged_handle_closed_not_merged_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "closed",
+        "number": 5,
+        "pull_request": { "merged": false, "title": "t", "merged_by": null },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(pr_merged::handle(&agent, &payload).await.is_none());
+}
+
+/// `opened` action → not a merge trigger → returns None.
+#[tokio::test]
+async fn pr_merged_handle_non_closed_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "opened",
+        "number": 10,
+        "pull_request": { "merged": true, "title": "t", "merged_by": { "login": "u" } },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(pr_merged::handle(&agent, &payload).await.is_none());
+}
+
+// ── comment_added::handle ─────────────────────────────────────────────────────
+
+/// `created` action → agent runs → returns Some(Ok(...)).
+#[tokio::test]
+async fn comment_added_handle_created_runs_agent() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_mock_body("Thanks for the comment!"));
+    });
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "created",
+        "issue": { "number": 7, "pull_request": {} },
+        "comment": { "body": "Can you clarify this?", "user": { "login": "bob" } },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    }))
+    .unwrap();
+
+    let agent = make_agent(&server.base_url());
+    let result = comment_added::handle(&agent, &payload).await;
+
+    assert!(matches!(result, Some(Ok(ref s)) if s.contains("Thanks")));
+}
+
+/// `deleted` action → not a trigger → returns None.
+#[tokio::test]
+async fn comment_added_handle_deleted_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "deleted",
+        "issue": { "number": 1 },
+        "comment": { "body": "x", "user": { "login": "u" } },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(comment_added::handle(&agent, &payload).await.is_none());
+}
+
+// ── push_to_branch::handle ────────────────────────────────────────────────────
+
+/// Branch push → agent runs → returns Some(Ok(...)).
+#[tokio::test]
+async fn push_to_branch_handle_branch_push_runs_agent() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_mock_body("Push looks fine."));
+    });
+
+    let payload = serde_json::to_vec(&json!({
+        "ref": "refs/heads/feature-x",
+        "deleted": false,
+        "pusher": { "name": "carol" },
+        "commits": [{ "id": "abc" }],
+        "head_commit": { "message": "add feature" },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    }))
+    .unwrap();
+
+    let agent = make_agent(&server.base_url());
+    let result = push_to_branch::handle(&agent, &payload).await;
+
+    assert!(matches!(result, Some(Ok(ref s)) if s.contains("Push looks fine")));
+}
+
+/// Tag push → not a trigger → returns None.
+#[tokio::test]
+async fn push_to_branch_handle_tag_push_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "ref": "refs/tags/v1.0.0",
+        "deleted": false,
+        "pusher": { "name": "u" },
+        "commits": [],
+        "head_commit": { "message": "tag" },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(push_to_branch::handle(&agent, &payload).await.is_none());
+}
+
+/// Branch deletion → not a trigger → returns None.
+#[tokio::test]
+async fn push_to_branch_handle_deletion_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "ref": "refs/heads/old-branch",
+        "deleted": true,
+        "pusher": { "name": "u" },
+        "commits": [],
+        "head_commit": null,
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(push_to_branch::handle(&agent, &payload).await.is_none());
+}
+
+// ── ci_completed::handle ──────────────────────────────────────────────────────
+
+/// check_run completed with failure → agent runs → returns Some(Ok(...)).
+#[tokio::test]
+async fn ci_completed_handle_failure_runs_agent() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_mock_body("Likely a test compilation error."));
+    });
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "completed",
+        "check_run": {
+            "name": "cargo test",
+            "conclusion": "failure",
+            "details_url": "https://ci.example.com/run/1",
+            "pull_requests": [{ "number": 42 }]
+        },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    }))
+    .unwrap();
+
+    let agent = make_agent(&server.base_url());
+    let result = ci_completed::handle(&agent, &payload).await;
+
+    assert!(matches!(result, Some(Ok(ref s)) if s.contains("compilation error")));
+}
+
+/// check_run completed with success → returns None.
+#[tokio::test]
+async fn ci_completed_handle_success_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "completed",
+        "check_run": {
+            "name": "cargo test",
+            "conclusion": "success",
+            "details_url": "",
+            "pull_requests": []
+        },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(ci_completed::handle(&agent, &payload).await.is_none());
+}
+
+/// non-completed action → returns None.
+#[tokio::test]
+async fn ci_completed_handle_created_action_returns_none() {
+    let server = MockServer::start_async().await;
+    let agent = make_agent(&server.base_url());
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "created",
+        "check_run": {
+            "name": "cargo test",
+            "conclusion": null,
+            "details_url": "",
+            "pull_requests": []
+        },
+        "repository": { "owner": { "login": "o" }, "name": "r" }
+    }))
+    .unwrap();
+
+    assert!(ci_completed::handle(&agent, &payload).await.is_none());
 }
