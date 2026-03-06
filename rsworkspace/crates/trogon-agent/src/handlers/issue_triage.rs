@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 use crate::agent_loop::AgentLoop;
 use crate::tools::{ToolDef, tool_def};
-use super::run_agent;
+use super::{fetch_memory, run_agent};
 
 /// Run the issue-triage agent from a raw Linear webhook payload.
 ///
@@ -45,17 +45,23 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let prompt = format!(
         "You are a project manager doing issue triage.\n\
          A new Linear issue has been created: {issue_id} — \"{title}\".\n\
-         1. Use `get_linear_issue` to fetch full details.\n\
-         2. Analyse the issue: is the description clear? Is priority set correctly?\n\
+         1. Use `get_linear_comments` to recall any prior triage decisions on this issue.\n\
+         2. Use `get_linear_issue` to fetch full details.\n\
+         3. Analyse the issue: is the description clear? Is priority set correctly?\n\
             Are labels appropriate?\n\
-         3. Use `post_linear_comment` to post a short triage note with your assessment\n\
+         4. Use `post_linear_comment` to post a short triage note with your assessment\n\
             and any suggested next steps.\n\
          Be concise and constructive."
     );
 
     let tools = triage_tools();
 
-    match run_agent(agent, prompt, tools).await {
+    let memory = match (&agent.memory_owner, &agent.memory_repo) {
+        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo).await,
+        _ => None,
+    };
+
+    match run_agent(agent, prompt, tools, memory).await {
         Ok(text) => {
             info!(issue_id, "Issue triage completed");
             Some(Ok(text))
@@ -77,6 +83,17 @@ fn triage_tools() -> Vec<ToolDef> {
                 "required": ["issue_id"],
                 "properties": {
                     "issue_id": { "type": "string", "description": "Linear issue ID (e.g. ISS-123)" }
+                }
+            }),
+        ),
+        tool_def(
+            "get_linear_comments",
+            "Get all comments on a Linear issue — use this to recall prior triage decisions.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["issue_id"],
+                "properties": {
+                    "issue_id": { "type": "string" }
                 }
             }),
         ),
@@ -114,8 +131,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn triage_tools_has_three_entries() {
-        assert_eq!(triage_tools().len(), 3);
+    fn triage_tools_has_four_entries() {
+        assert_eq!(triage_tools().len(), 4);
+    }
+
+    #[test]
+    fn triage_tools_includes_memory_tool() {
+        let tools = triage_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"get_linear_comments"));
     }
 
     #[tokio::test]
@@ -145,6 +169,8 @@ mod tests {
                 github_token: String::new(),
                 linear_token: String::new(),
             }),
+            memory_owner: None,
+            memory_repo: None,
         };
 
         let result = handle(&agent, &bytes).await;
@@ -168,6 +194,8 @@ mod tests {
                 github_token: String::new(),
                 linear_token: String::new(),
             }),
+            memory_owner: None,
+            memory_repo: None,
         };
 
         let payload = serde_json::json!({
@@ -196,6 +224,8 @@ mod tests {
                 github_token: String::new(),
                 linear_token: String::new(),
             }),
+            memory_owner: None,
+            memory_repo: None,
         };
 
         let result = handle(&agent, b"not json").await;

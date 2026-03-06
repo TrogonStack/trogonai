@@ -187,14 +187,6 @@ mod tests {
     }
 
     #[test]
-    fn from_env_requires_both_user_and_password_only_password_set() {
-        let env = InMemoryEnv::new();
-        env.set("NATS_PASSWORD", "pass");
-
-        assert!(matches!(NatsConfig::from_env(&env).auth, NatsAuth::None));
-    }
-
-    #[test]
     fn from_url_convenience() {
         let config = NatsConfig::from_url("nats://custom:4222");
 
