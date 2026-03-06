@@ -24,6 +24,7 @@ fn make_tool_ctx(proxy_url: &str) -> Arc<ToolContext> {
         proxy_url: proxy_url.to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
+            slack_token: String::new(),
     })
 }
 

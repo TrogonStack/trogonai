@@ -73,6 +73,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         cfg.proxy_url.clone(),
         cfg.github_token.clone(),
         cfg.linear_token.clone(),
+        cfg.slack_token.clone(),
     );
 
     let (mcp_tool_defs, mcp_dispatch) =
