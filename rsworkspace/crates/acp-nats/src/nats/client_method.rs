@@ -3,6 +3,7 @@ pub enum ClientMethod {
     FsReadTextFile,
     SessionRequestPermission,
     SessionUpdate,
+    TerminalCreate,
 }
 
 impl ClientMethod {
@@ -11,6 +12,7 @@ impl ClientMethod {
             "client.fs.read_text_file" => Some(Self::FsReadTextFile),
             "client.session.request_permission" => Some(Self::SessionRequestPermission),
             "client.session.update" => Some(Self::SessionUpdate),
+            "client.terminal.create" => Some(Self::TerminalCreate),
             _ => None,
         }
     }
