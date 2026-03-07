@@ -43,6 +43,13 @@ pub mod client {
         format!("{}.{}.client.fs.read_text_file", prefix, session_id)
     }
 
+    pub fn session_request_permission(prefix: &str, session_id: &str) -> String {
+        format!(
+            "{}.{}.client.session.request_permission",
+            prefix, session_id
+        )
+    }
+
     pub fn session_update(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.client.session.update", prefix, session_id)
     }
@@ -64,6 +71,14 @@ mod tests {
         assert_eq!(
             client::fs_read_text_file("acp", "s1"),
             "acp.s1.client.fs.read_text_file"
+        );
+    }
+
+    #[test]
+    fn client_session_request_permission_subject() {
+        assert_eq!(
+            client::session_request_permission("acp", "s1"),
+            "acp.s1.client.session.request_permission"
         );
     }
 

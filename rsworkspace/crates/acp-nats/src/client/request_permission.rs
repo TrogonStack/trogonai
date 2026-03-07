@@ -9,12 +9,28 @@ use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RequestPermissionError {
-    #[error("invalid request: {0}")]
-    InvalidRequest(#[source] serde_json::Error),
-    #[error("client error: {0}")]
-    ClientError(#[source] agent_client_protocol::Error),
+    InvalidRequest(serde_json::Error),
+    ClientError(agent_client_protocol::Error),
+}
+
+impl std::fmt::Display for RequestPermissionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRequest(e) => write!(f, "invalid request: {}", e),
+            Self::ClientError(e) => write!(f, "client error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for RequestPermissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidRequest(e) => Some(e),
+            Self::ClientError(e) => Some(e),
+        }
+    }
 }
 
 pub fn error_code_and_message(e: &RequestPermissionError) -> (ErrorCode, String) {
@@ -70,7 +86,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "request_permission reply").await;
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                response_bytes,
+                content_type,
+                "request_permission reply",
+            )
+            .await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -79,8 +102,16 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle request_permission"
             );
-            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "request_permission error reply").await;
+            let (bytes, content_type) =
+                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                bytes,
+                content_type,
+                "request_permission error reply",
+            )
+            .await;
         }
     }
 }
@@ -93,16 +124,18 @@ async fn forward_to_client<C: Client>(
     let envelope: Request<RequestPermissionRequest> =
         serde_json::from_slice(payload).map_err(RequestPermissionError::InvalidRequest)?;
     let request = envelope.params.ok_or_else(|| {
-        RequestPermissionError::InvalidRequest(serde_json::Error::custom("params is null or missing"))
+        RequestPermissionError::InvalidRequest(serde_json::Error::custom(
+            "params is null or missing",
+        ))
     })?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
-        return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(
-            format!(
+        return Err(RequestPermissionError::InvalidRequest(
+            serde_json::Error::custom(format!(
                 "params.sessionId ({}) does not match subject session id ({})",
                 params_session_id, expected_session_id
-            ),
-        )));
+            )),
+        ));
     }
     client
         .request_permission(request)
@@ -114,8 +147,9 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestId, RequestPermissionOutcome,
-        RequestPermissionResponse, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
+        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestId,
+        RequestPermissionOutcome, RequestPermissionResponse, SessionNotification, SessionUpdate,
+        ToolCallUpdate, ToolCallUpdateFields,
     };
     use std::error::Error;
     use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
@@ -133,7 +167,10 @@ mod tests {
 
     #[async_trait::async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -149,7 +186,10 @@ mod tests {
 
     #[async_trait::async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -229,7 +269,10 @@ mod tests {
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestPermissionError::ClientError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RequestPermissionError::ClientError(_)
+        ));
     }
 
     #[tokio::test]
@@ -244,7 +287,10 @@ mod tests {
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestPermissionError::InvalidRequest(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RequestPermissionError::InvalidRequest(_)
+        ));
     }
 
     #[tokio::test]
@@ -256,7 +302,10 @@ mod tests {
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestPermissionError::InvalidRequest(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RequestPermissionError::InvalidRequest(_)
+        ));
     }
 
     #[test]
@@ -269,7 +318,8 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         let (code, message) = error_code_and_message(&rp_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -282,7 +332,8 @@ mod tests {
         let rp_err = RequestPermissionError::InvalidRequest(err);
         assert!(rp_err.to_string().contains("invalid request"));
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         assert!(rp_err.to_string().contains("client error"));
     }
@@ -293,7 +344,8 @@ mod tests {
         let rp_err = RequestPermissionError::InvalidRequest(err);
         assert!(rp_err.source().is_some());
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         assert!(rp_err.source().is_some());
     }
@@ -327,7 +379,15 @@ mod tests {
         let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
         let payload = make_envelope(request);
 
-        handle(&payload, &client, None, &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            None,
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert!(nats.published_messages().is_empty());
     }
@@ -467,7 +527,15 @@ mod tests {
         let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
         let payload = make_envelope(request);
 
-        handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "session-001",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     }
