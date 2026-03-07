@@ -40,8 +40,10 @@
 
 pub mod api;
 pub mod automation;
+pub mod runs;
 pub mod store;
 pub mod trigger;
 
-pub use automation::{Automation, McpServer};
+pub use automation::{Automation, McpServer, Visibility};
+pub use runs::{RunRecord, RunStats, RunStatus, RunStore, now_unix};
 pub use store::AutomationStore;

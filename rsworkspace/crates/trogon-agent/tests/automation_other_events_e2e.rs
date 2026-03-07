@@ -79,10 +79,12 @@ fn make_automation(id: &str, trigger: &str, prompt: &str) -> Automation {
         name: format!("Test {id}"),
         trigger: trigger.to_string(),
         prompt: prompt.to_string(),
+        model: None,
         tools: vec![],
         memory_path: None,
         mcp_servers: vec![],
         enabled: true,
+        visibility: trogon_automations::Visibility::Private,
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
     }

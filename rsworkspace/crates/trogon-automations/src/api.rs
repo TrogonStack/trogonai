@@ -18,7 +18,7 @@
 
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, patch},
@@ -26,7 +26,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::automation::{Automation, McpServer};
+use crate::automation::{Automation, McpServer, Visibility};
+use crate::runs::RunStore;
 use crate::store::AutomationStore;
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ use crate::store::AutomationStore;
 #[derive(Clone)]
 pub struct AppState {
     pub store: AutomationStore,
+    pub run_store: RunStore,
 }
 
 // ── Tenant extraction ─────────────────────────────────────────────────────────
@@ -59,12 +61,16 @@ pub struct CreateRequest {
     pub trigger: String,
     pub prompt: String,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub tools: Vec<String>,
     pub memory_path: Option<String>,
     #[serde(default)]
     pub mcp_servers: Vec<McpServer>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub visibility: Visibility,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,11 +79,15 @@ pub struct UpdateRequest {
     pub trigger: String,
     pub prompt: String,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub tools: Vec<String>,
     pub memory_path: Option<String>,
     #[serde(default)]
     pub mcp_servers: Vec<McpServer>,
     pub enabled: bool,
+    #[serde(default)]
+    pub visibility: Visibility,
 }
 
 fn default_true() -> bool {
@@ -93,10 +103,12 @@ struct AutomationResponse {
     name: String,
     trigger: String,
     prompt: String,
+    model: Option<String>,
     tools: Vec<String>,
     memory_path: Option<String>,
     mcp_servers: Vec<McpServer>,
     enabled: bool,
+    visibility: Visibility,
     created_at: String,
     updated_at: String,
 }
@@ -109,10 +121,12 @@ impl From<Automation> for AutomationResponse {
             name: a.name,
             trigger: a.trigger,
             prompt: a.prompt,
+            model: a.model,
             tools: a.tools,
             memory_path: a.memory_path,
             mcp_servers: a.mcp_servers,
             enabled: a.enabled,
+            visibility: a.visibility,
             created_at: a.created_at,
             updated_at: a.updated_at,
         }
@@ -187,10 +201,12 @@ async fn create_automation(
         name: body.name,
         trigger: body.trigger,
         prompt: body.prompt,
+        model: body.model,
         tools: body.tools,
         memory_path: body.memory_path,
         mcp_servers: body.mcp_servers,
         enabled: body.enabled,
+        visibility: body.visibility,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -231,10 +247,12 @@ async fn update_automation(
         name: body.name,
         trigger: body.trigger,
         prompt: body.prompt,
+        model: body.model,
         tools: body.tools,
         memory_path: body.memory_path,
         mcp_servers: body.mcp_servers,
         enabled: body.enabled,
+        visibility: body.visibility,
         created_at: existing.created_at,
         updated_at: now_iso8601(),
     };
@@ -292,6 +310,36 @@ async fn set_enabled(headers: HeaderMap, state: AppState, id: String, enabled: b
     }
 }
 
+// ── Run history handlers ───────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct RunsQuery {
+    pub automation_id: Option<String>,
+}
+
+async fn list_runs(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<RunsQuery>,
+) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.run_store.list(&tid, q.automation_id.as_deref()).await {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Ok(runs) => (StatusCode::OK, axum::Json(runs)).into_response(),
+    }
+}
+
+async fn get_stats(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.run_store.stats(&tid).await {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Ok(stats) => (StatusCode::OK, axum::Json(stats)).into_response(),
+    }
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn router(state: AppState) -> Router {
@@ -303,6 +351,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/automations/{id}/enable", patch(enable_automation))
         .route("/automations/{id}/disable", patch(disable_automation))
+        .route("/runs", get(list_runs))
+        .route("/stats", get(get_stats))
         .with_state(state)
 }
 

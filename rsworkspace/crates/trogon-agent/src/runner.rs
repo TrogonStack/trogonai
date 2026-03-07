@@ -29,7 +29,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, consumer::pull, consumer::AckPolicy, consumer::DeliverPolicy};
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
-use trogon_automations::AutomationStore;
+use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
 
 use crate::agent_loop::AgentLoop;
 use crate::config::{AgentConfig, McpServerConfig};
@@ -43,6 +43,7 @@ const COMMENT_CONSUMER: &str = "trogon-agent-comment-added";
 const PUSH_CONSUMER: &str = "trogon-agent-push-to-branch";
 const CI_CONSUMER: &str = "trogon-agent-ci-completed";
 const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
+const CRON_CONSUMER: &str = "trogon-agent-cron";
 
 #[derive(Debug)]
 pub enum RunnerError {
@@ -103,11 +104,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .await
             .map_err(|e| RunnerError::JetStream(format!("AutomationStore: {e}")))?,
     );
+    let run_store = Arc::new(
+        RunStore::open(&js)
+            .await
+            .map_err(|e| RunnerError::JetStream(format!("RunStore: {e}")))?,
+    );
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Start the automations HTTP API server unless disabled (port == 0).
     if cfg.api_port != 0 {
-        let api_state = trogon_automations::api::AppState { store: (*store).clone() };
+        let api_state = trogon_automations::api::AppState {
+            store: (*store).clone(),
+            run_store: (*run_store).clone(),
+        };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
@@ -124,12 +133,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
+    let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
 
     let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
     let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
     let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
     let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
     let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
+    let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
 
     info!(
         proxy_url = %cfg.proxy_url,
@@ -148,6 +159,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.pull_request";
@@ -170,7 +182,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
                         });
@@ -184,6 +196,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.issue_comment";
@@ -196,7 +209,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     None => {}
                                 }
                             } else {
-                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
                         });
@@ -210,6 +223,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.push";
@@ -222,7 +236,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     None => {}
                                 }
                             } else {
-                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
                         });
@@ -236,6 +250,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.check_run";
@@ -248,7 +263,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     None => {}
                                 }
                             } else {
-                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
                         });
@@ -262,6 +277,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     Ok(msg) => {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "linear.Issue";
@@ -274,9 +290,32 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     None => {}
                                 }
                             } else {
-                                dispatch_automations(&agent, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
+                        });
+                    }
+                }
+            }
+            msg = cron_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving cron message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
                         });
                     }
                 }
@@ -289,8 +328,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 }
 
 /// Spawn one task per automation and wait for all to finish.
+/// Persists a [`RunRecord`] in `run_store` after each execution.
 pub(crate) async fn dispatch_automations(
     agent: &Arc<AgentLoop>,
+    run_store: &Arc<RunStore>,
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
     payload: &bytes::Bytes,
@@ -299,13 +340,39 @@ pub(crate) async fn dispatch_automations(
         .into_iter()
         .map(|auto| {
             let agent = Arc::clone(agent);
+            let run_store = Arc::clone(run_store);
             let payload = payload.clone();
             let subject = nats_subject.to_string();
             tokio::spawn(async move {
                 info!(automation = %auto.name, "Running automation");
-                match handlers::run_automation(&agent, &auto, &subject, &payload).await {
-                    Ok(o) => info!(automation = %auto.name, output = %o, "Automation done"),
-                    Err(e) => error!(automation = %auto.name, error = %e, "Automation failed"),
+                let started_at = trogon_automations::now_unix();
+                let result = handlers::run_automation(&agent, &auto, &subject, &payload).await;
+                let finished_at = trogon_automations::now_unix();
+
+                let (status, output) = match &result {
+                    Ok(o) => {
+                        info!(automation = %auto.name, output = %o, "Automation done");
+                        (RunStatus::Success, o.clone())
+                    }
+                    Err(e) => {
+                        error!(automation = %auto.name, error = %e, "Automation failed");
+                        (RunStatus::Failed, e.clone())
+                    }
+                };
+
+                let run = RunRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    automation_id: auto.id.clone(),
+                    automation_name: auto.name.clone(),
+                    tenant_id: auto.tenant_id.clone(),
+                    nats_subject: subject,
+                    started_at,
+                    finished_at,
+                    status,
+                    output,
+                };
+                if let Err(e) = run_store.record(&run).await {
+                    warn!(automation = %auto.name, error = %e, "Failed to persist run record");
                 }
             })
         })
@@ -398,13 +465,25 @@ mod tests {
             name: name.to_string(),
             trigger: "github.push".to_string(),
             prompt: "Do something.".to_string(),
+            model: None,
             tools: vec![],
             memory_path: None,
             mcp_servers: vec![],
             enabled: true,
+            visibility: trogon_automations::Visibility::Private,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    async fn make_run_store() -> (trogon_automations::RunStore, impl Drop) {
+        use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
+        let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+        let port = container.get_host_port_ipv4(4222).await.expect("port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+        let js = async_nats::jetstream::new(nats);
+        let rs = trogon_automations::RunStore::open(&js).await.expect("RunStore");
+        (rs, container)
     }
 
     /// dispatch_automations runs every automation and waits for all tasks.
@@ -421,11 +500,12 @@ mod tests {
                 }));
         });
 
+        let (rs, _container) = make_run_store().await;
         let agent = make_agent(&server.base_url());
         let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
         let payload = bytes::Bytes::from_static(b"{}");
 
-        dispatch_automations(&agent, automations, "github.push", &payload).await;
+        dispatch_automations(&agent, &Arc::new(rs), automations, "github.push", &payload).await;
 
         mock.assert_hits_async(2).await;
     }
@@ -433,10 +513,10 @@ mod tests {
     /// dispatch_automations with an empty list completes immediately without errors.
     #[tokio::test]
     async fn dispatch_automations_empty_list_is_noop() {
-        let agent = make_agent("http://127.0.0.1:1"); // no server needed
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent("http://127.0.0.1:1");
         let payload = bytes::Bytes::from_static(b"{}");
-        // Should complete without hanging or panicking.
-        dispatch_automations(&agent, vec![], "github.push", &payload).await;
+        dispatch_automations(&agent, &Arc::new(rs), vec![], "github.push", &payload).await;
     }
 
     #[test]

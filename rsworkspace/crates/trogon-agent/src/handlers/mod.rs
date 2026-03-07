@@ -87,10 +87,12 @@ mod tests {
             name: "Test automation".to_string(),
             trigger: "github.push".to_string(),
             prompt: "Review this push.".to_string(),
+            model: None,
             tools,
             memory_path: None,
             mcp_servers: vec![],
             enabled: true,
+            visibility: trogon_automations::Visibility::Private,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -358,29 +360,29 @@ pub async fn run_automation(
         crate::runner::init_mcp_servers(&agent.http_client, &auto_mcp_configs).await;
     tools.extend(auto_mcp_defs);
 
-    // If there are automation-level MCP servers, build a temporary AgentLoop
-    // that merges their dispatch entries with the base agent's dispatch.
+    // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
     let merged;
-    let effective: &AgentLoop = if auto_mcp_dispatch.is_empty() {
-        agent
-    } else {
-        let mut merged_dispatch = agent.mcp_dispatch.clone();
-        merged_dispatch.extend(auto_mcp_dispatch);
-        merged = AgentLoop {
-            http_client: agent.http_client.clone(),
-            proxy_url: agent.proxy_url.clone(),
-            anthropic_token: agent.anthropic_token.clone(),
-            model: agent.model.clone(),
-            max_iterations: agent.max_iterations,
-            tool_context: Arc::clone(&agent.tool_context),
-            memory_owner: agent.memory_owner.clone(),
-            memory_repo: agent.memory_repo.clone(),
-            memory_path: agent.memory_path.clone(),
-            mcp_tool_defs: agent.mcp_tool_defs.clone(),
-            mcp_dispatch: merged_dispatch,
+    let effective: &AgentLoop =
+        if auto_mcp_dispatch.is_empty() && automation.model.is_none() {
+            agent
+        } else {
+            let mut merged_dispatch = agent.mcp_dispatch.clone();
+            merged_dispatch.extend(auto_mcp_dispatch);
+            merged = AgentLoop {
+                http_client: agent.http_client.clone(),
+                proxy_url: agent.proxy_url.clone(),
+                anthropic_token: agent.anthropic_token.clone(),
+                model: automation.model.clone().unwrap_or_else(|| agent.model.clone()),
+                max_iterations: agent.max_iterations,
+                tool_context: Arc::clone(&agent.tool_context),
+                memory_owner: agent.memory_owner.clone(),
+                memory_repo: agent.memory_repo.clone(),
+                memory_path: agent.memory_path.clone(),
+                mcp_tool_defs: agent.mcp_tool_defs.clone(),
+                mcp_dispatch: merged_dispatch,
+            };
+            &merged
         };
-        &merged
-    };
 
     // Format the user prompt: event context + automation-specific instructions.
     let event_json = serde_json::from_slice::<serde_json::Value>(payload)

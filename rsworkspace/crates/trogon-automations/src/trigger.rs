@@ -22,15 +22,21 @@ pub fn parse(trigger: &str) -> (&str, Option<&str>) {
 ///
 /// Subject matching:
 /// - `"linear.Issue"` matches any subject that starts with `"linear.Issue"`.
+/// - `"cron"` matches any subject that starts with `"cron."`.
+/// - `"cron.my-job-id"` matches that exact cron subject.
 /// - All other subjects require an exact match.
 ///
 /// Action matching: if the trigger includes an action the payload `"action"`
-/// field must equal it (case-sensitive).
+/// field must equal it (case-sensitive), with one synthetic action:
+/// - `"draft_opened"` matches `action == "opened"` **and**
+///   `pull_request.draft == true`.
 pub fn matches(trigger: &str, nats_subject: &str, payload: &Value) -> bool {
     let (subj, action_filter) = parse(trigger);
 
     let subject_ok = if subj == "linear.Issue" {
         nats_subject.starts_with("linear.Issue")
+    } else if subj == "cron" {
+        nats_subject.starts_with("cron.")
     } else {
         nats_subject == subj
     };
@@ -41,6 +47,10 @@ pub fn matches(trigger: &str, nats_subject: &str, payload: &Value) -> bool {
 
     match action_filter {
         None => true,
+        Some("draft_opened") => {
+            payload["action"].as_str() == Some("opened")
+                && payload["pull_request"]["draft"].as_bool() == Some(true)
+        }
         Some(required) => payload["action"].as_str() == Some(required),
     }
 }
@@ -114,5 +124,58 @@ mod tests {
     fn wrong_subject_never_matches() {
         assert!(!matches("github.push", "github.check_run", &json!({})));
         assert!(!matches("github.issue_comment", "github.push", &json!({})));
+    }
+
+    // ── Cron triggers ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn cron_wildcard_matches_any_cron_subject() {
+        assert!(matches("cron", "cron.daily-digest", &json!({})));
+        assert!(matches("cron", "cron.nightly-cleanup", &json!({})));
+    }
+
+    #[test]
+    fn cron_wildcard_does_not_match_non_cron_subject() {
+        assert!(!matches("cron", "github.push", &json!({})));
+        assert!(!matches("cron", "linear.Issue.create", &json!({})));
+    }
+
+    #[test]
+    fn cron_exact_matches_that_job_only() {
+        assert!(matches("cron.my-job", "cron.my-job", &json!({})));
+        assert!(!matches("cron.my-job", "cron.other-job", &json!({})));
+    }
+
+    #[test]
+    fn cron_bare_does_not_match_bare_cron_subject() {
+        // "cron" (no dot) must NOT match a subject literally named "cron".
+        assert!(!matches("cron", "cron", &json!({})));
+    }
+
+    // ── draft_opened synthetic action ─────────────────────────────────────────
+
+    #[test]
+    fn draft_opened_matches_opened_draft_pr() {
+        let payload = json!({"action": "opened", "pull_request": {"draft": true}});
+        assert!(matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+    }
+
+    #[test]
+    fn draft_opened_does_not_match_non_draft_pr() {
+        let payload = json!({"action": "opened", "pull_request": {"draft": false}});
+        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+    }
+
+    #[test]
+    fn draft_opened_does_not_match_closed_draft_pr() {
+        let payload = json!({"action": "closed", "pull_request": {"draft": true}});
+        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+    }
+
+    #[test]
+    fn draft_opened_does_not_match_missing_draft_field() {
+        // If the draft field is absent, it must not match.
+        let payload = json!({"action": "opened", "pull_request": {}});
+        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
     }
 }
