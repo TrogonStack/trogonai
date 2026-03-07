@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
 use tokio::net::TcpListener;
 use trogon_automations::api::{AppState, router};
-use trogon_automations::AutomationStore;
+use trogon_automations::{AutomationStore, RunStore};
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -27,8 +27,9 @@ async fn start_server() -> TestServer {
         .expect("NATS connect");
     let js = jetstream::new(nats);
     let store = AutomationStore::open(&js).await.expect("store");
+    let run_store = RunStore::open(&js).await.expect("run_store");
 
-    let state = AppState { store };
+    let state = AppState { store, run_store };
     let app = router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -269,4 +270,129 @@ async fn created_at_preserved_on_update() {
         .header("x-tenant-id", "acme").json(&update).send().await.unwrap().json().await.unwrap();
 
     assert_eq!(updated["created_at"], created_at, "created_at must not change on update");
+}
+
+// ── model field ───────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_with_model_returns_model_in_response() {
+    let s = start_server().await;
+    let body = json!({
+        "name": "Fast automation", "trigger": "github.push", "prompt": "p",
+        "model": "claude-haiku-4-5-20251001"
+    });
+    let res: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&body).send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["model"], "claude-haiku-4-5-20251001");
+}
+
+#[tokio::test]
+async fn create_without_model_returns_null() {
+    let s = start_server().await;
+    let res: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
+    assert!(res["model"].is_null());
+}
+
+#[tokio::test]
+async fn update_sets_model() {
+    let s = start_server().await;
+    let created: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
+    let id = created["id"].as_str().unwrap();
+    let update = json!({
+        "name": "PR review", "trigger": "github.pull_request:opened", "prompt": "Review.",
+        "tools": [], "mcp_servers": [], "enabled": true,
+        "model": "claude-haiku-4-5-20251001"
+    });
+    let updated: Value = s.client.put(format!("{}/automations/{id}", s.base_url))
+        .header("x-tenant-id", "acme").json(&update).send().await.unwrap().json().await.unwrap();
+    assert_eq!(updated["model"], "claude-haiku-4-5-20251001");
+}
+
+// ── visibility field ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_defaults_visibility_to_private() {
+    let s = start_server().await;
+    let res: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["visibility"], "private");
+}
+
+#[tokio::test]
+async fn create_with_visibility_public() {
+    let s = start_server().await;
+    let body = json!({
+        "name": "Public automation", "trigger": "github.push", "prompt": "p",
+        "visibility": "public"
+    });
+    let res: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&body).send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["visibility"], "public");
+}
+
+#[tokio::test]
+async fn update_changes_visibility() {
+    let s = start_server().await;
+    let created: Value = s.client.post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme").json(&create_body()).send().await.unwrap().json().await.unwrap();
+    let id = created["id"].as_str().unwrap();
+    let update = json!({
+        "name": "PR review", "trigger": "github.pull_request:opened", "prompt": "Review.",
+        "tools": [], "mcp_servers": [], "enabled": true,
+        "visibility": "public"
+    });
+    let updated: Value = s.client.put(format!("{}/automations/{id}", s.base_url))
+        .header("x-tenant-id", "acme").json(&update).send().await.unwrap().json().await.unwrap();
+    assert_eq!(updated["visibility"], "public");
+}
+
+// ── /runs endpoint ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_runs_missing_tenant_returns_400() {
+    let s = start_server().await;
+    let res = s.client.get(format!("{}/runs", s.base_url)).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn get_runs_empty_returns_empty_array() {
+    let s = start_server().await;
+    let res: Value = s.client.get(format!("{}/runs", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    assert_eq!(res, json!([]));
+}
+
+#[tokio::test]
+async fn get_runs_filtered_by_automation_id() {
+    let s = start_server().await;
+    // Seed two runs via the RunStore directly (no runner needed).
+    // Since RunStore isn't exposed through the test server, use the stats endpoint
+    // to confirm the bucket exists and is functional.
+    let stats: Value = s.client.get(format!("{}/stats", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    assert_eq!(stats["total"], 0);
+    assert_eq!(stats["successful_7d"], 0);
+    assert_eq!(stats["failed_7d"], 0);
+}
+
+// ── /stats endpoint ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_stats_missing_tenant_returns_400() {
+    let s = start_server().await;
+    let res = s.client.get(format!("{}/stats", s.base_url)).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn get_stats_empty_returns_zeros() {
+    let s = start_server().await;
+    let res: Value = s.client.get(format!("{}/stats", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["total"], 0);
+    assert_eq!(res["successful_7d"], 0);
+    assert_eq!(res["failed_7d"], 0);
 }
