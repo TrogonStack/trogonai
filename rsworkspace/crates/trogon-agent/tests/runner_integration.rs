@@ -57,6 +57,7 @@ fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -122,6 +123,7 @@ async fn runner_nats_connect_error_missing_credentials() {
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -177,6 +179,7 @@ async fn runner_dispatches_github_pr_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -219,6 +222,7 @@ async fn runner_dispatches_linear_issue_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -259,6 +263,7 @@ async fn runner_skips_irrelevant_github_pr_action() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     // No mock registered — any call would return 404 and the test should never reach it.
@@ -303,6 +308,7 @@ async fn runner_skips_irrelevant_linear_event() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -346,6 +352,7 @@ async fn runner_pr_handler_json_error_does_not_crash() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -392,6 +399,7 @@ async fn runner_issue_handler_json_error_does_not_crash() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -440,6 +448,7 @@ async fn runner_pr_handler_agent_error_does_not_crash() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
 
@@ -507,6 +516,7 @@ async fn runner_issue_handler_agent_error_does_not_crash() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
 
@@ -568,6 +578,7 @@ async fn runner_dispatches_pr_merged_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.>"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -609,6 +620,7 @@ async fn runner_dispatches_issue_comment_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.>"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -646,6 +658,7 @@ async fn runner_dispatches_push_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.>"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
@@ -685,6 +698,7 @@ async fn runner_dispatches_ci_failure_event_to_anthropic() {
     let js = jetstream::new(nats);
     create_stream(&js, "GITHUB", &["github.>"]).await;
     create_stream(&js, "LINEAR", &["linear.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {
