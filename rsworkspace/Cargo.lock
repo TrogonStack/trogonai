@@ -3586,6 +3586,7 @@ dependencies = [
  "trogon-secret-proxy",
  "trogon-std",
  "trogon-vault",
+ "uuid",
 ]
 
 [[package]]

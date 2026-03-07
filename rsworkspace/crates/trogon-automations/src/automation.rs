@@ -2,6 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Visibility scope of an automation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    /// Only visible to the owner / within the tenant.
+    #[default]
+    Private,
+    /// Visible to all members of the tenant.
+    Public,
+}
+
 /// A configured automation: maps an event trigger to a custom agent behaviour.
 ///
 /// Stored as a JSON blob in NATS KV bucket `AUTOMATIONS`, keyed by
@@ -22,13 +33,21 @@ pub struct Automation {
     ///
     /// Examples:
     /// - `"github.pull_request:opened"` — PR opened or re-opened
+    /// - `"github.pull_request:draft_opened"` — Draft PR opened
     /// - `"github.push"` — any push to any branch
     /// - `"linear.Issue:create"` — new Linear issue created
+    /// - `"cron.my-job-id"` — specific scheduled job tick
+    /// - `"cron"` — any scheduled job tick
     pub trigger: String,
 
     /// User-facing prompt sent to the agent.  The raw event JSON is prepended
     /// automatically so the model always has access to the event payload.
     pub prompt: String,
+
+    /// Anthropic model override for this automation.
+    /// When `None`, the runner's global model is used.
+    #[serde(default)]
+    pub model: Option<String>,
 
     /// Built-in tool names the agent is allowed to use.
     /// An empty list means **all** built-in tools are available.
@@ -43,6 +62,10 @@ pub struct Automation {
 
     /// When `false` the automation is skipped without being deleted.
     pub enabled: bool,
+
+    /// Visibility scope — `private` (default) or `public`.
+    #[serde(default)]
+    pub visibility: Visibility,
 
     /// ISO-8601 creation timestamp.
     pub created_at: String,
@@ -71,6 +94,7 @@ mod tests {
             name: "PR review".to_string(),
             trigger: "github.pull_request:opened".to_string(),
             prompt: "Review the PR.".to_string(),
+            model: None,
             tools: vec!["get_pr_diff".to_string()],
             memory_path: Some(".trogon/memory.md".to_string()),
             mcp_servers: vec![McpServer {
@@ -78,6 +102,7 @@ mod tests {
                 url: "http://localhost:3000".to_string(),
             }],
             enabled: true,
+            visibility: Visibility::Private,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -128,5 +153,56 @@ mod tests {
         let mut b = sample();
         b.tenant_id = "other-org".to_string();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn model_none_serializes_as_null() {
+        let a = sample();
+        let v: serde_json::Value = serde_json::to_value(&a).unwrap();
+        assert!(v["model"].is_null());
+    }
+
+    #[test]
+    fn model_some_survives_round_trip() {
+        let mut a = sample();
+        a.model = Some("claude-haiku-4-5-20251001".to_string());
+        let json = serde_json::to_string(&a).unwrap();
+        let b: Automation = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.model.as_deref(), Some("claude-haiku-4-5-20251001"));
+    }
+
+    #[test]
+    fn model_defaults_to_none_when_field_missing_in_json() {
+        let json = r#"{"id":"x","tenant_id":"t","name":"n","trigger":"github.push",
+                       "prompt":"p","tools":[],"memory_path":null,"mcp_servers":[],
+                       "enabled":true,"created_at":"2026-01-01T00:00:00Z",
+                       "updated_at":"2026-01-01T00:00:00Z"}"#;
+        let a: Automation = serde_json::from_str(json).unwrap();
+        assert!(a.model.is_none());
+    }
+
+    #[test]
+    fn visibility_defaults_to_private() {
+        let a = sample();
+        assert_eq!(a.visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn visibility_public_round_trips() {
+        let mut a = sample();
+        a.visibility = Visibility::Public;
+        let json = serde_json::to_string(&a).unwrap();
+        let b: Automation = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn visibility_defaults_to_private_when_field_missing_in_json() {
+        let json = r#"{"id":"x","tenant_id":"t","name":"n","trigger":"github.push",
+                       "prompt":"p","tools":[],"memory_path":null,"mcp_servers":[],
+                       "enabled":true,"created_at":"2026-01-01T00:00:00Z",
+                       "updated_at":"2026-01-01T00:00:00Z"}"#;
+        let a: Automation = serde_json::from_str(json).unwrap();
+        assert_eq!(a.visibility, Visibility::Private);
     }
 }
