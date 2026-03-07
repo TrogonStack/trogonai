@@ -29,6 +29,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_session_request_permission() {
+        let subject = "acp.sess123.client.session.request_permission";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(parsed.method, ClientMethod::SessionRequestPermission);
+    }
+
+    #[test]
     fn test_parse_session_update() {
         let subject = "acp.sess123.client.session.update";
         let parsed = parse_client_subject(subject).unwrap();
