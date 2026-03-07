@@ -1,4 +1,3 @@
-use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PLAIN};
 use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
 use crate::wire::{encode_agent_error, encode_success, merge_jsonrpc_headers};
 use agent_client_protocol::{Error, ErrorCode};
@@ -6,10 +5,23 @@ use async_nats::header::HeaderMap;
 use jsonrpc_nats::{Encoded, ResponseId};
 use tracing::warn;
 
-fn reply_headers(wire_headers: &HeaderMap) -> HeaderMap {
-    let mut headers = merge_jsonrpc_headers(headers_with_trace_context(), wire_headers.clone());
-    headers.insert("Content-Type", CONTENT_TYPE_JSON);
-    headers
+pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
+
+pub fn error_response_fallback_bytes<S: JsonSerialize>(serializer: &S) -> (Bytes, &'static str) {
+    match serializer.to_vec(&Response::<()>::Error {
+        id: RequestId::Null,
+        error: Error::new(-32603, "Internal error"),
+    }) {
+        Ok(v) => (Bytes::from(v), CONTENT_TYPE_JSON),
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Fallback JSON serialization failed, response may not be valid JSON-RPC"
+            );
+            (Bytes::from("Internal error"), CONTENT_TYPE_PLAIN)
+        }
+    }
 }
 
 pub async fn publish_wire_reply<N: PublishClient + FlushClient>(
@@ -18,9 +30,10 @@ pub async fn publish_wire_reply<N: PublishClient + FlushClient>(
     encoded: Encoded,
     context: &str,
 ) {
-    let headers = reply_headers(&encoded.headers);
+    let mut headers = headers_with_trace_context();
+    headers.insert("Content-Type", content_type);
     if let Err(e) = nats
-        .publish_with_headers(reply_to.to_string(), headers, encoded.body)
+        .publish_with_headers(reply_to.to_string(), headers, bytes)
         .await
     {
         warn!(error = %e, "Failed to publish {}", context);
@@ -49,19 +62,43 @@ pub async fn publish_success_reply<N, Res>(
     }
 }
 
-pub async fn publish_agent_error_reply<N: PublishClient + FlushClient>(
-    nats: &N,
-    reply_to: &str,
-    response_id: ResponseId,
-    error: &Error,
-    context: &str,
-) {
-    match encode_agent_error(response_id, error) {
-        Ok(encoded) => publish_wire_reply(nats, reply_to, encoded, context).await,
-        Err(e) => {
-            warn!(error = %e, "Failed to encode error reply for {}", context);
-            publish_fallback_error_reply(nats, reply_to, context).await;
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::{ErrorCode, RequestId};
+    use trogon_std::{FailNextSerialize, StdJsonSerialize};
+
+    #[test]
+    fn error_response_bytes_first_fallback_uses_null_id() {
+        let mock = FailNextSerialize::new(1);
+        let (bytes, content_type) = error_response_bytes(
+            &mock,
+            RequestId::Number(42),
+            ErrorCode::InvalidParams,
+            "test message",
+        );
+        assert_eq!(content_type, "application/json");
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["id"], serde_json::Value::Null);
+        assert_eq!(parsed["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn error_response_bytes_last_resort_returns_plain_text() {
+        let mock = FailNextSerialize::new(2);
+        let (bytes, content_type) =
+            error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
+        assert_eq!(content_type, "text/plain");
+        assert_eq!(bytes.as_ref(), b"Internal error");
+    }
+
+    #[test]
+    fn error_response_fallback_bytes_std_serializer_returns_json() {
+        let (bytes, content_type) = error_response_fallback_bytes(&StdJsonSerialize);
+        assert_eq!(content_type, "application/json");
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["id"], serde_json::Value::Null);
+        assert_eq!(parsed["error"]["code"], -32603);
     }
 }
 
