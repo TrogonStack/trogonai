@@ -16,6 +16,7 @@ pub fn base_url(provider: &str) -> Option<&'static str> {
         // External API providers (used by trogon-agent tools)
         "github" => Some("https://api.github.com"),
         "linear" => Some("https://api.linear.app"),
+        "slack" => Some("https://slack.com/api"),
         _ => None,
     }
 }
@@ -36,6 +37,7 @@ mod tests {
         assert_eq!(base_url("mistral"), Some("https://api.mistral.ai"));
         assert_eq!(base_url("github"), Some("https://api.github.com"));
         assert_eq!(base_url("linear"), Some("https://api.linear.app"));
+        assert_eq!(base_url("slack"), Some("https://slack.com/api"));
     }
 
     #[test]
