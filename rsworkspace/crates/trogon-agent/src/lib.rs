@@ -29,9 +29,11 @@
 //! | `AGENT_MAX_ITERATIONS` | `10` | Max loop iterations per event |
 
 pub mod agent_loop;
+pub mod chat_api;
 pub mod config;
 pub mod handlers;
 pub mod runner;
+pub mod session;
 pub mod tools;
 
 pub use config::AgentConfig;
