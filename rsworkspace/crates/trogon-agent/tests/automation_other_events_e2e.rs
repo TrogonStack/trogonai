@@ -40,7 +40,7 @@ async fn js_client(port: u16) -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn create_streams(js: &jetstream::Context) {
-    for (name, subject) in [("GITHUB", "github.>"), ("LINEAR", "linear.Issue.>")] {
+    for (name, subject) in [("GITHUB", "github.>"), ("LINEAR", "linear.Issue.>"), ("CRON_TICKS", "cron.>")] {
         js.get_or_create_stream(jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
@@ -63,6 +63,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String) -> AgentConfig {
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,

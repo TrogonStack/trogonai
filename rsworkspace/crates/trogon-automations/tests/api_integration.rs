@@ -9,13 +9,14 @@ use serde_json::{Value, json};
 use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
 use tokio::net::TcpListener;
 use trogon_automations::api::{AppState, router};
-use trogon_automations::{AutomationStore, RunStore};
+use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore, now_unix};
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 struct TestServer {
     base_url: String,
     client: Client,
+    run_store: RunStore,
     _container: Box<dyn std::any::Any>,
 }
 
@@ -29,7 +30,7 @@ async fn start_server() -> TestServer {
     let store = AutomationStore::open(&js).await.expect("store");
     let run_store = RunStore::open(&js).await.expect("run_store");
 
-    let state = AppState { store, run_store };
+    let state = AppState { store, run_store: run_store.clone() };
     let app = router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -39,7 +40,23 @@ async fn start_server() -> TestServer {
     TestServer {
         base_url: format!("http://{addr}"),
         client: Client::new(),
+        run_store,
         _container: Box::new(container),
+    }
+}
+
+fn seed_run(id: &str, automation_id: &str, tenant_id: &str, status: RunStatus) -> RunRecord {
+    let t = now_unix();
+    RunRecord {
+        id: id.to_string(),
+        automation_id: automation_id.to_string(),
+        automation_name: format!("Automation {automation_id}"),
+        tenant_id: tenant_id.to_string(),
+        nats_subject: "github.pull_request".to_string(),
+        started_at: t,
+        finished_at: t + 1,
+        status,
+        output: "done".to_string(),
     }
 }
 
@@ -395,4 +412,89 @@ async fn get_stats_empty_returns_zeros() {
     assert_eq!(res["total"], 0);
     assert_eq!(res["successful_7d"], 0);
     assert_eq!(res["failed_7d"], 0);
+}
+
+// ── /runs with seeded data ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_runs_with_data_returns_records() {
+    let s = start_server().await;
+    s.run_store.record(&seed_run("r1", "auto-1", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r2", "auto-1", "acme", RunStatus::Failed)).await.unwrap();
+
+    let res: Value = s.client.get(format!("{}/runs", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    let arr = res.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert!(arr.iter().all(|r| r["tenant_id"] == "acme"));
+    let statuses: Vec<&str> = arr.iter().map(|r| r["status"].as_str().unwrap()).collect();
+    assert!(statuses.contains(&"success"));
+    assert!(statuses.contains(&"failed"));
+}
+
+#[tokio::test]
+async fn get_runs_filtered_by_automation_id_query_param() {
+    let s = start_server().await;
+    s.run_store.record(&seed_run("r1", "auto-A", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r2", "auto-A", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r3", "auto-B", "acme", RunStatus::Failed)).await.unwrap();
+
+    let all: Value = s.client.get(format!("{}/runs", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 3, "unfiltered returns all 3");
+
+    let filtered: Value = s.client.get(format!("{}/runs?automation_id=auto-A", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    let arr = filtered.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "filter by auto-A must return 2");
+    assert!(arr.iter().all(|r| r["automation_id"] == "auto-A"));
+}
+
+#[tokio::test]
+async fn get_runs_tenant_isolation() {
+    let s = start_server().await;
+    s.run_store.record(&seed_run("r1", "auto-1", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r2", "auto-1", "other", RunStatus::Success)).await.unwrap();
+
+    let acme: Value = s.client.get(format!("{}/runs", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    let other: Value = s.client.get(format!("{}/runs", s.base_url))
+        .header("x-tenant-id", "other").send().await.unwrap().json().await.unwrap();
+
+    assert_eq!(acme.as_array().unwrap().len(), 1);
+    assert_eq!(other.as_array().unwrap().len(), 1);
+}
+
+// ── /stats with seeded data ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_stats_with_data_returns_correct_counts() {
+    let s = start_server().await;
+    s.run_store.record(&seed_run("r1", "a", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r2", "a", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r3", "a", "acme", RunStatus::Failed)).await.unwrap();
+
+    let stats: Value = s.client.get(format!("{}/stats", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+
+    assert_eq!(stats["total"], 3);
+    assert_eq!(stats["successful_7d"], 2);
+    assert_eq!(stats["failed_7d"], 1);
+}
+
+#[tokio::test]
+async fn get_stats_tenant_isolation() {
+    let s = start_server().await;
+    s.run_store.record(&seed_run("r1", "a", "acme", RunStatus::Success)).await.unwrap();
+    s.run_store.record(&seed_run("r2", "a", "other", RunStatus::Failed)).await.unwrap();
+
+    let acme_stats: Value = s.client.get(format!("{}/stats", s.base_url))
+        .header("x-tenant-id", "acme").send().await.unwrap().json().await.unwrap();
+    let other_stats: Value = s.client.get(format!("{}/stats", s.base_url))
+        .header("x-tenant-id", "other").send().await.unwrap().json().await.unwrap();
+
+    assert_eq!(acme_stats["total"], 1);
+    assert_eq!(acme_stats["successful_7d"], 1);
+    assert_eq!(other_stats["total"], 1);
+    assert_eq!(other_stats["failed_7d"], 1);
 }

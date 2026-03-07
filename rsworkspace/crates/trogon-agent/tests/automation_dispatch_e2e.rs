@@ -43,7 +43,11 @@ async fn js_client(port: u16) -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn create_streams(js: &jetstream::Context) {
-    for (name, subject) in [("GITHUB", "github.>"), ("LINEAR", "linear.Issue.>")] {
+    for (name, subject) in [
+        ("GITHUB", "github.>"),
+        ("LINEAR", "linear.Issue.>"),
+        ("CRON_TICKS", "cron.>"),
+    ] {
         js.get_or_create_stream(jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
@@ -51,6 +55,28 @@ async fn create_streams(js: &jetstream::Context) {
         })
         .await
         .unwrap_or_else(|e| panic!("create stream {name}: {e}"));
+    }
+}
+
+fn runner_cfg_with_cron(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16, cron_stream: Option<String>) -> AgentConfig {
+    AgentConfig {
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        proxy_url,
+        anthropic_token: "test-token".to_string(),
+        github_token: "tok_github_prod_test01".to_string(),
+        linear_token: "tok_linear_prod_test01".to_string(),
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
+        cron_stream_name: cron_stream,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_servers: vec![],
+        api_port,
+        tenant_id: tenant_id.to_string(),
     }
 }
 
@@ -66,6 +92,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16)
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -400,4 +427,206 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
         wait_for_hits(&anthropic_mock, 1, Duration::from_secs(8)).await,
         "MCP tool 'mcp__search_mcp__search_docs' was not included in the Anthropic request"
     );
+}
+
+/// Automation with a `model` override sends that model to the Anthropic proxy.
+#[tokio::test]
+async fn automation_model_override_sent_to_anthropic() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    let mut auto = make_automation(
+        "auto-model",
+        "default",
+        "github.pull_request",
+        "MODEL_OVERRIDE_PROMPT",
+    );
+    auto.model = Some("claude-haiku-4-5-20251001".to_string());
+    store.put(&auto).await.expect("put automation");
+
+    // Match requests that contain the haiku model ID in the body.
+    let haiku_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("claude-haiku-4-5-20251001");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+
+    assert!(
+        wait_for_hits(&haiku_mock, 1, Duration::from_secs(8)).await,
+        "automation model override was not forwarded to Anthropic"
+    );
+}
+
+/// A cron tick published to CRON_TICKS dispatches to a matching automation.
+#[tokio::test]
+async fn cron_tick_dispatches_to_matching_automation() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (nats, js) = js_client(nats_port).await;
+    create_streams(&js).await; // creates GITHUB, LINEAR, and CRON_TICKS
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-cron",
+            "default",
+            "cron.daily",
+            "CRON_DAILY_PROMPT_XYZ",
+        ))
+        .await
+        .expect("put cron automation");
+
+    let anthropic = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("CRON_DAILY_PROMPT_XYZ");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move {
+        run(runner_cfg_with_cron(
+            nats_port,
+            mock_url,
+            "default",
+            0,
+            Some("CRON_TICKS".to_string()),
+        ))
+        .await
+        .ok()
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Publish a cron tick to the matching subject.
+    nats.publish("cron.daily", b"{}".as_slice().into()).await.expect("publish cron tick");
+
+    assert!(
+        wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
+        "cron tick did not dispatch to matching automation"
+    );
+}
+
+/// After dispatch, a RunRecord is persisted in RunStore and accessible via HTTP.
+#[tokio::test]
+async fn dispatch_persists_run_record_accessible_via_api() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-runs",
+            "default",
+            "github.pull_request",
+            "RUNS_RECORD_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // Find a free port for the API.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok()
+    });
+
+    // Wait for API to come up.
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // Trigger an automation.
+    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+
+    // Poll until at least one RunRecord appears (up to 10s).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let runs = loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break body;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    let arr = runs.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "exactly one run should be recorded");
+    assert_eq!(arr[0]["automation_id"], "auto-runs");
+    assert_eq!(arr[0]["status"], "success");
+    assert!(!arr[0]["id"].as_str().unwrap_or("").is_empty());
+
+    // Stats should also reflect the run.
+    let stats: serde_json::Value = client
+        .get(format!("http://127.0.0.1:{api_port}/stats"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stats["total"], 1);
+    assert_eq!(stats["successful_7d"], 1);
+    assert_eq!(stats["failed_7d"], 0);
+
+    // Verify the RunRecord fields are correct and consistent.
+    let run = &arr[0];
+    assert_eq!(run["automation_id"], "auto-runs");
+    assert_eq!(run["tenant_id"], "default");
+    assert_eq!(run["nats_subject"], "github.pull_request");
+    assert!(run["started_at"].as_u64().unwrap() > 0);
+    assert!(run["finished_at"].as_u64().unwrap() >= run["started_at"].as_u64().unwrap());
 }

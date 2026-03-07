@@ -44,7 +44,11 @@ async fn js_client(port: u16) -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn create_streams(js: &jetstream::Context) {
-    for (name, subject) in [("GITHUB", "github.>"), ("LINEAR", "linear.Issue.>")] {
+    for (name, subject) in [
+        ("GITHUB", "github.>"),
+        ("LINEAR", "linear.Issue.>"),
+        ("CRON_TICKS", "cron.>"),
+    ] {
         js.get_or_create_stream(jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
@@ -67,6 +71,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str) -> AgentConfig
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -475,4 +480,119 @@ async fn pr_merged_event_dispatches_to_automation_not_hardcoded_handler() {
         0,
         "hardcoded pr_merged handler ran despite matching automation"
     );
+}
+
+/// An automation with trigger `github.pull_request:draft_opened` fires when a
+/// PR arrives with `action=opened` AND `pull_request.draft=true`.
+#[tokio::test]
+async fn draft_opened_trigger_fires_for_draft_pr() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-draft",
+            "default",
+            "github.pull_request:draft_opened",
+            "DRAFT_PR_AUTOMATION_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    let draft_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("DRAFT_PR_AUTOMATION_PROMPT");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default")).await.ok() });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Draft PR: action=opened + pull_request.draft=true.
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "action": "opened",
+        "number": 99,
+        "repository": { "owner": { "login": "acme" }, "name": "api" },
+        "pull_request": { "title": "WIP feature", "draft": true }
+    }))
+    .unwrap();
+    js.publish("github.pull_request", payload.into()).await.expect("publish");
+
+    assert!(
+        wait_for_hits(&draft_mock, 1, Duration::from_secs(8)).await,
+        "draft_opened automation was not dispatched for draft PR"
+    );
+}
+
+/// `draft_opened` automation does NOT fire for a non-draft PR that is opened.
+#[tokio::test]
+async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-draft-only",
+            "default",
+            "github.pull_request:draft_opened",
+            "SHOULD_NOT_FIRE_FOR_NON_DRAFT",
+        ))
+        .await
+        .expect("put automation");
+
+    // If draft automation fires → 500.
+    let bad_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("SHOULD_NOT_FIRE_FOR_NON_DRAFT");
+            then.status(500).body("draft_opened must not fire for non-draft PR");
+        })
+        .await;
+
+    // Fallback pr_review contains "code reviewer".
+    let fallback = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("code reviewer");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default")).await.ok() });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Non-draft PR: action=opened + pull_request.draft=false.
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "action": "opened",
+        "number": 100,
+        "repository": { "owner": { "login": "acme" }, "name": "api" },
+        "pull_request": { "title": "Real feature", "draft": false }
+    }))
+    .unwrap();
+    js.publish("github.pull_request", payload.into()).await.expect("publish");
+
+    assert!(
+        wait_for_hits(&fallback, 1, Duration::from_secs(8)).await,
+        "fallback handler not called for non-draft PR"
+    );
+    assert_eq!(bad_mock.hits_async().await, 0, "draft_opened fired for non-draft PR");
 }
