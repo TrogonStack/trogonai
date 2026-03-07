@@ -439,3 +439,93 @@ async fn send_message_with_model_override_uses_override() {
     assert_eq!(res["content"], "haiku says hi");
     mock.assert_hits_async(1).await;
 }
+
+#[tokio::test]
+async fn send_message_anthropic_500_returns_500() {
+    let env = start().await;
+
+    // Anthropic proxy always returns 500 — agent gets an HTTP error parsing JSON.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(500).body("Internal Server Error");
+    });
+
+    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send().await.unwrap().json().await.unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send().await.unwrap();
+
+    assert_eq!(res.status(), 500, "Anthropic 500 must propagate as HTTP 500");
+}
+
+#[tokio::test]
+async fn update_session_memory_path_persisted() {
+    let env = start().await;
+
+    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "MP Session"}))
+        .send().await.unwrap().json().await.unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    // Initially no memory_path.
+    assert!(created["memory_path"].is_null());
+
+    // PATCH with memory_path.
+    let updated: Value = env.client.patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"memory_path": "docs/memory.md"}))
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(updated["memory_path"], "docs/memory.md");
+
+    // GET to confirm persistence.
+    let got: Value = env.client.get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(got["memory_path"], "docs/memory.md");
+}
+
+#[tokio::test]
+async fn send_message_tools_filtered_by_session_tools() {
+    let env = start().await;
+
+    // This mock only matches when the Anthropic body contains "get_pr_diff".
+    // If the tool list is correctly filtered, only get_pr_diff should appear.
+    let filtered_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("get_pr_diff");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("diff result"));
+    });
+
+    // This mock fires if a non-filtered tool (create_linear_issue) appears — must NOT fire.
+    let unfiltered_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("create_linear_issue");
+        then.status(500).body("unexpected tool in body");
+    });
+
+    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"tools": ["get_pr_diff"]}))
+        .send().await.unwrap().json().await.unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "show me the diff"}))
+        .send().await.unwrap().json().await.unwrap();
+
+    assert_eq!(res["content"], "diff result");
+    filtered_mock.assert_hits_async(1).await;
+    unfiltered_mock.assert_hits_async(0).await;
+}

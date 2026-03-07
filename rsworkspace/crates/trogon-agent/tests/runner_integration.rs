@@ -741,6 +741,8 @@ async fn runner_respects_custom_stream_names() {
     // Use non-default names — the default "GITHUB" / "LINEAR" streams do NOT exist.
     create_stream(&js, "MY_GH", &["github.pull_request"]).await;
     create_stream(&js, "MY_LIN", &["linear.>"]).await;
+    // CRON_TICKS must always exist (runner binds it unconditionally).
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
     let mock = proxy.mock_async(|when, then| {

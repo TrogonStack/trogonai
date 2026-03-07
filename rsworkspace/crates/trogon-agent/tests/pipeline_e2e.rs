@@ -2611,6 +2611,8 @@ async fn pipeline_custom_stream_names_route_correctly() {
     // Use custom stream names — do NOT create the default "GITHUB"/"LINEAR".
     create_stream(&js, "MY_GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "MY_LINEAR", &["linear.Issue.>"]).await;
+    // CRON_TICKS must always exist (runner binds it unconditionally).
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
