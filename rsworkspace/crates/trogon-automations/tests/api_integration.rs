@@ -238,6 +238,13 @@ async fn enable_missing_returns_404() {
 }
 
 #[tokio::test]
+async fn disable_missing_returns_404() {
+    let s = start_server().await;
+    let res = s.client.patch(format!("{}/automations/no-id/disable", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
 async fn list_empty_returns_empty_array() {
     let s = start_server().await;
     let res = s.client.get(format!("{}/automations", s.base_url)).header("x-tenant-id", "acme").send().await.unwrap();
