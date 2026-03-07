@@ -210,9 +210,8 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
     // Wait for the GitHub server to start accepting connections.
     wait_for_port(github_port).await;
 
-    // The agent runner requires BOTH GITHUB and LINEAR streams to exist.
-    // The GitHub server created GITHUB above; create LINEAR manually so
-    // runner.rs's `get_stream("LINEAR")` doesn't fail.
+    // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
+    // The GitHub server created GITHUB above; create the others manually.
     js.get_or_create_stream(jetstream::stream::Config {
         name: "LINEAR".to_string(),
         subjects: vec!["linear.Issue.>".to_string()],
@@ -220,6 +219,13 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
     })
     .await
     .expect("Failed to create LINEAR stream");
+    js.get_or_create_stream(jetstream::stream::Config {
+        name: "CRON_TICKS".to_string(),
+        subjects: vec!["cron.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
@@ -236,6 +242,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -399,9 +406,8 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
     // Wait for the Linear server to start accepting connections.
     wait_for_port(linear_port).await;
 
-    // The agent runner requires BOTH GITHUB and LINEAR streams to exist.
-    // The Linear server created LINEAR above; create GITHUB manually so
-    // runner.rs's `get_stream("GITHUB")` doesn't fail.
+    // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
+    // The Linear server created LINEAR above; create the others manually.
     js.get_or_create_stream(jetstream::stream::Config {
         name: "GITHUB".to_string(),
         subjects: vec!["github.pull_request".to_string()],
@@ -409,6 +415,13 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
     })
     .await
     .expect("Failed to create GITHUB stream");
+    js.get_or_create_stream(jetstream::stream::Config {
+        name: "CRON_TICKS".to_string(),
+        subjects: vec!["cron.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
@@ -425,6 +438,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         max_iterations: 1,
         github_stream_name: None,
         linear_stream_name: None,
+        cron_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,

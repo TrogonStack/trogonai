@@ -33,7 +33,7 @@ async fn create_required_streams(nats_port: u16) {
         .expect("Failed to connect to NATS");
     let js = async_nats::jetstream::new(nats);
 
-    for (name, subject) in [("GITHUB", "github.pull_request"), ("LINEAR", "linear.Issue.>")] {
+    for (name, subject) in [("GITHUB", "github.pull_request"), ("LINEAR", "linear.Issue.>"), ("CRON_TICKS", "cron.>")] {
         js.get_or_create_stream(async_nats::jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
