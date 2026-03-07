@@ -54,6 +54,10 @@ pub mod client {
         format!("{}.{}.client.session.update", prefix, session_id)
     }
 
+    pub fn terminal_create(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.create", prefix, session_id)
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -87,6 +91,14 @@ mod tests {
         assert_eq!(
             client::session_update("acp", "s1"),
             "acp.s1.client.session.update"
+        );
+    }
+
+    #[test]
+    fn client_terminal_create_subject() {
+        assert_eq!(
+            client::terminal_create("acp", "s1"),
+            "acp.s1.client.terminal.create"
         );
     }
 

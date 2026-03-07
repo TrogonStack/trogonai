@@ -2,6 +2,7 @@ pub(crate) mod fs_read_text_file;
 pub(crate) mod request_permission;
 pub(crate) mod rpc_reply;
 pub(crate) mod session_update;
+pub(crate) mod terminal_create;
 
 use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
@@ -201,6 +202,17 @@ async fn dispatch_client_method<
         ClientMethod::SessionUpdate => {
             session_update::handle(&payload, ctx.client, &parsed.session_id).await;
         }
+        ClientMethod::TerminalCreate => {
+            terminal_create::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.serializer,
+            )
+            .await;
+        }
     }
 }
 
@@ -209,9 +221,9 @@ mod tests {
     use super::*;
     use crate::session_id::AcpSessionId;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, Request, RequestId,
-        RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-        SessionNotification, SessionUpdate,
+        ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse,
+        ReadTextFileRequest, ReadTextFileResponse, Request, RequestId, RequestPermissionOutcome,
+        RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -256,6 +268,13 @@ mod tests {
             _: ReadTextFileRequest,
         ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn create_terminal(
+            &self,
+            _: CreateTerminalRequest,
+        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+            Ok(CreateTerminalResponse::new("term-001"))
         }
     }
 
@@ -405,6 +424,77 @@ mod tests {
         };
         dispatch_client_method(
             "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_create() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/create"),
+            params: Some(CreateTerminalRequest::new("sess-1", "echo hello")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalCreate,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.create",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_create_session_id_mismatch_publishes_error_reply()
+     {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-a").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/create"),
+            params: Some(CreateTerminalRequest::new("sess-b", "echo hello")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalCreate,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-a.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
