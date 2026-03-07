@@ -630,3 +630,97 @@ async fn dispatch_persists_run_record_accessible_via_api() {
     assert!(run["started_at"].as_u64().unwrap() > 0);
     assert!(run["finished_at"].as_u64().unwrap() >= run["started_at"].as_u64().unwrap());
 }
+
+/// When the Anthropic proxy returns 500, the dispatch records a `failed` RunRecord.
+#[tokio::test]
+async fn dispatch_records_failed_run_on_agent_error() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-fail",
+            "default",
+            "github.pull_request",
+            "FAIL_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Anthropic proxy always returns 500 → agent error → RunStatus::Failed.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(500).body("Internal Server Error");
+    })
+    .await;
+
+    // Find a free port for the API.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok()
+    });
+
+    // Wait for API to come up.
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // Trigger an automation.
+    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+
+    // Poll until a RunRecord with status=failed appears (up to 10s).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let runs = loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break body;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    let arr = runs.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["automation_id"], "auto-fail");
+    assert_eq!(arr[0]["status"], "failed");
+
+    // Stats must reflect the failure.
+    let stats: serde_json::Value = client
+        .get(format!("http://127.0.0.1:{api_port}/stats"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stats["failed_7d"], 1);
+    assert_eq!(stats["successful_7d"], 0);
+}
