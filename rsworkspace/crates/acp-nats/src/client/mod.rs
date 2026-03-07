@@ -522,6 +522,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_client_method_dispatches_session_update_with_rpc_mock_client() {
+        let nats = MockNatsClient::new();
+        let client = RpcMockClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let payload = bytes::Bytes::from(serde_json::to_vec(&notification).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionUpdate,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.update",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_fs_read_text_file_with_rpc_mock_client() {
+        let nats = MockNatsClient::new();
+        let client = RpcMockClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/read_text_file"),
+            params: Some(ReadTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::FsReadTextFile,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
     async fn dispatch_client_method_dispatches_request_permission() {
         let nats = MockNatsClient::new();
         let client = RpcMockClient;

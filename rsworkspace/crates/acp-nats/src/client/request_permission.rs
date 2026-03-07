@@ -331,6 +331,11 @@ mod tests {
         let err = serde_json::from_slice::<RequestPermissionRequest>(b"not json").unwrap_err();
         let rp_err = RequestPermissionError::InvalidRequest(err);
         assert!(rp_err.to_string().contains("invalid request"));
+
+        let client_err =
+            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+        let rp_err = RequestPermissionError::ClientError(client_err);
+        assert!(rp_err.to_string().contains("client error"));
     }
 
     #[test]
