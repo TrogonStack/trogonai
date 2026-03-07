@@ -18,30 +18,30 @@ use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 // ── Wire types ────────────────────────────────────────────────────────────────
 
 /// A single message in the Anthropic conversation history.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    role: &'static str,
-    content: Vec<ContentBlock>,
+    pub role: String,
+    pub content: Vec<ContentBlock>,
 }
 
 impl Message {
     /// Simple user turn with plain text.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
-            role: "user",
+            role: "user".to_string(),
             content: vec![ContentBlock::Text { text: text.into() }],
         }
     }
 
     /// Assistant turn (used when appending a model response to history).
     pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Self { role: "assistant", content }
+        Self { role: "assistant".to_string(), content }
     }
 
     /// User turn carrying `tool_result` blocks.
     pub fn tool_results(results: Vec<ToolResult>) -> Self {
         Self {
-            role: "user",
+            role: "user".to_string(),
             content: results
                 .into_iter()
                 .map(|r| ContentBlock::ToolResult {
@@ -258,6 +258,85 @@ impl AgentLoop {
         }
 
         warn!(max = self.max_iterations, "Agent reached max iterations");
+        Err(AgentError::MaxIterationsReached)
+    }
+
+    /// Like [`run`] but also returns the full updated message history.
+    ///
+    /// Used by the interactive chat API to persist conversation across turns.
+    /// `initial_messages` should contain the prior history; the returned
+    /// `Vec<Message>` is that history extended with the new user turn, all
+    /// intermediate tool exchanges, and the final assistant turn.
+    pub async fn run_chat(
+        &self,
+        initial_messages: Vec<Message>,
+        tools: &[ToolDef],
+        system_prompt: Option<&str>,
+    ) -> Result<(String, Vec<Message>), AgentError> {
+        let mut messages = initial_messages;
+
+        let mut all_tools: Vec<ToolDef> = tools.to_vec();
+        all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        let mut cached_tools: Vec<ToolDef> = all_tools;
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
+        }
+
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Chat loop iteration");
+
+            let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
+                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+            });
+
+            let request = AnthropicRequest {
+                model: &self.model,
+                max_tokens: 4096,
+                system,
+                tools: &cached_tools,
+                messages: &messages,
+            };
+
+            let response = self
+                .http_client
+                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                .header("anthropic-version", "2023-06-01")
+                .json(&request)
+                .send()
+                .await
+                .map_err(AgentError::Http)?
+                .json::<AnthropicResponse>()
+                .await
+                .map_err(AgentError::Http)?;
+
+            match response.stop_reason.as_str() {
+                "end_turn" => {
+                    let text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    messages.push(Message::assistant(response.content));
+                    info!(iterations = iteration + 1, "Chat completed");
+                    return Ok((text, messages));
+                }
+                "tool_use" => {
+                    let results = self.execute_tools(&response.content).await;
+                    messages.push(Message::assistant(response.content));
+                    messages.push(Message::tool_results(results));
+                }
+                other => {
+                    return Err(AgentError::UnexpectedStopReason(other.to_string()));
+                }
+            }
+        }
+
+        warn!(max = self.max_iterations, "Chat reached max iterations");
         Err(AgentError::MaxIterationsReached)
     }
 

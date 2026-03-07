@@ -32,8 +32,10 @@ use tracing::{error, info, warn};
 use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
 
 use crate::agent_loop::AgentLoop;
+use crate::chat_api::{ChatAppState, router as chat_router};
 use crate::config::{AgentConfig, McpServerConfig};
 use crate::handlers::{self, make_tool_context};
+use crate::session::SessionStore;
 use crate::tools::{ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -109,22 +111,32 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .await
             .map_err(|e| RunnerError::JetStream(format!("RunStore: {e}")))?,
     );
+    let session_store = SessionStore::open(&js)
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("SessionStore: {e}")))?;
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
-    // Start the automations HTTP API server unless disabled (port == 0).
+    // Start the combined HTTP API server unless disabled (port == 0).
+    // Automations + run history + interactive chat sessions are all on the same port.
     if cfg.api_port != 0 {
-        let api_state = trogon_automations::api::AppState {
+        let auto_state = trogon_automations::api::AppState {
             store: (*store).clone(),
             run_store: (*run_store).clone(),
         };
+        let chat_state = ChatAppState {
+            agent: Arc::clone(&agent),
+            session_store,
+        };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
+            let combined = trogon_automations::api::router(auto_state)
+                .merge(chat_router(chat_state));
             match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
-                Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind automations API"),
+                Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind API"),
                 Ok(listener) => {
-                    tracing::info!(port = api_port, "Automations API listening");
-                    if let Err(e) = axum::serve(listener, trogon_automations::api::router(api_state)).await {
-                        tracing::error!(error = %e, "Automations API server error");
+                    tracing::info!(port = api_port, "API listening (automations + chat)");
+                    if let Err(e) = axum::serve(listener, combined).await {
+                        tracing::error!(error = %e, "API server error");
                     }
                 }
             }
