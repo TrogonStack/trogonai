@@ -4,6 +4,7 @@ pub enum ClientMethod {
     SessionRequestPermission,
     SessionUpdate,
     TerminalCreate,
+    TerminalKill,
 }
 
 impl ClientMethod {
@@ -13,6 +14,7 @@ impl ClientMethod {
             "client.session.request_permission" => Some(Self::SessionRequestPermission),
             "client.session.update" => Some(Self::SessionUpdate),
             "client.terminal.create" => Some(Self::TerminalCreate),
+            "client.terminal.kill" => Some(Self::TerminalKill),
             _ => None,
         }
     }
