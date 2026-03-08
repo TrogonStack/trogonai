@@ -26,7 +26,6 @@ pub struct MockNatsClient {
 #[derive(Clone, Debug)]
 struct PublishedMessage {
     subject: String,
-    #[allow(dead_code)]
     payload: bytes::Bytes,
 }
 
@@ -54,6 +53,15 @@ impl MockNatsClient {
             .unwrap()
             .iter()
             .map(|m| m.subject.clone())
+            .collect()
+    }
+
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.payload.clone())
             .collect()
     }
 
@@ -135,6 +143,10 @@ impl AdvancedMockNatsClient {
 
     pub fn published_messages(&self) -> Vec<String> {
         self.base.published_messages()
+    }
+
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.base.published_payloads()
     }
 
     pub fn subscribed_to(&self) -> Vec<String> {
@@ -326,6 +338,7 @@ mod tests {
             )
             .await;
         assert_eq!(mock.published_messages(), vec!["foo"]);
+        assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("bar")]);
     }
 
     #[tokio::test]
@@ -375,6 +388,7 @@ mod tests {
             .await;
         assert!(second.is_ok());
         assert_eq!(mock.published_messages(), vec!["foo"]);
+        assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("y")]);
     }
 
     #[tokio::test]

@@ -1,19 +1,38 @@
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, KillTerminalRequest, KillTerminalResponse, Request, Response};
+use agent_client_protocol::{
+    Client, ErrorCode, KillTerminalCommandRequest, KillTerminalCommandResponse, Request, Response,
+};
 use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum TerminalKillError {
-    #[error("malformed JSON: {0}")]
-    MalformedJson(#[source] serde_json::Error),
-    #[error("invalid params: {0}")]
-    InvalidParams(#[source] agent_client_protocol::Error),
-    #[error("client error: {0}")]
-    ClientError(#[source] agent_client_protocol::Error),
+    MalformedJson(serde_json::Error),
+    InvalidParams(agent_client_protocol::Error),
+    ClientError(agent_client_protocol::Error),
+}
+
+impl std::fmt::Display for TerminalKillError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MalformedJson(e) => write!(f, "malformed JSON: {}", e),
+            Self::InvalidParams(e) => write!(f, "invalid params: {}", e),
+            Self::ClientError(e) => write!(f, "client error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for TerminalKillError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MalformedJson(e) => Some(e),
+            Self::InvalidParams(e) => Some(e),
+            Self::ClientError(e) => Some(e),
+        }
+    }
 }
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalKillError {
@@ -34,7 +53,10 @@ pub fn error_code_and_message(e: &TerminalKillError) -> (ErrorCode, String) {
     }
 }
 
-#[instrument(name = "acp.client.terminal.kill", skip(payload, client, nats, serializer))]
+#[instrument(
+    name = "acp.client.terminal.kill",
+    skip(payload, client, nats, serializer)
+)]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -48,7 +70,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
         None => {
             warn!(
                 session_id = %expected_session_id,
-                "terminal/kill requires reply subject; ignoring message"
+                "terminal/kill_command requires reply subject; ignoring message"
             );
             return;
         }
@@ -72,17 +94,32 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "terminal_kill reply").await;
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                response_bytes,
+                content_type,
+                "terminal_kill reply",
+            )
+            .await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
             warn!(
                 error = %e,
                 session_id = %expected_session_id,
-                "Failed to handle terminal/kill"
+                "Failed to handle terminal/kill_command"
             );
-            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "terminal_kill error reply").await;
+            let (bytes, content_type) =
+                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                bytes,
+                content_type,
+                "terminal_kill error reply",
+            )
+            .await;
         }
     }
 }
@@ -91,9 +128,10 @@ async fn forward_to_client<C: Client>(
     payload: &[u8],
     client: &C,
     expected_session_id: &str,
-) -> Result<KillTerminalResponse, TerminalKillError> {
-    let payload_value: serde_json::Value = serde_json::from_slice(payload).map_err(TerminalKillError::MalformedJson)?;
-    let envelope: Request<KillTerminalRequest> = serde_json::from_value(payload_value)
+) -> Result<KillTerminalCommandResponse, TerminalKillError> {
+    let payload_value: serde_json::Value =
+        serde_json::from_slice(payload).map_err(TerminalKillError::MalformedJson)?;
+    let envelope: Request<KillTerminalCommandRequest> = serde_json::from_value(payload_value)
         .map_err(|e| invalid_params_error(format!("Invalid terminal/kill request: {}", e)))?;
     let request = envelope
         .params
@@ -108,7 +146,7 @@ async fn forward_to_client<C: Client>(
     }
 
     client
-        .kill_terminal(request)
+        .kill_terminal_command(request)
         .await
         .map_err(TerminalKillError::ClientError)
 }
@@ -125,11 +163,13 @@ mod tests {
     async fn handle_success_publishes_response_to_reply_subject() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -156,11 +196,13 @@ mod tests {
     async fn handle_no_reply_does_not_call_client_or_publish() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -200,11 +242,13 @@ mod tests {
     async fn handle_session_id_mismatch_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-b"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-b"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -226,11 +270,13 @@ mod tests {
     async fn handle_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -251,7 +297,9 @@ mod tests {
         let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
         assert_eq!(
             response.get("error").and_then(|e| e.get("message")),
-            Some(&serde_json::Value::from("mock kill_terminal failure"))
+            Some(&serde_json::Value::from(
+                "mock kill_terminal_command failure"
+            ))
         );
     }
 
@@ -260,16 +308,26 @@ mod tests {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let serializer = FailNextSerialize::new(1);
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "sess-1",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -279,11 +337,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -306,11 +366,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_flush();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalCommandRequest::new(
+            agent_client_protocol::SessionId::from("sess-1"),
+            "term-001".to_string(),
+        );
         let envelope = Request {
             id: agent_client_protocol::RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill"),
+            method: std::sync::Arc::from("terminal/kill_command"),
             params: Some(request),
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
@@ -341,8 +403,9 @@ mod tests {
 
     #[test]
     fn error_code_and_message_malformed_json_returns_parse_error() {
-        let err =
-            TerminalKillError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
+        let err = TerminalKillError::MalformedJson(
+            serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err(),
+        );
         let (code, message) = error_code_and_message(&err);
         assert_eq!(code, ErrorCode::ParseError);
         assert!(message.contains("Malformed terminal/kill request JSON"));
@@ -350,8 +413,9 @@ mod tests {
 
     #[test]
     fn terminal_kill_error_display() {
-        let malformed =
-            TerminalKillError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
+        let malformed = TerminalKillError::MalformedJson(
+            serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err(),
+        );
         assert!(malformed.to_string().contains("malformed JSON"));
 
         let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
@@ -369,8 +433,9 @@ mod tests {
 
     #[test]
     fn terminal_kill_error_source() {
-        let malformed =
-            TerminalKillError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
+        let malformed = TerminalKillError::MalformedJson(
+            serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err(),
+        );
         assert!(malformed.source().is_some());
 
         let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
