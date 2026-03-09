@@ -1,46 +1,79 @@
-# Multi-stage Dockerfile for trogon-secret-proxy binaries.
+# Multi-stage Dockerfile for the full trogon stack.
 #
 # Targets:
-#   proxy   — HTTP proxy (axum, port 8080)
-#   worker  — JetStream pull consumer + detokenization worker
+#   proxy         — HTTP detokenization proxy (port 8080)
+#   worker        — JetStream pull consumer + vault admin
+#   agent         — Agentic loop + automations + chat API (port 8090)
+#   trogon-github — GitHub webhook receiver (port 8081)
+#   trogon-linear — Linear webhook receiver (port 8082)
 #
 # Build examples:
+#   docker build --target agent  -t trogon-agent  .
 #   docker build --target proxy  -t trogon-proxy  .
-#   docker build --target worker -t trogon-worker .
 
-# ── Stage 1: dependency cache ─────────────────────────────────────────────────
-FROM rust:1.82-slim AS chef
+# ── Stage 1: cargo-chef installer ────────────────────────────────────────────
+FROM rust:1.87-slim AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /workspace
 
-# ── Stage 2: compute recipe (dependency plan) ─────────────────────────────────
+# ── Stage 2: compute dependency recipe ───────────────────────────────────────
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ── Stage 3: build dependencies (cached unless Cargo.lock changes) ────────────
 FROM chef AS builder
-# ca-certificates needed for reqwest rustls-tls to verify upstream TLS certs
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=planner /workspace/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
-# Build the actual binaries
 COPY . .
-RUN cargo build --release -p trogon-secret-proxy
+RUN cargo build --release \
+    -p trogon-secret-proxy \
+    -p trogon-agent \
+    -p trogon-github \
+    -p trogon-linear
 
-# ── Stage 4: proxy runtime image ──────────────────────────────────────────────
+# ── Stage 4: proxy runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS proxy
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/proxy /usr/local/bin/proxy
 EXPOSE 8080
 ENTRYPOINT ["proxy"]
 
-# ── Stage 5: worker runtime image ─────────────────────────────────────────────
+# ── Stage 5: worker runtime ──────────────────────────────────────────────────
 FROM debian:bookworm-slim AS worker
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/worker /usr/local/bin/worker
 ENTRYPOINT ["worker"]
+
+# ── Stage 6: agent runtime ───────────────────────────────────────────────────
+FROM debian:bookworm-slim AS agent
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/agent /usr/local/bin/agent
+EXPOSE 8090
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${AUTOMATIONS_API_PORT:-8090}/stats -H 'x-tenant-id: health' || exit 1"]
+ENTRYPOINT ["agent"]
+
+# ── Stage 7: trogon-github runtime ───────────────────────────────────────────
+FROM debian:bookworm-slim AS trogon-github
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-github /usr/local/bin/trogon-github
+EXPOSE 8081
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${GITHUB_WEBHOOK_PORT:-8081}/health || exit 1"]
+ENTRYPOINT ["trogon-github"]
+
+# ── Stage 8: trogon-linear runtime ───────────────────────────────────────────
+FROM debian:bookworm-slim AS trogon-linear
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-linear /usr/local/bin/trogon-linear
+EXPOSE 8082
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${LINEAR_WEBHOOK_PORT:-8082}/health || exit 1"]
+ENTRYPOINT ["trogon-linear"]
