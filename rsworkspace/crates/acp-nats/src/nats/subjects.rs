@@ -62,6 +62,10 @@ pub mod client {
         format!("{}.{}.client.terminal.kill", prefix, session_id)
     }
 
+    pub fn terminal_output(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.output", prefix, session_id)
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -111,6 +115,14 @@ mod tests {
         assert_eq!(
             client::terminal_kill("acp", "s1"),
             "acp.s1.client.terminal.kill"
+        );
+    }
+
+    #[test]
+    fn client_terminal_output_subject() {
+        assert_eq!(
+            client::terminal_output("acp", "s1"),
+            "acp.s1.client.terminal.output"
         );
     }
 
