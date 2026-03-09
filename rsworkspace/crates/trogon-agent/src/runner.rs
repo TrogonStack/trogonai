@@ -147,6 +147,13 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
     let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
 
+    // Ensure all required JetStream streams exist before binding consumers.
+    // This removes the hard startup-order dependency on trogon-github, trogon-linear,
+    // and trogon-cron — the agent creates streams idempotently if they are absent.
+    ensure_stream(&js, github_stream_name, &["github.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
+
     let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
     let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
     let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
@@ -395,7 +402,7 @@ pub(crate) async fn dispatch_automations(
     }
 }
 
-pub(crate) async fn init_mcp_servers(
+pub async fn init_mcp_servers(
     http_client: &reqwest::Client,
     servers: &[McpServerConfig],
 ) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
@@ -609,6 +616,23 @@ mod tests {
         assert!(tools.is_empty(), "no tools expected when list_tools fails");
         assert!(dispatch.is_empty(), "no dispatch entries expected");
     }
+}
+
+async fn ensure_stream(
+    js: &jetstream::Context,
+    stream_name: &str,
+    subjects: &[&str],
+    max_age: Duration,
+) -> Result<(), RunnerError> {
+    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: stream_name.to_string(),
+        subjects: subjects.iter().map(|s| s.to_string()).collect(),
+        max_age,
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))?;
+    Ok(())
 }
 
 async fn bind_consumer(

@@ -529,3 +529,62 @@ async fn send_message_tools_filtered_by_session_tools() {
     filtered_mock.assert_hits_async(1).await;
     unfiltered_mock.assert_hits_async(0).await;
 }
+
+/// If a session is deleted while a `POST /sessions/:id/messages` request is
+/// in flight, the message handler must complete successfully (returns 200) and
+/// re-persist the session with the new messages via `session_store.put`.
+///
+/// The NATS KV `put` operation creates the key if absent, so the session is
+/// effectively re-created after the message finishes.
+#[tokio::test]
+async fn send_message_completes_after_concurrent_session_delete() {
+    let env = start().await;
+
+    // Slow mock: Anthropic takes 400 ms to respond, giving us time to delete.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("reply after delete"))
+            .delay(std::time::Duration::from_millis(400));
+    });
+
+    // Create the session.
+    let created: Value = env.client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "race-test"}))
+        .send().await.unwrap()
+        .json().await.unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let base_url = env.base_url.clone();
+    let msg_client = env.client.clone();
+    let msg_id = id.clone();
+
+    // Launch the send_message request in a background task.
+    let send_task = tokio::spawn(async move {
+        msg_client
+            .post(format!("{}/sessions/{msg_id}/messages", base_url))
+            .header("x-tenant-id", "acme")
+            .json(&json!({"content": "hello"}))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // Delete the session while the message is still being processed.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let del = env.client
+        .delete(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send().await.unwrap();
+    assert_eq!(del.status(), 204, "delete must succeed");
+
+    // Wait for the message request to complete.
+    let resp = send_task.await.unwrap();
+    assert_eq!(resp.status(), 200, "send_message must return 200 even after concurrent delete");
+
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["content"], "reply after delete");
+}

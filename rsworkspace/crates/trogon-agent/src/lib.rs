@@ -36,5 +36,5 @@ pub mod runner;
 pub mod session;
 pub mod tools;
 
-pub use config::AgentConfig;
+pub use config::{AgentConfig, McpServerConfig};
 pub use runner::{RunnerError, run};
