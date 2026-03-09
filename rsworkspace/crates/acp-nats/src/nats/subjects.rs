@@ -66,6 +66,10 @@ pub mod client {
         format!("{}.{}.client.terminal.output", prefix, session_id)
     }
 
+    pub fn terminal_release(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.release", prefix, session_id)
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -123,6 +127,14 @@ mod tests {
         assert_eq!(
             client::terminal_output("acp", "s1"),
             "acp.s1.client.terminal.output"
+        );
+    }
+
+    #[test]
+    fn client_terminal_release_subject() {
+        assert_eq!(
+            client::terminal_release("acp", "s1"),
+            "acp.s1.client.terminal.release"
         );
     }
 
