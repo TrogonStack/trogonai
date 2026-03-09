@@ -5,6 +5,7 @@ pub(crate) mod session_update;
 pub(crate) mod terminal_create;
 pub(crate) mod terminal_kill;
 pub(crate) mod terminal_output;
+pub(crate) mod terminal_release;
 
 use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
@@ -237,6 +238,17 @@ async fn dispatch_client_method<
             )
             .await;
         }
+        ClientMethod::TerminalRelease => {
+            terminal_release::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.serializer,
+            )
+            .await;
+        }
     }
 }
 
@@ -247,9 +259,10 @@ mod tests {
     use agent_client_protocol::{
         ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse,
         KillTerminalCommandRequest, KillTerminalCommandResponse, ReadTextFileRequest,
-        ReadTextFileResponse, Request, RequestId, RequestPermissionOutcome,
-        RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
-        TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
+        ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
+        RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+        SessionNotification, SessionUpdate, TerminalOutputRequest, TerminalOutputResponse,
+        ToolCallUpdate, ToolCallUpdateFields,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -261,6 +274,7 @@ mod tests {
         notifications: RefCell<Vec<String>>,
         kill_terminal_calls: RefCell<usize>,
         terminal_output_calls: RefCell<usize>,
+        terminal_release_calls: RefCell<usize>,
     }
 
     impl MockClient {
@@ -269,6 +283,7 @@ mod tests {
                 notifications: RefCell::new(Vec::new()),
                 kill_terminal_calls: RefCell::new(0),
                 terminal_output_calls: RefCell::new(0),
+                terminal_release_calls: RefCell::new(0),
             }
         }
 
@@ -278,6 +293,10 @@ mod tests {
 
         pub(super) fn terminal_output_call_count(&self) -> usize {
             *self.terminal_output_calls.borrow()
+        }
+
+        pub(super) fn terminal_release_call_count(&self) -> usize {
+            *self.terminal_release_calls.borrow()
         }
     }
 
@@ -332,6 +351,14 @@ mod tests {
                 "mock output".to_string(),
                 false,
             ))
+        }
+
+        async fn release_terminal(
+            &self,
+            _: ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            *self.terminal_release_calls.borrow_mut() += 1;
+            Ok(ReleaseTerminalResponse::new())
         }
     }
 
@@ -658,6 +685,428 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_release() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalRelease,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(response.get("id"), Some(&serde_json::Value::from(1)));
+        assert!(response.get("result").is_some());
+        assert!(response.get("error").is_none());
+        assert_eq!(
+            client.terminal_release_call_count(),
+            1,
+            "terminal_release handler must run"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_release_session_id_mismatch_publishes_error_reply()
+     {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-a").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-b", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalRelease,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-a.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        let payloads = nats.published_payloads();
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert!(response.get("error").is_some());
+        assert_eq!(client.terminal_release_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_release_client_error_publishes_error_reply()
+    {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalRelease,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        let payloads = nats.published_payloads();
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert!(response.get("error").is_some());
+        assert_eq!(
+            response.get("error").and_then(|e| e.get("code")),
+            Some(&serde_json::Value::from(-32603))
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_release_no_reply_does_not_call_client_or_publish() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalRelease,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+
+        assert!(nats.published_messages().is_empty());
+        assert_eq!(client.terminal_release_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_session_update_with_terminal_release_failing_client()
+    {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let payload = bytes::Bytes::from(serde_json::to_vec(&notification).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionUpdate,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.update",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_fs_read_text_file_with_terminal_release_failing_client()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/read_text_file"),
+            params: Some(ReadTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::FsReadTextFile,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_create_with_terminal_release_failing_client()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/create"),
+            params: Some(CreateTerminalRequest::new("sess-1", "echo hi")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalCreate,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.create",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_kill_with_terminal_release_failing_client()
+    {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalCommandRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalKill,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.kill",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_output_with_terminal_release_failing_client()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/output"),
+            params: Some(TerminalOutputRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalOutput,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.output",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_release_with_terminal_kill_failing_client()
+    {
+        let nats = MockNatsClient::new();
+        let client = TerminalKillFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalRelease,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.err".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        let payloads = nats.published_payloads();
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert!(response.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_request_permission_with_terminal_release_failing_client()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let request = RequestPermissionRequest::new("sess-1", tool_call, vec![]);
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::SessionRequestPermission,
+        };
+
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
     async fn dispatch_client_method_dispatches_terminal_output_client_error_publishes_error_reply()
     {
         let nats = MockNatsClient::new();
@@ -955,6 +1404,80 @@ mod tests {
             Err(agent_client_protocol::Error::new(
                 -32603,
                 "mock terminal_output failure",
+            ))
+        }
+
+        async fn release_terminal(
+            &self,
+            _: ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "mock release_terminal failure",
+            ))
+        }
+    }
+
+    pub(super) struct TerminalReleaseFailingClient;
+
+    #[async_trait(?Send)]
+    impl Client for TerminalReleaseFailingClient {
+        async fn session_notification(
+            &self,
+            n: agent_client_protocol::SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
+            let _ = n;
+            Ok(())
+        }
+
+        async fn request_permission(
+            &self,
+            _: RequestPermissionRequest,
+        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "not implemented in test mock",
+            ))
+        }
+
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+            Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn create_terminal(
+            &self,
+            _: CreateTerminalRequest,
+        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+            Ok(CreateTerminalResponse::new("term-001"))
+        }
+
+        async fn kill_terminal_command(
+            &self,
+            _: KillTerminalCommandRequest,
+        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
+            Ok(KillTerminalCommandResponse::new())
+        }
+
+        async fn terminal_output(
+            &self,
+            _: TerminalOutputRequest,
+        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+            Ok(TerminalOutputResponse::new(
+                "mock output".to_string(),
+                false,
+            ))
+        }
+
+        async fn release_terminal(
+            &self,
+            _: ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "mock release_terminal failure",
             ))
         }
     }
