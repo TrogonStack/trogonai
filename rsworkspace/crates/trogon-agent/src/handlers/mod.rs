@@ -313,6 +313,66 @@ mod tests {
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
+
+    /// 403 Forbidden → fetch_memory returns None (not found / no access).
+    #[tokio::test]
+    async fn fetch_memory_returns_none_on_403() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path_contains("memory.md");
+            then.status(403);
+        });
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
+
+    /// 500 Internal Server Error → fetch_memory returns None gracefully.
+    #[tokio::test]
+    async fn fetch_memory_returns_none_on_500() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path_contains("memory.md");
+            then.status(500);
+        });
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
+
+    /// Response body where `content` field is absent → fetch_memory returns None.
+    #[tokio::test]
+    async fn fetch_memory_returns_none_when_content_field_missing() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path_contains("memory.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "name": "memory.md", "sha": "abc" }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
+
+    /// Response body where `content` is invalid base64 → fetch_memory returns None.
+    #[tokio::test]
+    async fn fetch_memory_returns_none_on_invalid_base64() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path_contains("memory.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": "!!!not-valid-base64!!!" }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
 }
 
 /// Convenience: build the shared [`ToolContext`] that all handlers share.

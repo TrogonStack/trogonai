@@ -329,6 +329,18 @@ async fn list_runs(
     }
 }
 
+async fn list_runs_for_automation(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    match state.run_store.list(&tid, Some(&id)).await {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Ok(runs) => (StatusCode::OK, axum::Json(runs)).into_response(),
+    }
+}
+
 async fn get_stats(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -351,6 +363,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/automations/{id}/enable", patch(enable_automation))
         .route("/automations/{id}/disable", patch(disable_automation))
+        .route("/automations/{id}/runs", get(list_runs_for_automation))
         .route("/runs", get(list_runs))
         .route("/stats", get(get_stats))
         .with_state(state)

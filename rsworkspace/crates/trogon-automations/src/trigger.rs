@@ -51,6 +51,8 @@ pub fn matches(trigger: &str, nats_subject: &str, payload: &Value) -> bool {
             payload["action"].as_str() == Some("opened")
                 && payload["pull_request"]["draft"].as_bool() == Some(true)
         }
+        // "pushed" is the UI label for GitHub's "synchronize" action (new commits pushed to PR).
+        Some("pushed") => payload["action"].as_str() == Some("synchronize"),
         Some(required) => payload["action"].as_str() == Some(required),
     }
 }
@@ -170,6 +172,26 @@ mod tests {
     fn draft_opened_does_not_match_closed_draft_pr() {
         let payload = json!({"action": "closed", "pull_request": {"draft": true}});
         assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+    }
+
+    // ── pushed synthetic action ────────────────────────────────────────────────
+
+    #[test]
+    fn pushed_matches_synchronize_action() {
+        let payload = json!({"action": "synchronize", "pull_request": {"number": 42}});
+        assert!(matches("github.pull_request:pushed", "github.pull_request", &payload));
+    }
+
+    #[test]
+    fn pushed_does_not_match_opened_action() {
+        let payload = json!({"action": "opened"});
+        assert!(!matches("github.pull_request:pushed", "github.pull_request", &payload));
+    }
+
+    #[test]
+    fn pushed_does_not_match_wrong_subject() {
+        let payload = json!({"action": "synchronize"});
+        assert!(!matches("github.pull_request:pushed", "github.push", &payload));
     }
 
     #[test]
