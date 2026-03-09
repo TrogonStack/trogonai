@@ -5,6 +5,7 @@ pub enum ClientMethod {
     SessionUpdate,
     TerminalCreate,
     TerminalKill,
+    TerminalOutput,
 }
 
 impl ClientMethod {
@@ -15,6 +16,7 @@ impl ClientMethod {
             "client.session.update" => Some(Self::SessionUpdate),
             "client.terminal.create" => Some(Self::TerminalCreate),
             "client.terminal.kill" => Some(Self::TerminalKill),
+            "client.terminal.output" => Some(Self::TerminalOutput),
             _ => None,
         }
     }

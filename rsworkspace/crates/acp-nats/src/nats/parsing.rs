@@ -61,6 +61,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_terminal_output() {
+        let subject = "acp.sess123.client.terminal.output";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(parsed.method, ClientMethod::TerminalOutput);
+    }
+
+    #[test]
     fn test_parse_with_custom_prefix() {
         let subject = "myapp.sess123.client.session.update";
         let parsed = parse_client_subject(subject).unwrap();
