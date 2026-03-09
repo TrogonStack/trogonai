@@ -596,3 +596,118 @@ async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
     );
     assert_eq!(bad_mock.hits_async().await, 0, "draft_opened fired for non-draft PR");
 }
+
+/// An automation with trigger `github.pull_request:pushed` fires when a PR
+/// event arrives with `action=synchronize` (GitHub's label for "pushed commits").
+#[tokio::test]
+async fn pushed_trigger_fires_on_synchronize_action() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-pushed",
+            "default",
+            "github.pull_request:pushed",
+            "PUSHED_AUTOMATION_PROMPT_XYZ",
+        ))
+        .await
+        .expect("put automation");
+
+    let anthropic = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("PUSHED_AUTOMATION_PROMPT_XYZ");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default")).await.ok() });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // GitHub sends action="synchronize" when new commits are pushed to an open PR.
+    let payload = serde_json::to_vec(&json!({
+        "action": "synchronize",
+        "number": 77,
+        "repository": { "owner": { "login": "acme" }, "name": "api" },
+        "pull_request": { "title": "Add more commits" }
+    }))
+    .unwrap();
+    js.publish("github.pull_request", payload.into()).await.expect("publish");
+
+    assert!(
+        wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
+        "pushed automation was not dispatched for synchronize action"
+    );
+}
+
+/// An automation with trigger `github.pull_request:pushed` must NOT fire
+/// when the event has `action=opened` — only `synchronize` maps to "pushed".
+#[tokio::test]
+async fn pushed_trigger_does_not_fire_on_opened_action() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-pushed-only",
+            "default",
+            "github.pull_request:pushed",
+            "PUSHED_SHOULD_NOT_FIRE",
+        ))
+        .await
+        .expect("put automation");
+
+    // If the pushed automation fires → 500 (wrong dispatch).
+    let bad_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("PUSHED_SHOULD_NOT_FIRE");
+            then.status(500).body("pushed automation must not fire for opened action");
+        })
+        .await;
+
+    // Fallback pr_review runs for "opened" when no automation matches.
+    let fallback = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("code reviewer");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default")).await.ok() });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "opened",
+        "number": 78,
+        "repository": { "owner": { "login": "acme" }, "name": "api" },
+        "pull_request": { "title": "New PR" }
+    }))
+    .unwrap();
+    js.publish("github.pull_request", payload.into()).await.expect("publish");
+
+    assert!(
+        wait_for_hits(&fallback, 1, Duration::from_secs(8)).await,
+        "fallback handler not called — pushed automation may have incorrectly fired"
+    );
+    assert_eq!(bad_mock.hits_async().await, 0, "pushed automation fired for opened action");
+}

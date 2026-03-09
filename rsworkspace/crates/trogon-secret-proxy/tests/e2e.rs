@@ -5478,3 +5478,113 @@ async fn e2e_worker_retries_transient_5xx_and_eventually_succeeds() {
         "Worker must have made exactly 3 upstream attempts (2 × 503 + 1 × 200)"
     );
 }
+
+/// After rotating a token in the vault, subsequent requests through the proxy
+/// must use the NEW key — the worker resolves the vault on every request.
+#[tokio::test]
+async fn e2e_rotated_token_uses_new_key() {
+    let (_nats_container, nats_port) = start_nats().await;
+    let mock_server = httpmock::MockServer::start_async().await;
+
+    // Mock: accepts requests authenticated with the OLD key.
+    let v1_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-key-v1");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"resp-v1","version":1}"#);
+        })
+        .await;
+
+    // Mock: accepts requests authenticated with the NEW key.
+    let v2_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-key-v2");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"resp-v2","version":2}"#);
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    let token = ApiKeyToken::new("tok_anthropic_test_rot001").unwrap();
+    vault.store(&token, "sk-ant-key-v1").await.unwrap();
+
+    // Keep a reference to the vault so we can rotate it after the first request.
+    let vault_ref = Arc::clone(&vault);
+
+    let nats_config = NatsConfig {
+        servers: vec![format!("localhost:{}", nats_port)],
+        auth: NatsAuth::None,
+    };
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+
+    let outbound_subject = subjects::outbound("rot-test");
+    stream::ensure_stream(&jetstream, "rot-test", &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+
+    let state = ProxyState {
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "rot-test".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.ok() });
+
+    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap();
+    tokio::spawn(async move {
+        worker::run(jetstream, nats, vault, http_client, "rot-workers", &stream::stream_name("rot-test"))
+            .await
+            .ok()
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let client = reqwest::Client::new();
+    let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"Hi"}]}"#;
+
+    // ── First request: uses key_v1 ────────────────────────────────────────────
+    let resp1 = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", "Bearer tok_anthropic_test_rot001")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .expect("first request failed");
+
+    assert_eq!(resp1.status(), 200, "first request must succeed with key_v1");
+    let b1: serde_json::Value = resp1.json().await.unwrap();
+    assert_eq!(b1["version"], 1, "first request must be forwarded with key_v1");
+
+    // ── Rotate: token now maps to key_v2 ─────────────────────────────────────
+    vault_ref.rotate(&token, "sk-ant-key-v2").await.unwrap();
+
+    // ── Second request: must use key_v2 ──────────────────────────────────────
+    let resp2 = client
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .header("Authorization", "Bearer tok_anthropic_test_rot001")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .expect("second request failed");
+
+    assert_eq!(resp2.status(), 200, "second request must succeed with key_v2");
+    let b2: serde_json::Value = resp2.json().await.unwrap();
+    assert_eq!(b2["version"], 2, "second request must be forwarded with key_v2 after rotation");
+
+    assert_eq!(v1_mock.hits_async().await, 1, "key_v1 mock must be hit exactly once");
+    assert_eq!(v2_mock.hits_async().await, 1, "key_v2 mock must be hit exactly once");
+}

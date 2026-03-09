@@ -264,6 +264,49 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
     assert_eq!(result, "Fallthrough handled.");
 }
 
+/// When `init_mcp_servers` is called with a server that returns a non-200
+/// on `initialize`, it logs a warning and returns empty lists — the agent
+/// continues without that MCP server rather than panicking.
+#[tokio::test]
+async fn init_mcp_servers_skips_server_that_fails_initialize() {
+    let bad_server = MockServer::start_async().await;
+
+    // Server returns 500 on every request — initialize will fail.
+    bad_server.mock(|when, then| {
+        when.method(httpmock::Method::POST);
+        then.status(500).body("internal error");
+    });
+
+    let http_client = reqwest::Client::new();
+    let cfg = trogon_agent::McpServerConfig {
+        name: "failing".to_string(),
+        url: bad_server.base_url(),
+    };
+
+    let (tool_defs, dispatch) =
+        trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
+
+    assert!(tool_defs.is_empty(), "tool_defs must be empty when MCP server fails initialize");
+    assert!(dispatch.is_empty(), "dispatch must be empty when MCP server fails initialize");
+}
+
+/// When `init_mcp_servers` is called with an unreachable server URL, it
+/// skips the server gracefully and returns empty lists.
+#[tokio::test]
+async fn init_mcp_servers_skips_unreachable_server() {
+    let http_client = reqwest::Client::new();
+    let cfg = trogon_agent::McpServerConfig {
+        name: "unreachable".to_string(),
+        url: "http://127.0.0.1:1".to_string(), // nothing listens here
+    };
+
+    let (tool_defs, dispatch) =
+        trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
+
+    assert!(tool_defs.is_empty(), "tool_defs must be empty for unreachable MCP server");
+    assert!(dispatch.is_empty(), "dispatch must be empty for unreachable MCP server");
+}
+
 /// MCP tool definitions are merged into the tool list sent to Anthropic.
 /// The merged request body should contain both the built-in tool and the MCP tool.
 #[tokio::test]
