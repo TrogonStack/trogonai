@@ -9,6 +9,7 @@ pub enum ClientMethod {
     TerminalOutput,
     TerminalRelease,
     TerminalWaitForExit,
+    ExtSessionPromptResponse,
 }
 
 impl ClientMethod {
@@ -23,6 +24,7 @@ impl ClientMethod {
             "client.terminal.output" => Some(Self::TerminalOutput),
             "client.terminal.release" => Some(Self::TerminalRelease),
             "client.terminal.wait_for_exit" => Some(Self::TerminalWaitForExit),
+            "client.ext.session.prompt_response" => Some(Self::ExtSessionPromptResponse),
             _ => None,
         }
     }
