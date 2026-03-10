@@ -70,6 +70,10 @@ pub mod client {
         format!("{}.{}.client.terminal.release", prefix, session_id)
     }
 
+    pub fn terminal_wait_for_exit(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.wait_for_exit", prefix, session_id)
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -135,6 +139,14 @@ mod tests {
         assert_eq!(
             client::terminal_release("acp", "s1"),
             "acp.s1.client.terminal.release"
+        );
+    }
+
+    #[test]
+    fn client_terminal_wait_for_exit_subject() {
+        assert_eq!(
+            client::terminal_wait_for_exit("acp", "s1"),
+            "acp.s1.client.terminal.wait_for_exit"
         );
     }
 

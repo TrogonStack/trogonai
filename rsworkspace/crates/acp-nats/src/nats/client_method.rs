@@ -7,6 +7,7 @@ pub enum ClientMethod {
     TerminalKill,
     TerminalOutput,
     TerminalRelease,
+    TerminalWaitForExit,
 }
 
 impl ClientMethod {
@@ -19,6 +20,7 @@ impl ClientMethod {
             "client.terminal.kill" => Some(Self::TerminalKill),
             "client.terminal.output" => Some(Self::TerminalOutput),
             "client.terminal.release" => Some(Self::TerminalRelease),
+            "client.terminal.wait_for_exit" => Some(Self::TerminalWaitForExit),
             _ => None,
         }
     }
