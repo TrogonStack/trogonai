@@ -43,6 +43,10 @@ pub mod client {
         format!("{}.{}.client.fs.read_text_file", prefix, session_id)
     }
 
+    pub fn fs_write_text_file(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.fs.write_text_file", prefix, session_id)
+    }
+
     pub fn session_request_permission(prefix: &str, session_id: &str) -> String {
         format!(
             "{}.{}.client.session.request_permission",
@@ -91,6 +95,14 @@ mod tests {
         assert_eq!(
             client::fs_read_text_file("acp", "s1"),
             "acp.s1.client.fs.read_text_file"
+        );
+    }
+
+    #[test]
+    fn client_fs_write_text_file_subject() {
+        assert_eq!(
+            client::fs_write_text_file("acp", "s1"),
+            "acp.s1.client.fs.write_text_file"
         );
     }
 
