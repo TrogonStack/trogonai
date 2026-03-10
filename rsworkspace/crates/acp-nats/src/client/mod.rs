@@ -6,6 +6,7 @@ pub(crate) mod terminal_create;
 pub(crate) mod terminal_kill;
 pub(crate) mod terminal_output;
 pub(crate) mod terminal_release;
+pub(crate) mod terminal_wait_for_exit;
 
 use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
@@ -150,18 +151,21 @@ async fn process_message<
         let ctx = DispatchContext {
             nats: &nats,
             client: client.as_ref(),
+            bridge: bridge.as_ref(),
             serializer: &serializer,
         };
         dispatch_client_method(&subject, parsed, payload, reply, &ctx).await;
     });
 }
 
-struct DispatchContext<'a, N, Cl, S>
+struct DispatchContext<'a, N, Cl, C, S>
 where
     N: RequestClient + PublishClient + FlushClient,
+    C: GetElapsed + 'static,
 {
     nats: &'a N,
     client: &'a Cl,
+    bridge: &'a Bridge<N, C>,
     serializer: &'a S,
 }
 
@@ -169,13 +173,14 @@ where
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client,
+    C: GetElapsed + 'static,
     S: JsonSerialize,
 >(
     subject: &str,
     parsed: crate::nats::ParsedClientSubject,
     payload: Bytes,
     reply: Option<String>,
-    ctx: &DispatchContext<'_, N, Cl, S>,
+    ctx: &DispatchContext<'_, N, Cl, C, S>,
 ) {
     Span::current().record("session_id", parsed.session_id.as_str());
 
@@ -249,6 +254,18 @@ async fn dispatch_client_method<
             )
             .await;
         }
+        ClientMethod::TerminalWaitForExit => {
+            terminal_wait_for_exit::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.bridge.config.operation_timeout(),
+                ctx.serializer,
+            )
+            .await;
+        }
     }
 }
 
@@ -261,8 +278,9 @@ mod tests {
         KillTerminalCommandRequest, KillTerminalCommandResponse, ReadTextFileRequest,
         ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
         RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-        SessionNotification, SessionUpdate, TerminalOutputRequest, TerminalOutputResponse,
-        ToolCallUpdate, ToolCallUpdateFields,
+        SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest,
+        TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
+        WaitForTerminalExitResponse,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -275,6 +293,7 @@ mod tests {
         kill_terminal_calls: RefCell<usize>,
         terminal_output_calls: RefCell<usize>,
         terminal_release_calls: RefCell<usize>,
+        wait_for_terminal_exit_calls: RefCell<usize>,
     }
 
     impl MockClient {
@@ -284,6 +303,7 @@ mod tests {
                 kill_terminal_calls: RefCell::new(0),
                 terminal_output_calls: RefCell::new(0),
                 terminal_release_calls: RefCell::new(0),
+                wait_for_terminal_exit_calls: RefCell::new(0),
             }
         }
 
@@ -297,6 +317,10 @@ mod tests {
 
         pub(super) fn terminal_release_call_count(&self) -> usize {
             *self.terminal_release_calls.borrow()
+        }
+
+        pub(super) fn wait_for_terminal_exit_call_count(&self) -> usize {
+            *self.wait_for_terminal_exit_calls.borrow()
         }
     }
 
@@ -360,6 +384,16 @@ mod tests {
             *self.terminal_release_calls.borrow_mut() += 1;
             Ok(ReleaseTerminalResponse::new())
         }
+
+        async fn wait_for_terminal_exit(
+            &self,
+            _: WaitForTerminalExitRequest,
+        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+            *self.wait_for_terminal_exit_calls.borrow_mut() += 1;
+            Ok(WaitForTerminalExitResponse::new(
+                TerminalExitStatus::new().exit_code(0u32),
+            ))
+        }
     }
 
     fn make_msg(subject: &str, payload: &[u8], reply: Option<&str>) -> async_nats::Message {
@@ -391,6 +425,18 @@ mod tests {
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
+        ))
+    }
+
+    fn make_bridge_with_operation_timeout(
+        nats: MockNatsClient,
+        operation_timeout: std::time::Duration,
+    ) -> Rc<Bridge<MockNatsClient, SystemClock>> {
+        Rc::new(Bridge::new(
+            nats,
+            SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            crate::config::Config::for_test("acp").with_operation_timeout(operation_timeout),
         ))
     }
 
@@ -463,9 +509,11 @@ mod tests {
             method: ClientMethod::SessionUpdate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -501,9 +549,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -536,9 +586,11 @@ mod tests {
             method: ClientMethod::TerminalCreate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -572,9 +624,11 @@ mod tests {
             method: ClientMethod::TerminalCreate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -610,9 +664,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -651,9 +707,11 @@ mod tests {
             method: ClientMethod::TerminalOutput,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -702,9 +760,11 @@ mod tests {
             method: ClientMethod::TerminalRelease,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -731,6 +791,888 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_reply_none_skips_handler() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+
+        assert!(nats.published_messages().is_empty());
+        assert_eq!(client.wait_for_terminal_exit_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_wait_for_exit() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(response.get("id"), Some(&serde_json::Value::from(1)));
+        assert!(response.get("result").is_some());
+        assert!(response.get("error").is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_client_error_publishes_error_reply()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert!(response.get("error").is_some());
+        assert_eq!(
+            response.get("error").and_then(|e| e.get("code")),
+            Some(&serde_json::Value::from(-32603))
+        );
+        assert_eq!(
+            response.get("error").and_then(|e| e.get("message")),
+            Some(&serde_json::Value::from(
+                "mock wait_for_terminal_exit failure"
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_client_error_serialization_fallback() {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let serializer = FailNextSerialize::new(1);
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(42),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &serializer,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(response.get("id"), Some(&serde_json::Value::Null));
+        assert_eq!(
+            response.get("error").and_then(|e| e.get("code")),
+            Some(&serde_json::Value::from(-32603))
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_publishes_error_reply() {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge =
+            make_bridge_with_operation_timeout(nats.clone(), std::time::Duration::from_millis(10));
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert!(response.get("error").is_some());
+        assert_eq!(
+            response.get("error").and_then(|e| e.get("code")),
+            Some(&serde_json::Value::from(-32603))
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_success_publish_failure_exercises_error_path()
+     {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge_advanced(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_success_flush_failure_exercises_warn_path()
+     {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_flush();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge_advanced(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_client_error_publish_failure_exercises_error_path()
+     {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+        let client = TerminalWaitForExitFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge_advanced(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_client_error_flush_failure_exercises_warn_path()
+     {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_flush();
+        let client = TerminalWaitForExitFailingClient;
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::TerminalWaitForExit,
+        };
+
+        let bridge = make_bridge_advanced(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_with_terminal_release_failing_client()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/wait_for_exit"),
+            params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalWaitForExit,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.wait_for_exit",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_session_update_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let payload = bytes::Bytes::from(serde_json::to_vec(&notification).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::SessionUpdate,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.update",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_session_update_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let notification = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
+        );
+        let payload = bytes::Bytes::from(serde_json::to_vec(&notification).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::SessionUpdate,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.update",
+            parsed,
+            payload,
+            None,
+            &ctx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_request_permission_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let request = RequestPermissionRequest::new("sess-1", tool_call, vec![]);
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::SessionRequestPermission,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_request_permission_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let request = RequestPermissionRequest::new("sess-1", tool_call, vec![]);
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("session/request_permission"),
+            params: Some(request),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::SessionRequestPermission,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.session.request_permission",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_read_text_file_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/read_text_file"),
+            params: Some(ReadTextFileRequest::new("sess-1", "/tmp/foo")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsReadTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_create_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/create"),
+            params: Some(CreateTerminalRequest::new("sess-1", "echo hi")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalCreate,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.create",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_kill_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/kill_command"),
+            params: Some(KillTerminalCommandRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "term-001".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalKill,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.kill",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_output_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/output"),
+            params: Some(TerminalOutputRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalOutput,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.output",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_release_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalRelease,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_read_text_file_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/read_text_file"),
+            params: Some(ReadTextFileRequest::new("sess-1", "/tmp/foo")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsReadTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.read_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_create_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/create"),
+            params: Some(CreateTerminalRequest::new("sess-1", "echo hi")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalCreate,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.create",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_kill_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/kill_command"),
+            params: Some(KillTerminalCommandRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "term-001".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalKill,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.kill",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_output_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/output"),
+            params: Some(TerminalOutputRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalOutput,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.output",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_release_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("terminal/release"),
+            params: Some(ReleaseTerminalRequest::new("sess-1", "term-001")),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::TerminalRelease,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
     async fn dispatch_client_method_dispatches_terminal_release_session_id_mismatch_publishes_error_reply()
      {
         let nats = MockNatsClient::new();
@@ -749,9 +1691,11 @@ mod tests {
             method: ClientMethod::TerminalRelease,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -789,9 +1733,11 @@ mod tests {
             method: ClientMethod::TerminalRelease,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -831,9 +1777,11 @@ mod tests {
             method: ClientMethod::TerminalRelease,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -867,9 +1815,11 @@ mod tests {
             method: ClientMethod::SessionUpdate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -904,9 +1854,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -940,9 +1892,11 @@ mod tests {
             method: ClientMethod::TerminalCreate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -976,9 +1930,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1012,9 +1968,11 @@ mod tests {
             method: ClientMethod::TerminalOutput,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1048,9 +2006,11 @@ mod tests {
             method: ClientMethod::TerminalRelease,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1089,9 +2049,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1125,9 +2087,11 @@ mod tests {
             method: ClientMethod::TerminalOutput,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1167,9 +2131,11 @@ mod tests {
             method: ClientMethod::TerminalOutput,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1203,9 +2169,11 @@ mod tests {
             method: ClientMethod::TerminalOutput,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &serializer,
         };
         dispatch_client_method(
@@ -1241,9 +2209,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1281,9 +2251,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1327,9 +2299,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1480,6 +2454,157 @@ mod tests {
                 "mock release_terminal failure",
             ))
         }
+
+        async fn wait_for_terminal_exit(
+            &self,
+            _: WaitForTerminalExitRequest,
+        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+            Ok(WaitForTerminalExitResponse::new(
+                TerminalExitStatus::new().exit_code(0u32),
+            ))
+        }
+    }
+
+    pub(super) struct TerminalWaitForExitFailingClient;
+
+    #[async_trait(?Send)]
+    impl Client for TerminalWaitForExitFailingClient {
+        async fn session_notification(
+            &self,
+            n: agent_client_protocol::SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
+            let _ = n;
+            Ok(())
+        }
+
+        async fn request_permission(
+            &self,
+            _: RequestPermissionRequest,
+        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "not implemented in test mock",
+            ))
+        }
+
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+            Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn create_terminal(
+            &self,
+            _: CreateTerminalRequest,
+        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+            Ok(CreateTerminalResponse::new("term-001"))
+        }
+
+        async fn kill_terminal_command(
+            &self,
+            _: KillTerminalCommandRequest,
+        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
+            Ok(KillTerminalCommandResponse::new())
+        }
+
+        async fn terminal_output(
+            &self,
+            _: TerminalOutputRequest,
+        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+            Ok(TerminalOutputResponse::new(
+                "mock output".to_string(),
+                false,
+            ))
+        }
+
+        async fn release_terminal(
+            &self,
+            _: ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            Ok(ReleaseTerminalResponse::new())
+        }
+
+        async fn wait_for_terminal_exit(
+            &self,
+            _: WaitForTerminalExitRequest,
+        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "mock wait_for_terminal_exit failure",
+            ))
+        }
+    }
+
+    pub(super) struct TerminalWaitForExitTimeoutClient;
+
+    #[async_trait(?Send)]
+    impl Client for TerminalWaitForExitTimeoutClient {
+        async fn session_notification(
+            &self,
+            n: agent_client_protocol::SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
+            let _ = n;
+            Ok(())
+        }
+
+        async fn request_permission(
+            &self,
+            _: RequestPermissionRequest,
+        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+            Err(agent_client_protocol::Error::new(
+                -32603,
+                "not implemented in test mock",
+            ))
+        }
+
+        async fn read_text_file(
+            &self,
+            _: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+            Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn create_terminal(
+            &self,
+            _: CreateTerminalRequest,
+        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+            Ok(CreateTerminalResponse::new("term-001"))
+        }
+
+        async fn kill_terminal_command(
+            &self,
+            _: KillTerminalCommandRequest,
+        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
+            Ok(KillTerminalCommandResponse::new())
+        }
+
+        async fn terminal_output(
+            &self,
+            _: TerminalOutputRequest,
+        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+            Ok(TerminalOutputResponse::new(
+                "mock output".to_string(),
+                false,
+            ))
+        }
+
+        async fn release_terminal(
+            &self,
+            _: ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            Ok(ReleaseTerminalResponse::new())
+        }
+
+        async fn wait_for_terminal_exit(
+            &self,
+            _: WaitForTerminalExitRequest,
+        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Ok(WaitForTerminalExitResponse::new(
+                TerminalExitStatus::new().exit_code(0u32),
+            ))
+        }
     }
 
     #[tokio::test]
@@ -1503,9 +2628,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1556,9 +2683,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &serializer,
         };
         dispatch_client_method(
@@ -1603,9 +2732,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1642,9 +2773,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1682,9 +2815,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1721,9 +2856,11 @@ mod tests {
             method: ClientMethod::TerminalKill,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1755,9 +2892,11 @@ mod tests {
             method: ClientMethod::SessionUpdate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1792,9 +2931,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1827,9 +2968,11 @@ mod tests {
             method: ClientMethod::TerminalCreate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1865,9 +3008,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1903,9 +3048,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -1942,9 +3089,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &serializer,
         };
         dispatch_client_method(
@@ -2015,9 +3164,11 @@ mod tests {
             method: ClientMethod::SessionUpdate,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -2051,9 +3202,11 @@ mod tests {
             method: ClientMethod::FsReadTextFile,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -2094,9 +3247,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -2138,9 +3293,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -2181,9 +3338,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge_advanced(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
@@ -2226,9 +3385,11 @@ mod tests {
             method: ClientMethod::SessionRequestPermission,
         };
 
+        let bridge = make_bridge(nats.clone());
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
+            bridge: &bridge,
             serializer: &serializer,
         };
         dispatch_client_method(
