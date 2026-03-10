@@ -29,6 +29,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_fs_write_text_file() {
+        let subject = "acp.sess456.client.fs.write_text_file";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess456");
+        assert_eq!(parsed.method, ClientMethod::FsWriteTextFile);
+    }
+
+    #[test]
     fn test_parse_session_request_permission() {
         let subject = "acp.sess123.client.session.request_permission";
         let parsed = parse_client_subject(subject).unwrap();
