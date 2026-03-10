@@ -78,6 +78,14 @@ pub mod client {
         format!("{}.{}.client.terminal.wait_for_exit", prefix, session_id)
     }
 
+    pub fn ext(prefix: &str, session_id: &str, method: &str) -> String {
+        format!("{}.{}.client.ext.{}", prefix, session_id, method)
+    }
+
+    pub fn ext_session_prompt_response(prefix: &str, session_id: &str) -> String {
+        ext(prefix, session_id, "session.prompt_response")
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -159,6 +167,14 @@ mod tests {
         assert_eq!(
             client::terminal_wait_for_exit("acp", "s1"),
             "acp.s1.client.terminal.wait_for_exit"
+        );
+    }
+
+    #[test]
+    fn client_ext_session_prompt_response_subject() {
+        assert_eq!(
+            client::ext_session_prompt_response("acp", "s1"),
+            "acp.s1.client.ext.session.prompt_response"
         );
     }
 
