@@ -93,6 +93,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_ext_session_prompt_response() {
+        let subject = "acp.sess999.client.ext.session.prompt_response";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess999");
+        assert_eq!(parsed.method, ClientMethod::ExtSessionPromptResponse);
+    }
+
+    #[test]
     fn test_parse_with_custom_prefix() {
         let subject = "myapp.sess123.client.session.update";
         let parsed = parse_client_subject(subject).unwrap();
