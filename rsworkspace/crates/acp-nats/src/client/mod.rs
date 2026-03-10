@@ -1,4 +1,5 @@
 pub(crate) mod fs_read_text_file;
+pub(crate) mod fs_write_text_file;
 pub(crate) mod request_permission;
 pub(crate) mod rpc_reply;
 pub(crate) mod session_update;
@@ -196,6 +197,17 @@ async fn dispatch_client_method<
             )
             .await;
         }
+        ClientMethod::FsWriteTextFile => {
+            fs_write_text_file::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.serializer,
+            )
+            .await;
+        }
         ClientMethod::SessionRequestPermission => {
             request_permission::handle(
                 &payload,
@@ -280,7 +292,7 @@ mod tests {
         RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
         SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest,
         TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
-        WaitForTerminalExitResponse,
+        WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -349,6 +361,13 @@ mod tests {
             _: ReadTextFileRequest,
         ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
         }
 
         async fn create_terminal(
@@ -566,6 +585,92 @@ mod tests {
         .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_dispatches_fs_write_text_file() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let session_id = AcpSessionId::new("sess-1").unwrap();
+
+        let envelope = Request {
+            id: RequestId::Number(42),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/test.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id,
+            method: ClientMethod::FsWriteTextFile,
+        };
+
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value =
+            serde_json::from_slice(payloads[0].as_ref()).expect("response should be valid JSON");
+        assert_eq!(
+            response["id"], 42,
+            "response must be JSON-RPC envelope with matching id"
+        );
+        assert!(
+            response.get("result").is_some(),
+            "success response must have result field"
+        );
+    }
+
+    #[tokio::test]
+    async fn fs_write_text_file_round_trip() {
+        let nats = MockNatsClient::new();
+        let client = MockClient::new();
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("session-001"),
+                "/tmp/test.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = serde_json::to_vec(&envelope).unwrap();
+
+        fs_write_text_file::handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        let payloads = nats.published_payloads();
+        assert_eq!(payloads.len(), 1);
+        let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(response["id"], 1);
+        assert!(response.get("result").is_some());
     }
 
     #[tokio::test]
@@ -1505,6 +1610,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_write_text_file_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsWriteTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
     async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_read_text_file_covers_stubs()
      {
         let nats = MockNatsClient::new();
@@ -1663,6 +1805,115 @@ mod tests {
         };
         dispatch_client_method(
             "acp.sess-1.client.terminal.release",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_write_text_file_covers_stubs()
+     {
+        let nats = MockNatsClient::new();
+        let client = TerminalWaitForExitTimeoutClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsWriteTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_kill_failing_client_write_text_file_covers_stubs() {
+        let nats = MockNatsClient::new();
+        let client = TerminalKillFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsWriteTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_terminal_release_failing_client_write_text_file_covers_stubs() {
+        let nats = MockNatsClient::new();
+        let client = TerminalReleaseFailingClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsWriteTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2354,6 +2605,13 @@ mod tests {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
+        }
+
         async fn create_terminal(
             &self,
             _: CreateTerminalRequest,
@@ -2419,6 +2677,13 @@ mod tests {
             _: ReadTextFileRequest,
         ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
         }
 
         async fn create_terminal(
@@ -2494,6 +2759,13 @@ mod tests {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
+        }
+
         async fn create_terminal(
             &self,
             _: CreateTerminalRequest,
@@ -2563,6 +2835,13 @@ mod tests {
             _: ReadTextFileRequest,
         ) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
+        }
+
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
         }
 
         async fn create_terminal(
@@ -3136,6 +3415,13 @@ mod tests {
             Ok(ReadTextFileResponse::new("file contents".to_string()))
         }
 
+        async fn write_text_file(
+            &self,
+            _: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            Ok(WriteTextFileResponse::new())
+        }
+
         async fn terminal_output(
             &self,
             _: TerminalOutputRequest,
@@ -3263,6 +3549,42 @@ mod tests {
         )
         .await;
 
+        assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_client_method_rpc_mock_client_write_text_file_covers_stubs() {
+        let nats = MockNatsClient::new();
+        let client = RpcMockClient;
+        let envelope = Request {
+            id: RequestId::Number(1),
+            method: std::sync::Arc::from("fs/write_text_file"),
+            params: Some(WriteTextFileRequest::new(
+                agent_client_protocol::SessionId::from("sess-1"),
+                "/tmp/foo.txt".to_string(),
+                "content".to_string(),
+            )),
+        };
+        let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
+        let parsed = crate::nats::ParsedClientSubject {
+            session_id: AcpSessionId::new("sess-1").unwrap(),
+            method: ClientMethod::FsWriteTextFile,
+        };
+        let bridge = make_bridge(nats.clone());
+        let ctx = DispatchContext {
+            nats: &nats,
+            client: &client,
+            bridge: &bridge,
+            serializer: &StdJsonSerialize,
+        };
+        dispatch_client_method(
+            "acp.sess-1.client.fs.write_text_file",
+            parsed,
+            payload,
+            Some("_INBOX.reply".to_string()),
+            &ctx,
+        )
+        .await;
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
 
