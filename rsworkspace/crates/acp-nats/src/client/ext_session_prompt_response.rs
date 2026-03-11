@@ -142,7 +142,7 @@ mod tests {
 
         let payload = response_with_prompt_id(StopReason::EndTurn, token);
 
-        super::handle("prompt-resp-001", &payload, None, &bridge).await;
+        handle("prompt-resp-001", &payload, None, &bridge).await;
 
         let result = rx
             .await
@@ -156,7 +156,7 @@ mod tests {
         let bridge = make_bridge();
         let payload = response_with_prompt_id(StopReason::EndTurn, PromptToken(0));
 
-        super::handle("no-waiter-session", &payload, None, &bridge).await;
+        handle("no-waiter-session", &payload, None, &bridge).await;
     }
 
     #[tokio::test]
@@ -174,7 +174,7 @@ mod tests {
             token.0
         );
 
-        super::handle("bad-payload-001", payload.as_bytes(), None, &bridge).await;
+        handle("bad-payload-001", payload.as_bytes(), None, &bridge).await;
 
         let result = rx
             .await
@@ -196,7 +196,7 @@ mod tests {
         let response = PromptResponse::new(StopReason::EndTurn);
         let payload = serde_json::to_vec(&response).unwrap();
 
-        super::handle("no-token-session", &payload, None, &bridge).await;
+        handle("no-token-session", &payload, None, &bridge).await;
 
         assert!(
             bridge
@@ -222,9 +222,9 @@ mod tests {
 
         let payload = response_with_prompt_id(StopReason::EndTurn, token);
 
-        super::handle("session.with.dots", &payload, None, &bridge).await;
-        super::handle("session*wild", &payload, None, &bridge).await;
-        super::handle("session id", &payload, None, &bridge).await;
+        handle("session.with.dots", &payload, None, &bridge).await;
+        handle("session*wild", &payload, None, &bridge).await;
+        handle("session id", &payload, None, &bridge).await;
 
         assert!(
             bridge
@@ -267,7 +267,7 @@ mod tests {
             .unwrap();
 
         let late_payload = response_with_prompt_id(StopReason::EndTurn, token1);
-        super::handle("same-session", &late_payload, None, &bridge).await;
+        handle("same-session", &late_payload, None, &bridge).await;
 
         assert!(
             bridge
