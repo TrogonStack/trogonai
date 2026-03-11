@@ -3725,6 +3725,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-splitio"
+version = "0.1.0"
+dependencies = [
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [
