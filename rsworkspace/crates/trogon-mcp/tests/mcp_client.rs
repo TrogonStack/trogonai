@@ -222,3 +222,26 @@ async fn call_tool_skips_non_text_content_blocks() {
     let output = client(&server).call_tool("t", &json!({})).await.unwrap();
     assert_eq!(output, "only this");
 }
+
+// ── Timeout ───────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn initialize_http_timeout_returns_error() {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST);
+            then.delay(std::time::Duration::from_secs(10));
+        })
+        .await;
+
+    let c = McpClient::new(
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .unwrap(),
+        server.base_url(),
+    );
+    let err = c.initialize().await.unwrap_err();
+    assert!(err.contains("MCP HTTP error"), "got: {err}");
+}

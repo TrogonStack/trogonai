@@ -72,6 +72,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str) -> AgentConfig
         github_stream_name: None,
         linear_stream_name: None,
         cron_stream_name: None,
+        datadog_stream_name: None,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,

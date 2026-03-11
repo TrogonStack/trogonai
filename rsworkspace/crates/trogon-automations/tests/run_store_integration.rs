@@ -133,6 +133,48 @@ async fn stats_tenant_isolation() {
     assert_eq!(other_stats.failed_7d, 1);
 }
 
+// ── Stats 7-day window ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn stats_old_run_counts_in_total_but_not_in_7d() {
+    let (store, _c) = make_run_store().await;
+    let now = now_unix();
+
+    // Recent success — inside 7d window.
+    let mut recent = run("r-recent", "a", "acme", RunStatus::Success);
+    recent.started_at = now - 3600; // 1 hour ago
+    recent.finished_at = recent.started_at + 5;
+    store.record(&recent).await.unwrap();
+
+    // Old success — outside 7d window (8 days ago).
+    let mut old = run("r-old", "a", "acme", RunStatus::Success);
+    old.started_at = now.saturating_sub(8 * 86_400);
+    old.finished_at = old.started_at + 5;
+    store.record(&old).await.unwrap();
+
+    let stats = store.stats("acme").await.expect("stats");
+    assert_eq!(stats.total, 2, "total must include old runs");
+    assert_eq!(stats.successful_7d, 1, "7d count must exclude the 8-day-old run");
+    assert_eq!(stats.failed_7d, 0);
+}
+
+#[tokio::test]
+async fn stats_old_failed_run_excluded_from_7d() {
+    let (store, _c) = make_run_store().await;
+    let now = now_unix();
+
+    // Old failure — outside 7d window.
+    let mut old_fail = run("r-old-fail", "a", "acme", RunStatus::Failed);
+    old_fail.started_at = now.saturating_sub(8 * 86_400);
+    old_fail.finished_at = old_fail.started_at + 5;
+    store.record(&old_fail).await.unwrap();
+
+    let stats = store.stats("acme").await.expect("stats");
+    assert_eq!(stats.total, 1, "total includes old run");
+    assert_eq!(stats.failed_7d, 0, "old failure must not appear in 7d count");
+    assert_eq!(stats.successful_7d, 0);
+}
+
 // ── Run record fields ─────────────────────────────────────────────────────────
 
 #[tokio::test]

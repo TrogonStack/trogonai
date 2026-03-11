@@ -51,6 +51,8 @@ pub struct AgentConfig {
     pub linear_stream_name: Option<String>,
     /// JetStream stream name for CRON tick events (default: `CRON_TICKS`).
     pub cron_stream_name: Option<String>,
+    /// JetStream stream name for Datadog events (default: `DATADOG`).
+    pub datadog_stream_name: Option<String>,
     /// GitHub repo owner for reading `.trogon/memory.md` in Linear handlers
     /// (e.g. `"my-org"`).  Not needed for PR handlers — they use the PR repo.
     pub memory_owner: Option<String>,
@@ -96,6 +98,7 @@ impl AgentConfig {
             github_stream_name: env.var("GITHUB_STREAM_NAME").ok(),
             linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
             cron_stream_name: env.var("CRON_STREAM_NAME").ok(),
+            datadog_stream_name: env.var("DATADOG_STREAM_NAME").ok(),
             memory_owner: env.var("MEMORY_OWNER").ok(),
             memory_repo: env.var("MEMORY_REPO").ok(),
             memory_path: env.var("MEMORY_PATH").ok(),
@@ -134,6 +137,7 @@ mod tests {
         assert!(cfg.linear_token.is_empty());
         assert!(cfg.github_stream_name.is_none());
         assert!(cfg.linear_stream_name.is_none());
+        assert!(cfg.datadog_stream_name.is_none());
         assert!(cfg.memory_path.is_none());
     }
 
@@ -163,11 +167,13 @@ mod tests {
         env.set("GITHUB_STREAM_NAME", "GH_EVENTS");
         env.set("LINEAR_STREAM_NAME", "LIN_EVENTS");
         env.set("CRON_STREAM_NAME", "MY_CRON");
+        env.set("DATADOG_STREAM_NAME", "DD_EVENTS");
 
         let cfg = AgentConfig::from_env(&env);
         assert_eq!(cfg.github_stream_name.as_deref(), Some("GH_EVENTS"));
         assert_eq!(cfg.linear_stream_name.as_deref(), Some("LIN_EVENTS"));
         assert_eq!(cfg.cron_stream_name.as_deref(), Some("MY_CRON"));
+        assert_eq!(cfg.datadog_stream_name.as_deref(), Some("DD_EVENTS"));
     }
 
     #[test]
@@ -175,6 +181,21 @@ mod tests {
         let env = InMemoryEnv::new();
         let cfg = AgentConfig::from_env(&env);
         assert!(cfg.cron_stream_name.is_none());
+    }
+
+    #[test]
+    fn datadog_stream_name_none_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.datadog_stream_name.is_none());
+    }
+
+    #[test]
+    fn datadog_stream_name_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("DATADOG_STREAM_NAME", "MY_DATADOG");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.datadog_stream_name.as_deref(), Some("MY_DATADOG"));
     }
 
     #[test]

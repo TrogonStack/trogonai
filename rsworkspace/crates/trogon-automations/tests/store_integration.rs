@@ -124,6 +124,75 @@ async fn matching_returns_only_enabled_and_triggered() {
     assert!(!ids.contains(&"m4"), "m4 is wrong trigger");
 }
 
+// ── matching() — trigger variants ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn matching_cron_wildcard_matches_any_cron_subject() {
+    let (store, _c) = make_store().await;
+    let cron_any = sample_automation("c1", "cron");
+    store.put(&cron_any).await.expect("put");
+
+    let matched = store
+        .matching("test-tenant", "cron.daily-digest", &serde_json::json!({}))
+        .await
+        .expect("matching");
+
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].id, "c1");
+}
+
+#[tokio::test]
+async fn matching_cron_exact_matches_only_that_job() {
+    let (store, _c) = make_store().await;
+    store.put(&sample_automation("c2", "cron.my-job")).await.expect("put c2");
+    store.put(&sample_automation("c3", "cron.other-job")).await.expect("put c3");
+
+    let matched = store
+        .matching("test-tenant", "cron.my-job", &serde_json::json!({}))
+        .await
+        .expect("matching");
+
+    let ids: Vec<&str> = matched.iter().map(|a| a.id.as_str()).collect();
+    assert!(ids.contains(&"c2"), "exact cron job must match");
+    assert!(!ids.contains(&"c3"), "different cron job must not match");
+}
+
+#[tokio::test]
+async fn matching_linear_issue_prefix_matches() {
+    let (store, _c) = make_store().await;
+    store
+        .put(&sample_automation("l1", "linear.Issue:create"))
+        .await
+        .expect("put");
+
+    let payload = serde_json::json!({"action": "create"});
+    let matched = store
+        .matching("test-tenant", "linear.Issue.create", &payload)
+        .await
+        .expect("matching");
+
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].id, "l1");
+}
+
+#[tokio::test]
+async fn matching_cross_tenant_returns_empty() {
+    let (store, _c) = make_store().await;
+    // Automation belongs to "test-tenant".
+    store
+        .put(&sample_automation("iso-m1", "github.push"))
+        .await
+        .expect("put");
+
+    let payload = serde_json::json!({});
+    let matched = store
+        .matching("other-tenant", "github.push", &payload)
+        .await
+        .expect("matching");
+
+    assert!(matched.is_empty(), "other-tenant must not match test-tenant's automations");
+}
+
 #[tokio::test]
 async fn watch_delivers_snapshot_and_updates() {
     use futures_util::StreamExt as _;
