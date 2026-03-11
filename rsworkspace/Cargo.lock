@@ -3579,6 +3579,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-automations",
+ "trogon-datadog",
  "trogon-github",
  "trogon-linear",
  "trogon-mcp",
@@ -3607,6 +3608,27 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-datadog"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.7.9",
+ "bytes",
+ "futures-util",
+ "hex",
+ "hmac",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
 ]
 
 [[package]]
