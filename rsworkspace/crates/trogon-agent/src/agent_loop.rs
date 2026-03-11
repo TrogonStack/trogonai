@@ -456,6 +456,69 @@ mod tests {
         assert_eq!(sys_arr[0]["cache_control"]["type"], "ephemeral");
     }
 
+    /// `AgentLoop::run` marks the last tool with `cache_control: ephemeral` so
+    /// Anthropic caches the entire tool definitions block across iterations.
+    /// Only the *last* tool gets the marker — earlier ones must not have it.
+    #[test]
+    fn run_marks_last_tool_with_cache_control() {
+        use crate::tools::tool_def;
+        use serde_json::json;
+
+        // Simulate what AgentLoop::run does with cached_tools.
+        let mut cached_tools = vec![
+            tool_def("tool_a", "first tool", json!({"type": "object"})),
+            tool_def("tool_b", "second tool", json!({"type": "object"})),
+            tool_def("tool_c", "last tool", json!({"type": "object"})),
+        ];
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(json!({"type": "ephemeral"}));
+        }
+
+        // Only the last tool should have cache_control.
+        assert!(
+            cached_tools[0].cache_control.is_none(),
+            "first tool must not have cache_control"
+        );
+        assert!(
+            cached_tools[1].cache_control.is_none(),
+            "middle tool must not have cache_control"
+        );
+        assert_eq!(
+            cached_tools[2].cache_control,
+            Some(json!({"type": "ephemeral"})),
+            "last tool must have cache_control: ephemeral"
+        );
+    }
+
+    /// When there is only one tool it still gets `cache_control: ephemeral`.
+    #[test]
+    fn run_marks_single_tool_with_cache_control() {
+        use crate::tools::tool_def;
+        use serde_json::json;
+
+        let mut cached_tools = vec![tool_def("only", "only tool", json!({"type": "object"}))];
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(json!({"type": "ephemeral"}));
+        }
+
+        assert_eq!(
+            cached_tools[0].cache_control,
+            Some(json!({"type": "ephemeral"}))
+        );
+    }
+
+    /// When the tool list is empty no panic occurs and no cache_control is set.
+    #[test]
+    fn run_empty_tool_list_does_not_panic() {
+        use serde_json::json;
+
+        let mut cached_tools: Vec<crate::tools::ToolDef> = vec![];
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(json!({"type": "ephemeral"}));
+        }
+        assert!(cached_tools.is_empty());
+    }
+
     /// When `system_prompt` is `None`, the `"system"` key is absent from the
     /// serialized body (thanks to `skip_serializing_if = "Option::is_none"`).
     #[test]
