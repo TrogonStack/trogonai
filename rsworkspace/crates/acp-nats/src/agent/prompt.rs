@@ -251,7 +251,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -285,7 +285,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors.total")
+            .find(|m| m.name() == "acp.errors")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -494,7 +494,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "prompt", true),
-            "expected acp.request.count with method=prompt, success=true"
+            "expected acp.requests with method=prompt, success=true"
         );
         provider.shutdown().unwrap();
     }
@@ -546,11 +546,11 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_error_metric(&finished_metrics, "prompt", "backpressure_rejected"),
-            "expected acp.errors.total with operation=prompt, reason=backpressure_rejected"
+            "expected acp.errors with operation=prompt, reason=backpressure_rejected"
         );
         assert!(
             has_request_metric(&finished_metrics, "prompt", false),
-            "backpressure rejects are failed prompt requests and must increment acp.request.count"
+            "backpressure rejects are failed prompt requests and must increment acp.requests"
         );
         provider.shutdown().unwrap();
     }
@@ -567,11 +567,11 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "prompt", false),
-            "expected acp.request.count with method=prompt, success=false"
+            "expected acp.requests with method=prompt, success=false"
         );
         assert!(
             has_error_metric(&finished_metrics, "prompt", "invalid_session_id"),
-            "expected acp.errors.total with operation=prompt, reason=invalid_session_id"
+            "expected acp.errors with operation=prompt, reason=invalid_session_id"
         );
         provider.shutdown().unwrap();
     }
@@ -587,7 +587,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_error_metric(&finished_metrics, "prompt", "prompt_publish_failed"),
-            "expected acp.errors.total with operation=prompt, reason=prompt_publish_failed"
+            "expected acp.errors with operation=prompt, reason=prompt_publish_failed"
         );
         assert!(
             has_request_metric(&finished_metrics, "prompt", false),
@@ -605,7 +605,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -624,7 +624,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.errors.total")
+            .f64_histogram("acp.errors")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);

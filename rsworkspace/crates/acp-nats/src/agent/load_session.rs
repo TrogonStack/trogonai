@@ -161,7 +161,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors.total")
+            .find(|m| m.name() == "acp.errors")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -192,7 +192,7 @@ mod tests {
     ) {
         assert!(
             has_session_ready_error_metric(finished_metrics),
-            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
+            "expected acp.errors datapoint with operation=session_ready, reason=session_ready_publish_failed"
         );
     }
 
@@ -204,7 +204,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -235,7 +235,7 @@ mod tests {
     ) {
         assert!(
             has_load_session_metric(finished_metrics, expected_success),
-            "expected acp.request.count datapoint with method=load_session, success={}",
+            "expected acp.requests datapoint with method=load_session, success={}",
             expected_success
         );
     }
@@ -415,7 +415,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.errors.total")
+            .f64_histogram("acp.errors")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -434,7 +434,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
