@@ -299,3 +299,34 @@ async fn automation_with_mcp_servers_round_trips() {
     assert_eq!(fetched.mcp_servers.len(), 2);
     assert_eq!(fetched.mcp_servers[0].name, "search");
 }
+
+/// `list()` must silently skip entries whose bytes cannot be deserialized,
+/// warning rather than failing, and return the other valid automations.
+#[tokio::test]
+async fn list_skips_unreadable_entry_and_returns_valid_ones() {
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("NATS connect");
+    let js = jetstream::new(nats);
+    let store = AutomationStore::open(&js).await.expect("open store");
+
+    // Insert one valid automation.
+    let good = sample_automation("good-1", "github.push");
+    store.put(&good).await.expect("put good");
+
+    // Directly write corrupted bytes for a second key under the same tenant prefix.
+    let kv = js
+        .get_key_value(trogon_automations::store::BUCKET)
+        .await
+        .expect("get KV bucket");
+    kv.put("test-tenant.corrupted", bytes::Bytes::from(b"not valid json" as &[u8]))
+        .await
+        .expect("inject bad bytes");
+
+    // list() must return only the valid automation and silently skip the corrupt one.
+    let result = store.list("test-tenant").await.expect("list");
+    assert_eq!(result.len(), 1, "only the valid automation should be returned");
+    assert_eq!(result[0].id, "good-1");
+}
