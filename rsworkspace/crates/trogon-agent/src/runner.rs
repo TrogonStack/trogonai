@@ -46,6 +46,7 @@ const PUSH_CONSUMER: &str = "trogon-agent-push-to-branch";
 const CI_CONSUMER: &str = "trogon-agent-ci-completed";
 const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
 const CRON_CONSUMER: &str = "trogon-agent-cron";
+const DATADOG_CONSUMER: &str = "trogon-agent-datadog-alert";
 
 #[derive(Debug)]
 pub enum RunnerError {
@@ -146,6 +147,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
     let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
+    let datadog_stream_name = cfg.datadog_stream_name.as_deref().unwrap_or("DATADOG");
 
     // Ensure all required JetStream streams exist before binding consumers.
     // This removes the hard startup-order dependency on trogon-github, trogon-linear,
@@ -153,6 +155,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     ensure_stream(&js, github_stream_name, &["github.>"], Duration::from_secs(7 * 86_400)).await?;
     ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
     ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
+    ensure_stream(&js, datadog_stream_name, &["datadog.>"], Duration::from_secs(7 * 86_400)).await?;
 
     let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
     let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
@@ -160,12 +163,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
     let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
     let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
+    let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
 
     info!(
         proxy_url = %cfg.proxy_url,
         model = %cfg.model,
         github_stream = github_stream_name,
         linear_stream = linear_stream_name,
+        datadog_stream = datadog_stream_name,
         "Agent runner started"
     );
 
@@ -335,6 +340,33 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
+                        });
+                    }
+                }
+            }
+            msg = datadog_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving Datadog message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
+                                    Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
+                                    Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
+                                    None => {}
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
                         });
                     }
                 }
