@@ -522,3 +522,349 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     assert!(hit, "Automation was not dispatched for Datadog alert within 20 s");
     anthropic_mock.assert_async().await;
 }
+
+/// Full pipeline with a non-alert Datadog event (`datadog.event` subject).
+/// Payload has no `alert_transition` field — trogon-datadog routes it to
+/// `datadog.event`. The agent's fallback handler must pick it up and call
+/// the Anthropic API.
+#[tokio::test]
+async fn datadog_event_subject_triggers_full_pipeline() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Event logged."}]}"#,
+                );
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    let proxy_state = ProxyState {
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+
+    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let wjs = Arc::clone(&js);
+    let wnats = nats.clone();
+    let wvault = Arc::clone(&vault);
+    let wstream = stream::stream_name("trogon");
+    tokio::spawn(async move {
+        worker::run(wjs, wnats, wvault, http_client, "dd-event-worker", &wstream).await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let datadog_port = next_port();
+    let webhook_secret = "test-dd-event-secret";
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("DATADOG_WEBHOOK_PORT", datadog_port.to_string());
+    env.set("DATADOG_WEBHOOK_SECRET", webhook_secret);
+    let datadog_config = DatadogConfig::from_env(&env);
+
+    let nats_for_dd = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    tokio::spawn(async move { datadog_serve(datadog_config, nats_for_dd).await.ok(); });
+    wait_for_port(datadog_port).await;
+
+    let agent_cfg = AgentConfig {
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        proxy_url: format!("http://127.0.0.1:{proxy_port}"),
+        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: String::new(),
+        linear_token: String::new(),
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
+        cron_stream_name: None,
+        datadog_stream_name: None,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
+    };
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // POST a payload with NO alert_transition → trogon-datadog routes to datadog.event.
+    let body = serde_json::to_vec(&serde_json::json!({
+        "monitor_name": "Custom monitor fired",
+        "monitor_id": 99999,
+        "tags": ["env:prod", "service:web"]
+    }))
+    .unwrap();
+    let sig = compute_datadog_sig(webhook_secret, &body);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{datadog_port}/webhook"))
+        .header("x-datadog-signature", sig)
+        .header("dd-request-id", "dd-req-event-001")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(
+        hit,
+        "Mock Anthropic not called for datadog.event within 20 s — \
+         the datadog.event subject path may not be handled by the agent runner"
+    );
+    anthropic_mock.assert_async().await;
+}
+
+/// When the Anthropic API returns an error for a Datadog message, the runner
+/// must still ack the message and continue processing subsequent messages.
+/// Verified by posting two messages and asserting both reach Anthropic.
+#[tokio::test]
+async fn datadog_handler_error_still_acks_and_continues() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = MockServer::start_async().await;
+    // Both calls return 500. If the runner deadlocks or panics on the first
+    // failure, the second message will never be processed within the timeout.
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(500)
+                .header("content-type", "application/json")
+                .body(r#"{"error":"internal server error"}"#);
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    js.get_or_create_stream(jetstream::stream::Config {
+        name: "DATADOG".to_string(),
+        subjects: vec!["datadog.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    let datadog_port = next_port();
+    let webhook_secret = "test-dd-err-secret";
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("DATADOG_WEBHOOK_PORT", datadog_port.to_string());
+    env.set("DATADOG_WEBHOOK_SECRET", webhook_secret);
+    let datadog_config = DatadogConfig::from_env(&env);
+
+    let nats_for_dd = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    tokio::spawn(async move { datadog_serve(datadog_config, nats_for_dd).await.ok(); });
+    wait_for_port(datadog_port).await;
+
+    let agent_cfg = AgentConfig {
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        proxy_url: mock_server.base_url(),
+        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: String::new(),
+        linear_token: String::new(),
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
+        cron_stream_name: None,
+        datadog_stream_name: None,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
+    };
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // POST two messages back-to-back.
+    let client = reqwest::Client::new();
+    for i in 0..2u32 {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "alert_transition": "Triggered",
+            "alert_id": format!("err-test-{i}"),
+            "alert_title": "Error resilience test alert",
+            "host": "web-01"
+        }))
+        .unwrap();
+        let sig = compute_datadog_sig(webhook_secret, &body);
+        client
+            .post(format!("http://127.0.0.1:{datadog_port}/webhook"))
+            .header("x-datadog-signature", sig)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Both messages must reach Anthropic — the runner must not deadlock
+    // or stop processing after the first error.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if anthropic_mock.hits_async().await >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Runner did not dispatch both Datadog messages within 20 s \
+             after Anthropic errors — possible ack/continuation failure"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Automation registered for `datadog.event` takes precedence over the
+/// fallback handler when a non-alert Datadog event is received.
+#[tokio::test]
+async fn datadog_event_automation_dispatch() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = MockServer::start_async().await;
+    // The automation prompt contains "datadog.event" because run_automation
+    // prepends the NATS subject to the prompt.
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("datadog.event");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "event automation ran"}]
+                }));
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    // Register automation matching datadog.event.
+    let store = trogon_automations::AutomationStore::open(&js).await.unwrap();
+    let auto = trogon_automations::Automation {
+        id: "dd-event-auto-1".to_string(),
+        tenant_id: "default".to_string(),
+        name: "DD event auto".to_string(),
+        trigger: "datadog.event".to_string(),
+        prompt: "Handle this Datadog event via automation.".to_string(),
+        model: None,
+        tools: vec![],
+        memory_path: None,
+        mcp_servers: vec![],
+        enabled: true,
+        visibility: trogon_automations::Visibility::Private,
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        updated_at: "2026-01-01T00:00:00Z".to_string(),
+    };
+    store.put(&auto).await.unwrap();
+
+    js.get_or_create_stream(jetstream::stream::Config {
+        name: "DATADOG".to_string(),
+        subjects: vec!["datadog.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    let datadog_port = next_port();
+    let webhook_secret = "test-dd-event-auto-secret";
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("DATADOG_WEBHOOK_PORT", datadog_port.to_string());
+    env.set("DATADOG_WEBHOOK_SECRET", webhook_secret);
+    let datadog_config = DatadogConfig::from_env(&env);
+
+    let nats_for_dd = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    tokio::spawn(async move { datadog_serve(datadog_config, nats_for_dd).await.ok(); });
+    wait_for_port(datadog_port).await;
+
+    let agent_cfg = AgentConfig {
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        proxy_url: mock_server.base_url(),
+        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: String::new(),
+        linear_token: String::new(),
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
+        cron_stream_name: None,
+        datadog_stream_name: None,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
+    };
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // POST a payload with no alert_transition → trogon-datadog routes to datadog.event.
+    let body = serde_json::to_vec(&serde_json::json!({
+        "monitor_name": "Custom event monitor",
+        "monitor_id": 88888
+    }))
+    .unwrap();
+    let sig = compute_datadog_sig(webhook_secret, &body);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{datadog_port}/webhook"))
+        .header("x-datadog-signature", sig)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(
+        hit,
+        "Automation was not dispatched for datadog.event within 20 s"
+    );
+    anthropic_mock.assert_async().await;
+}
