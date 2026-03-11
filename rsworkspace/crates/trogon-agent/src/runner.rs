@@ -656,15 +656,27 @@ async fn ensure_stream(
     subjects: &[&str],
     max_age: Duration,
 ) -> Result<(), RunnerError> {
-    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+    let result = js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: stream_name.to_string(),
         subjects: subjects.iter().map(|s| s.to_string()).collect(),
         max_age,
         ..Default::default()
     })
-    .await
-    .map_err(|e| RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))?;
-    Ok(())
+    .await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // If the stream already exists with a different config (e.g. narrower subjects),
+            // fall back to using the existing stream rather than failing.
+            if js.get_stream(stream_name).await.is_ok() {
+                tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
+                Ok(())
+            } else {
+                Err(RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))
+            }
+        }
+    }
 }
 
 async fn bind_consumer(

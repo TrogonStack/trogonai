@@ -90,6 +90,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Datadog webhook receiver ──────────────────────────────────────────────
+  trogon-datadog:
+    build:
+      context: .
+      target: trogon-datadog
+    ports:
+      - "8083:8083"
+    environment:
+      NATS_URL: nats://nats:4222
+      DATADOG_WEBHOOK_PORT: "8083"
+      # DATADOG_WEBHOOK_SECRET: ""   # set to validate X-Datadog-Signature
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ── Agentic loop + automations + chat API ────────────────────────────────
   agent:
     build:

@@ -137,4 +137,44 @@ mod tests {
         });
         assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
     }
+
+    fn make_agent() -> AgentLoop {
+        use std::sync::Arc;
+        use crate::tools::ToolContext;
+        AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:9999".to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://localhost:9999".to_string(),
+                github_token: String::new(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
+    }
+
+    #[tokio::test]
+    async fn handle_returns_none_when_repository_field_missing() {
+        // action is "created" but repository field absent → None (? chain fails).
+        let payload = serde_json::json!({
+            "action": "created",
+            "comment": {"body": "hi", "user": {"login": "u"}},
+            "issue": {"number": 1}
+        });
+        assert!(handle(&make_agent(), &serde_json::to_vec(&payload).unwrap()).await.is_none());
+    }
 }

@@ -1,11 +1,12 @@
 # Multi-stage Dockerfile for the full trogon stack.
 #
 # Targets:
-#   proxy         — HTTP detokenization proxy (port 8080)
-#   worker        — JetStream pull consumer + vault admin
-#   agent         — Agentic loop + automations + chat API (port 8090)
-#   trogon-github — GitHub webhook receiver (port 8081)
-#   trogon-linear — Linear webhook receiver (port 8082)
+#   proxy           — HTTP detokenization proxy (port 8080)
+#   worker          — JetStream pull consumer + vault admin
+#   agent           — Agentic loop + automations + chat API (port 8090)
+#   trogon-github   — GitHub webhook receiver (port 8081)
+#   trogon-linear   — Linear webhook receiver (port 8082)
+#   trogon-datadog  — Datadog webhook receiver (port 8083)
 #
 # Build examples:
 #   docker build --target agent  -t trogon-agent  .
@@ -31,7 +32,8 @@ RUN cargo build --release \
     -p trogon-secret-proxy \
     -p trogon-agent \
     -p trogon-github \
-    -p trogon-linear
+    -p trogon-linear \
+    -p trogon-datadog
 
 # ── Stage 4: proxy runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS proxy
@@ -77,3 +79,13 @@ EXPOSE 8082
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD ["sh", "-c", "curl -sf http://localhost:${LINEAR_WEBHOOK_PORT:-8082}/health || exit 1"]
 ENTRYPOINT ["trogon-linear"]
+
+# ── Stage 9: trogon-datadog runtime ──────────────────────────────────────────
+FROM debian:bookworm-slim AS trogon-datadog
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-datadog /usr/local/bin/trogon-datadog
+EXPOSE 8083
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${DATADOG_WEBHOOK_PORT:-8083}/health || exit 1"]
+ENTRYPOINT ["trogon-datadog"]

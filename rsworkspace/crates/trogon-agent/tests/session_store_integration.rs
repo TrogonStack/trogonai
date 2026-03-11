@@ -151,3 +151,31 @@ async fn messages_are_preserved_across_put_get() {
     assert_eq!(got.messages.len(), 3);
     assert_eq!(got.messages[2].role, "user");
 }
+
+/// `list()` must silently skip entries whose bytes cannot be deserialized,
+/// warning rather than failing, and return the other valid sessions.
+#[tokio::test]
+async fn list_skips_unreadable_entry_and_returns_valid_ones() {
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+    let js = jetstream::new(nats);
+    let store = SessionStore::open(&js).await.expect("open");
+
+    // Insert one valid session.
+    store.put(&sample_session("valid-1", "acme")).await.unwrap();
+
+    // Inject corrupted bytes for a second key under the same tenant prefix.
+    let kv = js
+        .get_key_value(trogon_agent::session::SESSIONS_BUCKET)
+        .await
+        .expect("get KV bucket");
+    kv.put("acme.corrupted", bytes::Bytes::from(b"not valid json" as &[u8]))
+        .await
+        .expect("inject bad bytes");
+
+    // list() must return only the valid session and silently skip the corrupt one.
+    let result = store.list("acme").await.expect("list");
+    assert_eq!(result.len(), 1, "only the valid session should be returned");
+    assert_eq!(result[0].id, "valid-1");
+}

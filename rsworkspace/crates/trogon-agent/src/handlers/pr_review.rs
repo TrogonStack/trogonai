@@ -229,4 +229,43 @@ mod tests {
         assert!(REVIEW_ACTIONS.contains(&"synchronize"));
         assert!(!REVIEW_ACTIONS.contains(&"closed"));
     }
+
+    fn make_agent() -> AgentLoop {
+        use std::sync::Arc;
+        use crate::tools::ToolContext;
+        AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:9999".to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://localhost:9999".to_string(),
+                github_token: String::new(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_skips_non_review_action() {
+        let payload = serde_json::json!({
+            "action": "closed",
+            "number": 5,
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(handle(&make_agent(), &serde_json::to_vec(&payload).unwrap()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
+    }
 }
