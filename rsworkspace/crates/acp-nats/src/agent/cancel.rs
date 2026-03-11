@@ -126,7 +126,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -160,7 +160,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors.total")
+            .find(|m| m.name() == "acp.errors")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -222,11 +222,11 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "cancel", false),
-            "expected acp.request.count with method=cancel, success=false on validation failure"
+            "expected acp.requests with method=cancel, success=false on validation failure"
         );
         assert!(
             has_error_metric(&finished_metrics, "cancel", "invalid_session_id"),
-            "expected acp.errors.total with operation=cancel, reason=invalid_session_id"
+            "expected acp.errors with operation=cancel, reason=invalid_session_id"
         );
         provider.shutdown().unwrap();
     }
@@ -241,7 +241,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "cancel", true),
-            "expected acp.request.count with method=cancel, success=true"
+            "expected acp.requests with method=cancel, success=true"
         );
         provider.shutdown().unwrap();
     }
@@ -257,7 +257,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_error_metric(&finished_metrics, "cancel", "cancel_publish_failed"),
-            "expected acp.errors.total with operation=cancel, reason=cancel_publish_failed"
+            "expected acp.errors with operation=cancel, reason=cancel_publish_failed"
         );
         assert!(
             has_request_metric(&finished_metrics, "cancel", false),
@@ -275,7 +275,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -294,7 +294,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.errors.total")
+            .f64_histogram("acp.errors")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);

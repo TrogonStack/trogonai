@@ -102,7 +102,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .any(|sm| {
                 sm.metrics().any(|metric| {
-                    if metric.name() != "acp.request.count" {
+                    if metric.name() != "acp.requests" {
                         return false;
                     }
                     let data = metric.data();
@@ -126,7 +126,7 @@ mod tests {
             });
         assert!(
             found,
-            "expected acp.request.count datapoint with method=authenticate, success={}",
+            "expected acp.requests datapoint with method=authenticate, success={}",
             expected_success
         );
     }
