@@ -203,4 +203,31 @@ mod tests {
         });
         assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
     }
+
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        use std::sync::Arc;
+        use crate::agent_loop::AgentLoop;
+        use crate::tools::ToolContext;
+        let agent = AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:9999".to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://localhost:9999".to_string(),
+                github_token: String::new(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+        };
+        assert!(matches!(handle(&agent, b"not json").await, Some(Err(_))));
+    }
 }
