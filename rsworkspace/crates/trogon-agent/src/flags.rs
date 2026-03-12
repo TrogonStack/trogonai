@@ -31,6 +31,7 @@ use trogon_splitio::flags::FeatureFlag;
 /// Implement each variant in the Split.io / Harness FME dashboard using the
 /// string returned by [`FeatureFlag::name`].  Set a flag to `"off"` to
 /// disable the corresponding handler or capability without redeploying.
+#[derive(Debug)]
 pub enum AgentFlag {
     /// Enable/disable the PR review and PR merged fallback handlers.
     PrReviewEnabled,
@@ -87,7 +88,26 @@ mod tests {
 
     #[test]
     fn description_defaults_to_name() {
-        assert_eq!(AgentFlag::PrReviewEnabled.description(), AgentFlag::PrReviewEnabled.name());
-        assert_eq!(AgentFlag::MemoryEnabled.description(), AgentFlag::MemoryEnabled.name());
+        // All AgentFlag variants must satisfy description() == name() since
+        // no variant overrides the default trait impl.
+        let all: &[AgentFlag] = &[
+            AgentFlag::PrReviewEnabled,
+            AgentFlag::CommentHandlerEnabled,
+            AgentFlag::PushHandlerEnabled,
+            AgentFlag::CiHandlerEnabled,
+            AgentFlag::IssueTriageEnabled,
+            AgentFlag::AlertHandlerEnabled,
+            AgentFlag::MemoryEnabled,
+            AgentFlag::McpEnabled,
+            AgentFlag::IncidentioHandlerEnabled,
+        ];
+        for flag in all {
+            assert_eq!(
+                flag.description(),
+                flag.name(),
+                "AgentFlag::{:?} description() must equal name()",
+                flag
+            );
+        }
     }
 }
