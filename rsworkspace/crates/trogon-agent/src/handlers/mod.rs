@@ -222,6 +222,8 @@ mod tests {
             memory_path: Some(".trogon/memory.md".to_string()), // agent default
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
         let mut automation = make_automation(vec![]);
         automation.memory_path = Some("custom/notes.md".to_string()); // override
@@ -243,13 +245,15 @@ mod tests {
                 proxy_url: proxy_url.to_string(),
                 github_token: "tok_github_prod_test01".to_string(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
-        mcp_tool_defs: vec![],
-        mcp_dispatch: vec![],
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         }
     }
 
@@ -441,6 +445,8 @@ pub async fn run_automation(
                 memory_path: agent.memory_path.clone(),
                 mcp_tool_defs: agent.mcp_tool_defs.clone(),
                 mcp_dispatch: merged_dispatch,
+                split_client: agent.split_client.clone(),
+                tenant_id: agent.tenant_id.clone(),
             };
             &merged
         };
@@ -463,7 +469,14 @@ pub async fn run_automation(
         .unwrap_or(DEFAULT_MEMORY_PATH);
 
     let memory = match (&effective.memory_owner, &effective.memory_repo) {
-        (Some(owner), Some(repo)) => fetch_memory(effective, owner, repo, mem_path).await,
+        (Some(owner), Some(repo)) => {
+            if effective.is_flag_enabled(&crate::flags::AgentFlag::MemoryEnabled).await {
+                fetch_memory(effective, owner, repo, mem_path).await
+            } else {
+                debug!("Memory fetch skipped — agent_memory_enabled flag is off");
+                None
+            }
+        }
         _ => None,
     };
 

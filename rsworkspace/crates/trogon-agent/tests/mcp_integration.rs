@@ -58,6 +58,8 @@ fn make_agent_with_mcp(
             original_name.to_string(),
             mcp_client,
         )],
+        split_client: None,
+        tenant_id: "test".to_string(),
     }
 }
 

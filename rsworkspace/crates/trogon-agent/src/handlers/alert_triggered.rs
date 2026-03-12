@@ -111,6 +111,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         }
     }
 
@@ -218,6 +220,8 @@ mod tests {
             memory_path: Some(".trogon/memory.md".to_string()),
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
 
         let payload = serde_json::json!({

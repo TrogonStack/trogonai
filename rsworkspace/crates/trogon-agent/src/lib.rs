@@ -31,6 +31,7 @@
 pub mod agent_loop;
 pub mod chat_api;
 pub mod config;
+pub mod flags;
 pub mod handlers;
 pub mod runner;
 pub mod session;

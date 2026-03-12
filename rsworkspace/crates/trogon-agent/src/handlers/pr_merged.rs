@@ -161,6 +161,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
         let payload = serde_json::json!({
             "action": "opened",
@@ -194,6 +196,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
         let payload = serde_json::json!({
             "action": "closed",
@@ -227,6 +231,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
         assert!(matches!(handle(&agent, b"not json").await, Some(Err(_))));
     }

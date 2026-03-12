@@ -73,6 +73,14 @@ pub struct AgentConfig {
     /// Set via `TENANT_ID` env var (default: `"default"`).
     /// Used to scope automation lookups and KV keys.
     pub tenant_id: String,
+    /// Base URL of the Split Evaluator sidecar (e.g. `http://localhost:7548`).
+    /// When `None`, Split.io is disabled and all feature flags default to `true`
+    /// (fail-open — all handlers run as if every flag is on).
+    /// Set via `SPLIT_EVALUATOR_URL`.
+    pub split_evaluator_url: Option<String>,
+    /// Auth token for the Split Evaluator (`Authorization` header).
+    /// Must match `SPLIT_EVALUATOR_AUTH_TOKEN` configured on the evaluator.
+    pub split_auth_token: Option<String>,
 }
 
 impl AgentConfig {
@@ -115,6 +123,8 @@ impl AgentConfig {
             tenant_id: env
                 .var("TENANT_ID")
                 .unwrap_or_else(|_| "default".to_string()),
+            split_evaluator_url: env.var("SPLIT_EVALUATOR_URL").ok(),
+            split_auth_token: env.var("SPLIT_EVALUATOR_AUTH_TOKEN").ok(),
         }
     }
 }
@@ -349,5 +359,35 @@ mod tests {
         env.set("TENANT_ID", "acme");
         let cfg = AgentConfig::from_env(&env);
         assert_eq!(cfg.tenant_id, "acme");
+    }
+
+    #[test]
+    fn split_evaluator_url_none_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.split_evaluator_url.is_none());
+    }
+
+    #[test]
+    fn split_evaluator_url_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("SPLIT_EVALUATOR_URL", "http://split:7548");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.split_evaluator_url.as_deref(), Some("http://split:7548"));
+    }
+
+    #[test]
+    fn split_auth_token_none_when_not_set() {
+        let env = InMemoryEnv::new();
+        let cfg = AgentConfig::from_env(&env);
+        assert!(cfg.split_auth_token.is_none());
+    }
+
+    #[test]
+    fn split_auth_token_read_from_env() {
+        let env = InMemoryEnv::new();
+        env.set("SPLIT_EVALUATOR_AUTH_TOKEN", "my-secret");
+        let cfg = AgentConfig::from_env(&env);
+        assert_eq!(cfg.split_auth_token.as_deref(), Some("my-secret"));
     }
 }

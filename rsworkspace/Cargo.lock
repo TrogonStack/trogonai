@@ -4102,6 +4102,7 @@ dependencies = [
  "trogon-mcp",
  "trogon-nats",
  "trogon-secret-proxy",
+ "trogon-splitio",
  "trogon-std",
  "trogon-vault",
  "uuid",

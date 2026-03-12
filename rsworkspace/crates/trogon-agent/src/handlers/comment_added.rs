@@ -128,6 +128,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         };
         let payload = serde_json::json!({
             "action": "deleted",
@@ -159,6 +161,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         }
     }
 

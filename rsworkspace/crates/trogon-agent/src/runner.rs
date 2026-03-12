@@ -85,6 +85,13 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         cfg.slack_token.clone(),
     );
 
+    let split_client = cfg.split_evaluator_url.as_ref().map(|url| {
+        trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
+            evaluator_url: url.clone(),
+            auth_token: cfg.split_auth_token.clone().unwrap_or_default(),
+        })
+    });
+
     let (mcp_tool_defs, mcp_dispatch) =
         init_mcp_servers(&http_client, &cfg.mcp_servers).await;
 
@@ -100,6 +107,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         memory_path: cfg.memory_path.clone(),
         mcp_tool_defs,
         mcp_dispatch,
+        split_client,
+        tenant_id: cfg.tenant_id.clone(),
     });
 
     let store = Arc::new(
@@ -192,7 +201,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             if autos.is_empty() {
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
-                                if is_merged {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
+                                    info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag");
+                                } else if is_merged {
                                     match handlers::pr_merged::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "PR merged done"),
                                         Some(Err(e)) => error!(error = %e, "PR merged error"),
@@ -227,10 +238,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
-                                match handlers::comment_added::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "Comment-added done"),
-                                    Some(Err(e)) => error!(error = %e, "Comment-added error"),
-                                    None => {}
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
+                                    info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
+                                } else {
+                                    match handlers::comment_added::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Comment-added done"),
+                                        Some(Err(e)) => error!(error = %e, "Comment-added error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
                                 dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
@@ -254,10 +269,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
-                                match handlers::push_to_branch::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
-                                    Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
-                                    None => {}
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
+                                    info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
+                                } else {
+                                    match handlers::push_to_branch::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
+                                        Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
                                 dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
@@ -281,10 +300,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
-                                match handlers::ci_completed::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "CI-completed done"),
-                                    Some(Err(e)) => error!(error = %e, "CI-completed error"),
-                                    None => {}
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
+                                    info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
+                                } else {
+                                    match handlers::ci_completed::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "CI-completed done"),
+                                        Some(Err(e)) => error!(error = %e, "CI-completed error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
                                 dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
@@ -308,10 +331,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
-                                match handlers::issue_triage::handle(&agent, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "Issue triage done"),
-                                    Some(Err(e)) => error!(error = %e, "Issue triage error"),
-                                    None => {}
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
+                                    info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
+                                } else {
+                                    match handlers::issue_triage::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Issue triage done"),
+                                        Some(Err(e)) => error!(error = %e, "Issue triage error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
                                 dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
@@ -358,10 +385,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
-                                match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
-                                    Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
-                                    Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
-                                    None => {}
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
+                                    info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
+                                } else {
+                                    match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
+                                        Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
+                                        None => {}
+                                    }
                                 }
                             } else {
                                 dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
@@ -506,6 +537,8 @@ mod tests {
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
         })
     }
 
