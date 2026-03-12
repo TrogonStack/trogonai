@@ -354,6 +354,88 @@ mod tests {
         assert_eq!(t, "blue");
     }
 
+    // ── custom variant → is_enabled = false ──────────────────────────────────
+
+    /// Any treatment that is not exactly `"on"` must return `false` from
+    /// `is_enabled`.  Custom variants (`"blue"`, `"v2"`, etc.) are not
+    /// considered enabled — only `"on"` is.
+    #[tokio::test]
+    async fn is_enabled_returns_false_for_custom_variant() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
+            then.status(200).json_body(serde_json::json!({ "treatment": "blue" }));
+        });
+
+        let client = make_client(&server.base_url());
+        assert!(
+            !client.is_enabled("u", &AppFlag::NewDashboard, None).await,
+            "custom variant 'blue' must not be treated as enabled"
+        );
+    }
+
+    // ── short-circuit behavior ────────────────────────────────────────────────
+
+    /// `all_enabled` must stop evaluating after the first `false` flag.
+    /// The second flag must never be queried.
+    #[tokio::test]
+    async fn all_enabled_short_circuits_after_first_false() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment")
+                .query_param("split-name", "new_dashboard");
+            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+        });
+        let beta_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/client/get-treatment")
+                    .query_param("split-name", "beta_search");
+                then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            })
+            .await;
+
+        let client = make_client(&server.base_url());
+        let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
+        assert!(!client.all_enabled("u", &flags, None).await);
+        assert_eq!(
+            beta_mock.hits_async().await,
+            0,
+            "second flag must not be evaluated after the first is already false"
+        );
+    }
+
+    /// `any_enabled` must stop evaluating after the first `true` flag.
+    /// The second flag must never be queried.
+    #[tokio::test]
+    async fn any_enabled_short_circuits_after_first_true() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment")
+                .query_param("split-name", "new_dashboard");
+            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+        });
+        let beta_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/client/get-treatment")
+                    .query_param("split-name", "beta_search");
+                then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            })
+            .await;
+
+        let client = make_client(&server.base_url());
+        let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
+        assert!(client.any_enabled("u", &flags, None).await);
+        assert_eq!(
+            beta_mock.hits_async().await,
+            0,
+            "second flag must not be evaluated after the first is already true"
+        );
+    }
+
     // ── description default ───────────────────────────────────────────────────
 
     #[test]
