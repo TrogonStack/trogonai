@@ -107,6 +107,28 @@ mod tests {
     }
 
     #[test]
+    fn empty_webhook_secret_is_stored_as_some_empty() {
+        // An explicitly set but empty INCIDENTIO_WEBHOOK_SECRET is stored as
+        // Some("") — the server will attempt HMAC validation with an empty secret.
+        // This documents the behaviour so callers know to avoid empty secrets.
+        let env = InMemoryEnv::new();
+        env.set("INCIDENTIO_WEBHOOK_SECRET", "");
+        let config = IncidentioConfig::from_env(&env);
+        assert_eq!(config.webhook_secret.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn nats_url_is_passed_through_to_nats_config() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", "nats://my-nats:4222");
+        let config = IncidentioConfig::from_env(&env);
+        assert!(
+            config.nats.servers.iter().any(|s| s.contains("my-nats")),
+            "NATS_URL must be reflected in config.nats.servers"
+        );
+    }
+
+    #[test]
     fn invalid_max_age_falls_back_to_default() {
         let env = InMemoryEnv::new();
         env.set("INCIDENTIO_STREAM_MAX_AGE_SECS", "not-a-number");
