@@ -58,4 +58,25 @@ mod tests {
         assert_eq!(cfg.evaluator_url, "http://split:7548");
         assert!(cfg.auth_token.is_empty());
     }
+
+    /// Trailing slashes in the URL are preserved in SplitConfig — stripping
+    /// is the responsibility of SplitClient::new.  This test documents that
+    /// contract so future readers understand where trimming happens.
+    #[test]
+    fn url_with_trailing_slashes_is_stored_as_is() {
+        let env = InMemoryEnv::new();
+        env.set("SPLIT_EVALUATOR_URL", "http://localhost:7548///");
+        let cfg = SplitConfig::from_env(&env);
+        assert_eq!(cfg.evaluator_url, "http://localhost:7548///");
+    }
+
+    /// An empty URL string is stored as-is — the client will fail at request
+    /// time rather than at config-construction time.
+    #[test]
+    fn empty_url_is_stored_as_empty_string() {
+        let env = InMemoryEnv::new();
+        env.set("SPLIT_EVALUATOR_URL", "");
+        let cfg = SplitConfig::from_env(&env);
+        assert_eq!(cfg.evaluator_url, "");
+    }
 }
