@@ -406,6 +406,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_incident_none_optional_fields_not_in_body() {
+        // When summary, severity_id, and idempotency_key are all None, they must
+        // NOT appear in the serialised request body (skip_serializing_if = "Option::is_none").
+        use axum::{Router, routing::post, body::Bytes as AxumBytes};
+        use std::sync::{Arc, Mutex};
+
+        let captured: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+        let cap = captured.clone();
+        let app = Router::new().route(
+            "/incidents",
+            post(move |body: AxumBytes| {
+                let cap = cap.clone();
+                async move {
+                    *cap.lock().unwrap() = Some(body.to_vec());
+                    (
+                        axum::http::StatusCode::CREATED,
+                        axum::Json(serde_json::json!({
+                            "incident": {
+                                "id": "inc-04", "name": "No optional fields",
+                                "status": "triage", "severity": null, "permalink": null
+                            }
+                        })),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok(); });
+
+        let client = make_client(&format!("http://127.0.0.1:{port}"));
+        client.create_incident("No optional fields", None, None, None).await.unwrap();
+
+        let raw = captured.lock().unwrap().clone().unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert!(body.get("summary").is_none(), "summary must be absent when None");
+        assert!(body.get("severity_id").is_none(), "severity_id must be absent when None");
+        assert!(body.get("idempotency_key").is_none(), "idempotency_key must be absent when None");
+    }
+
+    #[tokio::test]
+    async fn get_incident_server_error_returns_err() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/incidents/inc-err");
+            then.status(500).body("internal server error");
+        });
+
+        let client = make_client(&server.base_url());
+        let result = client.get_incident("inc-err").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().0.contains("500"));
+    }
+
+    #[tokio::test]
+    async fn post_update_none_fields_not_in_body() {
+        // When new_status and new_severity_id are None, they must NOT appear in
+        // the request body (skip_serializing_if = "Option::is_none").
+        use axum::{Router, routing::post, body::Bytes as AxumBytes};
+        use std::sync::{Arc, Mutex};
+
+        let captured: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+        let cap = captured.clone();
+        let app = Router::new().route(
+            "/incident_updates",
+            post(move |body: AxumBytes| {
+                let cap = cap.clone();
+                async move {
+                    *cap.lock().unwrap() = Some(body.to_vec());
+                    axum::Json(serde_json::json!({"incident_update": {}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok(); });
+
+        let client = make_client(&format!("http://127.0.0.1:{port}"));
+        client.post_update("inc-05", "Progress update", None, None).await.unwrap();
+
+        let raw = captured.lock().unwrap().clone().unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert!(body.get("new_status").is_none(), "new_status must be absent when None");
+        assert!(body.get("new_severity_id").is_none(), "new_severity_id must be absent when None");
+    }
+
+    #[tokio::test]
     async fn create_incident_with_summary_and_severity() {
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {

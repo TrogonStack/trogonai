@@ -242,6 +242,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_returns_some_err_when_agent_fails() {
+        // When the Anthropic API returns an error, run_agent fails and the
+        // handler must return Some(Err(...)) rather than panicking or returning None.
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(500).body("internal error");
+        });
+
+        let agent = make_agent(&server.base_url());
+        let payload = serde_json::json!({
+            "event_type": "incident.created",
+            "incident": {"id": "inc-fail", "name": "test", "status": "active", "severity": {"name": "P1"}}
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.created", &bytes).await;
+        assert!(
+            matches!(result, Some(Err(_))),
+            "agent failure must produce Some(Err), got: {:?}", result
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_malformed_severity_uses_unknown_fallback() {
+        // When severity is a plain string rather than {"name": "..."}, as_str()
+        // on severity["name"] returns None → fallback "unknown" is used.
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("unknown"); // severity fallback
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "handled"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let payload = serde_json::json!({
+            "event_type": "incident.created",
+            "incident": {
+                "id": "inc-sev",
+                "name": "Bad severity",
+                "status": "active",
+                "severity": "P1"  // string, not {"name": "P1"}
+            }
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.created", &bytes).await;
+        assert!(matches!(result, Some(Ok(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn handle_incident_updated_uses_generic_guidance() {
         let server = httpmock::MockServer::start_async().await;
         let mock = server.mock(|when, then| {

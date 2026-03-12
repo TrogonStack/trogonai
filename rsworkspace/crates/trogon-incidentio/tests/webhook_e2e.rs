@@ -736,6 +736,31 @@ async fn list_incidents_skips_unparseable_kv_entries() {
     assert_eq!(incidents[0]["incident"]["id"].as_str(), Some("inc-valid"));
 }
 
+/// HTTP header names are case-insensitive; a sender using `X-INCIDENT-SIGNATURE`
+/// (all-caps) must be accepted the same as `X-Incident-Signature`.
+#[tokio::test]
+async fn webhook_signature_header_is_case_insensitive() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let secret = "case-test-secret";
+    let body = br#"{"event_type":"incident.created","incident":{"id":"inc-case"}}"#;
+
+    spawn_server(nats_port, http_port, Some(secret)).await;
+
+    let sig = compute_sig(secret, body);
+    // Send using all-uppercase header name.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("X-INCIDENT-SIGNATURE", sig)
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200, "uppercase header name must be accepted");
+}
+
 /// Missing X-Incident-Delivery header defaults to "unknown".
 #[tokio::test]
 async fn webhook_missing_delivery_header_defaults_to_unknown() {

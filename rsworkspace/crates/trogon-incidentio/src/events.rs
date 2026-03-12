@@ -97,4 +97,25 @@ mod tests {
     fn null_event_type_falls_back_to_event() {
         assert_eq!(nats_subject_suffix(br#"{"event_type":null}"#), "event");
     }
+
+    #[test]
+    fn non_string_event_type_falls_back_to_event() {
+        // Numbers and objects are not strings — as_str() returns None.
+        assert_eq!(nats_subject_suffix(br#"{"event_type":42}"#), "event");
+        assert_eq!(nats_subject_suffix(br#"{"event_type":{"nested":"val"}}"#), "event");
+        assert_eq!(nats_subject_suffix(br#"{"event_type":["a","b"]}"#), "event");
+    }
+
+    #[test]
+    fn incident_id_empty_string_returns_some_empty() {
+        // An empty-string ID is technically valid JSON — we return Some("") and
+        // let the caller decide whether to use it as a KV key.
+        let body = br#"{"incident":{"id":""}}"#;
+        assert_eq!(incident_id(body), Some("".to_string()));
+    }
+
+    #[test]
+    fn incident_id_when_incident_is_null_returns_none() {
+        assert_eq!(incident_id(br#"{"event_type":"incident.created","incident":null}"#), None);
+    }
 }
