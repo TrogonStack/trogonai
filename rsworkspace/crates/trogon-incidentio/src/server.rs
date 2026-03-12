@@ -14,9 +14,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::{
+    Json,
     Router,
     body::Bytes,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post},
 };
@@ -63,6 +64,8 @@ pub async fn serve(
     let app = Router::new()
         .route("/webhook", post(handle_webhook))
         .route("/health", get(handle_health))
+        .route("/incidents", get(list_incidents))
+        .route("/incidents/:id", get(get_incident_by_id))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -199,6 +202,49 @@ async fn handle_webhook(
         Err(e) => {
             warn!(error = %e, "Failed to publish incident.io event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+/// `GET /incidents` — returns all stored incidents as a JSON array.
+async fn list_incidents(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+    let raw_list = state
+        .incident_store
+        .list()
+        .await
+        .map_err(|e| {
+            warn!(error = %e, "Failed to list incidents from KV");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let incidents: Vec<serde_json::Value> = raw_list
+        .into_iter()
+        .filter_map(|bytes| serde_json::from_slice(&bytes).ok())
+        .collect();
+
+    Ok(Json(incidents))
+}
+
+/// `GET /incidents/:id` — returns the stored state of a single incident.
+async fn get_incident_by_id(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.incident_store.get(&id).await {
+        Ok(Some(bytes)) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| {
+                    warn!(incident_id = %id, error = %e, "Failed to deserialize incident JSON");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            Ok(Json(value))
+        }
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            warn!(incident_id = %id, error = %e, "Failed to get incident from KV");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
