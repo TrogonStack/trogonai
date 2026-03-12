@@ -161,6 +161,72 @@ fn agent_config_with_memory(
     }
 }
 
+/// When `split_auth_token` is configured it must be forwarded to the
+/// evaluator as the `Authorization` header on every flag request.
+/// The mock evaluator only returns `"on"` for the correct token — verifying
+/// that the header is actually sent.
+#[tokio::test]
+async fn split_auth_token_is_forwarded_to_evaluator() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Evaluator stub that returns "on" only when the correct token is present.
+    let evaluator_server = MockServer::start_async().await;
+    let evaluator_mock = evaluator_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment")
+                .header("authorization", "my-split-secret");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"treatment":"on"}"#);
+        })
+        .await;
+    let evaluator_url = evaluator_server.base_url();
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}"#);
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+    let vault = Arc::new(MemoryVault::new());
+    vault
+        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .await
+        .unwrap();
+    let proxy_port = start_proxy_and_worker(
+        &nats,
+        Arc::clone(&js),
+        mock_server.base_url(),
+        Arc::clone(&vault),
+        "auth-token-worker",
+    )
+    .await;
+
+    let mut cfg = agent_config(
+        nats_port,
+        format!("http://127.0.0.1:{proxy_port}"),
+        Some(evaluator_url),
+    );
+    cfg.split_auth_token = Some("my-split-secret".to_string());
+
+    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    publish_datadog_alert(nats_port).await;
+
+    // Evaluator returns "on" only when the correct auth token is sent.
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(hit, "Anthropic must be called — evaluator returned 'on' for the correct auth token");
+    evaluator_mock.assert_async().await;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// When the evaluator returns HTTP 500 (as opposed to being unreachable),
