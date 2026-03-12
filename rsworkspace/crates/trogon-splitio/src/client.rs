@@ -638,6 +638,57 @@ mod tests {
         assert!(!client.is_healthy().await);
     }
 
+    // ── get_treatments edge cases ─────────────────────────────────────────────
+
+    /// Empty flags slice → `flags.join(",")` produces `""` →
+    /// the mock filters out empty tokens → empty map returned.
+    #[tokio::test]
+    async fn get_treatments_with_empty_flags_returns_empty_map() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/client/get-treatments")
+                    .query_param("split-names", "");
+                then.status(200).json_body(serde_json::json!({}));
+            })
+            .await;
+
+        let client = make_client(&server.base_url());
+        let result = client.get_treatments("u", &[], None).await.unwrap();
+        assert!(result.is_empty(), "empty flags slice must yield empty map");
+        mock.assert_async().await;
+    }
+
+    // ── get_treatment_with_config edge cases ──────────────────────────────────
+
+    /// When the evaluator returns a `config` field that is not valid JSON,
+    /// the client silently discards it and returns `config: None` rather than
+    /// propagating an error — flags must never block the calling path.
+    #[tokio::test]
+    async fn get_treatment_with_config_invalid_json_is_silently_discarded() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment-with-config");
+            then.status(200).json_body(serde_json::json!({
+                "treatment": "on",
+                "config": "not valid json {{{"
+            }));
+        });
+
+        let client = make_client(&server.base_url());
+        let result = client
+            .get_treatment_with_config("u", "my_flag", None)
+            .await
+            .unwrap();
+        assert_eq!(result.treatment, "on");
+        assert!(
+            result.config.is_none(),
+            "invalid JSON config must be silently discarded, not surfaced as an error"
+        );
+    }
+
     // ── trailing slash handling ───────────────────────────────────────────────
 
     #[tokio::test]
