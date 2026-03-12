@@ -84,4 +84,17 @@ mod tests {
     fn incident_id_invalid_json_returns_none() {
         assert_eq!(incident_id(b"not json"), None);
     }
+
+    #[test]
+    fn incident_id_numeric_returns_none() {
+        // incident.io IDs are strings; if a sender sends a number, as_str()
+        // returns None and we skip the KV upsert rather than panicking.
+        let body = br#"{"event_type":"incident.created","incident":{"id":42}}"#;
+        assert_eq!(incident_id(body), None);
+    }
+
+    #[test]
+    fn null_event_type_falls_back_to_event() {
+        assert_eq!(nats_subject_suffix(br#"{"event_type":null}"#), "event");
+    }
 }
