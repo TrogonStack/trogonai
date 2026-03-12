@@ -4098,6 +4098,7 @@ dependencies = [
  "trogon-automations",
  "trogon-datadog",
  "trogon-github",
+ "trogon-incidentio",
  "trogon-linear",
  "trogon-mcp",
  "trogon-nats",
@@ -4160,6 +4161,29 @@ dependencies = [
  "hex",
  "hmac",
  "reqwest",
+ "sha2",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-incidentio"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.7.9",
+ "bytes",
+ "futures-util",
+ "hex",
+ "hmac",
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
  "sha2",
  "testcontainers-modules",
  "tokio",
