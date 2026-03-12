@@ -45,6 +45,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod flags;
+pub mod mock;
 
 pub use client::SplitClient;
 pub use config::SplitConfig;
