@@ -250,6 +250,8 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -447,6 +449,8 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();

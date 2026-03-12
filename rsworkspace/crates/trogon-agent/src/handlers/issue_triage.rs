@@ -178,6 +178,8 @@ mod tests {
             memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
         };
 
         let result = handle(&agent, &bytes).await;
@@ -207,6 +209,8 @@ mod tests {
             memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
         };
 
         let payload = serde_json::json!({
@@ -241,6 +245,8 @@ mod tests {
             memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
         };
 
         let result = handle(&agent, b"not json").await;
