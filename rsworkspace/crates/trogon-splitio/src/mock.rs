@@ -359,4 +359,50 @@ mod tests {
         assert_eq!(evs[0].event_type, "page_view");
         assert_eq!(evs[1].event_type, "signup");
     }
+
+    // ── edge cases ────────────────────────────────────────────────────────────
+
+    /// When `split-name` is absent from the query, the handler falls back to
+    /// `""`.  Since `""` is not a registered flag, the response is `"control"`.
+    #[tokio::test]
+    async fn mock_missing_split_name_returns_control() {
+        let mock = MockEvaluator::new();
+        let (addr, _h) = mock.serve().await;
+        let client = client_for(addr);
+
+        // Pass an empty flag name — equivalent to a missing split-name param.
+        let t = client.get_treatment("user-1", "", None).await.unwrap();
+        assert_eq!(t, "control", "empty / missing split-name must return 'control'");
+    }
+
+    /// When required track params (`key`, `traffic-type`, `event-type`) are
+    /// absent the handler returns 200 but does NOT record the event.
+    /// This documents the silent-ignore contract so callers can rely on it.
+    #[tokio::test]
+    async fn mock_track_with_missing_params_is_silently_ignored() {
+        let mock = MockEvaluator::new();
+        let events = mock.tracked_events.clone();
+        let (addr, _h) = mock.serve().await;
+
+        // Hit the /client/track endpoint with only a partial set of params
+        // (no event-type) — the handler must swallow it silently.
+        let url = format!("http://{addr}/client/track?key=user-1&traffic-type=user");
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200, "track endpoint must always return 200");
+
+        let evs = events.lock().unwrap();
+        assert_eq!(evs.len(), 0, "incomplete track params must not produce a recorded event");
+    }
+
+    /// `get_treatments` with no flags in the `split-names` param returns an
+    /// empty map — the mock filters out empty tokens from the comma split.
+    #[tokio::test]
+    async fn mock_get_treatments_with_empty_names_returns_empty_map() {
+        let mock = MockEvaluator::new().with_flag("flag_a", "on");
+        let (addr, _h) = mock.serve().await;
+        let client = client_for(addr);
+
+        let map = client.get_treatments("u", &[], None).await.unwrap();
+        assert!(map.is_empty(), "empty split-names must yield an empty map");
+    }
 }
