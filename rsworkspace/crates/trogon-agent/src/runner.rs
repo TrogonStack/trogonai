@@ -47,6 +47,7 @@ const CI_CONSUMER: &str = "trogon-agent-ci-completed";
 const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
 const CRON_CONSUMER: &str = "trogon-agent-cron";
 const DATADOG_CONSUMER: &str = "trogon-agent-datadog-alert";
+const INCIDENTIO_CONSUMER: &str = "trogon-agent-incidentio";
 
 #[derive(Debug)]
 pub enum RunnerError {
@@ -157,6 +158,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
     let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
     let datadog_stream_name = cfg.datadog_stream_name.as_deref().unwrap_or("DATADOG");
+    let incidentio_stream_name = cfg.incidentio_stream_name.as_deref().unwrap_or("INCIDENTIO");
 
     // Ensure all required JetStream streams exist before binding consumers.
     // This removes the hard startup-order dependency on trogon-github, trogon-linear,
@@ -165,6 +167,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
     ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
     ensure_stream(&js, datadog_stream_name, &["datadog.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(&js, incidentio_stream_name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
 
     let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
     let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
@@ -173,6 +176,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
     let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
     let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
+    let mut incidentio_messages = bind_consumer(&js, incidentio_stream_name, INCIDENTIO_CONSUMER, "incidentio.>").await?;
 
     info!(
         proxy_url = %cfg.proxy_url,
@@ -398,6 +402,37 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
+                        });
+                    }
+                }
+            }
+            msg = incidentio_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving incident.io message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
+                                    info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
+                                } else {
+                                    match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
+                                        Some(Err(e)) => error!(error = %e, "incident.io handler error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
                         });
                     }
                 }
