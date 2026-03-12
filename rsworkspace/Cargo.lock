@@ -4372,6 +4372,7 @@ dependencies = [
 name = "trogon-splitio"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "httpmock",
  "reqwest",
  "serde",
