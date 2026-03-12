@@ -10,6 +10,7 @@
 
 use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
+use futures_util::StreamExt;
 
 pub const BUCKET: &str = "INCIDENTS";
 
@@ -68,5 +69,31 @@ impl IncidentStore {
             None => Ok(None),
             Some(bytes) => Ok(Some(bytes.to_vec())),
         }
+    }
+
+    /// List all stored incidents.
+    ///
+    /// Iterates over all keys in the KV bucket and returns the latest value for
+    /// each incident.  Keys with no value (deleted entries) are skipped.
+    pub async fn list(&self) -> Result<Vec<Vec<u8>>, StoreError> {
+        let mut keys = self
+            .kv
+            .keys()
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
+
+        let mut results = Vec::new();
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(|e| StoreError(e.to_string()))?;
+            if let Some(bytes) = self
+                .kv
+                .get(&key)
+                .await
+                .map_err(|e| StoreError(e.to_string()))?
+            {
+                results.push(bytes.to_vec());
+            }
+        }
+        Ok(results)
     }
 }

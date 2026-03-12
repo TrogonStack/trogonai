@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 async-nats = "0.45.0"
 axum = "0.7"
+futures-util = "0.3"
 bytes = "1"
 hex = "0.4"
 hmac = "0.12"
