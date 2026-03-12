@@ -44,10 +44,12 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod flags;
 
 pub use client::SplitClient;
 pub use config::SplitConfig;
 pub use error::SplitError;
+pub use flags::FeatureFlag;
 
 /// The value returned when the SDK is not ready, a flag does not exist, or an
 /// error occurred during evaluation.  Never roll out new behaviour to a user
