@@ -107,6 +107,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── incident.io webhook receiver ─────────────────────────────────────────
+  trogon-incidentio:
+    build:
+      context: .
+      target: trogon-incidentio
+    ports:
+      - "8084:8084"
+    environment:
+      NATS_URL: nats://nats:4222
+      INCIDENTIO_WEBHOOK_PORT: "8084"
+      # INCIDENTIO_WEBHOOK_SECRET: ""   # set to validate X-Incident-Signature
+      # INCIDENTIO_API_TOKEN: ""        # Bearer token for the incident.io REST API
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ── Agentic loop + automations + chat API ────────────────────────────────
   agent:
     build:
@@ -130,6 +148,7 @@ services:
       # MEMORY_OWNER: my-org
       # MEMORY_REPO: my-repo
       # MEMORY_PATH: .trogon/memory.md
+      # INCIDENTIO_STREAM_NAME: INCIDENTIO
     depends_on:
       nats:
         condition: service_healthy
