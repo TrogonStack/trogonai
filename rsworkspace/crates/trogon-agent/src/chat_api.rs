@@ -295,6 +295,8 @@ async fn send_message(
             memory_path: state.agent.memory_path.clone(),
             mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
             mcp_dispatch: state.agent.mcp_dispatch.clone(),
+            split_client: state.agent.split_client.clone(),
+            tenant_id: state.agent.tenant_id.clone(),
         };
         &temp_agent
     };
