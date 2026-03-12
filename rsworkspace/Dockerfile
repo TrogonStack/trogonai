@@ -1,12 +1,14 @@
 # Multi-stage Dockerfile for the full trogon stack.
 #
 # Targets:
-#   proxy           — HTTP detokenization proxy (port 8080)
-#   worker          — JetStream pull consumer + vault admin
-#   agent           — Agentic loop + automations + chat API (port 8090)
-#   trogon-github   — GitHub webhook receiver (port 8081)
-#   trogon-linear   — Linear webhook receiver (port 8082)
-#   trogon-datadog  — Datadog webhook receiver (port 8083)
+#   proxy              — HTTP detokenization proxy (port 8080)
+#   worker             — JetStream pull consumer + vault admin
+#   agent              — Agentic loop + automations + chat API (port 8090)
+#   trogon-github      — GitHub webhook receiver (port 8081)
+#   trogon-linear      — Linear webhook receiver (port 8082)
+#   trogon-datadog     — Datadog webhook receiver (port 8083)
+#   trogon-incidentio  — incident.io webhook receiver (port 8084)
+#   trogon-incidentio — incident.io webhook receiver (port 8084)
 #
 # Build examples:
 #   docker build --target agent  -t trogon-agent  .
@@ -33,7 +35,8 @@ RUN cargo build --release \
     -p trogon-agent \
     -p trogon-github \
     -p trogon-linear \
-    -p trogon-datadog
+    -p trogon-datadog \
+    -p trogon-incidentio
 
 # ── Stage 4: proxy runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS proxy
@@ -89,3 +92,13 @@ EXPOSE 8083
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD ["sh", "-c", "curl -sf http://localhost:${DATADOG_WEBHOOK_PORT:-8083}/health || exit 1"]
 ENTRYPOINT ["trogon-datadog"]
+
+# ── Stage 10: trogon-incidentio runtime ──────────────────────────────────────
+FROM debian:bookworm-slim AS trogon-incidentio
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-incidentio /usr/local/bin/trogon-incidentio
+EXPOSE 8084
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${INCIDENTIO_WEBHOOK_PORT:-8084}/health || exit 1"]
+ENTRYPOINT ["trogon-incidentio"]
