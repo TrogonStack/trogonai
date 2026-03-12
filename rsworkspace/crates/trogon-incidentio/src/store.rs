@@ -160,6 +160,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn open_is_idempotent() {
+        // Opening the same KV bucket twice must succeed — create_or_update is safe to call
+        // multiple times on the same JetStream context.
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("Docker must be running for store tests");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let js = async_nats::jetstream::new(nats);
+
+        let store1 = IncidentStore::open(&js).await.unwrap();
+        let store2 = IncidentStore::open(&js).await.unwrap();
+
+        // Both stores must work independently.
+        store1.upsert("inc-a", b"a").await.unwrap();
+        let got = store2.get("inc-a").await.unwrap();
+        assert_eq!(got.as_deref(), Some(b"a".as_slice()));
+    }
+
+    #[tokio::test]
     async fn list_returns_all_incidents() {
         let (_c, store) = open_store().await;
         store.upsert("inc-a", b"payload-a").await.unwrap();

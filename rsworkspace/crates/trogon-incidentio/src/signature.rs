@@ -69,4 +69,24 @@ mod tests {
         let with_prefix = format!("sha256={sig}");
         assert!(!verify("secret", b"body", &with_prefix));
     }
+
+    #[test]
+    fn uppercase_hex_signature_is_accepted() {
+        // hex::decode is case-insensitive — document that incident.io senders
+        // using uppercase hex are still accepted.
+        let sig = compute_sig("secret", b"payload").to_uppercase();
+        assert!(verify("secret", b"payload", &sig));
+    }
+
+    #[test]
+    fn mixed_case_hex_signature_is_accepted() {
+        let sig = compute_sig("secret", b"payload");
+        // Alternate case of every character.
+        let mixed: String = sig
+            .chars()
+            .enumerate()
+            .map(|(i, c)| if i % 2 == 0 { c.to_ascii_uppercase() } else { c })
+            .collect();
+        assert!(verify("secret", b"payload", &mixed));
+    }
 }

@@ -587,6 +587,106 @@ async fn webhook_multiple_events_published_in_order() {
     assert_eq!(received_subjects[2], "incidentio.incident.resolved");
 }
 
+/// A malformed JSON body (not valid JSON) with a valid signature is accepted
+/// and published to the fallback `incidentio.event` subject.  The KV store is
+/// NOT updated because `incident_id()` returns `None` for invalid JSON.
+#[tokio::test]
+async fn webhook_malformed_json_body_published_to_fallback_subject() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let secret = "test-secret";
+    let body = b"this is not valid json at all";
+
+    let nats = spawn_server(nats_port, http_port, Some(secret)).await;
+    let mut sub = nats.subscribe("incidentio.event").await.expect("subscribe");
+
+    let sig = compute_sig(secret, body);
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("X-Incident-Signature", sig)
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200);
+
+    // Message must arrive on the fallback subject.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for incidentio.event message")
+        .expect("subscriber closed");
+
+    // KV must remain empty — no incident_id to key on.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    let mut keys = kv.keys().await.expect("keys");
+    assert!(keys.next().await.is_none(), "KV must be empty for malformed-JSON body");
+}
+
+/// A valid JSON body with a correct signature but without `incident.id` is
+/// published to the correct NATS subject, but the KV store is NOT updated.
+#[tokio::test]
+async fn webhook_body_without_incident_id_is_published_but_not_stored() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    // No incident.id field — the incident object is present but id is absent.
+    let body = br#"{"event_type":"incident.created","incident":{"name":"no-id-incident"}}"#;
+
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    // Published to correct subject.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for NATS message")
+        .expect("subscriber closed");
+
+    // KV must remain empty — no incident_id was extracted.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    let mut keys = kv.keys().await.expect("keys");
+    assert!(keys.next().await.is_none(), "KV must be empty when incident.id is missing");
+}
+
+/// GET /incidents/:id returns 500 when the stored entry contains invalid JSON.
+///
+/// This exercises the `serde_json::from_slice` error path inside
+/// `get_incident_by_id`, which differs from the `filter_map` in `list_incidents`.
+#[tokio::test]
+async fn get_incident_by_id_returns_500_for_corrupt_stored_entry() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    // Start the server (creates the INCIDENTS bucket).
+    spawn_server(nats_port, http_port, None).await;
+
+    // Inject corrupt JSON directly into the INCIDENTS KV bucket.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    kv.put("inc-corrupt-get", bytes::Bytes::from_static(b"<<<not json>>>"))
+        .await
+        .expect("KV put failed");
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port}/incidents/inc-corrupt-get"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 500, "corrupt KV entry must yield 500 from GET /incidents/:id");
+}
+
 /// GET /incidents silently skips KV entries that contain invalid JSON.
 ///
 /// This exercises the `filter_map(|bytes| serde_json::from_slice(&bytes).ok())`
