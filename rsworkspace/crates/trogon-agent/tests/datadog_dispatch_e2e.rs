@@ -219,6 +219,8 @@ async fn datadog_webhook_http_triggers_full_pipeline_with_real_key() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -368,6 +370,8 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
 
@@ -435,6 +439,8 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     let auto = trogon_automations::Automation {
         id: "dd-auto-1".to_string(),
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
         name: "DD alert auto".to_string(),
         trigger: "datadog.alert".to_string(),
         prompt: "Handle this Datadog alert via automation.".to_string(),
@@ -492,6 +498,8 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -614,6 +622,8 @@ async fn datadog_event_subject_triggers_full_pipeline() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -711,6 +721,8 @@ async fn datadog_handler_error_still_acks_and_continues() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -784,6 +796,8 @@ async fn datadog_event_automation_dispatch() {
     let auto = trogon_automations::Automation {
         id: "dd-event-auto-1".to_string(),
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
         name: "DD event auto".to_string(),
         trigger: "datadog.event".to_string(),
         prompt: "Handle this Datadog event via automation.".to_string(),
@@ -837,6 +851,8 @@ async fn datadog_event_automation_dispatch() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
     };
     tokio::spawn(async move { run(agent_cfg).await.ok(); });
     tokio::time::sleep(Duration::from_millis(300)).await;

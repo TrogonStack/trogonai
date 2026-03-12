@@ -55,7 +55,7 @@ use crate::{CONTROL, SplitClient, error::SplitError};
 /// the Split.io / Harness FME dashboard.
 ///
 /// [`name`]: FeatureFlag::name
-pub trait FeatureFlag {
+pub trait FeatureFlag: Send + Sync {
     /// The flag name as configured in Split.io (e.g. `"new_checkout_flow"`).
     fn name(&self) -> &'static str;
 
