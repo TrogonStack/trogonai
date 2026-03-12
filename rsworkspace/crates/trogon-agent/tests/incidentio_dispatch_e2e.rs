@@ -374,6 +374,111 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     anthropic_mock.assert_async().await;
 }
 
+/// Same pipeline but with `incident.updated` — verifies the subject
+/// `incidentio.incident.updated` reaches the agent (handled by the `_` branch).
+#[tokio::test]
+async fn incidentio_updated_triggers_full_pipeline() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey")
+                .body_contains("incident.updated");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Status update posted."}]}"#,
+                );
+        })
+        .await;
+
+    let vault = Arc::new(MemoryVault::new());
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    let outbound_subject = subjects::outbound("trogon");
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    let proxy_state = ProxyState {
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+
+    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let wjs = Arc::clone(&js);
+    let wnats = nats.clone();
+    let wvault = Arc::clone(&vault);
+    let wstream = stream::stream_name("trogon");
+    tokio::spawn(async move {
+        worker::run(wjs, wnats, wvault, http_client, "iio-updated-worker", &wstream).await.ok();
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let incidentio_port = next_port();
+    let webhook_secret = "test-iio-updated-secret";
+    let env = InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("INCIDENTIO_WEBHOOK_PORT", incidentio_port.to_string());
+    env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
+    let incidentio_config = IncidentioConfig::from_env(&env);
+
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    tokio::spawn(async move { incidentio_serve(incidentio_config, nats_for_iio).await.ok(); });
+    wait_for_port(incidentio_port).await;
+
+    let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "event_type": "incident.updated",
+        "incident": {
+            "id": "inc-e2e-updated-001",
+            "name": "Memory leak in service",
+            "status": "investigating",
+            "severity": { "name": "high" }
+        }
+    }))
+    .unwrap();
+    let sig = compute_incidentio_sig(webhook_secret, &body);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{incidentio_port}/webhook"))
+        .header("x-incident-signature", sig)
+        .header("x-incident-delivery", "del-updated-001")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(hit, "Mock Anthropic not called for incident.updated within 20 s");
+    anthropic_mock.assert_async().await;
+}
+
 /// Automation registered for `incidentio.incident.created` takes precedence
 /// over the fallback handler.
 #[tokio::test]
