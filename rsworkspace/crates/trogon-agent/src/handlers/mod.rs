@@ -6,6 +6,7 @@
 pub mod alert_triggered;
 pub mod ci_completed;
 pub mod comment_added;
+pub mod incident_declared;
 pub mod issue_triage;
 pub mod pr_merged;
 pub mod pr_review;
