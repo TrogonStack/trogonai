@@ -53,6 +53,8 @@ pub struct AgentConfig {
     pub cron_stream_name: Option<String>,
     /// JetStream stream name for Datadog events (default: `DATADOG`).
     pub datadog_stream_name: Option<String>,
+    /// JetStream stream name for incident.io events (default: `INCIDENTIO`).
+    pub incidentio_stream_name: Option<String>,
     /// GitHub repo owner for reading `.trogon/memory.md` in Linear handlers
     /// (e.g. `"my-org"`).  Not needed for PR handlers — they use the PR repo.
     pub memory_owner: Option<String>,
@@ -107,6 +109,7 @@ impl AgentConfig {
             linear_stream_name: env.var("LINEAR_STREAM_NAME").ok(),
             cron_stream_name: env.var("CRON_STREAM_NAME").ok(),
             datadog_stream_name: env.var("DATADOG_STREAM_NAME").ok(),
+            incidentio_stream_name: env.var("INCIDENTIO_STREAM_NAME").ok(),
             memory_owner: env.var("MEMORY_OWNER").ok(),
             memory_repo: env.var("MEMORY_REPO").ok(),
             memory_path: env.var("MEMORY_PATH").ok(),
