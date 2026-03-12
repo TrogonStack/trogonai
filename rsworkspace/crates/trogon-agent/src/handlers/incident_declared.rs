@@ -242,6 +242,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_incident_updated_uses_generic_guidance() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("incident.updated")
+                .body_contains("status update");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "status noted"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let payload = serde_json::json!({
+            "event_type": "incident.updated",
+            "incident": {
+                "id": "inc-upd-1",
+                "name": "DB latency",
+                "status": "investigating",
+                "severity": {"name": "P2"}
+            }
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.updated", &bytes).await;
+        assert!(matches!(result, Some(Ok(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn handle_with_null_incident_fields_uses_fallbacks() {
+        let server = httpmock::MockServer::start_async().await;
+        // When status/severity/name are explicitly null the prompt must still
+        // be built (using the fallback strings) — no panic.
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("unknown")   // status fallback
+                .body_contains("(no name)"); // name fallback
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "ok"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let payload = serde_json::json!({
+            "event_type": "incident.created",
+            "incident": {
+                "id": null,
+                "name": null,
+                "status": null,
+                "severity": null
+            }
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.created", &bytes).await;
+        assert!(matches!(result, Some(Ok(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn handle_proceeds_without_memory_when_fetch_fails() {
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {

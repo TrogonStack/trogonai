@@ -97,3 +97,80 @@ impl IncidentStore {
         Ok(results)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{runners::AsyncRunner, ImageExt};
+
+    async fn open_store() -> (impl Drop, IncidentStore) {
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("Docker must be running for store tests");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let js = async_nats::jetstream::new(nats);
+        let store = IncidentStore::open(&js).await.unwrap();
+        (container, store)
+    }
+
+    #[tokio::test]
+    async fn open_creates_kv_bucket() {
+        let (_c, store) = open_store().await;
+        store.upsert("probe", b"{}").await.unwrap();
+        let v = store.get("probe").await.unwrap();
+        assert!(v.is_some());
+    }
+
+    #[tokio::test]
+    async fn upsert_and_get_roundtrip() {
+        let (_c, store) = open_store().await;
+        let data = br#"{"id":"inc-1","name":"disk full"}"#;
+        store.upsert("inc-1", data).await.unwrap();
+        let got = store.get("inc-1").await.unwrap().expect("should be Some");
+        assert_eq!(got, data);
+    }
+
+    #[tokio::test]
+    async fn upsert_overwrites_existing_entry() {
+        let (_c, store) = open_store().await;
+        store.upsert("inc-2", b"original").await.unwrap();
+        store.upsert("inc-2", b"updated").await.unwrap();
+        let got = store.get("inc-2").await.unwrap().unwrap();
+        assert_eq!(got, b"updated");
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_missing_key() {
+        let (_c, store) = open_store().await;
+        let result = store.get("does-not-exist").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_empty_bucket_returns_empty_vec() {
+        let (_c, store) = open_store().await;
+        let result = store.list().await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_returns_all_incidents() {
+        let (_c, store) = open_store().await;
+        store.upsert("inc-a", b"payload-a").await.unwrap();
+        store.upsert("inc-b", b"payload-b").await.unwrap();
+        store.upsert("inc-c", b"payload-c").await.unwrap();
+
+        let mut results = store.list().await.unwrap();
+        results.sort();
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&b"payload-a".to_vec()));
+        assert!(results.contains(&b"payload-b".to_vec()));
+        assert!(results.contains(&b"payload-c".to_vec()));
+    }
+}

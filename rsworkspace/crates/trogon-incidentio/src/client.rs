@@ -370,6 +370,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_incident_with_idempotency_key_sends_key() {
+        let server = MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/incidents")
+                .body_contains("\"idempotency_key\"")
+                .body_contains("my-idem-key-123");
+            then.status(201)
+                .header("content-type", "application/json")
+                .json_body(incident_json("inc-03", "Idempotent incident"));
+        });
+
+        let client = make_client(&server.base_url());
+        client
+            .create_incident("Idempotent incident", None, None, Some("my-idem-key-123"))
+            .await
+            .unwrap();
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn create_incident_malformed_json_response_returns_err() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/incidents");
+            then.status(201)
+                .header("content-type", "application/json")
+                .body("{not valid json");
+        });
+
+        let client = make_client(&server.base_url());
+        let result = client.create_incident("test", None, None, None).await;
+        assert!(result.is_err(), "malformed JSON response must return Err");
+    }
+
+    #[tokio::test]
     async fn create_incident_with_summary_and_severity() {
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {

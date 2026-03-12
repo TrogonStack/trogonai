@@ -587,6 +587,55 @@ async fn webhook_multiple_events_published_in_order() {
     assert_eq!(received_subjects[2], "incidentio.incident.resolved");
 }
 
+/// GET /incidents silently skips KV entries that contain invalid JSON.
+///
+/// This exercises the `filter_map(|bytes| serde_json::from_slice(&bytes).ok())`
+/// path in `list_incidents`: if a corrupt entry is present alongside a valid
+/// one, only the valid incident is returned.
+#[tokio::test]
+async fn list_incidents_skips_unparseable_kv_entries() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    let nats = spawn_server(nats_port, http_port, None).await;
+    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+
+    // Post one valid incident so the INCIDENTS bucket is created and populated.
+    let valid_body = r#"{"event_type":"incident.created","incident":{"id":"inc-valid","name":"Valid"}}"#;
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(valid_body)
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    // Wait for NATS to confirm the message so the KV write has happened.
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for NATS message")
+        .expect("subscriber closed");
+
+    // Inject corrupt JSON directly into the INCIDENTS KV bucket.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    kv.put("inc-corrupt", bytes::Bytes::from_static(b"{this is not valid json"))
+        .await
+        .expect("KV put failed");
+
+    // GET /incidents must return only the one valid incident.
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port}/incidents"))
+        .send()
+        .await
+        .expect("HTTP request failed");
+
+    assert_eq!(resp.status(), 200);
+    let incidents: Vec<serde_json::Value> = resp.json().await.expect("response is not JSON");
+    assert_eq!(incidents.len(), 1, "corrupt KV entry must be silently skipped");
+    assert_eq!(incidents[0]["incident"]["id"].as_str(), Some("inc-valid"));
+}
+
 /// Missing X-Incident-Delivery header defaults to "unknown".
 #[tokio::test]
 async fn webhook_missing_delivery_header_defaults_to_unknown() {
