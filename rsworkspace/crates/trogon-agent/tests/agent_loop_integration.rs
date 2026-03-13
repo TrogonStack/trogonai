@@ -37,8 +37,6 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
     mcp_dispatch: vec![],
     split_client: None,
     tenant_id: "test".to_string(),
-    split_evaluator_url: None,
-    split_auth_token: None,
     }
 }
 
@@ -195,8 +193,6 @@ async fn agent_loop_max_iterations_reached() {
     mcp_dispatch: vec![],
     split_client: None,
     tenant_id: "test".to_string(),
-    split_evaluator_url: None,
-    split_auth_token: None,
     };
 
     let result = agent.run(vec![Message::user_text("loop")], &no_tools(), None).await;
@@ -433,8 +429,6 @@ async fn run_chat_max_iterations_reached() {
         mcp_dispatch: vec![],
         split_client: None,
         tenant_id: "test".to_string(),
-        split_evaluator_url: None,
-        split_auth_token: None,
     };
 
     let result = agent.run_chat(vec![Message::user_text("loop")], &no_tools(), None).await;

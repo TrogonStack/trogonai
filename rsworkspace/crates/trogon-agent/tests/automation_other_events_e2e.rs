@@ -71,6 +71,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String) -> AgentConfig {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
     }
@@ -80,8 +81,6 @@ fn make_automation(id: &str, trigger: &str, prompt: &str) -> Automation {
     Automation {
         id: id.to_string(),
         tenant_id: "default".to_string(),
-        split_evaluator_url: None,
-        split_auth_token: None,
         name: format!("Test {id}"),
         trigger: trigger.to_string(),
         prompt: prompt.to_string(),

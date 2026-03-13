@@ -59,8 +59,6 @@ async fn create_streams(js: &jetstream::Context) {
 }
 
 fn runner_cfg_with_cron(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16, cron_stream: Option<String>) -> AgentConfig {
- split_evaluator_url: None,
- split_auth_token: None,
     AgentConfig {
         nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
@@ -80,14 +78,13 @@ fn runner_cfg_with_cron(nats_port: u16, proxy_url: String, tenant_id: &str, api_
         mcp_servers: vec![],
         api_port,
         tenant_id: tenant_id.to_string(),
+        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
     }
 }
 
 fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16) -> AgentConfig {
- split_evaluator_url: None,
- split_auth_token: None,
     AgentConfig {
         nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
@@ -107,19 +104,16 @@ fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16)
         mcp_servers: vec![],
         api_port,
         tenant_id: tenant_id.to_string(),
+        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
     }
 }
 
 fn make_automation(id: &str, tenant_id: &str, trigger: &str, prompt: &str) -> Automation {
- split_evaluator_url: None,
- split_auth_token: None,
     Automation {
         id: id.to_string(),
         tenant_id: tenant_id.to_string(),
-        split_evaluator_url: None,
-        split_auth_token: None,
         name: format!("Test automation {id}"),
         trigger: trigger.to_string(),
         prompt: prompt.to_string(),
