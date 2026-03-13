@@ -8,7 +8,6 @@
 #   trogon-linear      — Linear webhook receiver (port 8082)
 #   trogon-datadog     — Datadog webhook receiver (port 8083)
 #   trogon-incidentio  — incident.io webhook receiver (port 8084)
-#   trogon-incidentio — incident.io webhook receiver (port 8084)
 #
 # Build examples:
 #   docker build --target agent  -t trogon-agent  .
