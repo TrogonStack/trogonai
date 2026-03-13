@@ -216,4 +216,61 @@ mod tests {
         // 2026-01-01 in unix is roughly 1_767_225_600
         assert!(t > 1_767_000_000, "timestamp looks wrong: {t}");
     }
+
+    #[test]
+    fn run_record_all_fields_accessible() {
+        let r = RunRecord {
+            id: "run-abc".to_string(),
+            automation_id: "auto-42".to_string(),
+            automation_name: "Deploy check".to_string(),
+            tenant_id: "acme".to_string(),
+            nats_subject: "github.push".to_string(),
+            started_at: 1_700_000_000,
+            finished_at: 1_700_000_010,
+            status: RunStatus::Success,
+            output: "All checks passed.".to_string(),
+        };
+        assert_eq!(r.id, "run-abc");
+        assert_eq!(r.automation_id, "auto-42");
+        assert_eq!(r.automation_name, "Deploy check");
+        assert_eq!(r.tenant_id, "acme");
+        assert_eq!(r.nats_subject, "github.push");
+        assert_eq!(r.started_at, 1_700_000_000);
+        assert_eq!(r.finished_at, 1_700_000_010);
+        assert_eq!(r.status, RunStatus::Success);
+        assert_eq!(r.output, "All checks passed.");
+    }
+
+    #[test]
+    fn run_record_failed_status_round_trips() {
+        let r = sample_run("run-fail", RunStatus::Failed, 1_700_000_100);
+        let json = serde_json::to_string(&r).unwrap();
+        let r2: RunRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(r2.status, RunStatus::Failed);
+        assert_eq!(r2.id, "run-fail");
+    }
+
+    #[test]
+    fn run_status_deserializes_from_snake_case() {
+        let success: RunStatus = serde_json::from_str("\"success\"").unwrap();
+        let failed: RunStatus = serde_json::from_str("\"failed\"").unwrap();
+        assert_eq!(success, RunStatus::Success);
+        assert_eq!(failed, RunStatus::Failed);
+    }
+
+    #[test]
+    fn run_record_duration_computed_correctly() {
+        let r = sample_run("run-dur", RunStatus::Success, 1_700_000_000);
+        // finished_at is started_at + 5 per sample_run helper
+        assert_eq!(r.finished_at - r.started_at, 5);
+    }
+
+    #[test]
+    fn run_stats_struct_fields() {
+        let stats = RunStats { total: 10, successful_7d: 7, failed_7d: 3 };
+        let v: serde_json::Value = serde_json::to_value(&stats).unwrap();
+        assert_eq!(v["total"], 10);
+        assert_eq!(v["successful_7d"], 7);
+        assert_eq!(v["failed_7d"], 3);
+    }
 }
