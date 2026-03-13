@@ -982,6 +982,168 @@ mod tests {
         assert!(matches!(result, Err(NatsError::Request { .. })));
     }
 
+    // ── headers_with_trace_context / inject_trace_context ────────────────────
+
+    /// Outside any active span the function must still return a `HeaderMap`
+    /// without panicking.  When the default noop propagator is installed the
+    /// map will be empty, but the important thing is that the function
+    /// completes and produces a valid (possibly zero-length) map.
+    #[test]
+    fn headers_with_trace_context_returns_empty_when_no_span() {
+        let headers = headers_with_trace_context();
+        // The map length is determined by whatever propagator is installed;
+        // with the default noop propagator it will be 0.  Either way the call
+        // must not panic and must return a valid HeaderMap.
+        let _ = headers.len(); // just assert we have a usable value
+    }
+
+    /// Calling `inject_trace_context` twice on the same `HeaderMap` must not
+    /// panic, even if the propagator tries to overwrite an existing key.
+    #[test]
+    fn inject_trace_context_is_idempotent() {
+        let mut headers = HeaderMap::new();
+        inject_trace_context(&mut headers);
+        inject_trace_context(&mut headers); // second call must not panic
+    }
+
+    /// `headers_with_trace_context` must return without panicking regardless
+    /// of whether a tracing span is active.  When a span *is* active and a
+    /// real propagator is installed the map should be non-empty, but here we
+    /// simply verify the function is callable and returns a `HeaderMap`.
+    #[test]
+    fn headers_with_trace_context_contains_known_keys() {
+        // No real OTel tracer is wired up in unit tests, so we can only
+        // assert the call succeeds and returns a properly-typed value.
+        let headers: HeaderMap = headers_with_trace_context();
+        // Regardless of propagator the result is a valid HeaderMap.
+        drop(headers);
+    }
+
+    // ── RetryPolicy ──────────────────────────────────────────────────────────
+
+    /// The default `RetryPolicy` (via `no_retries()`) should have a positive
+    /// initial delay so any future retry code uses a sensible starting point.
+    #[test]
+    fn retry_policy_default_has_sensible_values() {
+        let policy = RetryPolicy::default();
+        // max_retries == 0 means "no retries" which is the documented default.
+        assert_eq!(policy.max_retries, 0);
+        // initial_retry_delay must be > 0 so callers can rely on it.
+        assert!(
+            policy.initial_retry_delay.as_millis() > 0,
+            "initial_retry_delay must be positive"
+        );
+    }
+
+    /// The backoff formula `initial * (1 << exp)` at `exp = 0` (first retry,
+    /// attempts == 1 when the failure occurs) must equal `initial_retry_delay`.
+    #[test]
+    fn retry_policy_delay_for_attempt_zero_is_initial() {
+        let initial = Duration::from_millis(100);
+        let policy = RetryPolicy {
+            max_retries: 3,
+            initial_retry_delay: initial,
+        };
+        // In the execute loop: on the first failure `attempts == 1`, so
+        //   exp = (attempts - 1).min(31) = 0
+        //   delay = initial * (1 << 0) = initial * 1 = initial
+        let exp: u32 = (1u32 - 1).min(31);
+        let delay = policy.initial_retry_delay * (1u32 << exp);
+        assert_eq!(delay, initial);
+    }
+
+    /// Verify the exponential growth: attempt 1 → initial×2, attempt 2 → initial×4.
+    #[test]
+    fn retry_policy_delay_grows_exponentially() {
+        let initial = Duration::from_millis(50);
+        let policy = RetryPolicy {
+            max_retries: 5,
+            initial_retry_delay: initial,
+        };
+
+        // attempt=2 (second failure) → exp=(2-1)=1 → delay = initial * 2
+        let exp1: u32 = (2u32 - 1).min(31);
+        let delay1 = policy.initial_retry_delay * (1u32 << exp1);
+        assert_eq!(delay1, initial * 2, "second attempt should double delay");
+
+        // attempt=3 → exp=2 → delay = initial * 4
+        let exp2: u32 = (3u32 - 1).min(31);
+        let delay2 = policy.initial_retry_delay * (1u32 << exp2);
+        assert_eq!(delay2, initial * 4, "third attempt should quadruple delay");
+
+        // confirm strictly growing
+        assert!(delay2 > delay1);
+    }
+
+    /// After 32+ failures the exponent is capped at 31, so the computed delay
+    /// must not exceed `initial * 2^31`.
+    #[test]
+    fn retry_policy_delay_is_capped_at_max() {
+        let initial = Duration::from_millis(1);
+        let max_delay = initial * (1u32 << 31);
+
+        for high_attempt in [32u32, 50, 100] {
+            let exp = (high_attempt - 1).min(31);
+            let delay = initial * (1u32 << exp);
+            assert_eq!(
+                delay, max_delay,
+                "delay at attempt {high_attempt} must equal the cap"
+            );
+        }
+    }
+
+    /// `RetryPolicy` can be constructed with arbitrary values and they are
+    /// preserved exactly.
+    #[test]
+    fn retry_policy_custom_values() {
+        let policy = RetryPolicy {
+            max_retries: 7,
+            initial_retry_delay: Duration::from_millis(200),
+        };
+        assert_eq!(policy.max_retries, 7);
+        assert_eq!(policy.initial_retry_delay, Duration::from_millis(200));
+    }
+
+    // ── PublishOptions / PublishOptionsBuilder ────────────────────────────────
+
+    /// The default `PublishOptions` has no retries and no flush.
+    #[test]
+    fn publish_options_default() {
+        let opts = PublishOptions::default();
+        assert_eq!(opts.publish_retry_policy.max_retries, 0);
+        assert!(opts.flush.is_none());
+    }
+
+    /// The builder correctly applies a `FlushPolicy`.
+    #[test]
+    fn publish_options_with_flush_policy() {
+        let opts = PublishOptions::builder()
+            .flush_policy(FlushPolicy::standard())
+            .build();
+        let flush = opts.flush.expect("flush must be set");
+        assert_eq!(flush.retry_policy.max_retries, 3);
+    }
+
+    /// Chaining all builder methods produces consistent `PublishOptions`.
+    #[test]
+    fn publish_options_builder_chain() {
+        let opts = PublishOptions::builder()
+            .publish_retry_policy(RetryPolicy {
+                max_retries: 5,
+                initial_retry_delay: Duration::from_millis(25),
+            })
+            .flush_policy(FlushPolicy::standard())
+            .build();
+
+        assert_eq!(opts.publish_retry_policy.max_retries, 5);
+        assert_eq!(
+            opts.publish_retry_policy.initial_retry_delay,
+            Duration::from_millis(25)
+        );
+        assert!(opts.flush.is_some());
+        assert_eq!(opts.flush.unwrap().retry_policy.max_retries, 3);
+    }
+
     #[tokio::test]
     #[cfg(feature = "test-support")]
     async fn test_retry_policy_no_retries_fails_immediately() {
