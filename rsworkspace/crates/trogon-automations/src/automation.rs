@@ -205,4 +205,52 @@ mod tests {
         let a: Automation = serde_json::from_str(json).unwrap();
         assert_eq!(a.visibility, Visibility::Private);
     }
+
+    #[test]
+    fn mcp_server_round_trips_through_json() {
+        let server = McpServer {
+            name: "search".to_string(),
+            url: "http://mcp.example.com/search".to_string(),
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: McpServer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, server);
+        assert_eq!(back.name, "search");
+        assert_eq!(back.url, "http://mcp.example.com/search");
+    }
+
+    #[test]
+    fn mcp_servers_list_survives_round_trip() {
+        let mut a = sample();
+        a.mcp_servers = vec![
+            McpServer { name: "search".to_string(), url: "http://search.local".to_string() },
+            McpServer { name: "db".to_string(), url: "http://db.local".to_string() },
+        ];
+        let json = serde_json::to_string(&a).unwrap();
+        let b: Automation = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.mcp_servers.len(), 2);
+        assert_eq!(b.mcp_servers[0].name, "search");
+        assert_eq!(b.mcp_servers[1].name, "db");
+    }
+
+    #[test]
+    fn empty_mcp_servers_serializes_as_empty_array() {
+        let mut a = sample();
+        a.mcp_servers = vec![];
+        let v: serde_json::Value = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["mcp_servers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn visibility_enum_default_is_private() {
+        assert_eq!(Visibility::default(), Visibility::Private);
+    }
+
+    #[test]
+    fn visibility_variants_serialize_as_snake_case() {
+        let priv_val = serde_json::to_value(Visibility::Private).unwrap();
+        let pub_val = serde_json::to_value(Visibility::Public).unwrap();
+        assert_eq!(priv_val, "private");
+        assert_eq!(pub_val, "public");
+    }
 }
