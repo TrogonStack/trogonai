@@ -52,8 +52,6 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
     mcp_dispatch: vec![],
     split_client: None,
     tenant_id: "test".to_string(),
-    split_evaluator_url: None,
-    split_auth_token: None,
     }
 }
 

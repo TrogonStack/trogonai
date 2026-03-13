@@ -19,13 +19,9 @@ async fn make_store() -> (SessionStore, impl Drop) {
 }
 
 fn sample_session(id: &str, tenant_id: &str) -> ChatSession {
- split_evaluator_url: None,
- split_auth_token: None,
     ChatSession {
         id: id.to_string(),
         tenant_id: tenant_id.to_string(),
-        split_evaluator_url: None,
-        split_auth_token: None,
         name: format!("Session {id}"),
         model: None,
         tools: vec![],

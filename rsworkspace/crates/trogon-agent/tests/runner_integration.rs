@@ -65,6 +65,7 @@ fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
     }
@@ -134,6 +135,7 @@ async fn runner_nats_connect_error_missing_credentials() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
+        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
     };
