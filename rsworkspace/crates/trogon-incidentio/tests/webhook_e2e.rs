@@ -802,6 +802,90 @@ async fn webhook_concurrent_requests_all_stored_in_kv() {
     }
 }
 
+/// Calling `serve()` twice on the same NATS JetStream context (same container)
+/// must both succeed — `ensure_stream` uses `get_or_create_stream` which is
+/// idempotent even when the stream already exists.
+#[tokio::test]
+async fn ensure_stream_is_idempotent() {
+    let (_container, nats_port) = start_nats().await;
+
+    // First server on port A.
+    let http_port_a = next_port();
+    let config_a = make_config(nats_port, http_port_a, None);
+    let nats_a = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config_a, nats_a).await.ok() });
+    wait_for_port(http_port_a, Duration::from_secs(5)).await;
+
+    // Second server on port B — reuses the same NATS/JetStream context (same
+    // container), so `ensure_stream` will find the stream already exists.
+    let http_port_b = next_port();
+    let config_b = make_config(nats_port, http_port_b, None);
+    let nats_b = nats_client(nats_port).await;
+    tokio::spawn(async move { serve(config_b, nats_b).await.ok() });
+    wait_for_port(http_port_b, Duration::from_secs(5)).await;
+
+    // Both servers must be responsive.
+    let resp_a = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port_a}/health"))
+        .send()
+        .await
+        .expect("HTTP request to server A failed");
+    assert_eq!(resp_a.status(), 200, "server A health check failed");
+
+    let resp_b = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{http_port_b}/health"))
+        .send()
+        .await
+        .expect("HTTP request to server B failed");
+    assert_eq!(resp_b.status(), 200, "server B health check failed");
+}
+
+/// When the INCIDENTS KV bucket is deleted after the server starts, the handler
+/// logs a warning but still publishes to NATS and returns 200.
+///
+/// This exercises the `warn!` + continue path in `handle_webhook` where
+/// `incident_store.upsert()` fails silently.
+#[tokio::test]
+async fn webhook_kv_upsert_failure_still_publishes_to_nats() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+    let body = br#"{"event_type":"incident.created","incident":{"id":"inc-kv-gone"}}"#;
+
+    let nats = spawn_server(nats_port, http_port, None).await;
+
+    // Subscribe before deleting the bucket so we don't miss the message.
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
+
+    // Delete the INCIDENTS KV bucket while the server is running.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    js.delete_key_value("INCIDENTS")
+        .await
+        .expect("failed to delete INCIDENTS KV bucket");
+
+    // Small pause so the delete propagates before the request arrives.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // The webhook must still return 200 — KV failure is non-fatal.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{http_port}/webhook"))
+        .header("Content-Type", "application/json")
+        .body(body.as_ref())
+        .send()
+        .await
+        .expect("HTTP request failed");
+    assert_eq!(resp.status(), 200, "KV failure must not prevent 200 response");
+
+    // NATS publish must still succeed.
+    let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for NATS message after KV bucket deletion")
+        .expect("subscriber closed");
+    assert_eq!(msg.payload.as_ref(), body.as_ref(), "payload must be bit-for-bit identical");
+}
+
 /// HTTP header names are case-insensitive; a sender using `X-INCIDENT-SIGNATURE`
 /// (all-caps) must be accepted the same as `X-Incident-Signature`.
 #[tokio::test]
