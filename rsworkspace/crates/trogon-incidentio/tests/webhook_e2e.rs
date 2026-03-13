@@ -736,6 +736,72 @@ async fn list_incidents_skips_unparseable_kv_entries() {
     assert_eq!(incidents[0]["incident"]["id"].as_str(), Some("inc-valid"));
 }
 
+/// 10 concurrent webhook requests for distinct incident IDs are all stored in
+/// the INCIDENTS KV bucket — verifies there is no race condition in the handler.
+#[tokio::test]
+async fn webhook_concurrent_requests_all_stored_in_kv() {
+    let (_container, nats_port) = start_nats().await;
+    let http_port = next_port();
+
+    spawn_server(nats_port, http_port, None).await;
+
+    const N: usize = 10;
+    let http_client = reqwest::Client::new();
+
+    // Fire N concurrent POSTs, one per incident ID.
+    let mut handles = Vec::with_capacity(N);
+    for i in 0..N {
+        let client = http_client.clone();
+        let port = http_port;
+        handles.push(tokio::spawn(async move {
+            let body = format!(
+                r#"{{"event_type":"incident.created","incident":{{"id":"inc-concurrent-{i}","name":"Concurrent incident {i}"}}}}"#
+            );
+            client
+                .post(format!("http://127.0.0.1:{port}/webhook"))
+                .header("Content-Type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .expect("HTTP request failed")
+                .status()
+        }));
+    }
+
+    // All requests must return 200.
+    for handle in handles {
+        let status = handle.await.expect("task panicked");
+        assert_eq!(status, 200, "concurrent request did not return 200");
+    }
+
+    // Wait for all KV writes to settle.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // All N incidents must be present in the KV store.
+    let js = async_nats::jetstream::new(nats_client(nats_port).await);
+    let kv = js
+        .get_key_value("INCIDENTS")
+        .await
+        .expect("INCIDENTS bucket should exist");
+
+    for i in 0..N {
+        let key = format!("inc-concurrent-{i}");
+        let entry = kv
+            .get(&key)
+            .await
+            .unwrap_or_else(|e| panic!("KV get failed for {key}: {e}"))
+            .unwrap_or_else(|| panic!("incident {key} not found in KV after concurrent POSTs"));
+        // Sanity-check: the stored payload contains the expected incident id.
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&entry).expect("stored entry is not valid JSON");
+        assert_eq!(
+            parsed["incident"]["id"].as_str(),
+            Some(key.as_str()),
+            "stored incident id mismatch for {key}"
+        );
+    }
+}
+
 /// HTTP header names are case-insensitive; a sender using `X-INCIDENT-SIGNATURE`
 /// (all-caps) must be accepted the same as `X-Incident-Signature`.
 #[tokio::test]

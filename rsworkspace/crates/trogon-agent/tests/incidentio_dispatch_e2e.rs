@@ -102,7 +102,8 @@ fn base_agent_config(nats_port: u16, proxy_url: String) -> AgentConfig {
         linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        incidentio_stream_name: None,
+        // Must be Some(...) so the runner subscribes to the INCIDENTIO stream.
+        incidentio_stream_name: Some("INCIDENTIO".to_string()),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -573,5 +574,189 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
     assert!(hit, "Automation was not dispatched for incidentio.incident.created within 20 s");
+    anthropic_mock.assert_async().await;
+}
+
+/// When `incidentio_stream_name` is `None` the runner skips the INCIDENTIO
+/// subscription entirely — the agent must NOT be called even after an
+/// `incident.created` webhook is published directly onto the INCIDENTIO stream.
+#[tokio::test]
+async fn incidentio_stream_name_none_skips_subscription() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    // Mock Anthropic — must NOT be called.
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"should not happen"}]}"#);
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    // Manually create the INCIDENTIO stream so we can publish to it.
+    js.get_or_create_stream(jetstream::stream::Config {
+        name: "INCIDENTIO".to_string(),
+        subjects: vec!["incidentio.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    // Start agent runner with incidentio_stream_name = None → must skip subscription.
+    let mut agent_cfg = base_agent_config(nats_port, mock_server.base_url());
+    agent_cfg.incidentio_stream_name = None;
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Publish an incidentio event directly onto the stream.
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "event_type": "incident.created",
+        "incident": {
+            "id": "inc-none-test",
+            "name": "Stream name None test",
+            "status": "active",
+            "severity": { "name": "low" }
+        }
+    }))
+    .unwrap();
+    nats.publish("incidentio.incident.created", payload.into())
+        .await
+        .unwrap();
+
+    // Wait briefly to give the runner a chance to (incorrectly) call the agent.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Anthropic must not have been called.
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Agent was called despite incidentio_stream_name = None"
+    );
+}
+
+/// When NO automation is registered (empty AutomationStore), an
+/// `incident.created` webhook still triggers the `incident_declared` fallback
+/// handler which calls the agent directly.
+#[tokio::test]
+async fn incidentio_no_automation_falls_back_to_handler() {
+    let (_nats_container, nats_port) = start_nats().await;
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey")
+                .body_contains("incident.created");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Fallback handler ran."}]}"#,
+                );
+        })
+        .await;
+
+    let vault = Arc::new(trogon_vault::MemoryVault::new());
+    vault
+        .store(
+            &trogon_vault::ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+
+    let outbound_subject = trogon_secret_proxy::subjects::outbound("trogon");
+    trogon_secret_proxy::stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    let proxy_state = trogon_secret_proxy::proxy::ProxyState {
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
+        base_url_override: Some(mock_server.base_url()),
+    };
+    tokio::spawn(async move {
+        axum::serve(listener, trogon_secret_proxy::proxy::router(proxy_state))
+            .await
+            .ok();
+    });
+
+    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let wjs = Arc::clone(&js);
+    let wnats = nats.clone();
+    let wvault = Arc::clone(&vault);
+    let wstream = trogon_secret_proxy::stream::stream_name("trogon");
+    tokio::spawn(async move {
+        trogon_secret_proxy::worker::run(
+            wjs, wnats, wvault, http_client, "iio-fallback-worker", &wstream,
+        )
+        .await
+        .ok();
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let incidentio_port = next_port();
+    let webhook_secret = "test-fallback-secret";
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("NATS_URL", format!("localhost:{nats_port}"));
+    env.set("INCIDENTIO_WEBHOOK_PORT", incidentio_port.to_string());
+    env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
+    let incidentio_config = trogon_incidentio::IncidentioConfig::from_env(&env);
+
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    tokio::spawn(async move {
+        trogon_incidentio::serve(incidentio_config, nats_for_iio).await.ok();
+    });
+    wait_for_port(incidentio_port).await;
+
+    // Start agent runner — AutomationStore is empty (no automations registered).
+    let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
+    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "event_type": "incident.created",
+        "incident": {
+            "id": "inc-fallback-001",
+            "name": "Fallback handler test",
+            "status": "active",
+            "severity": { "name": "medium" }
+        }
+    }))
+    .unwrap();
+    let sig = compute_incidentio_sig(webhook_secret, &body);
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{incidentio_port}/webhook"))
+        .header("x-incident-signature", sig)
+        .header("x-incident-delivery", "del-fallback-001")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(
+        hit,
+        "Fallback incident_declared handler was not called when AutomationStore is empty"
+    );
     anthropic_mock.assert_async().await;
 }

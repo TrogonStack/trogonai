@@ -365,6 +365,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_uses_memory_as_system_prompt_when_fetch_succeeds() {
+        // When GitHub returns a valid memory file, handle() must forward its
+        // decoded content as the system prompt to the Anthropic API.
+        use base64::Engine as _;
+        use base64::engine::general_purpose;
+        use std::sync::Arc;
+        use crate::tools::ToolContext;
+
+        let server = httpmock::MockServer::start_async().await;
+
+        // Mock: GitHub contents endpoint returns a base64-encoded memory file.
+        let memory_content = "# Runbook\nFor P1 incidents: page the on-call engineer immediately.";
+        let encoded = general_purpose::STANDARD.encode(memory_content.as_bytes());
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains(".trogon/memory.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": encoded }));
+        });
+
+        // Mock: Anthropic receives the memory content as a system prompt.
+        let anthropic_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Runbook")
+                .body_contains("P1 incidents");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "incident handled with memory"}]
+                }));
+        });
+
+        let http_client = reqwest::Client::new();
+        let agent = AgentLoop {
+            http_client: http_client.clone(),
+            proxy_url: server.base_url(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client,
+                proxy_url: server.base_url(),
+                github_token: "tok_github_prod_test01".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: Some("owner".to_string()),
+            memory_repo: Some("repo".to_string()),
+            memory_path: Some(".trogon/memory.md".to_string()),
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+        };
+
+        let payload = serde_json::json!({
+            "event_type": "incident.created",
+            "incident": {
+                "id": "inc-mem-ok",
+                "name": "API latency spike",
+                "status": "triage",
+                "severity": {"name": "P1"}
+            }
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.created", &bytes).await;
+        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
+        anthropic_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn handle_uses_custom_memory_path_from_agent() {
+        // When the AgentLoop has a custom memory_path, the GitHub fetch must use
+        // that path — not the default ".trogon/memory.md".
+        use base64::Engine as _;
+        use base64::engine::general_purpose;
+        use std::sync::Arc;
+        use crate::tools::ToolContext;
+
+        let server = httpmock::MockServer::start_async().await;
+
+        let memory_content = "# Custom runbook\nUse the custom runbook for all incidents.";
+        let encoded = general_purpose::STANDARD.encode(memory_content.as_bytes());
+
+        // The custom path must appear in the GET request — not the default path.
+        let custom_path_mock = server.mock_async(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains("custom/runbook.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": encoded }));
+        }).await;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Custom runbook");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "handled with custom memory"}]
+                }));
+        });
+
+        let http_client = reqwest::Client::new();
+        let agent = AgentLoop {
+            http_client: http_client.clone(),
+            proxy_url: server.base_url(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client,
+                proxy_url: server.base_url(),
+                github_token: "tok_github_prod_test01".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: Some("owner".to_string()),
+            memory_repo: Some("repo".to_string()),
+            // Custom path — should override the DEFAULT_MEMORY_PATH.
+            memory_path: Some("custom/runbook.md".to_string()),
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+        };
+
+        let payload = serde_json::json!({
+            "event_type": "incident.created",
+            "incident": {
+                "id": "inc-custom-path",
+                "name": "Custom path test",
+                "status": "triage",
+                "severity": {"name": "P2"}
+            }
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let result = handle(&agent, "incidentio.incident.created", &bytes).await;
+        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
+        // Verify the custom path was fetched from GitHub.
+        custom_path_mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn handle_proceeds_without_memory_when_fetch_fails() {
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
