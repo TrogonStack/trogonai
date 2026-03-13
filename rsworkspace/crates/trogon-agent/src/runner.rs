@@ -158,7 +158,6 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
     let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
     let datadog_stream_name = cfg.datadog_stream_name.as_deref().unwrap_or("DATADOG");
-    let incidentio_stream_name = cfg.incidentio_stream_name.as_deref().unwrap_or("INCIDENTIO");
 
     // Ensure all required JetStream streams exist before binding consumers.
     // This removes the hard startup-order dependency on trogon-github, trogon-linear,
@@ -167,7 +166,6 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
     ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
     ensure_stream(&js, datadog_stream_name, &["datadog.>"], Duration::from_secs(7 * 86_400)).await?;
-    ensure_stream(&js, incidentio_stream_name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
 
     let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
     let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
@@ -176,7 +174,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
     let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
     let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
-    let mut incidentio_messages = bind_consumer(&js, incidentio_stream_name, INCIDENTIO_CONSUMER, "incidentio.>").await?;
+
+    // incident.io stream is optional: when `incidentio_stream_name` is `None` the runner
+    // skips both stream creation and consumer binding so no incidentio events are processed.
+    let mut incidentio_messages_opt = match cfg.incidentio_stream_name.as_deref() {
+        None => {
+            info!("incidentio_stream_name is None — skipping incident.io subscription");
+            None
+        }
+        Some(name) => {
+            ensure_stream(&js, name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
+            Some(bind_consumer(&js, name, INCIDENTIO_CONSUMER, "incidentio.>").await?)
+        }
+    };
 
     info!(
         proxy_url = %cfg.proxy_url,
@@ -406,7 +416,12 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     }
                 }
             }
-            msg = incidentio_messages.next() => {
+            msg = async {
+                match incidentio_messages_opt.as_mut() {
+                    Some(s) => s.next().await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 let Some(msg) = msg else { break };
                 match msg {
                     Err(e) => warn!(error = %e, "Error receiving incident.io message"),
