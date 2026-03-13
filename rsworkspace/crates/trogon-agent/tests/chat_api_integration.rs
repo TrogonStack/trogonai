@@ -74,8 +74,6 @@ async fn start() -> TestEnv {
         mcp_dispatch: vec![],
         split_client: None,
         tenant_id: "test".to_string(),
-        split_evaluator_url: None,
-        split_auth_token: None,
     });
 
     let state = ChatAppState { agent, session_store };
