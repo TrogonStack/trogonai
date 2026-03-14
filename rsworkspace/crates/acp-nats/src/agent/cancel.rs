@@ -82,7 +82,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 mod tests {
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
+    use agent_client_protocol::{Agent, CancelNotification, ErrorCode, SessionId, StopReason};
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
@@ -91,6 +91,7 @@ mod tests {
     };
     use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
+    use trogon_std::time::MockClock;
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
@@ -127,6 +128,22 @@ mod tests {
             Config::for_test("acp"),
         );
         (mock, bridge, exporter, provider)
+    }
+
+    fn mock_bridge_with_clock() -> (
+        AdvancedMockNatsClient,
+        MockClock,
+        Bridge<AdvancedMockNatsClient, MockClock>,
+    ) {
+        let mock = AdvancedMockNatsClient::new();
+        let clock = MockClock::new();
+        let bridge = Bridge::new(
+            mock.clone(),
+            clock.clone(),
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("acp"),
+        );
+        (mock, clock, bridge)
     }
 
     fn has_request_metric(
@@ -318,5 +335,103 @@ mod tests {
             "cancel_publish_failed"
         ));
         provider.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_marks_session_as_cancelled() {
+        let (_mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id = "cancel-session-001";
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_id.into(), &bridge.clock)
+                .is_none()
+        );
+
+        let notification = CancelNotification::new(session_id);
+        bridge.cancel(notification).await.unwrap();
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_id.into(), &bridge.clock)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_resolves_pending_prompt_waiter_with_cancelled() {
+        let (_mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id: SessionId = "cancel-session-002".into();
+
+        let (rx, _guard, _token) = bridge
+            .pending_session_prompt_responses
+            .register_waiter(session_id.clone())
+            .unwrap();
+
+        let notification = CancelNotification::new(session_id.clone());
+        bridge.cancel(notification).await.unwrap();
+
+        let response = rx
+            .await
+            .expect("Should receive cancelled response")
+            .expect("Prompt waiter should receive success response");
+        assert_eq!(response.stop_reason, StopReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancel_publishes_to_nats() {
+        let (mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id = "cancel-session-003";
+
+        let notification = CancelNotification::new(session_id);
+        bridge.cancel(notification).await.unwrap();
+
+        let published = mock.published_messages();
+        assert!(
+            published.iter().any(|s| s.contains("session.cancel")),
+            "Expected cancel publish, got: {:?}",
+            published
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_session_evicts_expired_on_mark() {
+        let (_mock, clock, bridge) = mock_bridge_with_clock();
+
+        let session_old: SessionId = "old-session".into();
+        let session_new: SessionId = "new-session".into();
+
+        bridge
+            .cancelled_sessions
+            .mark_cancelled(session_old.clone(), &bridge.clock);
+
+        clock.advance(Duration::from_secs(301));
+
+        for idx in 0..15 {
+            let filler_session: SessionId = format!("filler-{idx}").into();
+            bridge
+                .cancelled_sessions
+                .mark_cancelled(filler_session, &bridge.clock);
+        }
+
+        bridge
+            .cancelled_sessions
+            .mark_cancelled(session_new.clone(), &bridge.clock);
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_old, &bridge.clock)
+                .is_none()
+        );
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_new, &bridge.clock)
+                .is_some()
+        );
     }
 }
