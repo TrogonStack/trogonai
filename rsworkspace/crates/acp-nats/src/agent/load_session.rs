@@ -250,14 +250,24 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
-        let expected = LoadSessionResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.load", &expected);
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mock = AdvancedMockNatsClient::new();
+                let bridge = Bridge::new(
+                    mock.clone(),
+                    trogon_std::time::MockClock::new(),
+                    &opentelemetry::global::meter("acp-nats-test"),
+                    Config::for_test("acp"),
+                );
+                let expected = LoadSessionResponse::new();
+                set_json_response(&mock, "acp.session-load-001.agent.session.load", &expected);
 
-        let request = LoadSessionRequest::new("s1", ".");
-        let result = bridge.load_session(request).await;
-
-        assert!(result.is_ok());
+                let request = LoadSessionRequest::new("session-load-001", "/tmp");
+                let result = bridge.load_session(request).await;
+                assert!(result.is_ok());
+            })
+            .await;
     }
 
     #[tokio::test]
