@@ -165,7 +165,6 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
 
     /// Cancels any pending waiter for the session with a Cancelled response.
     /// Used when a cancel notification arrives; we don't have a prompt_token.
-    #[allow(dead_code)]
     pub fn cancel_waiter_for_session(
         &self,
         session_id: &SessionId,
@@ -240,7 +239,7 @@ mod tests {
     use std::time::Duration;
 
     use agent_client_protocol::{PromptResponse, SessionId, StopReason};
-    use trogon_std::time::{MockClock, MockInstant};
+    use trogon_std::time::{GetNow, MockClock, MockInstant};
 
     use super::*;
 
@@ -256,6 +255,36 @@ mod tests {
     }
 
     #[test]
+    fn should_suppress_missing_waiter_after_timeout() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let clock = MockClock::new();
+        let session_id = SessionId::from("s1");
+        let token = PromptToken(42);
+
+        assert!(!waiters.should_suppress_missing_waiter_warning(&session_id, token, &clock));
+        waiters.mark_prompt_waiter_timed_out(session_id.clone(), token, &clock);
+        assert!(waiters.should_suppress_missing_waiter_warning(&session_id, token, &clock));
+    }
+
+    #[tokio::test]
+    async fn register_waiter_clears_stale_timed_out_entries() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let clock = MockClock::new();
+        let session_id = SessionId::from("s1");
+
+        let (_rx, _guard, token) = waiters.register_waiter(session_id.clone()).unwrap();
+        waiters.mark_prompt_waiter_timed_out(session_id.clone(), token, &clock);
+        assert_eq!(waiters.timed_out.lock().unwrap().len(), 1);
+
+        waiters.remove_waiter_for_test(&session_id);
+        let (_rx2, _guard2, _token2) = waiters.register_waiter(session_id.clone()).unwrap();
+        assert!(
+            waiters.timed_out.lock().unwrap().is_empty(),
+            "register_waiter should have cleared timed_out entries for the session"
+        );
+    }
+
+    #[test]
     fn purge_expired_timed_out_waiters_removes_expired_markers() {
         let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
         let clock = MockClock::new();
@@ -266,6 +295,27 @@ mod tests {
         waiters.purge_expired_timed_out_waiters(&clock);
 
         assert!(waiters.timed_out.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn purge_keeps_non_expired_markers() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let clock = MockClock::new();
+        let old_instant = clock.now();
+        clock.advance(PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW + Duration::from_millis(1));
+        let fresh_instant = clock.now();
+        {
+            let mut timed_out = waiters.timed_out.lock().unwrap();
+            timed_out.insert((SessionId::from("old"), PromptToken(0)), old_instant);
+            timed_out.insert((SessionId::from("fresh"), PromptToken(1)), fresh_instant);
+        }
+        assert_eq!(waiters.timed_out.lock().unwrap().len(), 2);
+
+        waiters.purge_expired_timed_out_waiters(&clock);
+
+        let timed_out = waiters.timed_out.lock().unwrap();
+        assert_eq!(timed_out.len(), 1);
+        assert!(timed_out.contains_key(&(SessionId::from("fresh"), PromptToken(1))));
     }
 
     #[tokio::test]
