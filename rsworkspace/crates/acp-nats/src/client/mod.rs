@@ -71,7 +71,6 @@ pub async fn run<
     let wildcard = client::wildcards::all(bridge.config.acp_prefix());
     info!("Starting client proxy - subscribing to {}", wildcard);
 
-    // TODO: change `run` to return `Result` and propagate this error once there is a caller.
     let mut subscriber = match nats.subscribe(wildcard).await {
         Ok(sub) => sub,
         Err(e) => {
@@ -221,7 +220,7 @@ async fn dispatch_client_method<
             .await;
         }
         ClientMethod::SessionUpdate => {
-            session_update::handle(&payload, ctx.client, &parsed.session_id).await;
+            session_update::handle(&payload, ctx.client, reply.is_some()).await;
         }
         ClientMethod::ExtSessionPromptResponse => {
             ext_session_prompt_response::handle(
