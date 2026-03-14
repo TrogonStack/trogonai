@@ -30,18 +30,14 @@ use std::time::Duration;
 use tracing::{info, warn};
 use trogon_std::time::GetElapsed;
 
-#[allow(dead_code)]
 const CANCELLED_SESSION_TTL: Duration = Duration::from_secs(300);
-#[allow(dead_code)]
 const CLEANUP_EVERY: usize = 16;
 
-#[allow(dead_code)]
 pub(crate) struct CancelledSessions<I: Copy> {
     map: Mutex<HashMap<SessionId, I>>,
     cleanup_counter: std::sync::atomic::AtomicUsize,
 }
 
-#[allow(dead_code)]
 impl<I: Copy> CancelledSessions<I> {
     pub fn new() -> Self {
         Self {
@@ -85,7 +81,6 @@ pub struct Bridge<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>
     pub(crate) nats: N,
     pub(crate) clock: C,
     pub(crate) metrics: Metrics,
-    #[allow(dead_code)]
     pub(crate) cancelled_sessions: CancelledSessions<C::Instant>,
     pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
     pub(crate) prompt_slot_counter: PromptSlotCounter,
@@ -112,7 +107,6 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C>
         &self.nats
     }
 
-    #[allow(dead_code)]
     pub(crate) fn register_session_ready_task(&self, task: tokio::task::JoinHandle<()>) {
         let mut tasks = self.session_ready_publish_tasks.lock().unwrap();
         tasks.retain(|task| !task.is_finished());
@@ -134,7 +128,6 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C>
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn spawn_session_ready(&self, session_id: &SessionId) {
         let nats_clone = self.nats.clone();
         let prefix = self.config.acp_prefix().to_string();
