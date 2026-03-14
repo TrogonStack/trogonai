@@ -6,6 +6,7 @@ use crate::acp_prefix::AcpPrefix;
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(7200);
 const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
+
 /// Above this value, prompt timeout errors are rendered in seconds instead of milliseconds.
 pub(crate) const PROMPT_TIMEOUT_MESSAGE_SECS_THRESHOLD: Duration = Duration::from_secs(60);
 /// Suppresses duplicate timeout-related warnings for a short late-response window.
@@ -36,6 +37,10 @@ impl Config {
         }
     }
 
+    pub fn with_prefix(acp_prefix: AcpPrefix, nats: NatsConfig) -> Self {
+        Self::new(acp_prefix, nats)
+    }
+
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
         self.operation_timeout = timeout;
         self
@@ -47,7 +52,7 @@ impl Config {
     }
 
     pub fn with_max_concurrent_client_tasks(mut self, max: usize) -> Self {
-        self.max_concurrent_client_tasks = max;
+        self.max_concurrent_client_tasks = max.max(1);
         self
     }
 
@@ -72,7 +77,7 @@ impl Config {
     ///
     /// A minimum of 1 avoids misconfiguration that would permanently reject all client messages.
     pub fn max_concurrent_client_tasks(&self) -> usize {
-        self.max_concurrent_client_tasks.max(1)
+        self.max_concurrent_client_tasks
     }
 
     #[cfg(test)]
@@ -81,7 +86,7 @@ impl Config {
             servers: vec!["localhost:4222".to_string()],
             auth: trogon_nats::NatsAuth::None,
         };
-        Self::new(AcpPrefix::new(acp_prefix).unwrap(), nats)
+        Self::new(AcpPrefix::new(acp_prefix.to_string()).unwrap(), nats)
     }
 }
 
@@ -132,9 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn config_max_concurrent_client_tasks_zero_is_clamped_to_one() {
-        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
-            .with_max_concurrent_client_tasks(0);
+    fn config_with_max_concurrent_client_tasks_enforces_minimum() {
+        let config = Config::for_test("acp").with_max_concurrent_client_tasks(0);
         assert_eq!(config.max_concurrent_client_tasks(), 1);
     }
 
@@ -143,5 +147,11 @@ mod tests {
         let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats());
         assert_eq!(config.nats().servers.len(), 1);
         assert_eq!(config.nats().servers[0], "localhost:4222");
+    }
+
+    #[test]
+    fn config_with_prefix_accepts_validated_prefix() {
+        let config = Config::with_prefix(AcpPrefix::new("acp").unwrap(), default_nats());
+        assert_eq!(config.acp_prefix(), "acp");
     }
 }
