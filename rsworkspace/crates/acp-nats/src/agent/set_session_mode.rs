@@ -191,11 +191,14 @@ mod tests {
     async fn set_session_mode_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = SetSessionModeResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.set_mode", &expected);
+        set_json_response(
+            &mock,
+            "acp.session-mode-001.agent.session.set_mode",
+            &expected,
+        );
 
-        let request = SetSessionModeRequest::new("s1", "mode-1");
+        let request = SetSessionModeRequest::new("session-mode-001", "auto");
         let result = bridge.set_session_mode(request).await;
-
         assert!(result.is_ok());
     }
 
