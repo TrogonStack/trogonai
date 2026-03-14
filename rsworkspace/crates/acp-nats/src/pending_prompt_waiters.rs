@@ -163,6 +163,28 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
             .contains_key(&(session_id.clone(), prompt_token))
     }
 
+    /// Cancels any pending waiter for the session with a Cancelled response.
+    /// Used when a cancel notification arrives; we don't have a prompt_token.
+    #[allow(dead_code)]
+    pub fn cancel_waiter_for_session(
+        &self,
+        session_id: &SessionId,
+        response: std::result::Result<PromptResponse, String>,
+    ) -> bool {
+        let mut waiters = self.waiters.lock().unwrap();
+        let waiter = waiters.remove(session_id);
+        drop(waiters);
+        if let Some(waiter) = waiter {
+            self.timed_out
+                .lock()
+                .unwrap()
+                .retain(|(s, _), _| s != session_id);
+            waiter.sender.send(response).is_ok()
+        } else {
+            false
+        }
+    }
+
     /// Delivers a backend prompt result to the waiting caller for `(session_id, prompt_token)`.
     /// Only resolves if the token matches; late responses for a different prompt are ignored.
     pub fn resolve_waiter(
@@ -276,5 +298,33 @@ mod tests {
             .expect("new waiter should remain connected")
             .expect("new waiter should receive a valid response");
         assert_eq!(response.stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn cancel_waiter_for_session_resolves_pending() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let clock = MockClock::new();
+        let session_id = SessionId::from("s1");
+
+        let (rx, _guard, token) = waiters.register_waiter(session_id.clone()).unwrap();
+        waiters.mark_prompt_waiter_timed_out(session_id.clone(), token, &clock);
+
+        let cancelled = waiters
+            .cancel_waiter_for_session(&session_id, Ok(PromptResponse::new(StopReason::Cancelled)));
+        assert!(cancelled);
+        assert!(waiters.timed_out.lock().unwrap().is_empty());
+
+        let response = rx.await.unwrap().unwrap();
+        assert_eq!(response.stop_reason, StopReason::Cancelled);
+    }
+
+    #[test]
+    fn cancel_waiter_for_session_returns_false_when_no_waiter() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let session_id = SessionId::from("s1");
+        assert!(!waiters.cancel_waiter_for_session(
+            &session_id,
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+        ));
     }
 }
