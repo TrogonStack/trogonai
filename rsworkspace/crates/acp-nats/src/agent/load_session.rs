@@ -1,13 +1,7 @@
 use super::Bridge;
-use crate::acp_prefix::AcpPrefix;
-use crate::config::SESSION_READY_DELAY;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
-    RetryPolicy, agent,
-};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
 use crate::session_id::AcpSessionId;
-use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -88,14 +82,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     .map_err(map_load_session_error);
 
     if result.is_ok() {
-        let nats = bridge.nats.clone();
-        let prefix = bridge.config.acp_prefix.clone();
-        let session_id = session_id.clone();
-        let metrics = bridge.metrics.clone();
-        // TODO: track the JoinHandle so we can drain in-flight publishes on graceful shutdown.
-        tokio::spawn(async move {
-            publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
-        });
+        bridge.spawn_session_ready(&args.session_id);
     }
 
     bridge.metrics.record_request(
@@ -105,38 +92,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     );
 
     result
-}
-
-async fn publish_session_ready<N: PublishClient + FlushClient>(
-    nats: &N,
-    prefix: &AcpPrefix,
-    session_id: &AcpSessionId,
-    metrics: &Metrics,
-) {
-    tokio::time::sleep(SESSION_READY_DELAY).await;
-
-    let subject = agent::ext_session_ready(prefix.as_str(), session_id.as_str());
-    info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
-
-    let message = ExtSessionReady::new(agent_client_protocol::SessionId::from(
-        session_id.to_string(),
-    ));
-
-    let options = PublishOptions::builder()
-        .publish_retry_policy(RetryPolicy::standard())
-        .flush_policy(FlushPolicy::standard())
-        .build();
-
-    if let Err(e) = nats::publish(nats, &subject, &message, options).await {
-        warn!(
-            error = %e,
-            session_id = %session_id,
-            "Failed to publish session.ready"
-        );
-        metrics.record_error("session_ready", "session_ready_publish_failed");
-    } else {
-        info!(session_id = %session_id, "Published session.ready");
-    }
 }
 
 #[cfg(test)]

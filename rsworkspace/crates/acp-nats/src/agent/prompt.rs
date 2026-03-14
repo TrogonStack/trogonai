@@ -84,6 +84,17 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             Err(error) => return Err(invalid_session_id_error(bridge, error)),
         };
 
+        if bridge
+            .cancelled_sessions
+            .take_if_cancelled(&args.session_id, &bridge.clock)
+            .is_some()
+        {
+            info!(session_id = %args.session_id, "Prompt pre-flight: session already cancelled");
+            return Ok(PromptResponse::new(
+                agent_client_protocol::StopReason::Cancelled,
+            ));
+        }
+
         let nats = bridge.nats();
         let subject = agent::session_prompt(bridge.config.acp_prefix(), session_id.as_str());
 
@@ -386,6 +397,20 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("Duplicate prompt request"));
         assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_cancelled_for_pre_cancelled_session() {
+        let (_mock, bridge) = mock_bridge();
+        bridge
+            .cancelled_sessions
+            .mark_cancelled(SessionId::from("s1"), &bridge.clock);
+
+        let response = bridge
+            .prompt(PromptRequest::new("s1", vec![]))
+            .await
+            .unwrap();
+        assert_eq!(response.stop_reason, StopReason::Cancelled);
     }
 
     #[tokio::test(flavor = "current_thread")]
