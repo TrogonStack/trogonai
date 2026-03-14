@@ -306,4 +306,34 @@ mod tests {
         assert!(agent::session_set_mode(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::ext_session_ready(prefix, sid).starts_with(&expected_prefix));
     }
+
+    #[test]
+    fn multi_tenant_prefixes_are_isolated() {
+        let sid = "sess123";
+        assert_ne!(agent::initialize("tenant1"), agent::initialize("tenant2"));
+        assert_ne!(
+            agent::session_prompt("tenant1", sid),
+            agent::session_prompt("tenant2", sid),
+        );
+    }
+
+    #[test]
+    fn environment_based_prefixes() {
+        assert_eq!(agent::initialize("dev"), "dev.agent.initialize");
+        assert_eq!(agent::initialize("prod"), "prod.agent.initialize");
+        assert_eq!(agent::initialize("staging"), "staging.agent.initialize");
+    }
+
+    #[test]
+    fn special_characters_in_prefix() {
+        assert_eq!(agent::initialize("my_app"), "my_app.agent.initialize");
+        assert_eq!(agent::initialize("my-app"), "my-app.agent.initialize");
+        assert_eq!(agent::initialize("app123"), "app123.agent.initialize");
+    }
+
+    #[test]
+    fn prefix_does_not_add_extra_namespace() {
+        assert_eq!(agent::initialize("myapp"), "myapp.agent.initialize");
+        assert_ne!(agent::initialize("myapp"), "myapp.acp.agent.initialize");
+    }
 }

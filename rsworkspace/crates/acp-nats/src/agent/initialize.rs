@@ -317,4 +317,21 @@ mod tests {
         assert!(err.to_string().contains("Initialize request failed"));
         assert_eq!(err.code, ErrorCode::InternalError);
     }
+
+    #[tokio::test]
+    async fn handlers_use_custom_prefix() {
+        let mock = AdvancedMockNatsClient::new();
+        let bridge = Bridge::new(
+            mock.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("myorg.prod"),
+        );
+        let expected = InitializeResponse::new(ProtocolVersion::LATEST);
+        set_json_response(&mock, "myorg.prod.agent.initialize", &expected);
+
+        let request = InitializeRequest::new(ProtocolVersion::LATEST);
+        let result = bridge.initialize(request).await;
+        assert!(result.is_ok());
+    }
 }
