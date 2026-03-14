@@ -36,6 +36,20 @@ pub mod agent {
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
+
+    pub mod wildcards {
+        pub fn global(prefix: &str) -> String {
+            format!("{}.agent.>", prefix)
+        }
+
+        pub fn all_sessions(prefix: &str) -> String {
+            format!("{}.*.agent.>", prefix)
+        }
+
+        pub fn session(prefix: &str, session_id: &str) -> String {
+            format!("{}.{}.agent.>", prefix, session_id)
+        }
+    }
 }
 
 pub mod client {
@@ -89,6 +103,10 @@ pub mod client {
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
+        }
+
+        pub fn session(prefix: &str, session_id: &str) -> String {
+            format!("{}.{}.client.>", prefix, session_id)
         }
     }
 }
@@ -181,6 +199,26 @@ mod tests {
     #[test]
     fn client_wildcards_all() {
         assert_eq!(client::wildcards::all("foo"), "foo.*.client.>");
+    }
+
+    #[test]
+    fn agent_wildcards_global() {
+        assert_eq!(agent::wildcards::global("acp"), "acp.agent.>");
+    }
+
+    #[test]
+    fn agent_wildcards_all_sessions() {
+        assert_eq!(agent::wildcards::all_sessions("acp"), "acp.*.agent.>");
+    }
+
+    #[test]
+    fn agent_wildcards_session() {
+        assert_eq!(agent::wildcards::session("acp", "s1"), "acp.s1.agent.>");
+    }
+
+    #[test]
+    fn client_wildcards_session() {
+        assert_eq!(client::wildcards::session("acp", "s1"), "acp.s1.client.>");
     }
 
     #[test]
