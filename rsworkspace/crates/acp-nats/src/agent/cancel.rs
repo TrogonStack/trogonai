@@ -1,7 +1,9 @@
 use super::Bridge;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
+use agent_client_protocol::{
+    CancelNotification, Error, ErrorCode, PromptResponse, Result, StopReason,
+};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
 
@@ -56,6 +58,16 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             .metrics
             .record_error("cancel", "cancel_publish_failed");
     }
+
+    bridge
+        .cancelled_sessions
+        .mark_cancelled(args.session_id.clone(), &bridge.clock);
+    bridge
+        .pending_session_prompt_responses
+        .cancel_waiter_for_session(
+            &args.session_id,
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+        );
 
     bridge.metrics.record_request(
         "cancel",
