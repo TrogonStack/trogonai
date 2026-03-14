@@ -1,0 +1,26 @@
+[package]
+name = "acp-nats-ws"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+acp-nats = { path = "../acp-nats" }
+agent-client-protocol = "0.9.4"
+async-compat = "0.2.5"
+async-nats = "0.45.0"
+axum = { version = "0.8.8", features = ["ws"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+futures-util = { version = "0.3", features = ["sink"] }
+opentelemetry = "0.31.0"
+opentelemetry-appender-tracing = "0.31.0"
+opentelemetry-otlp = { version = "0.31.0", features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "logs", "metrics"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "io-util"] }
+tower-http = { version = "0.6.8", features = ["trace"] }
+tracing = "0.1.44"
+tracing-opentelemetry = "0.32.1"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
+trogon-std = { path = "../trogon-std" }
+
+[dev-dependencies]
+trogon-std = { path = "../trogon-std", features = ["test-support"] }
