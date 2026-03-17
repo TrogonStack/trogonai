@@ -8,9 +8,9 @@ use std::time::Duration;
 /// 30 s keeps export volume low while still surfacing near-real-time data.
 const METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(30);
 
-pub(super) static METER_PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
+pub(crate) static METER_PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
 
-pub(super) fn init_provider(
+pub(crate) fn init_provider(
     resource: &Resource,
 ) -> Result<SdkMeterProvider, Box<dyn std::error::Error>> {
     let exporter = MetricExporter::builder().with_http().build()?;
@@ -27,7 +27,7 @@ pub(super) fn init_provider(
     Ok(provider)
 }
 
-pub(super) fn force_flush() {
+pub(crate) fn force_flush() {
     if let Some(provider) = METER_PROVIDER.get()
         && let Err(e) = provider.force_flush()
     {
@@ -35,7 +35,7 @@ pub(super) fn force_flush() {
     }
 }
 
-pub(super) fn shutdown() {
+pub(crate) fn shutdown() {
     if let Some(provider) = METER_PROVIDER.get()
         && let Err(e) = provider.shutdown()
     {

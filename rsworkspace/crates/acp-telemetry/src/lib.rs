@@ -1,6 +1,10 @@
 mod log;
 mod metric;
+mod service_name;
+pub mod signal;
 mod trace;
+
+pub use service_name::ServiceName;
 
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider;
@@ -14,19 +18,18 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
-const OTEL_SERVICE_NAME: &str = "acp-nats-stdio";
-const LOG_FILE_NAME: &str = "acp-nats-stdio.log";
-
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
+    service_name: ServiceName,
     env: &impl ReadEnv,
     fs: &F,
 ) -> (Option<std::sync::Mutex<F::Writer>>, Option<String>) {
-    let log_dir = match log::ensure_log_dir(env, fs) {
+    let log_dir = match log::ensure_log_dir(service_name, env, fs) {
         Ok(dir) => dir,
         Err(e) => return (None, Some(format!("File logging disabled: {}", e))),
     };
 
-    let log_file = log_dir.join(LOG_FILE_NAME);
+    let log_file_name = format!("{}.log", service_name.as_str());
+    let log_file = log_dir.join(&log_file_name);
     match fs.open_append(&log_file) {
         Ok(writer) => (
             Some(std::sync::Mutex::new(writer)),
@@ -44,6 +47,7 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
 }
 
 pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
+    service_name: ServiceName,
     acp_prefix: &str,
     env: &E,
     fs: &F,
@@ -56,7 +60,7 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
         .with_span_events(FmtSpan::CLOSE)
         .json();
 
-    let (log_file, file_layer_info) = try_open_log_file(env, fs);
+    let (log_file, file_layer_info) = try_open_log_file(service_name, env, fs);
     let file_layer = log_file.map(|file| {
         tracing_subscriber::fmt::layer()
             .with_writer(file)
@@ -65,12 +69,12 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
             .json()
     });
 
-    match try_init_otel(acp_prefix) {
+    match try_init_otel(service_name, acp_prefix) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
             opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
             opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
-            let tracer = tracer_provider.tracer(OTEL_SERVICE_NAME);
+            let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
             let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
             if trace::TRACER_PROVIDER.set(tracer_provider).is_err() {
                 eprintln!("WARN: tracer provider already initialized");
@@ -118,6 +122,7 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
 }
 
 fn try_init_otel(
+    service_name: ServiceName,
     acp_prefix: &str,
 ) -> Result<
     (
@@ -128,7 +133,7 @@ fn try_init_otel(
     Box<dyn std::error::Error>,
 > {
     let resource = Resource::builder()
-        .with_service_name(OTEL_SERVICE_NAME)
+        .with_service_name(service_name.as_str())
         .with_attributes(vec![KeyValue::new("acp.prefix", acp_prefix.to_owned())])
         .build();
 
@@ -151,6 +156,10 @@ pub fn shutdown_otel() {
     log::shutdown();
 }
 
+pub fn meter(name: &'static str) -> opentelemetry::metrics::Meter {
+    opentelemetry::global::meter(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,11 +172,11 @@ mod tests {
         env.set("ACP_LOG_DIR", "/tmp/test-logs");
         let fs = MemFs::new();
 
-        let (writer, info) = try_open_log_file(&env, &fs);
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
         assert!(writer.is_some());
         let msg = info.unwrap();
         assert!(msg.contains("File logging enabled"));
-        assert!(msg.contains(LOG_FILE_NAME));
+        assert!(msg.contains("acp-nats-stdio.log"));
     }
 
     #[test]
@@ -175,7 +184,7 @@ mod tests {
         let env = InMemoryEnv::new();
         let fs = MemFs::new();
 
-        let (writer, info) = try_open_log_file(&env, &fs);
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsWs, &env, &fs);
         assert!(writer.is_some());
         let msg = info.unwrap();
         assert!(msg.contains("File logging enabled"));
@@ -188,9 +197,15 @@ mod tests {
         fs.insert("/tmp/test-logs", "file-blocking-dir");
         env.set("ACP_LOG_DIR", "/tmp/test-logs/sub");
 
-        let (writer, info) = try_open_log_file(&env, &fs);
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
         assert!(writer.is_none());
         let msg = info.unwrap();
         assert!(msg.contains("File logging disabled"));
+    }
+
+    #[test]
+    fn service_name_reexported() {
+        assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
+        assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
     }
 }
