@@ -15,6 +15,20 @@ use tracing::{debug, info, warn};
 
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
+// ── PermissionChecker ─────────────────────────────────────────────────────────
+
+/// Called by the agent loop before each tool execution.
+/// Returns `true` to allow the tool to run, `false` to deny it.
+pub trait PermissionChecker: Send + Sync {
+    fn check<'a>(
+        &'a self,
+        session_id: &'a str,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
+}
+
 // ── Wire types ────────────────────────────────────────────────────────────────
 
 /// A single message in the Anthropic conversation history.
@@ -215,6 +229,8 @@ pub struct AgentLoop {
     pub split_client: Option<trogon_splitio::SplitClient>,
     /// Tenant identifier used as the Split.io user key for flag evaluation.
     pub tenant_id: String,
+    /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
+    pub permission_checker: Option<Arc<dyn PermissionChecker>>,
 }
 
 impl AgentLoop {
@@ -554,7 +570,17 @@ impl AgentLoop {
                     })
                     .await;
 
-                let output = if let Some((_, original, client)) =
+                // Ask permission before executing (if a checker is installed)
+                let allowed = match &self.permission_checker {
+                    Some(checker) => {
+                        checker.check(&self.tenant_id, id, name, input).await
+                    }
+                    None => true,
+                };
+
+                let output = if !allowed {
+                    format!("Permission denied: user refused to run tool `{name}`")
+                } else if let Some((_, original, client)) =
                     self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
                 {
                     match client.call_tool(original, input).await {
@@ -803,6 +829,7 @@ mod tests {
             mcp_dispatch: vec![],
             split_client,
             tenant_id: "test-tenant".to_string(),
+            permission_checker: None,
         }
     }
 

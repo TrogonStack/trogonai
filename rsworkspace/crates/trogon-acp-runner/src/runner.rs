@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 use trogon_agent::agent_loop::{AgentEvent, AgentLoop, ContentBlock, ImageSource, Message};
 use trogon_agent::tools::{ToolDef, all_tool_defs};
 
+use crate::permission::{ChannelPermissionChecker, PermissionTx};
 use crate::session_store::{SessionStore, StoredMcpServer};
 
 /// Subscribes to `{prefix}.*.agent.prompt` via NATS Core, runs the agentic loop
@@ -21,6 +22,9 @@ pub struct Runner {
     store: SessionStore,
     agent: Arc<AgentLoop>,
     prefix: String,
+    /// Optional in-process channel to forward permission requests to the ACP connection.
+    /// `None` means all tools are auto-allowed (no gate).
+    permission_tx: Option<PermissionTx>,
 }
 
 impl Runner {
@@ -29,6 +33,7 @@ impl Runner {
         js: &jetstream::Context,
         agent: AgentLoop,
         prefix: impl Into<String>,
+        permission_tx: Option<PermissionTx>,
     ) -> anyhow::Result<Self> {
         let store = SessionStore::open(js).await?;
         Ok(Self {
@@ -36,6 +41,7 @@ impl Runner {
             store,
             agent: Arc::new(agent),
             prefix: prefix.into(),
+            permission_tx,
         })
     }
 
@@ -108,10 +114,11 @@ impl Runner {
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
 
         let tools = all_tool_defs();
-        // Build per-session agent with model + MCP overrides
+        // Build per-session agent with model + MCP overrides and permission gate
+        let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let agent: Arc<AgentLoop> = {
-            let needs_override = state.model.is_some() || !state.mcp_servers.is_empty();
-            if needs_override {
+            let needs_clone = state.model.is_some() || !state.mcp_servers.is_empty() || needs_perm;
+            if needs_clone {
                 let mut a = (*self.agent).clone();
                 if let Some(ref model) = state.model {
                     a.model = model.clone();
@@ -121,6 +128,14 @@ impl Runner {
                         build_session_mcp(&self.nats, &state.mcp_servers).await;
                     a.mcp_tool_defs.extend(mcp_defs);
                     a.mcp_dispatch.extend(mcp_dispatch);
+                }
+                if needs_perm {
+                    if let Some(ref perm_tx) = self.permission_tx {
+                        a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
+                            session_id: payload.session_id.clone(),
+                            tx: perm_tx.clone(),
+                        }));
+                    }
                 }
                 Arc::new(a)
             } else {
@@ -244,12 +259,26 @@ impl Runner {
 
         let tools = all_tool_defs();
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
-        let agent: Arc<AgentLoop> = if let Some(ref model) = state.model {
-            let mut a = (*self.agent).clone();
-            a.model = model.clone();
-            Arc::new(a)
-        } else {
-            self.agent.clone()
+        let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
+        let agent: Arc<AgentLoop> = {
+            let needs_clone = state.model.is_some() || needs_perm;
+            if needs_clone {
+                let mut a = (*self.agent).clone();
+                if let Some(ref model) = state.model {
+                    a.model = model.clone();
+                }
+                if needs_perm {
+                    if let Some(ref perm_tx) = self.permission_tx {
+                        a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
+                            session_id: payload.session_id.clone(),
+                            tx: perm_tx.clone(),
+                        }));
+                    }
+                }
+                Arc::new(a)
+            } else {
+                self.agent.clone()
+            }
         };
         let messages = state.messages.clone();
 

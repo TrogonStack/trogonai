@@ -39,7 +39,11 @@ mod agent;
 use std::sync::Arc;
 
 use acp_nats::{AcpPrefix, Bridge, Config};
-use agent_client_protocol::{AgentSideConnection, Client, SessionNotification};
+use agent_client_protocol::{
+    AgentSideConnection, Client, PermissionOption, PermissionOptionKind,
+    RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, ToolCallUpdate,
+    ToolCallUpdateFields,
+};
 use async_nats::jetstream;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
@@ -48,7 +52,7 @@ use tracing::info;
 
 use trogon_agent::agent_loop::AgentLoop;
 use trogon_agent::tools::ToolContext;
-use trogon_acp_runner::Runner;
+use trogon_acp_runner::{PermissionReq, Runner};
 use trogon_nats::NatsConfig;
 
 #[tokio::main]
@@ -108,11 +112,18 @@ async fn main() -> anyhow::Result<()> {
         mcp_dispatch: vec![],
         split_client: None,
         tenant_id: "default".to_string(),
+        permission_checker: None,
     };
+
+    // ── Permission gate channel ───────────────────────────────────────────────
+    // The Runner sends PermissionReq over this channel; the LocalSet task below
+    // handles each request by calling conn.request_permission() on the ACP connection.
+
+    let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
 
     // ── Runner (NATS subscriber + agent) ─────────────────────────────────────
 
-    let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone()).await?;
+    let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone(), Some(perm_tx)).await?;
     tokio::spawn(async move { runner.run().await });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
@@ -163,11 +174,27 @@ async fn main() -> anyhow::Result<()> {
                     tokio::task::spawn_local(fut);
                 });
 
-            // Forward session notifications (streaming events, tool calls) to the ACP client
+            // Forward session notifications and handle permission requests in a single task
+            // so `conn` (which is !Send) is only used within this LocalSet task.
             tokio::task::spawn_local(async move {
-                while let Some(notification) = notification_rx.recv().await {
-                    if let Err(e) = conn.session_notification(notification).await {
-                        tracing::warn!(error = %e, "failed to forward session notification");
+                loop {
+                    tokio::select! {
+                        maybe_notification = notification_rx.recv() => {
+                            match maybe_notification {
+                                Some(notification) => {
+                                    if let Err(e) = conn.session_notification(notification).await {
+                                        tracing::warn!(error = %e, "failed to forward session notification");
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
+                        maybe_perm = perm_rx.recv() => {
+                            if let Some(req) = maybe_perm {
+                                handle_permission_request(&conn, req).await;
+                            }
+                            // perm channel closing doesn't stop the loop
+                        }
                     }
                 }
             });
@@ -179,4 +206,38 @@ async fn main() -> anyhow::Result<()> {
         .await;
 
     Ok(())
+}
+
+/// Call `conn.request_permission` for a tool and send the allow/deny result
+/// back to the Runner via the oneshot channel embedded in `req`.
+async fn handle_permission_request(conn: &AgentSideConnection, req: PermissionReq) {
+    let options = vec![
+        PermissionOption::new("allow_always", "Always Allow", PermissionOptionKind::AllowAlways),
+        PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+        PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+    ];
+
+    let fields = ToolCallUpdateFields::new()
+        .title(req.tool_name.clone())
+        .raw_input(req.tool_input.clone());
+    let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
+
+    let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
+
+    let allowed = match conn.request_permission(perm_req).await {
+        Ok(resp) => match resp.outcome {
+            RequestPermissionOutcome::Selected(sel) => {
+                let id = sel.option_id.0.as_ref();
+                id == "allow" || id == "allow_always"
+            }
+            RequestPermissionOutcome::Cancelled => false,
+            _ => false,
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, tool = %req.tool_name, "permission request failed — denying");
+            false
+        }
+    };
+
+    let _ = req.response_tx.send(allowed);
 }
