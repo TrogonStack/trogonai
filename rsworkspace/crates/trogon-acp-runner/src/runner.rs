@@ -164,6 +164,12 @@ impl Runner {
                                         &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
                                     ).await;
                                 }
+                                Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => {
+                                    self.publish_event(
+                                        &events_subject,
+                                        &PromptEvent::Done { stop_reason: "max_tokens".to_string() },
+                                    ).await;
+                                }
                                 Ok(Err(e)) => {
                                     self.publish_error(&events_subject, e.to_string()).await;
                                 }
@@ -236,8 +242,8 @@ impl Runner {
         };
         let messages = state.messages.clone();
 
-        tokio::task::spawn_local(async move {
-            let _ = agent.run_chat_streaming(messages, &tools, None, event_tx).await;
+        let agent_handle = tokio::task::spawn_local(async move {
+            agent.run_chat_streaming(messages, &tools, None, event_tx).await
         });
 
         while let Some(event) = event_rx.recv().await {
@@ -257,9 +263,14 @@ impl Runner {
             self.publish_event(&events_subject, &prompt_event).await;
         }
 
+        let stop_reason = match agent_handle.await {
+            Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => "max_tokens",
+            Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => "max_turn_requests",
+            _ => "end_turn",
+        };
         self.publish_event(
             &events_subject,
-            &PromptEvent::Done { stop_reason: "end_turn".to_string() },
+            &PromptEvent::Done { stop_reason: stop_reason.to_string() },
         )
         .await;
     }

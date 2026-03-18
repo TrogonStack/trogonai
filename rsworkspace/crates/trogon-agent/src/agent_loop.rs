@@ -130,6 +130,7 @@ struct AnthropicUsage {
 pub enum AgentError {
     Http(reqwest::Error),
     MaxIterationsReached,
+    MaxTokens,
     UnexpectedStopReason(String),
 }
 
@@ -138,6 +139,7 @@ impl std::fmt::Display for AgentError {
         match self {
             Self::Http(e) => write!(f, "HTTP error: {e}"),
             Self::MaxIterationsReached => write!(f, "Agent exceeded max iterations"),
+            Self::MaxTokens => write!(f, "Context window full (max_tokens)"),
             Self::UnexpectedStopReason(r) => write!(f, "Unexpected stop reason: {r}"),
         }
     }
@@ -294,6 +296,10 @@ impl AgentLoop {
                     info!(iterations = iteration + 1, "Agent completed");
                     return Ok(text);
                 }
+                "max_tokens" => {
+                    warn!(iteration, "Agent hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
+                }
                 "tool_use" => {
                     let results = self.execute_tools(&response.content).await;
                     messages.push(Message::assistant(response.content));
@@ -372,6 +378,10 @@ impl AgentLoop {
                     messages.push(Message::assistant(response.content));
                     info!(iterations = iteration + 1, "Chat completed");
                     return Ok((text, messages));
+                }
+                "max_tokens" => {
+                    warn!(iteration, "Chat hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
                 }
                 "tool_use" => {
                     let results = self.execute_tools(&response.content).await;
@@ -475,6 +485,26 @@ impl AgentLoop {
                     messages.push(Message::assistant(response.content));
                     info!(iterations = iteration + 1, "Streaming chat completed");
                     return Ok(messages);
+                }
+                "max_tokens" => {
+                    // Emit whatever partial text was in the response before signalling
+                    let text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let _ = event_tx.send(AgentEvent::UsageSummary {
+                        input_tokens: total_input,
+                        output_tokens: total_output,
+                    }).await;
+                    if !text.is_empty() {
+                        let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+                    }
+                    warn!(iteration, "Streaming chat hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
                 }
                 "tool_use" => {
                     let results = self
