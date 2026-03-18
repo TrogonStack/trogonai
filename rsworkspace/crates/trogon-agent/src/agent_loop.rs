@@ -196,7 +196,9 @@ pub enum AgentEvent {
     /// A tool call was dispatched — emitted immediately before execution.
     ToolCallStarted { id: String, name: String, input: serde_json::Value },
     /// A tool call completed — emitted immediately after execution.
-    ToolCallFinished { id: String, output: String },
+    ToolCallFinished { id: String, output: String, exit_code: Option<i32>, signal: Option<String> },
+    /// A system-level status message (forward compatibility with Anthropic API system events).
+    SystemStatus { message: String },
     /// Token usage summary emitted at the end of a turn.
     UsageSummary {
         input_tokens: u32,
@@ -218,6 +220,9 @@ pub struct AgentLoop {
     pub anthropic_token: String,
     pub model: String,
     pub max_iterations: u32,
+    /// Extended thinking token budget. When `Some(n)` with `n > 0`, the
+    /// Anthropic `thinking` feature is enabled with `budget_tokens = n`.
+    pub thinking_budget: Option<u32>,
     /// Shared context passed to every tool execution.
     pub tool_context: Arc<ToolContext>,
     /// GitHub repo owner for pre-fetching the memory file in handlers
@@ -479,12 +484,22 @@ impl AgentLoop {
                 messages: &messages,
             };
 
+            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
+            if let Some(budget) = self.thinking_budget {
+                if budget > 0 {
+                    body["thinking"] = serde_json::json!({
+                        "type": "enabled",
+                        "budget_tokens": budget
+                    });
+                }
+            }
+
             let response = self
                 .http_client
                 .post(format!("{}/anthropic/v1/messages", self.proxy_url))
                 .header("Authorization", format!("Bearer {}", self.anthropic_token))
                 .header("anthropic-version", "2023-06-01")
-                .json(&request)
+                .json(&body)
                 .send()
                 .await
                 .map_err(AgentError::Http)?
@@ -612,6 +627,8 @@ impl AgentLoop {
                     .send(AgentEvent::ToolCallFinished {
                         id: id.clone(),
                         output: output.clone(),
+                        exit_code: None,
+                        signal: None,
                     })
                     .await;
 
@@ -832,6 +849,7 @@ mod tests {
             anthropic_token: String::new(),
             model: "test".to_string(),
             max_iterations: 1,
+            thinking_budget: None,
             tool_context: Arc::new(ToolContext {
                 http_client: http,
                 proxy_url: "http://127.0.0.1:1".to_string(),

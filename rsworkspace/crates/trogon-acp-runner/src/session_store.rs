@@ -45,6 +45,9 @@ pub struct SessionState {
     /// Optional system prompt set at session creation via `_meta.systemPrompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// Additional root directories supplied via `_meta.additionalRoots` at session creation.
+    #[serde(default)]
+    pub additional_roots: Vec<String>,
 }
 
 /// NATS KV-backed session store.

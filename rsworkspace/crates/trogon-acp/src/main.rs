@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         slack_token: slack_token.clone(),
     });
 
-    let agent_loop = AgentLoop {
+    let mut agent_loop = AgentLoop {
         http_client,
         proxy_url,
         anthropic_token,
@@ -113,7 +113,15 @@ async fn main() -> anyhow::Result<()> {
         split_client: None,
         tenant_id: "default".to_string(),
         permission_checker: None,
+        thinking_budget: None,
     };
+
+    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    if let Some(budget) = thinking_budget {
+        agent_loop.thinking_budget = Some(budget);
+    }
 
     // ── Permission gate channel ───────────────────────────────────────────────
     // The Runner sends PermissionReq over this channel; the LocalSet task below

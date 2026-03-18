@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, AvailableCommandsUpdate,
+    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
+    AvailableCommandsUpdate,
     CancelNotification, ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Error,
     ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
@@ -145,11 +146,24 @@ where
     }
 
     /// Send an `available_commands_update` notification asynchronously.
-    /// We have no slash commands in the NATS model, so we send an empty list.
-    async fn send_available_commands_update(&self, session_id: &SessionId) {
+    /// Builds one slash command entry per MCP server (e.g. `"myserver:"`).
+    async fn send_available_commands_update(
+        &self,
+        session_id: &SessionId,
+        mcp_servers: &[trogon_acp_runner::StoredMcpServer],
+    ) {
+        let commands: Vec<AvailableCommand> = mcp_servers
+            .iter()
+            .map(|s| {
+                AvailableCommand::new(
+                    format!("{}:", s.name),
+                    format!("Commands provided by MCP server '{}'", s.name),
+                )
+            })
+            .collect();
         let notification = SessionNotification::new(
             session_id.clone(),
-            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![])),
+            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
         );
         let sender = self.notification_sender.clone();
         let sid = session_id.clone();
@@ -377,12 +391,24 @@ where
                     None
                 }
             });
+        let additional_roots: Vec<String> = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("additionalRoots"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let state = SessionState {
             cwd,
             created_at: now_iso8601(),
             mode: "default".to_string(),
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
             system_prompt,
+            additional_roots,
             ..Default::default()
         };
         if let Err(e) = self.store.save(&session_id, &state).await {
@@ -391,7 +417,7 @@ where
 
         let sid = SessionId::from(session_id.clone());
         self.publish_session_ready(&session_id).await;
-        self.send_available_commands_update(&sid).await;
+        self.send_available_commands_update(&sid, &state.mcp_servers).await;
 
         let modes = Self::build_mode_state(&state.mode);
         let models = Self::build_model_state(&self.default_model);
@@ -416,7 +442,7 @@ where
 
         self.replay_history(&args.session_id, &state).await;
         self.publish_session_ready(&session_id).await;
-        self.send_available_commands_update(&args.session_id).await;
+        self.send_available_commands_update(&args.session_id, &state.mcp_servers).await;
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
@@ -446,6 +472,12 @@ where
             return Err(Error::new(
                 ErrorCode::InvalidParams.into(),
                 format!("Invalid mode: {mode_id}"),
+            ));
+        }
+        if mode_id == "bypassPermissions" && is_running_as_root() {
+            return Err(Error::new(
+                ErrorCode::InvalidParams.into(),
+                "bypassPermissions cannot be used when running as root or with sudo",
             ));
         }
 
@@ -613,6 +645,7 @@ where
             title: src_state.title.clone(),
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
             system_prompt: src_state.system_prompt.clone(),
+            additional_roots: src_state.additional_roots.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");
@@ -620,7 +653,7 @@ where
 
         let sid = SessionId::from(new_id.clone());
         self.publish_session_ready(&new_id).await;
-        self.send_available_commands_update(&sid).await;
+        self.send_available_commands_update(&sid, &new_state.mcp_servers).await;
 
         let current_mode = if new_state.mode.is_empty() { "default" } else { &new_state.mode };
         let current_model = new_state.model.as_deref().unwrap_or(&self.default_model);
@@ -640,7 +673,7 @@ where
         })?;
 
         self.publish_session_ready(&session_id).await;
-        self.send_available_commands_update(&args.session_id).await;
+        self.send_available_commands_update(&args.session_id, &state.mcp_servers).await;
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
@@ -730,4 +763,24 @@ fn days_in_month(y: u64, m: u64) -> u64 {
         2 => if is_leap(y) { 29 } else { 28 },
         _ => 30,
     }
+}
+
+/// Returns `true` if the current process is running as root or under sudo.
+fn is_running_as_root() -> bool {
+    if std::env::var("SUDO_UID").is_ok() || std::env::var("SUDO_USER").is_ok() {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("Uid:\t") {
+                    if let Some(uid_str) = rest.split_whitespace().next() {
+                        return uid_str == "0";
+                    }
+                }
+            }
+        }
+    }
+    false
 }

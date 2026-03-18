@@ -56,7 +56,16 @@ pub enum PromptEvent {
         input: serde_json::Value,
     },
     /// A tool call finished executing.
-    ToolCallFinished { id: String, output: String },
+    ToolCallFinished {
+        id: String,
+        output: String,
+        #[serde(default)]
+        exit_code: Option<i32>,
+        #[serde(default)]
+        signal: Option<String>,
+    },
+    /// A system-level status message (forward compatibility with Anthropic API system events).
+    SystemStatus { message: String },
     /// Token usage summary for the completed turn.
     UsageUpdate {
         input_tokens: u32,
@@ -125,5 +134,17 @@ mod tests {
         let json = serde_json::to_string(&e).unwrap();
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(e2, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"));
+    }
+
+    #[test]
+    fn prompt_event_system_status_tag() {
+        let e = PromptEvent::SystemStatus { message: "rate_limit_warning".to_string() };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "system_status");
+        assert_eq!(v["message"], "rate_limit_warning");
+        // Roundtrip
+        let json = serde_json::to_string(&e).unwrap();
+        let e2: PromptEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning"));
     }
 }

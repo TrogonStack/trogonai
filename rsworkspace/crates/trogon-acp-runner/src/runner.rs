@@ -114,6 +114,7 @@ impl Runner {
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
 
         let tools = all_tool_defs();
+        let tools: Vec<_> = tools.into_iter().filter(|t| t.name != "AskUserQuestion").collect();
         // Build per-session agent with model + MCP overrides and permission gate
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let agent: Arc<AgentLoop> = {
@@ -144,6 +145,19 @@ impl Runner {
         };
         let messages = state.messages.clone();
         let system_prompt = state.system_prompt.clone();
+        let system_prompt = if !state.additional_roots.is_empty() {
+            let roots_info = state.additional_roots.iter()
+                .map(|r| format!("- {r}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let roots_section = format!("Additional working directories:\n{roots_info}");
+            match system_prompt {
+                Some(s) => Some(format!("{s}\n\n{roots_section}")),
+                None => Some(roots_section),
+            }
+        } else {
+            system_prompt
+        };
 
         // Spawn the agent loop so we can select! against cancel
         let agent_fut = tokio::task::spawn_local(async move {
@@ -170,8 +184,11 @@ impl Runner {
                                 AgentEvent::ToolCallStarted { id, name, input } => {
                                     PromptEvent::ToolCallStarted { id, name, input }
                                 }
-                                AgentEvent::ToolCallFinished { id, output } => {
-                                    PromptEvent::ToolCallFinished { id, output }
+                                AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                                    PromptEvent::ToolCallFinished { id, output, exit_code, signal }
+                                }
+                                AgentEvent::SystemStatus { message } => {
+                                    PromptEvent::SystemStatus { message }
                                 }
                                 AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
                                     PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
@@ -260,6 +277,7 @@ impl Runner {
         state.messages.push(user_message_from_payload(&payload));
 
         let tools = all_tool_defs();
+        let tools: Vec<_> = tools.into_iter().filter(|t| t.name != "AskUserQuestion").collect();
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let agent: Arc<AgentLoop> = {
@@ -284,6 +302,19 @@ impl Runner {
         };
         let messages = state.messages.clone();
         let system_prompt = state.system_prompt.clone();
+        let system_prompt = if !state.additional_roots.is_empty() {
+            let roots_info = state.additional_roots.iter()
+                .map(|r| format!("- {r}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let roots_section = format!("Additional working directories:\n{roots_info}");
+            match system_prompt {
+                Some(s) => Some(format!("{s}\n\n{roots_section}")),
+                None => Some(roots_section),
+            }
+        } else {
+            system_prompt
+        };
 
         let agent_handle = tokio::task::spawn_local(async move {
             agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
@@ -296,8 +327,11 @@ impl Runner {
                 AgentEvent::ToolCallStarted { id, name, input } => {
                     PromptEvent::ToolCallStarted { id, name, input }
                 }
-                AgentEvent::ToolCallFinished { id, output } => {
-                    PromptEvent::ToolCallFinished { id, output }
+                AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                    PromptEvent::ToolCallFinished { id, output, exit_code, signal }
+                }
+                AgentEvent::SystemStatus { message } => {
+                    PromptEvent::SystemStatus { message }
                 }
                 AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
                     PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
@@ -364,6 +398,9 @@ async fn build_session_mcp(
         match client.list_tools().await {
             Ok(tools) => {
                 for tool in tools {
+                    if tool.name == "AskUserQuestion" {
+                        continue;
+                    }
                     // Prefix the tool name with the server name to avoid collisions
                     let prefixed = format!("{}__{}", server.name, tool.name);
                     tool_defs.push(ToolDef {

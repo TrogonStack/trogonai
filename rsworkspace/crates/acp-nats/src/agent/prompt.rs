@@ -88,6 +88,7 @@ where
     let mut accumulated_output: u64 = 0;
     let mut accumulated_cache_creation: u64 = 0;
     let mut accumulated_cache_read: u64 = 0;
+    let mut seen_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     loop {
         let msg = match timeout(op_timeout, subscriber.next()).await {
@@ -162,6 +163,10 @@ where
                 return Err(Error::new(ErrorCode::InternalError.into(), message));
             }
             PromptEvent::ToolCallStarted { id, name, input } => {
+                if seen_tool_ids.contains(&id) {
+                    continue;
+                }
+                seen_tool_ids.insert(id.clone());
                 let tool_call = ToolCall::new(id, name)
                     .status(ToolCallStatus::InProgress)
                     .raw_input(input);
