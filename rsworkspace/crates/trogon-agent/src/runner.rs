@@ -1,0 +1,795 @@
+//! JetStream pull-consumer runner — wires incoming events to agent handlers.
+//!
+//! ## Dispatch strategy
+//!
+//! For each incoming NATS event the runner:
+//!
+//! 1. Queries the [`AutomationStore`] for enabled automations whose `trigger`
+//!    matches the event's subject and payload action.
+//! 2. If one or more automations match, **each is executed in a separate
+//!    `tokio::spawn`** (parallel execution).
+//! 3. If **no** automations match, the runner falls back to the built-in
+//!    hardcoded handler so the agent works out-of-the-box without any
+//!    configuration.
+//!
+//! This means automations can be added, edited, enabled, or disabled at any
+//! time via the [`trogon_automations::api`] HTTP API — no restart required.
+//!
+//! | JetStream stream | Filter subject        | Fallback handler                   |
+//! |------------------|-----------------------|------------------------------------|
+//! | `GITHUB`         | `github.pull_request` | pr_review / pr_merged              |
+//! | `GITHUB`         | `github.issue_comment`| comment_added                      |
+//! | `GITHUB`         | `github.push`         | push_to_branch                     |
+//! | `GITHUB`         | `github.check_run`    | ci_completed                       |
+//! | `LINEAR`         | `linear.Issue.>`      | issue_triage                       |
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_nats::jetstream::{self, consumer::pull, consumer::AckPolicy, consumer::DeliverPolicy};
+use futures_util::StreamExt;
+use tracing::{error, info, warn};
+use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
+
+use crate::agent_loop::AgentLoop;
+use crate::chat_api::{ChatAppState, router as chat_router};
+use crate::config::{AgentConfig, McpServerConfig};
+use crate::handlers::{self, make_tool_context};
+use crate::session::SessionStore;
+use crate::tools::{ToolContext, ToolDef};
+
+const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+const GITHUB_CONSUMER: &str = "trogon-agent-pr-review";
+const COMMENT_CONSUMER: &str = "trogon-agent-comment-added";
+const PUSH_CONSUMER: &str = "trogon-agent-push-to-branch";
+const CI_CONSUMER: &str = "trogon-agent-ci-completed";
+const LINEAR_CONSUMER: &str = "trogon-agent-issue-triage";
+const CRON_CONSUMER: &str = "trogon-agent-cron";
+const DATADOG_CONSUMER: &str = "trogon-agent-datadog-alert";
+const INCIDENTIO_CONSUMER: &str = "trogon-agent-incidentio";
+
+#[derive(Debug)]
+pub enum RunnerError {
+    Nats(trogon_nats::ConnectError),
+    JetStream(String),
+}
+
+impl std::fmt::Display for RunnerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nats(e) => write!(f, "NATS connect error: {e}"),
+            Self::JetStream(e) => write!(f, "JetStream error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RunnerError {}
+
+impl From<trogon_nats::ConnectError> for RunnerError {
+    fn from(e: trogon_nats::ConnectError) -> Self {
+        Self::Nats(e)
+    }
+}
+
+pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
+    let nats = trogon_nats::connect(&cfg.nats, NATS_CONNECT_TIMEOUT).await?;
+    let js = jetstream::new(nats);
+
+    let http_client = reqwest::Client::new();
+
+    let tool_ctx: Arc<ToolContext> = make_tool_context(
+        http_client.clone(),
+        cfg.proxy_url.clone(),
+        cfg.github_token.clone(),
+        cfg.linear_token.clone(),
+        cfg.slack_token.clone(),
+    );
+
+    let split_client = cfg.split_evaluator_url.as_ref().map(|url| {
+        trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
+            evaluator_url: url.clone(),
+            auth_token: cfg.split_auth_token.clone().unwrap_or_default(),
+        })
+    });
+
+    let (mcp_tool_defs, mcp_dispatch) =
+        init_mcp_servers(&http_client, &cfg.mcp_servers).await;
+
+    let agent = Arc::new(AgentLoop {
+        http_client,
+        proxy_url: cfg.proxy_url.clone(),
+        anthropic_token: cfg.anthropic_token.clone(),
+        model: cfg.model.clone(),
+        max_iterations: cfg.max_iterations,
+        tool_context: tool_ctx,
+        memory_owner: cfg.memory_owner.clone(),
+        memory_repo: cfg.memory_repo.clone(),
+        memory_path: cfg.memory_path.clone(),
+        mcp_tool_defs,
+        mcp_dispatch,
+        split_client,
+        tenant_id: cfg.tenant_id.clone(),
+    });
+
+    let store = Arc::new(
+        AutomationStore::open(&js)
+            .await
+            .map_err(|e| RunnerError::JetStream(format!("AutomationStore: {e}")))?,
+    );
+    let run_store = Arc::new(
+        RunStore::open(&js)
+            .await
+            .map_err(|e| RunnerError::JetStream(format!("RunStore: {e}")))?,
+    );
+    let session_store = SessionStore::open(&js)
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("SessionStore: {e}")))?;
+    let tenant_id = Arc::new(cfg.tenant_id.clone());
+
+    // Start the combined HTTP API server unless disabled (port == 0).
+    // Automations + run history + interactive chat sessions are all on the same port.
+    if cfg.api_port != 0 {
+        let auto_state = trogon_automations::api::AppState {
+            store: (*store).clone(),
+            run_store: (*run_store).clone(),
+        };
+        let chat_state = ChatAppState {
+            agent: Arc::clone(&agent),
+            session_store,
+        };
+        let api_port = cfg.api_port;
+        tokio::spawn(async move {
+            let combined = trogon_automations::api::router(auto_state)
+                .merge(chat_router(chat_state));
+            match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
+                Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind API"),
+                Ok(listener) => {
+                    tracing::info!(port = api_port, "API listening (automations + chat)");
+                    if let Err(e) = axum::serve(listener, combined).await {
+                        tracing::error!(error = %e, "API server error");
+                    }
+                }
+            }
+        });
+    }
+
+    let github_stream_name = cfg.github_stream_name.as_deref().unwrap_or("GITHUB");
+    let linear_stream_name = cfg.linear_stream_name.as_deref().unwrap_or("LINEAR");
+    let cron_stream_name = cfg.cron_stream_name.as_deref().unwrap_or("CRON_TICKS");
+    let datadog_stream_name = cfg.datadog_stream_name.as_deref().unwrap_or("DATADOG");
+
+    // Ensure all required JetStream streams exist before binding consumers.
+    // This removes the hard startup-order dependency on trogon-github, trogon-linear,
+    // and trogon-cron — the agent creates streams idempotently if they are absent.
+    ensure_stream(&js, github_stream_name, &["github.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
+    ensure_stream(&js, datadog_stream_name, &["datadog.>"], Duration::from_secs(7 * 86_400)).await?;
+
+    let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
+    let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
+    let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
+    let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
+    let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
+    let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
+    let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
+
+    // incident.io stream is optional: when `incidentio_stream_name` is `None` the runner
+    // skips both stream creation and consumer binding so no incidentio events are processed.
+    let mut incidentio_messages_opt = match cfg.incidentio_stream_name.as_deref() {
+        None => {
+            info!("incidentio_stream_name is None — skipping incident.io subscription");
+            None
+        }
+        Some(name) => {
+            ensure_stream(&js, name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
+            Some(bind_consumer(&js, name, INCIDENTIO_CONSUMER, "incidentio.>").await?)
+        }
+    };
+
+    info!(
+        proxy_url = %cfg.proxy_url,
+        model = %cfg.model,
+        github_stream = github_stream_name,
+        linear_stream = linear_stream_name,
+        datadog_stream = datadog_stream_name,
+        "Agent runner started"
+    );
+
+    loop {
+        tokio::select! {
+            msg = pr_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving PR message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        tokio::spawn(async move {
+                            let subject = "github.pull_request";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                let is_merged = pv["action"].as_str() == Some("closed")
+                                    && pv["pull_request"]["merged"].as_bool() == Some(true);
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
+                                    info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag");
+                                } else if is_merged {
+                                    match handlers::pr_merged::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "PR merged done"),
+                                        Some(Err(e)) => error!(error = %e, "PR merged error"),
+                                        None => {}
+                                    }
+                                } else {
+                                    match handlers::pr_review::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "PR review done"),
+                                        Some(Err(e)) => error!(error = %e, "PR review error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
+                        });
+                    }
+                }
+            }
+            msg = comment_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving comment message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        tokio::spawn(async move {
+                            let subject = "github.issue_comment";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
+                                    info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
+                                } else {
+                                    match handlers::comment_added::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Comment-added done"),
+                                        Some(Err(e)) => error!(error = %e, "Comment-added error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
+                        });
+                    }
+                }
+            }
+            msg = push_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving push message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        tokio::spawn(async move {
+                            let subject = "github.push";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
+                                    info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
+                                } else {
+                                    match handlers::push_to_branch::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
+                                        Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
+                        });
+                    }
+                }
+            }
+            msg = ci_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving CI message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        tokio::spawn(async move {
+                            let subject = "github.check_run";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
+                                    info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
+                                } else {
+                                    match handlers::ci_completed::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "CI-completed done"),
+                                        Some(Err(e)) => error!(error = %e, "CI-completed error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
+                        });
+                    }
+                }
+            }
+            msg = issue_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving issue message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        tokio::spawn(async move {
+                            let subject = "linear.Issue";
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
+                                    info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
+                                } else {
+                                    match handlers::issue_triage::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Issue triage done"),
+                                        Some(Err(e)) => error!(error = %e, "Issue triage error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
+                        });
+                    }
+                }
+            }
+            msg = cron_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving cron message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
+                        });
+                    }
+                }
+            }
+            msg = datadog_messages.next() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving Datadog message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
+                                    info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
+                                } else {
+                                    match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
+                                        Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
+                        });
+                    }
+                }
+            }
+            msg = async {
+                match incidentio_messages_opt.as_mut() {
+                    Some(s) => s.next().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    Err(e) => warn!(error = %e, "Error receiving incident.io message"),
+                    Ok(msg) => {
+                        let agent = Arc::clone(&agent);
+                        let store = Arc::clone(&store);
+                        let run_store = Arc::clone(&run_store);
+                        let tenant_id = Arc::clone(&tenant_id);
+                        let nats_subject = msg.subject.to_string();
+                        tokio::spawn(async move {
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            if autos.is_empty() {
+                                if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
+                                    info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
+                                } else {
+                                    match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
+                                        Some(Err(e)) => error!(error = %e, "incident.io handler error"),
+                                        None => {}
+                                    }
+                                }
+                            } else {
+                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                            }
+                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Agent runner stopped");
+    Ok(())
+}
+
+/// Spawn one task per automation and wait for all to finish.
+/// Persists a [`RunRecord`] in `run_store` after each execution.
+pub(crate) async fn dispatch_automations(
+    agent: &Arc<AgentLoop>,
+    run_store: &Arc<RunStore>,
+    automations: Vec<trogon_automations::Automation>,
+    nats_subject: &str,
+    payload: &bytes::Bytes,
+) {
+    let handles: Vec<_> = automations
+        .into_iter()
+        .map(|auto| {
+            let agent = Arc::clone(agent);
+            let run_store = Arc::clone(run_store);
+            let payload = payload.clone();
+            let subject = nats_subject.to_string();
+            tokio::spawn(async move {
+                info!(automation = %auto.name, "Running automation");
+                let started_at = trogon_automations::now_unix();
+                let result = handlers::run_automation(&agent, &auto, &subject, &payload).await;
+                let finished_at = trogon_automations::now_unix();
+
+                let (status, output) = match &result {
+                    Ok(o) => {
+                        info!(automation = %auto.name, output = %o, "Automation done");
+                        (RunStatus::Success, o.clone())
+                    }
+                    Err(e) => {
+                        error!(automation = %auto.name, error = %e, "Automation failed");
+                        (RunStatus::Failed, e.clone())
+                    }
+                };
+
+                let run = RunRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    automation_id: auto.id.clone(),
+                    automation_name: auto.name.clone(),
+                    tenant_id: auto.tenant_id.clone(),
+                    nats_subject: subject,
+                    started_at,
+                    finished_at,
+                    status,
+                    output,
+                };
+                if let Err(e) = run_store.record(&run).await {
+                    warn!(automation = %auto.name, error = %e, "Failed to persist run record");
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.await.ok();
+    }
+}
+
+pub async fn init_mcp_servers(
+    http_client: &reqwest::Client,
+    servers: &[McpServerConfig],
+) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
+    let mut tool_defs = Vec::new();
+    let mut dispatch = Vec::new();
+
+    for server in servers {
+        let client = Arc::new(trogon_mcp::McpClient::new(
+            http_client.clone(),
+            &server.url,
+        ));
+
+        if let Err(e) = client.initialize().await {
+            warn!(server = %server.name, error = %e, "Failed to initialize MCP server — skipping");
+            continue;
+        }
+
+        match client.list_tools().await {
+            Err(e) => warn!(server = %server.name, error = %e, "Failed to list MCP tools — skipping server"),
+            Ok(tools) => {
+                info!(server = %server.name, count = tools.len(), "MCP tools loaded");
+                for tool in tools {
+                    let prefixed = format!(
+                        "mcp__{}__{}", sanitize_name(&server.name), sanitize_name(&tool.name)
+                    );
+                    tool_defs.push(ToolDef {
+                        name: prefixed.clone(),
+                        description: tool.description.clone(),
+                        input_schema: tool.input_schema.clone(),
+                        cache_control: None,
+                    });
+                    dispatch.push((prefixed, tool.name, Arc::clone(&client)));
+                }
+            }
+        }
+    }
+
+    (tool_defs, dispatch)
+}
+
+pub(crate) fn sanitize_name(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dispatch_automations, sanitize_name};
+    use std::sync::Arc;
+
+    fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
+        let http_client = reqwest::Client::new();
+        Arc::new(crate::agent_loop::AgentLoop {
+            http_client: http_client.clone(),
+            proxy_url: proxy_url.to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(crate::tools::ToolContext {
+                http_client,
+                proxy_url: proxy_url.to_string(),
+                github_token: "tok_github_prod_test01".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+        })
+    }
+
+    fn make_automation(name: &str) -> trogon_automations::Automation {
+        trogon_automations::Automation {
+            id: format!("id-{name}"),
+            tenant_id: "acme".to_string(),
+            name: name.to_string(),
+            trigger: "github.push".to_string(),
+            prompt: "Do something.".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            mcp_servers: vec![],
+            enabled: true,
+            visibility: trogon_automations::Visibility::Private,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    async fn make_run_store() -> (trogon_automations::RunStore, impl Drop) {
+        use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
+        let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+        let port = container.get_host_port_ipv4(4222).await.expect("port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+        let js = async_nats::jetstream::new(nats);
+        let rs = trogon_automations::RunStore::open(&js).await.expect("RunStore");
+        (rs, container)
+    }
+
+    /// dispatch_automations runs every automation and waits for all tasks.
+    #[tokio::test]
+    async fn dispatch_automations_runs_all() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "ok"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+        let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        dispatch_automations(&agent, &Arc::new(rs), automations, "github.push", &payload).await;
+
+        mock.assert_hits_async(2).await;
+    }
+
+    /// dispatch_automations with an empty list completes immediately without errors.
+    #[tokio::test]
+    async fn dispatch_automations_empty_list_is_noop() {
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent("http://127.0.0.1:1");
+        let payload = bytes::Bytes::from_static(b"{}");
+        dispatch_automations(&agent, &Arc::new(rs), vec![], "github.push", &payload).await;
+    }
+
+    #[test]
+    fn sanitize_name_keeps_alphanumeric_and_dash() {
+        assert_eq!(sanitize_name("my-server"), "my-server");
+        assert_eq!(sanitize_name("server123"), "server123");
+        assert_eq!(sanitize_name("abc-XYZ-789"), "abc-XYZ-789");
+    }
+
+    #[test]
+    fn sanitize_name_replaces_spaces_and_special_chars() {
+        assert_eq!(sanitize_name("my server"), "my_server");
+        assert_eq!(sanitize_name("my.server"), "my_server");
+        assert_eq!(sanitize_name("my/tool"), "my_tool");
+        assert_eq!(sanitize_name("tool:v2"), "tool_v2");
+    }
+
+    #[test]
+    fn sanitize_name_empty_string() {
+        assert_eq!(sanitize_name(""), "");
+    }
+
+    #[test]
+    fn sanitize_name_all_special_chars() {
+        assert_eq!(sanitize_name("..."), "___");
+    }
+
+    /// An MCP server that fails `initialize` is skipped — no tools, no panic.
+    #[tokio::test]
+    async fn init_mcp_servers_skips_server_that_fails_initialize() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "error": { "code": -32600, "message": "not supported" }
+                }));
+        });
+
+        let cfg = vec![crate::config::McpServerConfig {
+            name: "bad-server".to_string(),
+            url: format!("{}/mcp", server.base_url()),
+        }];
+        let http_client = reqwest::Client::new();
+        let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
+
+        assert!(tools.is_empty(), "no tools expected when server fails to initialize");
+        assert!(dispatch.is_empty(), "no dispatch entries expected");
+    }
+
+    /// An MCP server that initialises successfully but then fails `list_tools` is also skipped.
+    #[tokio::test]
+    async fn init_mcp_servers_skips_server_that_fails_list_tools() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": { "protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {} }
+                }));
+        });
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).body_contains("tools/list");
+            then.status(500);
+        });
+
+        let cfg = vec![crate::config::McpServerConfig {
+            name: "flaky-server".to_string(),
+            url: format!("{}/mcp", server.base_url()),
+        }];
+        let http_client = reqwest::Client::new();
+        let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
+
+        assert!(tools.is_empty(), "no tools expected when list_tools fails");
+        assert!(dispatch.is_empty(), "no dispatch entries expected");
+    }
+}
+
+async fn ensure_stream(
+    js: &jetstream::Context,
+    stream_name: &str,
+    subjects: &[&str],
+    max_age: Duration,
+) -> Result<(), RunnerError> {
+    let result = js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: stream_name.to_string(),
+        subjects: subjects.iter().map(|s| s.to_string()).collect(),
+        max_age,
+        ..Default::default()
+    })
+    .await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // If the stream already exists with a different config (e.g. narrower subjects),
+            // fall back to using the existing stream rather than failing.
+            if js.get_stream(stream_name).await.is_ok() {
+                tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
+                Ok(())
+            } else {
+                Err(RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))
+            }
+        }
+    }
+}
+
+async fn bind_consumer(
+    js: &jetstream::Context,
+    stream_name: &str,
+    consumer_name: &str,
+    filter_subject: &str,
+) -> Result<impl futures_util::Stream<Item = Result<jetstream::Message, async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>>>, RunnerError> {
+    let stream = js
+        .get_stream(stream_name)
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("get stream {stream_name}: {e}")))?;
+
+    let consumer: jetstream::consumer::Consumer<pull::Config> = stream
+        .get_or_create_consumer(
+            consumer_name,
+            pull::Config {
+                durable_name: Some(consumer_name.to_string()),
+                filter_subject: filter_subject.to_string(),
+                ack_policy: AckPolicy::Explicit,
+                deliver_policy: DeliverPolicy::All,
+                max_deliver: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("create consumer {consumer_name}: {e}")))?;
+
+    consumer
+        .messages()
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("messages stream {consumer_name}: {e}")))
+}

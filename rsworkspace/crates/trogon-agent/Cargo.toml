@@ -1,0 +1,47 @@
+[package]
+name = "trogon-agent"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats  = "0.45.0"
+base64      = "0.22"
+bytes       = "1"
+futures-util = "0.3"
+reqwest     = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde       = { version = "1.0.228", features = ["derive"] }
+serde_json  = "1.0.149"
+tokio       = { version = "1.49.0", features = ["full"] }
+tracing     = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum         = "0.8"
+trogon-automations = { path = "../trogon-automations" }
+uuid               = { version = "1", features = ["v4"] }
+trogon-mcp     = { path = "../trogon-mcp" }
+trogon-nats    = { path = "../trogon-nats" }
+trogon-splitio = { path = "../trogon-splitio" }
+trogon-std     = { path = "../trogon-std" }
+
+[dev-dependencies]
+trogon-std          = { path = "../trogon-std", features = ["test-support"] }
+trogon-secret-proxy = { path = "../trogon-secret-proxy" }
+trogon-vault        = { path = "../trogon-vault", features = ["hashicorp-vault"] }
+trogon-github       = { path = "../trogon-github" }
+trogon-linear       = { path = "../trogon-linear" }
+trogon-datadog      = { path = "../trogon-datadog" }
+trogon-incidentio   = { path = "../trogon-incidentio" }
+httpmock            = "0.7"
+tokio               = { version = "1.49.0", features = ["full"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+axum                = "0.8"
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+hmac                = "0.12"
+sha2                = "0.10"
+hex                 = "0.4"
+
+[[bin]]
+name = "agent"
+path = "src/bin/agent.rs"
