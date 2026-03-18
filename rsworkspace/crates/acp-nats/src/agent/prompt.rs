@@ -1,7 +1,7 @@
 use agent_client_protocol::{
     ContentBlock, ContentChunk, Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification,
     SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, UsageUpdate,
+    ToolCallUpdateFields, Usage, UsageUpdate,
 };
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -83,6 +83,9 @@ where
     // so queued prompts don't time out while waiting for the runner.
     let op_timeout = std::time::Duration::from_secs(600); // 10 minutes
 
+    let mut accumulated_input: u64 = 0;
+    let mut accumulated_output: u64 = 0;
+
     loop {
         let msg = match timeout(op_timeout, subscriber.next()).await {
             Ok(Some(msg)) => msg,
@@ -123,17 +126,31 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
+            PromptEvent::ThinkingDelta { text } => {
+                let notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+                        TextContent::new(text),
+                    ))),
+                );
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
             PromptEvent::Done { stop_reason } => {
                 let sr = match stop_reason.as_str() {
                     "end_turn" => StopReason::EndTurn,
                     "max_tokens" => StopReason::MaxTokens,
+                    "max_turn_requests" => StopReason::MaxTurnRequests,
                     "cancelled" => StopReason::Cancelled,
                     other => {
                         warn!(stop_reason = other, "unknown stop reason — using EndTurn");
                         StopReason::EndTurn
                     }
                 };
-                return Ok(PromptResponse::new(sr));
+                let total = accumulated_input + accumulated_output;
+                let usage = Usage::new(total, accumulated_input, accumulated_output);
+                return Ok(PromptResponse::new(sr).usage(usage));
             }
             PromptEvent::Error { message } => {
                 return Err(Error::new(ErrorCode::InternalError.into(), message));
@@ -164,7 +181,9 @@ where
                 }
             }
             PromptEvent::UsageUpdate { input_tokens, output_tokens } => {
-                let used = (input_tokens as u64) + (output_tokens as u64);
+                accumulated_input = input_tokens as u64;
+                accumulated_output = output_tokens as u64;
+                let used = accumulated_input + accumulated_output;
                 let size = 200_000u64; // Claude's typical context window
                 let update = UsageUpdate::new(used, size);
                 let notification = SessionNotification::new(

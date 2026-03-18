@@ -20,6 +20,9 @@ pub struct SessionState {
     /// ISO-8601 creation timestamp.
     #[serde(default)]
     pub created_at: String,
+    /// Short title derived from the first prompt (max 256 chars).
+    #[serde(default)]
+    pub title: String,
 }
 
 /// NATS KV-backed session store.

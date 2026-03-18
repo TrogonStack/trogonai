@@ -245,10 +245,15 @@ where
             .unwrap_or("unknown");
         info!(client = %client, "ACP initialize");
 
+        let mut caps_meta = serde_json::Map::new();
+        // Advertise `close` capability — not yet a first-class field in the Rust SDK
+        caps_meta.insert("close".to_string(), serde_json::json!({}));
+
         let session_caps = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
             .fork(SessionForkCapabilities::new())
-            .resume(SessionResumeCapabilities::new());
+            .resume(SessionResumeCapabilities::new())
+            .meta(caps_meta);
 
         let mut meta = serde_json::Map::new();
         meta.insert(
@@ -452,7 +457,10 @@ where
             let cwd = PathBuf::from(if state.cwd.is_empty() { "/" } else { &state.cwd });
             let mut info = SessionInfo::new(id.clone(), cwd);
             if !state.created_at.is_empty() {
-                info = info.updated_at(state.created_at);
+                info = info.updated_at(state.created_at.clone());
+            }
+            if !state.title.is_empty() {
+                info = info.title(state.title.clone());
             }
             sessions.push(info);
         }
@@ -478,6 +486,7 @@ where
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),
+            title: src_state.title.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");

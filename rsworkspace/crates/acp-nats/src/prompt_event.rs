@@ -21,8 +21,10 @@ pub struct PromptPayload {
 pub enum PromptEvent {
     /// A chunk of text produced by the model.
     TextDelta { text: String },
+    /// A chunk of the model's internal reasoning (extended thinking).
+    ThinkingDelta { text: String },
     /// The runner finished the turn. `stop_reason` matches Anthropic values:
-    /// `"end_turn"`, `"max_tokens"`, `"cancelled"`.
+    /// `"end_turn"`, `"max_tokens"`, `"max_turn_requests"`, `"cancelled"`.
     Done { stop_reason: String },
     /// The runner encountered an unrecoverable error.
     Error { message: String },

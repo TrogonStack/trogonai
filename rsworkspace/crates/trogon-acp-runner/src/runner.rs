@@ -96,6 +96,11 @@ impl Runner {
             }
         };
 
+        // Capture the first prompt as the session title (before appending the user turn)
+        if state.title.is_empty() {
+            state.title = truncate_title(&payload.user_message);
+        }
+
         // Append the user turn
         state.messages.push(trogon_agent::agent_loop::Message::user_text(&payload.user_message));
 
@@ -132,6 +137,9 @@ impl Runner {
                                 AgentEvent::TextDelta { text } => {
                                     PromptEvent::TextDelta { text }
                                 }
+                                AgentEvent::ThinkingDelta { text } => {
+                                    PromptEvent::ThinkingDelta { text }
+                                }
                                 AgentEvent::ToolCallStarted { id, name, input } => {
                                     PromptEvent::ToolCallStarted { id, name, input }
                                 }
@@ -149,6 +157,12 @@ impl Runner {
                             match agent_fut.await {
                                 Ok(Ok(updated_messages)) => {
                                     final_messages = Some(updated_messages);
+                                }
+                                Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => {
+                                    self.publish_event(
+                                        &events_subject,
+                                        &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
+                                    ).await;
                                 }
                                 Ok(Err(e)) => {
                                     self.publish_error(&events_subject, e.to_string()).await;
@@ -205,6 +219,10 @@ impl Runner {
             }
         };
 
+        if state.title.is_empty() {
+            state.title = truncate_title(&payload.user_message);
+        }
+
         state.messages.push(trogon_agent::agent_loop::Message::user_text(&payload.user_message));
 
         let tools = all_tool_defs();
@@ -225,6 +243,7 @@ impl Runner {
         while let Some(event) = event_rx.recv().await {
             let prompt_event = match event {
                 AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
+                AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
                 AgentEvent::ToolCallStarted { id, name, input } => {
                     PromptEvent::ToolCallStarted { id, name, input }
                 }
@@ -260,5 +279,16 @@ impl Runner {
 
     async fn publish_error(&self, subject: &str, message: String) {
         self.publish_event(subject, &PromptEvent::Error { message }).await;
+    }
+}
+
+/// Truncate a prompt to at most 256 characters for use as a session title.
+fn truncate_title(text: &str) -> String {
+    let sanitized = text.replace(['\r', '\n'], " ");
+    let trimmed = sanitized.trim();
+    if trimmed.len() <= 256 {
+        trimmed.to_string()
+    } else {
+        format!("{}…", &trimmed[..255])
     }
 }

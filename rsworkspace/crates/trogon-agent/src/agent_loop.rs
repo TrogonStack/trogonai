@@ -59,6 +59,8 @@ impl Message {
 pub enum ContentBlock {
     /// Plain text from the model or the user.
     Text { text: String },
+    /// Extended thinking block produced by the model (requires thinking beta).
+    Thinking { thinking: String },
     /// Tool invocation requested by the model.
     ToolUse { id: String, name: String, input: Value },
     /// Result returned to the model after executing a tool.
@@ -157,6 +159,8 @@ impl std::error::Error for AgentError {
 pub enum AgentEvent {
     /// A chunk of assistant text.
     TextDelta { text: String },
+    /// A chunk of the model's internal reasoning (extended thinking).
+    ThinkingDelta { text: String },
     /// A tool call was dispatched — emitted immediately before execution.
     ToolCallStarted { id: String, name: String, input: serde_json::Value },
     /// A tool call completed — emitted immediately after execution.
@@ -446,6 +450,13 @@ impl AgentLoop {
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
+                    // Emit thinking blocks before text
+                    for block in &response.content {
+                        if let ContentBlock::Thinking { thinking } = block {
+                            let _ = event_tx.send(AgentEvent::ThinkingDelta { text: thinking.clone() }).await;
+                        }
+                    }
+
                     let text = response
                         .content
                         .iter()
