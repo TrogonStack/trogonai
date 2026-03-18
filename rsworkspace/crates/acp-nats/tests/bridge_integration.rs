@@ -47,11 +47,13 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
         },
     )
     .with_operation_timeout(Duration::from_millis(500));
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
         SystemClock,
         &opentelemetry::global::meter("acp-nats-integration-test"),
         config,
+        tx,
     )
 }
 

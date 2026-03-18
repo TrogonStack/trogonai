@@ -3,35 +3,47 @@ mod cancel;
 mod initialize;
 mod load_session;
 mod new_session;
+mod prompt;
 mod set_session_mode;
 
 use crate::config::Config;
-use crate::nats::{FlushClient, PublishClient, RequestClient};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::ErrorCode;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    Result, SetSessionModeRequest, SetSessionModeResponse,
+    Result, SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
+use tokio::sync::mpsc;
 use trogon_std::time::GetElapsed;
 
-pub struct Bridge<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> {
+pub struct Bridge<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> {
     pub(crate) nats: N,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
+    /// Sender for ACP `session/update` notifications produced while processing a prompt.
+    /// The binary wires this to an `AgentSideConnection::session_notification()` forwarding task.
+    pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
 }
 
-impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C> {
-    pub fn new(nats: N, clock: C, meter: &Meter, config: Config) -> Self {
+impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Bridge<N, C> {
+    pub fn new(
+        nats: N,
+        clock: C,
+        meter: &Meter,
+        config: Config,
+        notification_sender: mpsc::Sender<SessionNotification>,
+    ) -> Self {
         Self {
             nats,
             clock,
             config,
             metrics: Metrics::new(meter),
+            notification_sender,
         }
     }
 
@@ -41,7 +53,9 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C>
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Bridge<N, C> {
+impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Agent
+    for Bridge<N, C>
+{
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
     }
@@ -65,11 +79,8 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
         set_session_mode::handle(self, args).await
     }
 
-    async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
+        prompt::handle(self, args).await
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
@@ -98,14 +109,17 @@ mod tests {
     use super::Bridge;
     use crate::config::Config;
     use agent_client_protocol::{Agent, ExtNotification, ExtRequest, PromptRequest};
+    use tokio::sync::mpsc;
     use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock> {
+        let (tx, _rx) = mpsc::channel(1);
         Bridge::new(
             AdvancedMockNatsClient::new(),
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tx,
         )
     }
 
@@ -114,43 +128,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stub_methods_return_not_implemented() {
+    async fn prompt_returns_error_when_subscribe_fails() {
+        // AdvancedMockNatsClient.subscribe() always returns Err — so prompt returns InternalError
+        let bridge = mock_bridge();
+        let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn ext_methods_return_not_implemented() {
         let bridge = mock_bridge();
         let msg = "not yet implemented";
 
-        assert!(
-            bridge
-                .prompt(PromptRequest::new("s1", vec![]))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .ext_method(ExtRequest::new("ext", empty_raw_value()))
-                .await
-                .is_err()
-        );
-        assert!(
-            bridge
-                .ext_notification(ExtNotification::new("ext", empty_raw_value()))
-                .await
-                .is_err()
-        );
+        let err = bridge
+            .ext_method(ExtRequest::new("ext", empty_raw_value()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains(msg));
 
         let err = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
+            .ext_notification(ExtNotification::new("ext", empty_raw_value()))
             .await
             .unwrap_err();
         assert!(err.to_string().contains(msg));
     }
 
-    /// Unimplemented stub methods (`prompt`, `ext_method`, `ext_notification`) must
-    /// use `ErrorCode::InternalError` so clients can distinguish "method not available
-    /// on this bridge" from domain errors.  Implemented methods (`authenticate`,
-    /// `new_session`, etc.) return `AGENT_UNAVAILABLE` when NATS fails — they are
-    /// NOT tested here.
     #[tokio::test]
-    async fn stub_methods_use_internal_error_code() {
+    async fn ext_methods_use_internal_error_code() {
         use agent_client_protocol::ErrorCode;
 
         let bridge = mock_bridge();
@@ -167,7 +171,6 @@ mod tests {
             }};
         }
 
-        check_internal!(bridge.prompt(PromptRequest::new("s1", vec![])));
         check_internal!(bridge.ext_method(ExtRequest::new("ext", empty_raw_value())));
         check_internal!(bridge.ext_notification(ExtNotification::new("ext", empty_raw_value())));
     }

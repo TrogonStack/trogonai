@@ -1,0 +1,28 @@
+[package]
+name = "trogon-acp"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+acp-nats          = { path = "../acp-nats" }
+agent-client-protocol = "0.9.4"
+anyhow            = "1"
+async-nats        = "0.45.0"
+opentelemetry     = "0.31.0"
+reqwest           = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio             = { version = "1.49.0", features = ["full"] }
+tokio-util        = { version = "0.7", features = ["compat"] }
+tracing           = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+trogon-agent      = { path = "../trogon-agent" }
+trogon-acp-runner = { path = "../trogon-acp-runner" }
+trogon-nats       = { path = "../trogon-nats" }
+trogon-std        = { path = "../trogon-std" }
+
+[[bin]]
+name = "trogon-acp"
+path = "src/main.rs"
