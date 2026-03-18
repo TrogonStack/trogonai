@@ -139,6 +139,22 @@ impl std::error::Error for AgentError {
     }
 }
 
+// ── AgentEvent ────────────────────────────────────────────────────────────────
+
+/// Events emitted by [`AgentLoop::run_chat_streaming`] during a prompt turn.
+///
+/// Callers receive these on an `mpsc::Receiver` and can forward them to the
+/// client in real time (e.g. as NATS `PromptEvent` messages).
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    /// A chunk of assistant text.
+    TextDelta { text: String },
+    /// A tool call was dispatched — emitted immediately before execution.
+    ToolCallStarted { id: String, name: String, input: serde_json::Value },
+    /// A tool call completed — emitted immediately after execution.
+    ToolCallFinished { id: String, output: String },
+}
+
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
@@ -355,6 +371,136 @@ impl AgentLoop {
 
         warn!(max = self.max_iterations, "Chat reached max iterations");
         Err(AgentError::MaxIterationsReached)
+    }
+
+    /// Like [`run_chat`] but emits [`AgentEvent`]s on `event_tx` throughout execution.
+    ///
+    /// - `TextDelta` is emitted when the model produces text at `end_turn`.
+    /// - `ToolCallStarted` is emitted for each tool call before it runs.
+    /// - `ToolCallFinished` is emitted for each tool call after it completes.
+    ///
+    /// Returns the updated message history (same as [`run_chat`]).
+    /// Errors on `event_tx` are swallowed — the receiver dropping does not abort the loop.
+    pub async fn run_chat_streaming(
+        &self,
+        initial_messages: Vec<Message>,
+        tools: &[ToolDef],
+        system_prompt: Option<&str>,
+        event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
+    ) -> Result<Vec<Message>, AgentError> {
+        let mut messages = initial_messages;
+
+        let mut all_tools: Vec<ToolDef> = tools.to_vec();
+        all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        let mut cached_tools: Vec<ToolDef> = all_tools;
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
+        }
+
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Streaming chat loop iteration");
+
+            let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
+                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+            });
+
+            let request = AnthropicRequest {
+                model: &self.model,
+                max_tokens: 4096,
+                system,
+                tools: &cached_tools,
+                messages: &messages,
+            };
+
+            let response = self
+                .http_client
+                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                .header("anthropic-version", "2023-06-01")
+                .json(&request)
+                .send()
+                .await
+                .map_err(AgentError::Http)?
+                .json::<AnthropicResponse>()
+                .await
+                .map_err(AgentError::Http)?;
+
+            match response.stop_reason.as_str() {
+                "end_turn" => {
+                    let text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+
+                    messages.push(Message::assistant(response.content));
+                    info!(iterations = iteration + 1, "Streaming chat completed");
+                    return Ok(messages);
+                }
+                "tool_use" => {
+                    let results = self
+                        .execute_tools_streaming(&response.content, &event_tx)
+                        .await;
+                    messages.push(Message::assistant(response.content));
+                    messages.push(Message::tool_results(results));
+                }
+                other => {
+                    return Err(AgentError::UnexpectedStopReason(other.to_string()));
+                }
+            }
+        }
+
+        warn!(max = self.max_iterations, "Streaming chat reached max iterations");
+        Err(AgentError::MaxIterationsReached)
+    }
+
+    async fn execute_tools_streaming(
+        &self,
+        content: &[ContentBlock],
+        event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
+    ) -> Vec<ToolResult> {
+        let mut results = Vec::new();
+
+        for block in content {
+            if let ContentBlock::ToolUse { id, name, input } = block {
+                debug!(tool = %name, "Executing tool (streaming)");
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallStarted {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    })
+                    .await;
+
+                let output = if let Some((_, original, client)) =
+                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                {
+                    match client.call_tool(original, input).await {
+                        Ok(out) => out,
+                        Err(e) => format!("Tool error: {e}"),
+                    }
+                } else {
+                    dispatch_tool(&self.tool_context, name, input).await
+                };
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallFinished {
+                        id: id.clone(),
+                        output: output.clone(),
+                    })
+                    .await;
+
+                results.push(ToolResult { tool_use_id: id.clone(), content: output });
+            }
+        }
+
+        results
     }
 
     async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {

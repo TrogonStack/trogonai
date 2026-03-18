@@ -26,6 +26,14 @@ pub enum PromptEvent {
     Done { stop_reason: String },
     /// The runner encountered an unrecoverable error.
     Error { message: String },
+    /// A tool call was dispatched to the tool executor.
+    ToolCallStarted {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    /// A tool call finished executing.
+    ToolCallFinished { id: String, output: String },
 }
 
 #[cfg(test)]

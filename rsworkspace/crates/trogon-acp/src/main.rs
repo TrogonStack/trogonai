@@ -6,12 +6,18 @@
 //! ACP client (Zed / editor)
 //!        ↓ stdio (newline-delimited JSON-RPC)
 //!   trogon-acp  [this binary]
-//!     Bridge<NatsClient>   ← acp-nats
-//!        ↓↑ NATS Core (prompt publish / event subscribe)
-//!   trogon-acp-runner      ← separate process or same process
-//!     Runner               runs AgentLoop, publishes PromptEvents
-//!        ↓
-//!   Anthropic API (via trogon-secret-proxy)
+//!     TrogonAcpAgent
+//!       ├─ initialize / authenticate / new_session / set_session_mode
+//!       │    handled locally (no NATS round-trip)
+//!       ├─ load_session
+//!       │    loads history from NATS KV, replays as session notifications
+//!       └─ prompt / cancel
+//!            Bridge<NatsClient>   ← acp-nats
+//!               ↓↑ NATS Core (prompt publish / event subscribe)
+//!         trogon-acp-runner      ← same process
+//!           Runner               subscribes, runs AgentLoop, streams PromptEvents
+//!              ↓
+//!         Anthropic API (via trogon-secret-proxy)
 //! ```
 //!
 //! ## Environment variables
@@ -27,6 +33,8 @@
 //! | `SLACK_TOKEN`      | —                        | Proxy token for Slack API          |
 //! | `AGENT_MODEL`      | `claude-opus-4-6`        | Claude model ID                    |
 //! | `AGENT_MAX_ITERATIONS` | `10`                 | Max loop iterations per prompt     |
+
+mod agent;
 
 use std::sync::Arc;
 
@@ -107,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
     let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone()).await?;
     tokio::spawn(async move { runner.run().await });
 
-    // ── Bridge (ACP ↔ NATS) ──────────────────────────────────────────────────
+    // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
 
     let (notification_tx, mut notification_rx) = mpsc::channel::<SessionNotification>(64);
 
@@ -115,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         servers: vec![nats_url],
         auth: trogon_nats::NatsAuth::None,
     };
-    let config = Config::new(AcpPrefix::new(acp_prefix)?, nats_config);
+    let config = Config::new(AcpPrefix::new(acp_prefix.clone())?, nats_config);
 
     let meter = opentelemetry::global::meter("trogon-acp");
     let bridge = Bridge::new(
@@ -123,6 +131,20 @@ async fn main() -> anyhow::Result<()> {
         trogon_std::time::SystemClock,
         &meter,
         config,
+        notification_tx.clone(),
+    );
+
+    // ── Session store (shared between Runner and TrogonAcpAgent) ─────────────
+
+    let store = trogon_acp_runner::SessionStore::open(&js).await?;
+
+    // ── TrogonAcpAgent (handles lifecycle locally, routes prompt/cancel via Bridge) ──
+
+    let acp_agent = agent::TrogonAcpAgent::new(
+        bridge,
+        store,
+        nats.clone(),
+        acp_prefix,
         notification_tx,
     );
 
@@ -136,11 +158,11 @@ async fn main() -> anyhow::Result<()> {
             let stdout = tokio::io::stdout().compat_write();
 
             let (conn, io_task) =
-                AgentSideConnection::new(bridge, stdout, stdin, |fut| {
+                AgentSideConnection::new(acp_agent, stdout, stdin, |fut| {
                     tokio::task::spawn_local(fut);
                 });
 
-            // Forward session notifications from the bridge to the ACP client
+            // Forward session notifications (streaming events, tool calls) to the ACP client
             tokio::task::spawn_local(async move {
                 while let Some(notification) = notification_rx.recv().await {
                     if let Err(e) = conn.session_notification(notification).await {

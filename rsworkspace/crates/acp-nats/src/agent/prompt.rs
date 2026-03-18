@@ -1,6 +1,7 @@
 use agent_client_protocol::{
     ContentBlock, ContentChunk, Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification,
-    SessionUpdate, StopReason, TextContent,
+    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields,
 };
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -134,6 +135,31 @@ where
             }
             PromptEvent::Error { message } => {
                 return Err(Error::new(ErrorCode::InternalError.into(), message));
+            }
+            PromptEvent::ToolCallStarted { id, name, input } => {
+                let tool_call = ToolCall::new(id, name)
+                    .status(ToolCallStatus::InProgress)
+                    .raw_input(input);
+                let notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::ToolCall(tool_call),
+                );
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
+            PromptEvent::ToolCallFinished { id, output } => {
+                let fields = ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .raw_output(serde_json::Value::String(output));
+                let update = ToolCallUpdate::new(id, fields);
+                let notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::ToolCallUpdate(update),
+                );
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
             }
         }
     }
