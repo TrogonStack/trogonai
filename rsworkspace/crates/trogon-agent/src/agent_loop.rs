@@ -218,6 +218,11 @@ pub struct AgentLoop {
     pub proxy_url: String,
     /// Opaque proxy token for Anthropic (never the real API key).
     pub anthropic_token: String,
+    /// When set, overrides `proxy_url` as the Anthropic messages base URL.
+    /// Format: `https://gateway.example.com/v1` (without trailing `/messages`).
+    pub anthropic_base_url: Option<String>,
+    /// Additional HTTP headers sent to the Anthropic endpoint (e.g. gateway auth headers).
+    pub anthropic_extra_headers: Vec<(String, String)>,
     pub model: String,
     pub max_iterations: u32,
     /// Extended thinking token budget. When `Some(n)` with `n > 0`, the
@@ -256,6 +261,15 @@ impl AgentLoop {
         match &self.split_client {
             Some(client) => client.is_enabled(&self.tenant_id, flag, None).await,
             None => true,
+        }
+    }
+
+    /// Build the Anthropic messages API URL, respecting the gateway override.
+    fn messages_url(&self) -> String {
+        if let Some(ref base) = self.anthropic_base_url {
+            format!("{base}/messages")
+        } else {
+            format!("{}/anthropic/v1/messages", self.proxy_url)
         }
     }
 
@@ -302,14 +316,18 @@ impl AgentLoop {
                 messages: &messages,
             };
 
-            let response = self
+            let mut req_builder = self
                 .http_client
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .post(self.messages_url())
                 .header(
                     "Authorization",
                     format!("Bearer {}", self.anthropic_token),
                 )
-                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in &self.anthropic_extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            let response = req_builder
                 .json(&request)
                 .send()
                 .await
@@ -393,11 +411,15 @@ impl AgentLoop {
                 messages: &messages,
             };
 
-            let response = self
+            let mut req_builder = self
                 .http_client
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .post(self.messages_url())
                 .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in &self.anthropic_extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            let response = req_builder
                 .json(&request)
                 .send()
                 .await
@@ -494,11 +516,15 @@ impl AgentLoop {
                 }
             }
 
-            let response = self
+            let mut req_builder = self
                 .http_client
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .post(self.messages_url())
                 .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in &self.anthropic_extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            let response = req_builder
                 .json(&body)
                 .send()
                 .await
@@ -847,6 +873,8 @@ mod tests {
             http_client: http.clone(),
             proxy_url: "http://127.0.0.1:1".to_string(),
             anthropic_token: String::new(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
             model: "test".to_string(),
             max_iterations: 1,
             thinking_budget: None,

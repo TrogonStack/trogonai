@@ -10,6 +10,8 @@ pub enum UserContentBlock {
     Text { text: String },
     /// Base64-encoded image.
     Image { data: String, mime_type: String },
+    /// HTTP/HTTPS image URL (passed natively to the Anthropic API as a URL image source).
+    ImageUrl { url: String },
     /// Reference link to a resource (shown as `[@name](uri)`).
     ResourceLink { uri: String, name: String },
     /// Embedded text resource (shown as XML context block).
@@ -74,6 +76,9 @@ pub enum PromptEvent {
         cache_creation_tokens: u32,
         #[serde(default)]
         cache_read_tokens: u32,
+        /// Context window size for the model being used (if known).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_window: Option<u64>,
     },
 }
 
@@ -86,6 +91,7 @@ mod tests {
         let p = PromptPayload {
             req_id: "req-1".to_string(),
             session_id: "sess-1".to_string(),
+            content: vec![],
             user_message: "hello".to_string(),
         };
         let json = serde_json::to_string(&p).unwrap();

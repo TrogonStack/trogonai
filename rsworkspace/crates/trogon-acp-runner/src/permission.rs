@@ -27,6 +27,8 @@ pub type PermissionTx = mpsc::Sender<PermissionReq>;
 pub struct ChannelPermissionChecker {
     pub session_id: String,
     pub tx: PermissionTx,
+    /// Tools for which the user previously chose "Always Allow" — auto-approved.
+    pub allowed_tools: Vec<String>,
 }
 
 impl PermissionChecker for ChannelPermissionChecker {
@@ -37,6 +39,11 @@ impl PermissionChecker for ChannelPermissionChecker {
         tool_name: &'a str,
         tool_input: &'a Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        // Auto-allow tools the user has previously allowed for this session.
+        if self.allowed_tools.iter().any(|t| t == tool_name) {
+            return Box::pin(async move { true });
+        }
+
         let session_id = self.session_id.clone();
         let tool_call_id = tool_call_id.to_string();
         let tool_name = tool_name.to_string();

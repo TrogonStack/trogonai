@@ -19,6 +19,13 @@ pub mod agent {
         format!("{}.{}.agent.session.cancel", prefix, session_id)
     }
 
+    /// Broadcast subject published when a session is cancelled.
+    /// All bridge `prompt()` callers for this session subscribe here and
+    /// drain immediately when they receive a message.
+    pub fn session_cancelled(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.cancelled", prefix, session_id)
+    }
+
     pub fn session_set_mode(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.session.set_mode", prefix, session_id)
     }
@@ -124,6 +131,14 @@ mod tests {
         assert_eq!(
             agent::prompt_events("acp", "s1", "req-abc"),
             "acp.s1.agent.prompt.events.req-abc"
+        );
+    }
+
+    #[test]
+    fn session_cancelled_subject() {
+        assert_eq!(
+            agent::session_cancelled("acp", "s1"),
+            "acp.s1.agent.session.cancelled"
         );
     }
 

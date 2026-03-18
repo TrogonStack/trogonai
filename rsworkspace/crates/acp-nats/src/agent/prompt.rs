@@ -52,6 +52,12 @@ where
         Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}"))
     })?;
 
+    let session_cancelled_subject =
+        agent::session_cancelled(bridge.config.acp_prefix(), session_id.as_ref());
+    let mut cancel_notify = bridge.nats.subscribe(session_cancelled_subject).await.map_err(|e| {
+        Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}"))
+    })?;
+
     // 5. Build and publish the prompt payload via NATS Core
     let payload = PromptPayload {
         req_id,
@@ -91,19 +97,31 @@ where
     let mut seen_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     loop {
-        let msg = match timeout(op_timeout, subscriber.next()).await {
-            Ok(Some(msg)) => msg,
-            Ok(None) => {
-                return Err(Error::new(
-                    ErrorCode::InternalError.into(),
-                    "prompt event stream closed unexpectedly",
-                ));
+        let msg = tokio::select! {
+            result = timeout(op_timeout, subscriber.next()) => {
+                match result {
+                    Ok(Some(msg)) => msg,
+                    Ok(None) => {
+                        return Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt event stream closed unexpectedly",
+                        ));
+                    }
+                    Err(_elapsed) => {
+                        return Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt timed out waiting for runner",
+                        ));
+                    }
+                }
             }
-            Err(_elapsed) => {
-                return Err(Error::new(
-                    ErrorCode::InternalError.into(),
-                    "prompt timed out waiting for runner",
-                ));
+            _ = cancel_notify.next() => {
+                let total = accumulated_input + accumulated_output
+                    + accumulated_cache_creation + accumulated_cache_read;
+                let usage = Usage::new(total, accumulated_input, accumulated_output)
+                    .cached_read_tokens(accumulated_cache_read)
+                    .cached_write_tokens(accumulated_cache_creation);
+                return Ok(PromptResponse::new(StopReason::Cancelled).usage(usage));
             }
         };
 
@@ -178,9 +196,14 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
-            PromptEvent::ToolCallFinished { id, output } => {
+            PromptEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                let status = if exit_code.map(|c| c != 0).unwrap_or(false) || signal.is_some() {
+                    ToolCallStatus::Failed
+                } else {
+                    ToolCallStatus::Completed
+                };
                 let fields = ToolCallUpdateFields::new()
-                    .status(ToolCallStatus::Completed)
+                    .status(status)
                     .raw_output(serde_json::Value::String(output));
                 let update = ToolCallUpdate::new(id, fields);
                 let notification = SessionNotification::new(
@@ -191,13 +214,16 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
-            PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+            PromptEvent::SystemStatus { message } => {
+                tracing::info!(message = %message, "agent system status");
+            }
+            PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window } => {
                 accumulated_input += input_tokens as u64;
                 accumulated_output += output_tokens as u64;
                 accumulated_cache_creation += cache_creation_tokens as u64;
                 accumulated_cache_read += cache_read_tokens as u64;
-                let used = accumulated_input + accumulated_output + accumulated_cache_read;
-                let size = 200_000u64; // Claude's typical context window
+                let used = accumulated_input + accumulated_output + accumulated_cache_read + accumulated_cache_creation;
+                let size = context_window.unwrap_or(200_000u64);
                 let update = UsageUpdate::new(used, size);
                 let notification = SessionNotification::new(
                     args.session_id.clone(),
@@ -216,10 +242,27 @@ where
 /// Follows the same logic as `promptToClaude()` in the TypeScript reference:
 /// - Text → plain text
 /// - ResourceLink → `[@name](uri)` formatted link
-/// - Resource (text) → `<context ref="uri">\n{text}\n</context>` appended at the end
+/// - Resource (text) → inline [@name](uri) link + `<context ref="uri">\n{text}\n</context>` appended at the end
 /// - Resource (blob) → skipped
 /// - Image (base64) → image block
-/// - Image (url only) → `![image](url)` text link
+/// - Image (http/https url) → native URL image block; other URL schemes → `![image](url)` text link
+
+/// Format a URI as an inline reference link, matching TS `formatUriAsLink`.
+/// For file:// and zed:// URIs, extracts the last path segment as the display name.
+/// For other URIs, uses the full URI as-is.
+fn format_uri_as_link(uri: &str) -> String {
+    if uri.starts_with("file://") || uri.starts_with("zed://") {
+        let name = uri.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(uri);
+        format!("[@{name}]({uri})")
+    } else {
+        uri.to_string()
+    }
+}
+
 fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     let mut content: Vec<UserContentBlock> = Vec::new();
     let mut context_parts: Vec<UserContentBlock> = Vec::new();
@@ -237,9 +280,13 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
                         mime_type: img.mime_type.clone(),
                     });
                 } else if let Some(uri) = &img.uri {
-                    content.push(UserContentBlock::Text {
-                        text: format!("![image]({uri})"),
-                    });
+                    if uri.starts_with("http://") || uri.starts_with("https://") {
+                        content.push(UserContentBlock::ImageUrl { url: uri.clone() });
+                    } else {
+                        content.push(UserContentBlock::Text {
+                            text: format!("![image]({uri})"),
+                        });
+                    }
                 }
             }
             ContentBlock::ResourceLink(r) => {
@@ -251,6 +298,10 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
             ContentBlock::Resource(r) => {
                 match &r.resource {
                     EmbeddedResourceResource::TextResourceContents(t) => {
+                        // Inline reference link (position marker in the message body)
+                        content.push(UserContentBlock::Text {
+                            text: format_uri_as_link(&t.uri),
+                        });
                         context_parts.push(UserContentBlock::Context {
                             uri: t.uri.clone(),
                             text: t.text.clone(),

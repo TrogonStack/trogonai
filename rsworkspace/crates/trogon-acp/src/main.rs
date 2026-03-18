@@ -52,7 +52,7 @@ use tracing::info;
 
 use trogon_agent::agent_loop::AgentLoop;
 use trogon_agent::tools::ToolContext;
-use trogon_acp_runner::{PermissionReq, Runner};
+use trogon_acp_runner::{GatewayConfig, PermissionReq, Runner, SessionStore};
 use trogon_nats::NatsConfig;
 
 #[tokio::main]
@@ -102,6 +102,8 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         proxy_url,
         anthropic_token,
+        anthropic_base_url: None,
+        anthropic_extra_headers: vec![],
         model: model.clone(),
         max_iterations,
         tool_context,
@@ -129,9 +131,13 @@ async fn main() -> anyhow::Result<()> {
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
 
+    // ── Shared gateway config (set by authenticate(), consumed by Runner) ─────
+
+    let gateway_config = std::sync::Arc::new(tokio::sync::RwLock::new(None::<GatewayConfig>));
+
     // ── Runner (NATS subscriber + agent) ─────────────────────────────────────
 
-    let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone(), Some(perm_tx)).await?;
+    let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone(), Some(perm_tx), gateway_config.clone()).await?;
     tokio::spawn(async move { runner.run().await });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
@@ -161,11 +167,12 @@ async fn main() -> anyhow::Result<()> {
 
     let acp_agent = agent::TrogonAcpAgent::new(
         bridge,
-        store,
+        store.clone(),
         nats.clone(),
         acp_prefix,
-        notification_tx,
+        notification_tx.clone(),
         model.clone(),
+        gateway_config,
     );
 
     // ── ACP connection over stdio ─────────────────────────────────────────────
@@ -184,6 +191,8 @@ async fn main() -> anyhow::Result<()> {
 
             // Forward session notifications and handle permission requests in a single task
             // so `conn` (which is !Send) is only used within this LocalSet task.
+            let perm_store = store.clone();
+            let perm_notif_tx = notification_tx.clone();
             tokio::task::spawn_local(async move {
                 loop {
                     tokio::select! {
@@ -199,7 +208,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         maybe_perm = perm_rx.recv() => {
                             if let Some(req) = maybe_perm {
-                                handle_permission_request(&conn, req).await;
+                                handle_permission_request(&conn, req, &perm_store, &perm_notif_tx, &model).await;
                             }
                             // perm channel closing doesn't stop the loop
                         }
@@ -216,9 +225,119 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns `true` if `bypassPermissions` mode may be offered to the user.
+/// Mirrors the TS `ALLOW_BYPASS = !IS_ROOT` constant: denied when running as root or sudo.
+fn allow_bypass() -> bool {
+    if std::env::var("SUDO_UID").is_ok() || std::env::var("SUDO_USER").is_ok() {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("Uid:\t") {
+                    if let Some(uid) = rest.split_whitespace().next() {
+                        return uid != "0";
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Call `conn.request_permission` for a tool and send the allow/deny result
 /// back to the Runner via the oneshot channel embedded in `req`.
-async fn handle_permission_request(conn: &AgentSideConnection, req: PermissionReq) {
+///
+/// Special cases:
+/// - `ExitPlanMode`: presents mode-selection options instead of allow/deny.
+/// - `allow_always`: saves the tool name to `allowed_tools` in the session store.
+async fn handle_permission_request(
+    conn: &AgentSideConnection,
+    req: PermissionReq,
+    store: &SessionStore,
+    notification_tx: &mpsc::Sender<SessionNotification>,
+    default_model: &str,
+) {
+    // ── ExitPlanMode: let the user choose which mode to switch to ─────────────
+    if req.tool_name == "ExitPlanMode" {
+        let mut options = Vec::new();
+        if allow_bypass() {
+            options.push(PermissionOption::new(
+                "bypassPermissions",
+                "Yes, and bypass permissions",
+                PermissionOptionKind::AllowAlways,
+            ));
+        }
+        options.push(PermissionOption::new(
+            "acceptEdits",
+            "Yes, and auto-accept edits",
+            PermissionOptionKind::AllowAlways,
+        ));
+        options.push(PermissionOption::new(
+            "default",
+            "Yes, and manually approve edits",
+            PermissionOptionKind::AllowOnce,
+        ));
+        options.push(PermissionOption::new(
+            "plan",
+            "No, keep planning",
+            PermissionOptionKind::RejectOnce,
+        ));
+
+        let fields = ToolCallUpdateFields::new().title("Exit Plan Mode".to_string());
+        let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
+        let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
+
+        let (allowed, new_mode) = match conn.request_permission(perm_req).await {
+            Ok(resp) => match resp.outcome {
+                RequestPermissionOutcome::Selected(sel) => {
+                    let id = sel.option_id.0.as_ref();
+                    if id == "plan" {
+                        (false, None)
+                    } else {
+                        (true, Some(id.to_string()))
+                    }
+                }
+                _ => (false, None),
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "ExitPlanMode permission request failed");
+                (false, None)
+            }
+        };
+
+        // Persist the mode change and notify the client
+        if let Some(mode) = new_mode {
+            use agent_client_protocol::{ConfigOptionUpdate, CurrentModeUpdate, SessionUpdate};
+            if let Ok(mut state) = store.load(&req.session_id).await {
+                state.mode = mode.clone();
+                if let Err(e) = store.save(&req.session_id, &state).await {
+                    tracing::warn!(error = %e, "failed to save session mode after ExitPlanMode");
+                }
+                let current_model = state.model.as_deref().unwrap_or(default_model);
+                let config_options = agent::TrogonAcpAgent::<
+                    async_nats::Client,
+                    trogon_std::time::SystemClock,
+                >::build_config_options(&mode, current_model, allow_bypass());
+                let config_n = SessionNotification::new(
+                    req.session_id.clone(),
+                    SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
+                );
+                let _ = notification_tx.send(config_n).await;
+            }
+            let mode_n = SessionNotification::new(
+                req.session_id.clone(),
+                SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode)),
+            );
+            let _ = notification_tx.send(mode_n).await;
+        }
+
+        let _ = req.response_tx.send(allowed);
+        return;
+    }
+
+    // ── Standard tool permission request ──────────────────────────────────────
     let options = vec![
         PermissionOption::new("allow_always", "Always Allow", PermissionOptionKind::AllowAlways),
         PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
@@ -232,20 +351,37 @@ async fn handle_permission_request(conn: &AgentSideConnection, req: PermissionRe
 
     let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
 
-    let allowed = match conn.request_permission(perm_req).await {
+    let outcome = conn.request_permission(perm_req).await;
+
+    let (allowed, save_always) = match outcome {
         Ok(resp) => match resp.outcome {
             RequestPermissionOutcome::Selected(sel) => {
                 let id = sel.option_id.0.as_ref();
-                id == "allow" || id == "allow_always"
+                let is_allowed = id == "allow" || id == "allow_always";
+                let is_always = id == "allow_always";
+                (is_allowed, is_always)
             }
-            RequestPermissionOutcome::Cancelled => false,
-            _ => false,
+            RequestPermissionOutcome::Cancelled => (false, false),
+            _ => (false, false),
         },
         Err(e) => {
             tracing::warn!(error = %e, tool = %req.tool_name, "permission request failed — denying");
-            false
+            (false, false)
         }
     };
+
+    // Persist allow-always decision so ChannelPermissionChecker can auto-approve
+    // future calls to this tool within the session.
+    if save_always {
+        if let Ok(mut state) = store.load(&req.session_id).await {
+            if !state.allowed_tools.contains(&req.tool_name) {
+                state.allowed_tools.push(req.tool_name.clone());
+                if let Err(e) = store.save(&req.session_id, &state).await {
+                    tracing::warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
+                }
+            }
+        }
+    }
 
     let _ = req.response_tx.send(allowed);
 }

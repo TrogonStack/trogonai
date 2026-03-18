@@ -5,14 +5,35 @@ use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
+
+/// Gateway credentials that override the default proxy/token when set.
+/// Populated by `authenticate()` in the ACP agent and shared with the Runner.
+#[derive(Debug, Clone)]
+pub struct GatewayConfig {
+    /// Full base URL for the Anthropic messages endpoint (e.g. `https://gateway.example.com/v1`).
+    pub base_url: String,
+    /// Auth token for the gateway.
+    pub token: String,
+    /// Additional HTTP headers to forward to the gateway.
+    pub extra_headers: Vec<(String, String)>,
+}
 
 use trogon_agent::agent_loop::{AgentEvent, AgentLoop, ContentBlock, ImageSource, Message};
 use trogon_agent::tools::{ToolDef, all_tool_defs};
 
 use crate::permission::{ChannelPermissionChecker, PermissionTx};
 use crate::session_store::{SessionStore, StoredMcpServer};
+
+/// Returns the context window token limit for a given model ID.
+fn context_window_tokens(model: &str) -> u64 {
+    if model.contains("opus") || model.contains("sonnet") || model.contains("haiku") {
+        200_000
+    } else {
+        200_000 // safe default
+    }
+}
 
 /// Subscribes to `{prefix}.*.agent.prompt` via NATS Core, runs the agentic loop
 /// for each incoming prompt (with streaming events and cancel support), and publishes
@@ -25,6 +46,8 @@ pub struct Runner {
     /// Optional in-process channel to forward permission requests to the ACP connection.
     /// `None` means all tools are auto-allowed (no gate).
     permission_tx: Option<PermissionTx>,
+    /// Optional gateway config — when set, overrides proxy_url/anthropic_token on the agent.
+    gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
 }
 
 impl Runner {
@@ -34,6 +57,7 @@ impl Runner {
         agent: AgentLoop,
         prefix: impl Into<String>,
         permission_tx: Option<PermissionTx>,
+        gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     ) -> anyhow::Result<Self> {
         let store = SessionStore::open(js).await?;
         Ok(Self {
@@ -42,6 +66,7 @@ impl Runner {
             agent: Arc::new(agent),
             prefix: prefix.into(),
             permission_tx,
+            gateway_config,
         })
     }
 
@@ -131,8 +156,12 @@ impl Runner {
         };
         // Build per-session agent with model + MCP overrides and permission gate
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
+        let gateway = self.gateway_config.read().await.clone();
         let agent: Arc<AgentLoop> = {
-            let needs_clone = state.model.is_some() || !state.mcp_servers.is_empty() || needs_perm;
+            let needs_clone = state.model.is_some()
+                || !state.mcp_servers.is_empty()
+                || needs_perm
+                || gateway.is_some();
             if needs_clone {
                 let mut a = (*self.agent).clone();
                 if let Some(ref model) = state.model {
@@ -149,8 +178,14 @@ impl Runner {
                         a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
                             session_id: payload.session_id.clone(),
                             tx: perm_tx.clone(),
+                            allowed_tools: state.allowed_tools.clone(),
                         }));
                     }
+                }
+                if let Some(ref gw) = gateway {
+                    a.anthropic_base_url = Some(gw.base_url.clone());
+                    a.anthropic_token = gw.token.clone();
+                    a.anthropic_extra_headers = gw.extra_headers.clone();
                 }
                 Arc::new(a)
             } else {
@@ -172,6 +207,9 @@ impl Runner {
         } else {
             system_prompt
         };
+
+        // Capture context window size before agent is moved into spawn_local
+        let context_window = Some(context_window_tokens(&agent.model));
 
         // Spawn the agent loop so we can select! against cancel
         let agent_fut = tokio::task::spawn_local(async move {
@@ -213,7 +251,7 @@ impl Runner {
                                     last_output_tokens = output_tokens;
                                     last_cache_creation_tokens = cache_creation_tokens;
                                     last_cache_read_tokens = cache_read_tokens;
-                                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
+                                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window }
                                 }
                             };
                             self.publish_event(&events_subject, &prompt_event).await;
@@ -233,6 +271,7 @@ impl Runner {
                                                 output_tokens: last_output_tokens,
                                                 cache_creation_tokens: last_cache_creation_tokens,
                                                 cache_read_tokens: last_cache_read_tokens,
+                                                context_window,
                                             },
                                         ).await;
                                     }
@@ -250,6 +289,7 @@ impl Runner {
                                                 output_tokens: last_output_tokens,
                                                 cache_creation_tokens: last_cache_creation_tokens,
                                                 cache_read_tokens: last_cache_read_tokens,
+                                                context_window,
                                             },
                                         ).await;
                                     }
@@ -338,20 +378,36 @@ impl Runner {
         };
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
+        let gateway = self.gateway_config.read().await.clone();
         let agent: Arc<AgentLoop> = {
-            let needs_clone = state.model.is_some() || needs_perm;
+            let needs_clone = state.model.is_some()
+                || !state.mcp_servers.is_empty()
+                || needs_perm
+                || gateway.is_some();
             if needs_clone {
                 let mut a = (*self.agent).clone();
                 if let Some(ref model) = state.model {
                     a.model = model.clone();
+                }
+                if !state.mcp_servers.is_empty() {
+                    let (mcp_defs, mcp_dispatch) =
+                        build_session_mcp(&self.nats, &state.mcp_servers).await;
+                    a.mcp_tool_defs.extend(mcp_defs);
+                    a.mcp_dispatch.extend(mcp_dispatch);
                 }
                 if needs_perm {
                     if let Some(ref perm_tx) = self.permission_tx {
                         a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
                             session_id: payload.session_id.clone(),
                             tx: perm_tx.clone(),
+                            allowed_tools: state.allowed_tools.clone(),
                         }));
                     }
+                }
+                if let Some(ref gw) = gateway {
+                    a.anthropic_base_url = Some(gw.base_url.clone());
+                    a.anthropic_token = gw.token.clone();
+                    a.anthropic_extra_headers = gw.extra_headers.clone();
                 }
                 Arc::new(a)
             } else {
@@ -373,6 +429,9 @@ impl Runner {
         } else {
             system_prompt
         };
+
+        // Capture context window size before agent is moved into spawn_local
+        let context_window = Some(context_window_tokens(&agent.model));
 
         let agent_handle = tokio::task::spawn_local(async move {
             agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
@@ -401,7 +460,7 @@ impl Runner {
                     last_output_tokens = output_tokens;
                     last_cache_creation_tokens = cache_creation_tokens;
                     last_cache_read_tokens = cache_read_tokens;
-                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
+                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window }
                 }
             };
             self.publish_event(&events_subject, &prompt_event).await;
@@ -428,6 +487,7 @@ impl Runner {
                             output_tokens: last_output_tokens,
                             cache_creation_tokens: last_cache_creation_tokens,
                             cache_read_tokens: last_cache_read_tokens,
+                            context_window,
                         },
                     ).await;
                 }
@@ -445,6 +505,7 @@ impl Runner {
                             output_tokens: last_output_tokens,
                             cache_creation_tokens: last_cache_creation_tokens,
                             cache_read_tokens: last_cache_read_tokens,
+                            context_window,
                         },
                     ).await;
                 }
@@ -529,6 +590,7 @@ async fn build_session_mcp(
 /// Converts `UserContentBlock`s to Anthropic `ContentBlock`s:
 /// - `Text`         → plain text block
 /// - `Image`        → base64 image block
+/// - `ImageUrl`     → native URL image block
 /// - `ResourceLink` → `[@name](uri)` text block
 /// - `Context`      → `<context ref="uri">\n{text}\n</context>` text block
 fn user_message_from_payload(payload: &PromptPayload) -> Message {
@@ -549,11 +611,14 @@ fn user_message_from_payload(payload: &PromptPayload) -> Message {
                     data: data.clone(),
                 },
             },
+            UserContentBlock::ImageUrl { url } => ContentBlock::Image {
+                source: ImageSource::Url { url: url.clone() },
+            },
             UserContentBlock::ResourceLink { uri, name } => ContentBlock::Text {
                 text: format!("[@{name}]({uri})"),
             },
             UserContentBlock::Context { uri, text } => ContentBlock::Text {
-                text: format!("<context ref=\"{uri}\">\n{text}\n</context>"),
+                text: format!("\n<context ref=\"{uri}\">\n{text}\n</context>"),
             },
         })
         .collect();
@@ -563,10 +628,11 @@ fn user_message_from_payload(payload: &PromptPayload) -> Message {
 
 /// Truncate a prompt to at most 256 characters for use as a session title.
 fn truncate_title(text: &str) -> String {
-    let sanitized = text.replace(['\r', '\n'], " ");
-    let trimmed = sanitized.trim();
+    let no_newlines = text.replace(['\r', '\n'], " ");
+    let collapsed: String = no_newlines.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim().to_string();
     if trimmed.len() <= 256 {
-        trimmed.to_string()
+        trimmed
     } else {
         format!("{}…", &trimmed[..255])
     }

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
+    AgentCapabilities, AuthMethod, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
     AvailableCommandsUpdate,
     CancelNotification, ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Error,
     ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
@@ -22,13 +22,13 @@ use agent_client_protocol::{
     SetSessionModeRequest, SetSessionModeResponse, TextContent, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
 use agent_client_protocol::McpServer;
 use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use acp_nats::Bridge;
-use trogon_acp_runner::{SessionState, SessionStore, StoredMcpServer};
+use trogon_acp_runner::{GatewayConfig, SessionState, SessionStore, StoredMcpServer};
 use trogon_agent::agent_loop::ContentBlock as AgentContentBlock;
 use trogon_std::time::GetElapsed;
 
@@ -55,6 +55,8 @@ where
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
     /// Default model configured for this agent instance (from AGENT_MODEL env var).
     pub(crate) default_model: String,
+    /// Shared gateway config — written by `authenticate()`, read by the Runner.
+    pub(crate) gateway_config: std::sync::Arc<RwLock<Option<GatewayConfig>>>,
 }
 
 impl<N, C> TrogonAcpAgent<N, C>
@@ -69,6 +71,7 @@ where
         prefix: impl Into<String>,
         notification_sender: mpsc::Sender<SessionNotification>,
         default_model: impl Into<String>,
+        gateway_config: std::sync::Arc<RwLock<Option<GatewayConfig>>>,
     ) -> Self {
         Self {
             bridge,
@@ -77,26 +80,29 @@ where
             prefix: prefix.into(),
             notification_sender,
             default_model: default_model.into(),
+            gateway_config,
         }
     }
 
     /// Build the `SessionModeState` for a session.
-    fn build_mode_state(current_mode: &str) -> SessionModeState {
-        SessionModeState::new(
-            current_mode.to_string(),
-            vec![
-                SessionMode::new("default", "Default")
-                    .description("Standard behavior"),
-                SessionMode::new("acceptEdits", "Accept Edits")
-                    .description("Auto-accept file edit operations"),
-                SessionMode::new("plan", "Plan Mode")
-                    .description("Planning mode, no actual tool execution"),
-                SessionMode::new("dontAsk", "Don't Ask")
-                    .description("Don't prompt for permissions"),
+    fn build_mode_state(current_mode: &str, allow_bypass: bool) -> SessionModeState {
+        let mut modes = vec![
+            SessionMode::new("default", "Default")
+                .description("Standard behavior"),
+            SessionMode::new("acceptEdits", "Accept Edits")
+                .description("Auto-accept file edit operations"),
+            SessionMode::new("plan", "Plan Mode")
+                .description("Planning mode, no actual tool execution"),
+            SessionMode::new("dontAsk", "Don't Ask")
+                .description("Don't prompt for permissions"),
+        ];
+        if allow_bypass {
+            modes.push(
                 SessionMode::new("bypassPermissions", "Bypass Permissions")
                     .description("Bypass all permission checks"),
-            ],
-        )
+            );
+        }
+        SessionModeState::new(current_mode.to_string(), modes)
     }
 
     /// Build the `SessionModelState` for a session.
@@ -109,15 +115,17 @@ where
     }
 
     /// Build the `SessionConfigOption` list for a session.
-    fn build_config_options(current_mode: &str, current_model: &str) -> Vec<SessionConfigOption> {
+    pub(crate) fn build_config_options(current_mode: &str, current_model: &str, allow_bypass: bool) -> Vec<SessionConfigOption> {
         use agent_client_protocol::SessionConfigSelectOption;
-        let mode_options: Vec<SessionConfigSelectOption> = vec![
+        let mut mode_options: Vec<SessionConfigSelectOption> = vec![
             SessionConfigSelectOption::new("default", "Default"),
             SessionConfigSelectOption::new("acceptEdits", "Accept Edits"),
             SessionConfigSelectOption::new("plan", "Plan Mode"),
             SessionConfigSelectOption::new("dontAsk", "Don't Ask"),
-            SessionConfigSelectOption::new("bypassPermissions", "Bypass Permissions"),
         ];
+        if allow_bypass {
+            mode_options.push(SessionConfigSelectOption::new("bypassPermissions", "Bypass Permissions"));
+        }
         let model_options: Vec<SessionConfigSelectOption> = AVAILABLE_MODELS
             .iter()
             .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
@@ -191,6 +199,17 @@ where
                                     session_id.clone(),
                                     SessionUpdate::AgentMessageChunk(ContentChunk::new(
                                         ContentBlock::Text(TextContent::new(text.clone())),
+                                    )),
+                                );
+                                if self.notification_sender.send(n).await.is_err() {
+                                    return;
+                                }
+                            }
+                            AgentContentBlock::Thinking { thinking } if !thinking.is_empty() => {
+                                let n = SessionNotification::new(
+                                    session_id.clone(),
+                                    SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+                                        ContentBlock::Text(TextContent::new(thinking.clone())),
                                     )),
                                 );
                                 if self.notification_sender.send(n).await.is_err() {
@@ -317,6 +336,10 @@ where
             acp_nats::nats::agent::session_cancel(&self.prefix, session_id);
         let empty: Vec<u8> = vec![];
         let _ = self.nats.publish(cancel_subject, empty.into()).await;
+        let cancelled_subject =
+            acp_nats::nats::agent::session_cancelled(&self.prefix, session_id);
+        let empty: Vec<u8> = vec![];
+        let _ = self.nats.publish(cancelled_subject, empty.into()).await;
         if let Err(e) = self.store.delete(session_id).await {
             warn!(session_id, error = %e, "Failed to delete session on close");
         }
@@ -366,10 +389,60 @@ where
                     .mcp_capabilities(McpCapabilities::new().http(true).sse(true))
                     .meta(meta),
             )
-            .agent_info(Implementation::new("trogon-acp", "0.1.0")))
+            .auth_methods(vec![
+                AuthMethod::new("gateway", "Model Gateway")
+                    .description("Connect via a custom Anthropic-compatible gateway"),
+            ])
+            .agent_info(Implementation::new("trogon-acp", "0.1.0").title("Claude Agent")))
     }
 
-    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+    async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        // Only the "gateway" auth method is supported.
+        if args.method_id.0.as_ref() != "gateway" {
+            return Err(Error::new(
+                ErrorCode::InvalidParams.into(),
+                format!("unsupported auth method: {}", args.method_id.0),
+            ));
+        }
+
+        // _meta shape: { "gateway": { "baseUrl": "...", "headers": { "Authorization": "Bearer ..." } } }
+        let gateway = args.meta.as_ref()
+            .and_then(|m| m.get("gateway"))
+            .and_then(|v| v.as_object());
+
+        if let Some(gw) = gateway {
+            let url = gw.get("baseUrl").and_then(|v| v.as_str());
+            if let Some(url) = url {
+                // headers is a flat Record<string, string>
+                let extra_headers: Vec<(String, String)> = gw
+                    .get("headers")
+                    .and_then(|v| v.as_object())
+                    .map(|map| {
+                        map.iter()
+                            .filter_map(|(k, v)| {
+                                v.as_str().map(|s| (k.clone(), s.to_string()))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                // Derive the auth token from the Authorization header if present,
+                // falling back to an empty string (gateway may use header-based auth).
+                let token = extra_headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+                    .map(|(_, v)| v.strip_prefix("Bearer ").unwrap_or(v).to_string())
+                    .unwrap_or_default();
+
+                info!(gateway_url = %url, "authenticate: gateway config set");
+                *self.gateway_config.write().await = Some(GatewayConfig {
+                    base_url: url.to_string(),
+                    token,
+                    extra_headers,
+                });
+            }
+        }
+
         Ok(AuthenticateResponse::new())
     }
 
@@ -426,9 +499,10 @@ where
         self.publish_session_ready(&session_id).await;
         self.send_available_commands_update(&sid, &state.mcp_servers).await;
 
-        let modes = Self::build_mode_state(&state.mode);
+        let allow_bypass = !is_running_as_root();
+        let modes = Self::build_mode_state(&state.mode, allow_bypass);
         let models = Self::build_model_state(&self.default_model);
-        let config_options = Self::build_config_options(&state.mode, &self.default_model);
+        let config_options = Self::build_config_options(&state.mode, &self.default_model, allow_bypass);
 
         Ok(NewSessionResponse::new(sid)
             .modes(modes)
@@ -454,9 +528,10 @@ where
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
 
-        let modes = Self::build_mode_state(current_mode);
+        let allow_bypass = !is_running_as_root();
+        let modes = Self::build_mode_state(current_mode, allow_bypass);
         let models = Self::build_model_state(current_model);
-        let config_options = Self::build_config_options(current_mode, current_model);
+        let config_options = Self::build_config_options(current_mode, current_model, allow_bypass);
 
         Ok(LoadSessionResponse::new()
             .modes(modes)
@@ -506,7 +581,7 @@ where
         let _ = self.notification_sender.send(mode_notification).await;
 
         // Send updated config options
-        let config_options = Self::build_config_options(&mode_id, current_model);
+        let config_options = Self::build_config_options(&mode_id, current_model, !is_running_as_root());
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -538,6 +613,12 @@ where
                     format!("Invalid mode: {value}"),
                 ));
             }
+            if value == "bypassPermissions" && is_running_as_root() {
+                return Err(Error::new(
+                    ErrorCode::InvalidParams.into(),
+                    "bypassPermissions cannot be used when running as root or with sudo",
+                ));
+            }
             state.mode = value.clone();
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "Failed to save session mode");
@@ -562,7 +643,7 @@ where
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
-        let config_options = Self::build_config_options(current_mode, current_model);
+        let config_options = Self::build_config_options(current_mode, current_model, !is_running_as_root());
 
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
@@ -593,7 +674,7 @@ where
         }
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
-        let config_options = Self::build_config_options(current_mode, &model);
+        let config_options = Self::build_config_options(current_mode, &model, !is_running_as_root());
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -621,7 +702,10 @@ where
                     continue;
                 }
             }
-            let cwd = PathBuf::from(if state.cwd.is_empty() { "/" } else { &state.cwd });
+            if state.cwd.is_empty() {
+                continue;
+            }
+            let cwd = PathBuf::from(&state.cwd);
             let mut info = SessionInfo::new(id.clone(), cwd);
             let ts = if !state.updated_at.is_empty() {
                 &state.updated_at
@@ -632,7 +716,10 @@ where
                 info = info.updated_at(ts.clone());
             }
             if !state.title.is_empty() {
-                info = info.title(state.title.clone());
+                let sanitized = sanitize_title(&state.title);
+                if !sanitized.is_empty() {
+                    info = info.title(sanitized);
+                }
             }
             sessions.push(info);
         }
@@ -652,6 +739,37 @@ where
 
         let new_id = uuid::Uuid::new_v4().to_string();
         let cwd = args.cwd.to_string_lossy().to_string();
+        let system_prompt = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("systemPrompt"))
+            .and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if let Some(append) = v.get("append").and_then(|a| a.as_str()) {
+                    Some(append.to_string())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| src_state.system_prompt.clone());
+        let additional_roots: Vec<String> = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("additionalRoots"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_else(|| src_state.additional_roots.clone());
+        let disable_builtin_tools = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("disableBuiltInTools"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(src_state.disable_builtin_tools);
         let new_state = SessionState {
             messages: src_state.messages.clone(),
             model: src_state.model.clone(),
@@ -661,9 +779,10 @@ where
             updated_at: now_iso8601(),
             title: src_state.title.clone(),
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
-            system_prompt: src_state.system_prompt.clone(),
-            additional_roots: src_state.additional_roots.clone(),
-            disable_builtin_tools: src_state.disable_builtin_tools,
+            system_prompt,
+            additional_roots,
+            disable_builtin_tools,
+            allowed_tools: src_state.allowed_tools.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");
@@ -676,10 +795,11 @@ where
         let current_mode = if new_state.mode.is_empty() { "default" } else { &new_state.mode };
         let current_model = new_state.model.as_deref().unwrap_or(&self.default_model);
 
+        let allow_bypass = !is_running_as_root();
         Ok(ForkSessionResponse::new(sid)
-            .modes(Self::build_mode_state(current_mode))
+            .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(current_mode, current_model)))
+            .config_options(Self::build_config_options(current_mode, current_model, allow_bypass)))
     }
 
     async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
@@ -696,10 +816,11 @@ where
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
 
+        let allow_bypass = !is_running_as_root();
         Ok(ResumeSessionResponse::new()
-            .modes(Self::build_mode_state(current_mode))
+            .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(current_mode, current_model)))
+            .config_options(Self::build_config_options(current_mode, current_model, allow_bypass)))
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
@@ -731,6 +852,16 @@ where
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
         Ok(())
+    }
+}
+
+/// Sanitize a session title: collapse whitespace, trim, truncate to 256 chars.
+fn sanitize_title(text: &str) -> String {
+    let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= 256 {
+        collapsed
+    } else {
+        format!("{}…", &collapsed[..255])
     }
 }
 

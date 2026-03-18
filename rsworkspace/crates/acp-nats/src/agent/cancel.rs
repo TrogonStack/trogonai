@@ -57,6 +57,16 @@ pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushCl
             .record_error("cancel", "cancel_publish_failed");
     }
 
+    // Broadcast to all waiting bridge callers so they drain immediately
+    let cancelled_subject = agent::session_cancelled(bridge.config.acp_prefix(), &args.session_id.to_string());
+    if let Err(e) = bridge.nats().publish_with_headers(
+        cancelled_subject,
+        async_nats::HeaderMap::new(),
+        bytes::Bytes::new(),
+    ).await {
+        warn!(session_id = %args.session_id, error = %e, "Failed to publish session_cancelled broadcast");
+    }
+
     bridge
         .metrics
         .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), true);

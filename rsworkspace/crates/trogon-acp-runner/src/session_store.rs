@@ -52,9 +52,13 @@ pub struct SessionState {
     /// Set via `_meta.disableBuiltInTools` at session creation.
     #[serde(default)]
     pub disable_builtin_tools: bool,
+    /// Tools for which the user chose "Always Allow" — auto-approved on future calls.
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
 }
 
 /// NATS KV-backed session store.
+#[derive(Clone)]
 pub struct SessionStore {
     kv: jetstream::kv::Store,
 }
