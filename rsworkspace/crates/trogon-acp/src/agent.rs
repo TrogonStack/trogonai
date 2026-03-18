@@ -92,6 +92,8 @@ where
                     .description("Planning mode, no actual tool execution"),
                 SessionMode::new("dontAsk", "Don't Ask")
                     .description("Don't prompt for permissions"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions")
+                    .description("Bypass all permission checks"),
             ],
         )
     }
@@ -113,6 +115,7 @@ where
             SessionConfigSelectOption::new("acceptEdits", "Accept Edits"),
             SessionConfigSelectOption::new("plan", "Plan Mode"),
             SessionConfigSelectOption::new("dontAsk", "Don't Ask"),
+            SessionConfigSelectOption::new("bypassPermissions", "Bypass Permissions"),
         ];
         let model_options: Vec<SessionConfigSelectOption> = AVAILABLE_MODELS
             .iter()
@@ -361,11 +364,25 @@ where
         info!(session_id = %session_id, cwd = ?args.cwd, "New ACP session");
 
         let cwd = args.cwd.to_string_lossy().to_string();
+        let system_prompt = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("systemPrompt"))
+            .and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if let Some(append) = v.get("append").and_then(|a| a.as_str()) {
+                    Some(append.to_string())
+                } else {
+                    None
+                }
+            });
         let state = SessionState {
             cwd,
             created_at: now_iso8601(),
             mode: "default".to_string(),
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
+            system_prompt,
             ..Default::default()
         };
         if let Err(e) = self.store.save(&session_id, &state).await {
@@ -422,6 +439,16 @@ where
         let mode_id = args.mode_id.to_string();
         info!(session_id = %session_id, mode = %mode_id, "Set session mode");
 
+        const VALID_MODES: &[&str] = &[
+            "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
+        ];
+        if !VALID_MODES.contains(&mode_id.as_str()) {
+            return Err(Error::new(
+                ErrorCode::InvalidParams.into(),
+                format!("Invalid mode: {mode_id}"),
+            ));
+        }
+
         let mut state = self.store.load(&session_id).await.map_err(|e| {
             Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}"))
         })?;
@@ -463,6 +490,15 @@ where
         })?;
 
         if config_id == "mode" {
+            const VALID_MODES: &[&str] = &[
+                "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
+            ];
+            if !VALID_MODES.contains(&value.as_str()) {
+                return Err(Error::new(
+                    ErrorCode::InvalidParams.into(),
+                    format!("Invalid mode: {value}"),
+                ));
+            }
             state.mode = value.clone();
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "Failed to save session mode");
@@ -538,8 +574,13 @@ where
             let state = self.store.load(id).await.unwrap_or_default();
             let cwd = PathBuf::from(if state.cwd.is_empty() { "/" } else { &state.cwd });
             let mut info = SessionInfo::new(id.clone(), cwd);
-            if !state.created_at.is_empty() {
-                info = info.updated_at(state.created_at.clone());
+            let ts = if !state.updated_at.is_empty() {
+                &state.updated_at
+            } else {
+                &state.created_at
+            };
+            if !ts.is_empty() {
+                info = info.updated_at(ts.clone());
             }
             if !state.title.is_empty() {
                 info = info.title(state.title.clone());
@@ -568,8 +609,10 @@ where
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),
+            updated_at: now_iso8601(),
             title: src_state.title.clone(),
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
+            system_prompt: src_state.system_prompt.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");

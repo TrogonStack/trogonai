@@ -86,6 +86,8 @@ where
 
     let mut accumulated_input: u64 = 0;
     let mut accumulated_output: u64 = 0;
+    let mut accumulated_cache_creation: u64 = 0;
+    let mut accumulated_cache_read: u64 = 0;
 
     loop {
         let msg = match timeout(op_timeout, subscriber.next()).await {
@@ -149,8 +151,11 @@ where
                         StopReason::EndTurn
                     }
                 };
-                let total = accumulated_input + accumulated_output;
-                let usage = Usage::new(total, accumulated_input, accumulated_output);
+                let total = accumulated_input + accumulated_output
+                    + accumulated_cache_creation + accumulated_cache_read;
+                let usage = Usage::new(total, accumulated_input, accumulated_output)
+                    .cached_read_tokens(accumulated_cache_read)
+                    .cached_write_tokens(accumulated_cache_creation);
                 return Ok(PromptResponse::new(sr).usage(usage));
             }
             PromptEvent::Error { message } => {
@@ -181,10 +186,12 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
-            PromptEvent::UsageUpdate { input_tokens, output_tokens } => {
+            PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
                 accumulated_input = input_tokens as u64;
                 accumulated_output = output_tokens as u64;
-                let used = accumulated_input + accumulated_output;
+                accumulated_cache_creation = cache_creation_tokens as u64;
+                accumulated_cache_read = cache_read_tokens as u64;
+                let used = accumulated_input + accumulated_output + accumulated_cache_read;
                 let size = 200_000u64; // Claude's typical context window
                 let update = UsageUpdate::new(used, size);
                 let notification = SessionNotification::new(
@@ -215,7 +222,8 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
     for block in blocks {
         match block {
             ContentBlock::Text(t) => {
-                content.push(UserContentBlock::Text { text: t.text.clone() });
+                let text = rewrite_mcp_slash_command(&t.text);
+                content.push(UserContentBlock::Text { text });
             }
             ContentBlock::Image(img) => {
                 if !img.data.is_empty() {
@@ -263,4 +271,23 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
     // Append context blocks at the end, matching the TS behaviour
     content.extend(context_parts);
     content
+}
+
+/// Rewrite `/mcp:server:command args` → `/server:command (MCP) args`
+/// to match Claude Code's internal slash command naming convention.
+fn rewrite_mcp_slash_command(text: &str) -> String {
+    // Match /mcp:server:command with optional trailing args
+    if let Some(rest) = text.strip_prefix("/mcp:") {
+        let (server_cmd, args) = rest.split_once(char::is_whitespace)
+            .map(|(sc, a)| (sc, Some(a)))
+            .unwrap_or((rest, None));
+        if let Some((server, command)) = server_cmd.split_once(':') {
+            let rewritten = match args {
+                Some(a) => format!("/{server}:{command} (MCP) {a}"),
+                None => format!("/{server}:{command} (MCP)"),
+            };
+            return rewritten;
+        }
+    }
+    text.to_string()
 }

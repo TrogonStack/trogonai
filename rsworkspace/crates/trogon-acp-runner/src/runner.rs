@@ -143,10 +143,11 @@ impl Runner {
             }
         };
         let messages = state.messages.clone();
+        let system_prompt = state.system_prompt.clone();
 
         // Spawn the agent loop so we can select! against cancel
         let agent_fut = tokio::task::spawn_local(async move {
-            agent.run_chat_streaming(messages, &tools, None, event_tx).await
+            agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
         });
 
         // Forward streaming events to NATS while watching for cancel
@@ -172,8 +173,8 @@ impl Runner {
                                 AgentEvent::ToolCallFinished { id, output } => {
                                     PromptEvent::ToolCallFinished { id, output }
                                 }
-                                AgentEvent::UsageSummary { input_tokens, output_tokens } => {
-                                    PromptEvent::UsageUpdate { input_tokens, output_tokens }
+                                AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+                                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
                                 }
                             };
                             self.publish_event(&events_subject, &prompt_event).await;
@@ -229,6 +230,7 @@ impl Runner {
 
         if let Some(updated_messages) = final_messages {
             state.messages = updated_messages;
+            state.updated_at = crate::session_store::now_iso8601();
             if let Err(e) = self.store.save(&payload.session_id, &state).await {
                 warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
             }
@@ -281,9 +283,10 @@ impl Runner {
             }
         };
         let messages = state.messages.clone();
+        let system_prompt = state.system_prompt.clone();
 
         let agent_handle = tokio::task::spawn_local(async move {
-            agent.run_chat_streaming(messages, &tools, None, event_tx).await
+            agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
         });
 
         while let Some(event) = event_rx.recv().await {
@@ -296,14 +299,22 @@ impl Runner {
                 AgentEvent::ToolCallFinished { id, output } => {
                     PromptEvent::ToolCallFinished { id, output }
                 }
-                AgentEvent::UsageSummary { input_tokens, output_tokens } => {
-                    PromptEvent::UsageUpdate { input_tokens, output_tokens }
+                AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
                 }
             };
             self.publish_event(&events_subject, &prompt_event).await;
         }
 
         let stop_reason = match agent_handle.await {
+            Ok(Ok(updated_messages)) => {
+                state.messages = updated_messages;
+                state.updated_at = crate::session_store::now_iso8601();
+                if let Err(e) = self.store.save(&payload.session_id, &state).await {
+                    warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
+                }
+                "end_turn"
+            }
             Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => "max_tokens",
             Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => "max_turn_requests",
             _ => "end_turn",

@@ -148,6 +148,10 @@ struct AnthropicResponse {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -194,7 +198,12 @@ pub enum AgentEvent {
     /// A tool call completed — emitted immediately after execution.
     ToolCallFinished { id: String, output: String },
     /// Token usage summary emitted at the end of a turn.
-    UsageSummary { input_tokens: u32, output_tokens: u32 },
+    UsageSummary {
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        cache_read_tokens: u32,
+    },
 }
 
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
@@ -452,6 +461,8 @@ impl AgentLoop {
 
         let mut total_input: u32 = 0;
         let mut total_output: u32 = 0;
+        let mut total_cache_creation: u32 = 0;
+        let mut total_cache_read: u32 = 0;
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Streaming chat loop iteration");
@@ -484,6 +495,8 @@ impl AgentLoop {
             if let Some(ref u) = response.usage {
                 total_input = total_input.saturating_add(u.input_tokens);
                 total_output = total_output.saturating_add(u.output_tokens);
+                total_cache_creation = total_cache_creation.saturating_add(u.cache_creation_input_tokens);
+                total_cache_read = total_cache_read.saturating_add(u.cache_read_input_tokens);
             }
 
             match response.stop_reason.as_str() {
@@ -507,6 +520,8 @@ impl AgentLoop {
                     let _ = event_tx.send(AgentEvent::UsageSummary {
                         input_tokens: total_input,
                         output_tokens: total_output,
+                        cache_creation_tokens: total_cache_creation,
+                        cache_read_tokens: total_cache_read,
                     }).await;
                     let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
 
@@ -527,6 +542,8 @@ impl AgentLoop {
                     let _ = event_tx.send(AgentEvent::UsageSummary {
                         input_tokens: total_input,
                         output_tokens: total_output,
+                        cache_creation_tokens: total_cache_creation,
+                        cache_read_tokens: total_cache_read,
                     }).await;
                     if !text.is_empty() {
                         let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
