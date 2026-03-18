@@ -103,7 +103,14 @@ impl Runner {
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
 
         let tools = all_tool_defs();
-        let agent = self.agent.clone();
+        // Use per-session model override when present
+        let agent: Arc<AgentLoop> = if let Some(ref model) = state.model {
+            let mut a = (*self.agent).clone();
+            a.model = model.clone();
+            Arc::new(a)
+        } else {
+            self.agent.clone()
+        };
         let messages = state.messages.clone();
 
         // Spawn the agent loop so we can select! against cancel
@@ -199,7 +206,13 @@ impl Runner {
 
         let tools = all_tool_defs();
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
-        let agent = self.agent.clone();
+        let agent: Arc<AgentLoop> = if let Some(ref model) = state.model {
+            let mut a = (*self.agent).clone();
+            a.model = model.clone();
+            Arc::new(a)
+        } else {
+            self.agent.clone()
+        };
         let messages = state.messages.clone();
 
         tokio::task::spawn_local(async move {

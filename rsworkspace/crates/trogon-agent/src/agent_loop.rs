@@ -158,6 +158,7 @@ pub enum AgentEvent {
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
+#[derive(Clone)]
 pub struct AgentLoop {
     pub http_client: reqwest::Client,
     /// Base URL of the running `trogon-secret-proxy`.
