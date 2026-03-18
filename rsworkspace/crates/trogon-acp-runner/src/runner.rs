@@ -208,8 +208,9 @@ impl Runner {
             system_prompt
         };
 
-        // Capture context window size before agent is moved into spawn_local
+        // Capture context window size and current model before agent is moved into spawn_local
         let context_window = Some(context_window_tokens(&agent.model));
+        let current_model = state.model.clone().unwrap_or_else(|| self.agent.model.clone());
 
         // Spawn the agent loop so we can select! against cancel
         let agent_fut = tokio::task::spawn_local(async move {
@@ -223,6 +224,8 @@ impl Runner {
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
+        // id → tool name, used to detect EnterPlanMode completion
+        let mut tool_name_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
         loop {
             tokio::select! {
@@ -238,10 +241,26 @@ impl Runner {
                                     PromptEvent::ThinkingDelta { text }
                                 }
                                 AgentEvent::ToolCallStarted { id, name, input } => {
+                                    tool_name_by_id.insert(id.clone(), name.clone());
                                     PromptEvent::ToolCallStarted { id, name, input }
                                 }
                                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
-                                    PromptEvent::ToolCallFinished { id, output, exit_code, signal }
+                                    let is_enter_plan = tool_name_by_id.get(&id)
+                                        .map(|n| n == "EnterPlanMode")
+                                        .unwrap_or(false);
+                                    let finished_event = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
+                                    self.publish_event(&events_subject, &finished_event).await;
+                                    if is_enter_plan {
+                                        state.mode = "plan".to_string();
+                                        self.publish_event(
+                                            &events_subject,
+                                            &PromptEvent::ModeChanged {
+                                                mode: "plan".to_string(),
+                                                model: current_model.clone(),
+                                            },
+                                        ).await;
+                                    }
+                                    continue;
                                 }
                                 AgentEvent::SystemStatus { message } => {
                                     PromptEvent::SystemStatus { message }
@@ -430,8 +449,9 @@ impl Runner {
             system_prompt
         };
 
-        // Capture context window size before agent is moved into spawn_local
+        // Capture context window size and current model before agent is moved into spawn_local
         let context_window = Some(context_window_tokens(&agent.model));
+        let current_model = state.model.clone().unwrap_or_else(|| self.agent.model.clone());
 
         let agent_handle = tokio::task::spawn_local(async move {
             agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
@@ -441,16 +461,33 @@ impl Runner {
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
+        let mut tool_name_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
         while let Some(event) = event_rx.recv().await {
             let prompt_event = match event {
                 AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
                 AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
                 AgentEvent::ToolCallStarted { id, name, input } => {
+                    tool_name_by_id.insert(id.clone(), name.clone());
                     PromptEvent::ToolCallStarted { id, name, input }
                 }
                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
-                    PromptEvent::ToolCallFinished { id, output, exit_code, signal }
+                    let is_enter_plan = tool_name_by_id.get(&id)
+                        .map(|n| n == "EnterPlanMode")
+                        .unwrap_or(false);
+                    let finished_event = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
+                    self.publish_event(&events_subject, &finished_event).await;
+                    if is_enter_plan {
+                        state.mode = "plan".to_string();
+                        self.publish_event(
+                            &events_subject,
+                            &PromptEvent::ModeChanged {
+                                mode: "plan".to_string(),
+                                model: current_model.clone(),
+                            },
+                        ).await;
+                    }
+                    continue;
                 }
                 AgentEvent::SystemStatus { message } => {
                     PromptEvent::SystemStatus { message }

@@ -59,6 +59,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
+        "EnterPlanMode" => Ok("Entered plan mode".to_string()),
         unknown => Err(format!("Unknown tool: {unknown}")),
     };
     result.unwrap_or_else(|e| format!("Tool error: {e}"))
@@ -268,6 +269,12 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
                                  "assignee_id":{"type":"string"},"priority":{"type":"integer"}}})),
     ];
     tools.extend(slack::slack_tool_defs());
+    tools.push(tool_def(
+        "EnterPlanMode",
+        "Switch the session into plan mode. In plan mode the agent may only read and analyse — \
+         it must not write files, run commands, or call any tool that modifies state.",
+        json!({"type": "object", "properties": {}}),
+    ));
     tools
 }
 
@@ -284,13 +291,14 @@ mod catalog_tests {
             "update_file", "create_pull_request", "request_reviewers", "get_pr_comments",
             "get_linear_issue", "get_linear_comments", "post_linear_comment",
             "update_linear_issue", "send_slack_message", "read_slack_channel",
+            "EnterPlanMode",
         ] {
             assert!(names.contains(expected), "missing tool: {expected}");
         }
     }
 
     #[test]
-    fn all_tool_defs_has_fourteen_entries() {
-        assert_eq!(all_tool_defs().len(), 14);
+    fn all_tool_defs_has_fifteen_entries() {
+        assert_eq!(all_tool_defs().len(), 15);
     }
 }

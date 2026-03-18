@@ -1,8 +1,9 @@
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode, Plan, PlanEntry,
-    PlanEntryPriority, PlanEntryStatus, PromptRequest, PromptResponse, SessionNotification,
-    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, Usage, UsageUpdate,
+    ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, EmbeddedResourceResource,
+    Error, ErrorCode, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptRequest,
+    PromptResponse, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, Usage, UsageUpdate,
 };
 use crate::prompt_event::UserContentBlock;
 use bytes::Bytes;
@@ -247,6 +248,23 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
+            PromptEvent::ModeChanged { mode, model } => {
+                let mode_notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.clone())),
+                );
+                if bridge.notification_sender.send(mode_notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+                let config_options = build_plan_mode_config_options(&mode, &model);
+                let config_notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
+                );
+                if bridge.notification_sender.send(config_notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
             PromptEvent::SystemStatus { message } => {
                 tracing::info!(message = %message, "agent system status");
             }
@@ -417,4 +435,29 @@ fn rewrite_mcp_slash_command(text: &str) -> String {
         }
     }
     text.to_string()
+}
+
+/// Build `SessionConfigOption` list for the `ConfigOptionUpdate` sent after `EnterPlanMode`.
+///
+/// Mirrors `TrogonAcpAgent::build_config_options` from `trogon-acp`.  Duplicated here because
+/// `acp-nats` cannot depend on the higher-level `trogon-acp` crate.  The `bypassPermissions`
+/// mode is intentionally omitted — `EnterPlanMode` only ever sets mode to `"plan"`.
+fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {
+    let mode_options = vec![
+        SessionConfigSelectOption::new("default", "Default"),
+        SessionConfigSelectOption::new("acceptEdits", "Accept Edits"),
+        SessionConfigSelectOption::new("plan", "Plan Mode"),
+        SessionConfigSelectOption::new("dontAsk", "Don't Ask"),
+    ];
+    let model_options = vec![
+        SessionConfigSelectOption::new("claude-opus-4-6", "Claude Opus 4"),
+        SessionConfigSelectOption::new("claude-sonnet-4-6", "Claude Sonnet 4"),
+        SessionConfigSelectOption::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+    ];
+    vec![
+        SessionConfigOption::select("mode", "Mode", mode.to_string(), mode_options)
+            .category(SessionConfigOptionCategory::Mode),
+        SessionConfigOption::select("model", "Model", model.to_string(), model_options)
+            .category(SessionConfigOptionCategory::Model),
+    ]
 }

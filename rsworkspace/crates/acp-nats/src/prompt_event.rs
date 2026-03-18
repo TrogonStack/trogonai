@@ -80,6 +80,10 @@ pub enum PromptEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_window: Option<u64>,
     },
+    /// The agent entered plan mode via the `EnterPlanMode` tool.
+    /// Carries the new mode name and the active model so the Bridge can build
+    /// the full `ConfigOptionUpdate` without access to the ACP agent's config.
+    ModeChanged { mode: String, model: String },
 }
 
 #[cfg(test)]
