@@ -3599,6 +3599,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-agent",
+ "trogon-mcp",
  "trogon-nats",
  "trogon-std",
 ]

@@ -24,9 +24,10 @@ use agent_client_protocol::{
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use agent_client_protocol::McpServer;
 use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use acp_nats::Bridge;
-use trogon_acp_runner::{SessionState, SessionStore};
+use trogon_acp_runner::{SessionState, SessionStore, StoredMcpServer};
 use trogon_agent::agent_loop::ContentBlock as AgentContentBlock;
 use trogon_std::time::GetElapsed;
 
@@ -219,6 +220,80 @@ where
         }
     }
 
+    /// Resolve a model string to a known model ID using fuzzy matching.
+    ///
+    /// Algorithm (same as TypeScript `resolveModelPreference`):
+    /// 1. Exact match on ID
+    /// 2. Case-insensitive match on display name
+    /// 3. Substring match (id/name contains query, or query contains id)
+    /// 4. Tokenized match — split by non-alphanumeric, score by token overlap
+    fn resolve_model(preference: &str) -> Option<&'static str> {
+        let trimmed = preference.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let lower = trimmed.to_lowercase();
+
+        // 1. Exact ID match
+        if let Some((id, _)) = AVAILABLE_MODELS.iter().find(|(id, _)| *id == trimmed) {
+            return Some(id);
+        }
+        // 2. Case-insensitive ID or name match
+        if let Some((id, _)) = AVAILABLE_MODELS
+            .iter()
+            .find(|(id, name)| id.to_lowercase() == lower || name.to_lowercase() == lower)
+        {
+            return Some(id);
+        }
+        // 3. Substring match
+        if let Some((id, _)) = AVAILABLE_MODELS.iter().find(|(id, name)| {
+            let il = id.to_lowercase();
+            let nl = name.to_lowercase();
+            il.contains(&lower) || nl.contains(&lower) || lower.contains(il.as_str())
+        }) {
+            return Some(id);
+        }
+        // 4. Tokenized match — "opus" → "claude-opus-4-6"
+        let tokens: Vec<&str> = lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| !s.is_empty() && *s != "claude")
+            .collect();
+        if tokens.is_empty() {
+            return None;
+        }
+        let mut best: Option<&'static str> = None;
+        let mut best_score = 0usize;
+        for (id, name) in AVAILABLE_MODELS {
+            let haystack = format!("{} {}", id.to_lowercase(), name.to_lowercase());
+            let score = tokens.iter().filter(|&&t| haystack.contains(t)).count();
+            if score > best_score {
+                best_score = score;
+                best = Some(id);
+            }
+        }
+        if best_score > 0 { best } else { None }
+    }
+
+    /// Convert ACP `McpServer` list to storable configs (Http/Sse only; stdio skipped).
+    fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
+        servers
+            .iter()
+            .filter_map(|s| match s {
+                McpServer::Http(h) => Some(StoredMcpServer {
+                    name: h.name.clone(),
+                    url: h.url.clone(),
+                    headers: h.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                }),
+                McpServer::Sse(s) => Some(StoredMcpServer {
+                    name: s.name.clone(),
+                    url: s.url.clone(),
+                    headers: s.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                }),
+                _ => None, // Stdio not supported in NATS model
+            })
+            .collect()
+    }
+
     /// Delete a session from KV and publish a cancel to abort any running prompt.
     async fn close_session_impl(&self, session_id: &str) {
         let cancel_subject =
@@ -290,6 +365,7 @@ where
             cwd,
             created_at: now_iso8601(),
             mode: "default".to_string(),
+            mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
             ..Default::default()
         };
         if let Err(e) = self.store.save(&session_id, &state).await {
@@ -397,7 +473,10 @@ where
             );
             let _ = self.notification_sender.send(notification).await;
         } else if config_id == "model" {
-            state.model = Some(value.clone());
+            let resolved = Self::resolve_model(&value)
+                .map(|s| s.to_string())
+                .unwrap_or(value.clone());
+            state.model = Some(resolved);
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "Failed to save session model");
             }
@@ -421,7 +500,10 @@ where
         args: SetSessionModelRequest,
     ) -> Result<SetSessionModelResponse> {
         let session_id = args.session_id.to_string();
-        let model = args.model_id.0.to_string();
+        let raw_model = args.model_id.0.to_string();
+        let model = Self::resolve_model(&raw_model)
+            .map(|s| s.to_string())
+            .unwrap_or(raw_model);
         info!(session_id = %session_id, model = %model, "Set session model");
 
         let mut state = self.store.load(&session_id).await.map_err(|e| {
@@ -487,6 +569,7 @@ where
             cwd,
             created_at: now_iso8601(),
             title: src_state.title.clone(),
+            mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");

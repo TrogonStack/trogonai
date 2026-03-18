@@ -19,5 +19,6 @@ tokio         = { version = "1.49.0", features = ["full"] }
 tracing       = "0.1.44"
 
 trogon-agent  = { path = "../trogon-agent" }
+trogon-mcp    = { path = "../trogon-mcp" }
 trogon-nats   = { path = "../trogon-nats" }
 trogon-std    = { path = "../trogon-std" }

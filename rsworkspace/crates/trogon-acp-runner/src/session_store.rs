@@ -2,6 +2,19 @@ use async_nats::jetstream;
 use serde::{Deserialize, Serialize};
 use trogon_agent::agent_loop::Message;
 
+/// A URL-based MCP server configuration stored per session.
+/// Stdio servers are not supported in the NATS model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredMcpServer {
+    /// Human-readable name (used as tool prefix).
+    pub name: String,
+    /// HTTP or SSE endpoint URL.
+    pub url: String,
+    /// Optional HTTP headers (name, value pairs).
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+}
+
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.
@@ -23,6 +36,9 @@ pub struct SessionState {
     /// Short title derived from the first prompt (max 256 chars).
     #[serde(default)]
     pub title: String,
+    /// Per-session MCP server configurations (HTTP/SSE only).
+    #[serde(default)]
+    pub mcp_servers: Vec<StoredMcpServer>,
 }
 
 /// NATS KV-backed session store.

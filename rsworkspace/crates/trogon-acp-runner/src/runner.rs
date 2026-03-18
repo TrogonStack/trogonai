@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use trogon_agent::agent_loop::{AgentEvent, AgentLoop, ContentBlock, ImageSource, Message};
-use trogon_agent::tools::all_tool_defs;
+use trogon_agent::tools::{ToolDef, all_tool_defs};
 
-use crate::session_store::SessionStore;
+use crate::session_store::{SessionStore, StoredMcpServer};
 
 /// Subscribes to `{prefix}.*.agent.prompt` via NATS Core, runs the agentic loop
 /// for each incoming prompt (with streaming events and cancel support), and publishes
@@ -108,13 +108,24 @@ impl Runner {
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
 
         let tools = all_tool_defs();
-        // Use per-session model override when present
-        let agent: Arc<AgentLoop> = if let Some(ref model) = state.model {
-            let mut a = (*self.agent).clone();
-            a.model = model.clone();
-            Arc::new(a)
-        } else {
-            self.agent.clone()
+        // Build per-session agent with model + MCP overrides
+        let agent: Arc<AgentLoop> = {
+            let needs_override = state.model.is_some() || !state.mcp_servers.is_empty();
+            if needs_override {
+                let mut a = (*self.agent).clone();
+                if let Some(ref model) = state.model {
+                    a.model = model.clone();
+                }
+                if !state.mcp_servers.is_empty() {
+                    let (mcp_defs, mcp_dispatch) =
+                        build_session_mcp(&self.nats, &state.mcp_servers).await;
+                    a.mcp_tool_defs.extend(mcp_defs);
+                    a.mcp_dispatch.extend(mcp_dispatch);
+                }
+                Arc::new(a)
+            } else {
+                self.agent.clone()
+            }
         };
         let messages = state.messages.clone();
 
@@ -291,6 +302,47 @@ impl Runner {
     async fn publish_error(&self, subject: &str, message: String) {
         self.publish_event(subject, &PromptEvent::Error { message }).await;
     }
+}
+
+/// Connect to per-session MCP servers, initialize them, and return tool defs + dispatch table.
+async fn build_session_mcp(
+    _nats: &async_nats::Client,
+    servers: &[StoredMcpServer],
+) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
+    let http = reqwest::Client::new();
+    let mut tool_defs = Vec::new();
+    let mut dispatch = Vec::new();
+
+    for server in servers {
+        let client = Arc::new(trogon_mcp::McpClient::new(http.clone(), &server.url));
+
+        if let Err(e) = client.initialize().await {
+            warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
+            continue;
+        }
+
+        match client.list_tools().await {
+            Ok(tools) => {
+                for tool in tools {
+                    // Prefix the tool name with the server name to avoid collisions
+                    let prefixed = format!("{}__{}", server.name, tool.name);
+                    tool_defs.push(ToolDef {
+                        name: prefixed.clone(),
+                        description: tool.description,
+                        input_schema: tool.input_schema,
+                        cache_control: None,
+                    });
+                    dispatch.push((prefixed, tool.name, client.clone()));
+                }
+                info!(name = %server.name, tools = tool_defs.len(), "MCP server connected");
+            }
+            Err(e) => {
+                warn!(name = %server.name, error = %e, "Failed to list MCP tools — skipping");
+            }
+        }
+    }
+
+    (tool_defs, dispatch)
 }
 
 /// Build a rich Anthropic user `Message` from a `PromptPayload`.
