@@ -156,6 +156,10 @@ impl AdvancedMockNatsClient {
     pub fn clear_responses(&self) {
         self.request_responses.lock().unwrap().clear();
     }
+
+    pub fn inject_messages(&self) -> futures::channel::mpsc::UnboundedSender<async_nats::Message> {
+        self.base.inject_messages()
+    }
 }
 
 impl Default for AdvancedMockNatsClient {
