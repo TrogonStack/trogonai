@@ -48,6 +48,10 @@ pub struct SessionState {
     /// Additional root directories supplied via `_meta.additionalRoots` at session creation.
     #[serde(default)]
     pub additional_roots: Vec<String>,
+    /// If true, all built-in agent tools are disabled for this session.
+    /// Set via `_meta.disableBuiltInTools` at session creation.
+    #[serde(default)]
+    pub disable_builtin_tools: bool,
 }
 
 /// NATS KV-backed session store.

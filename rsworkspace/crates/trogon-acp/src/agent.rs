@@ -402,6 +402,12 @@ where
                     .collect()
             })
             .unwrap_or_default();
+        let disable_builtin_tools = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("disableBuiltInTools"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let state = SessionState {
             cwd,
             created_at: now_iso8601(),
@@ -409,6 +415,7 @@ where
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
             system_prompt,
             additional_roots,
+            disable_builtin_tools,
             ..Default::default()
         };
         if let Err(e) = self.store.save(&session_id, &state).await {

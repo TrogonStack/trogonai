@@ -113,8 +113,11 @@ impl Runner {
         // Channel for streaming agent events
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
 
-        let tools = all_tool_defs();
-        let tools: Vec<_> = tools.into_iter().filter(|t| t.name != "AskUserQuestion").collect();
+        let tools = if state.disable_builtin_tools {
+            vec![]
+        } else {
+            all_tool_defs().into_iter().filter(|t| t.name != "AskUserQuestion").collect()
+        };
         // Build per-session agent with model + MCP overrides and permission gate
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let agent: Arc<AgentLoop> = {
@@ -276,8 +279,11 @@ impl Runner {
 
         state.messages.push(user_message_from_payload(&payload));
 
-        let tools = all_tool_defs();
-        let tools: Vec<_> = tools.into_iter().filter(|t| t.name != "AskUserQuestion").collect();
+        let tools = if state.disable_builtin_tools {
+            vec![]
+        } else {
+            all_tool_defs().into_iter().filter(|t| t.name != "AskUserQuestion").collect()
+        };
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let agent: Arc<AgentLoop> = {
