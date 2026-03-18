@@ -15,6 +15,20 @@ use tracing::{debug, info, warn};
 
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
+// ── PermissionChecker ─────────────────────────────────────────────────────────
+
+/// Called by the agent loop before each tool execution.
+/// Returns `true` to allow the tool to run, `false` to deny it.
+pub trait PermissionChecker: Send + Sync {
+    fn check<'a>(
+        &'a self,
+        session_id: &'a str,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
+}
+
 // ── Wire types ────────────────────────────────────────────────────────────────
 
 /// A single message in the Anthropic conversation history.
@@ -53,12 +67,26 @@ impl Message {
     }
 }
 
+/// Source for an image content block sent to the Anthropic API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ImageSource {
+    /// Base64-encoded image data.
+    Base64 { media_type: String, data: String },
+    /// Remote image URL.
+    Url { url: String },
+}
+
 /// A single block within a message's `content` array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Plain text from the model or the user.
     Text { text: String },
+    /// Image sent by the user (base64 or URL).
+    Image { source: ImageSource },
+    /// Extended thinking block produced by the model (requires thinking beta).
+    Thinking { thinking: String },
     /// Tool invocation requested by the model.
     ToolUse { id: String, name: String, input: Value },
     /// Result returned to the model after executing a tool.
@@ -112,6 +140,18 @@ struct AnthropicRequest<'a> {
 struct AnthropicResponse {
     stop_reason: String,
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AnthropicUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -120,6 +160,7 @@ struct AnthropicResponse {
 pub enum AgentError {
     Http(reqwest::Error),
     MaxIterationsReached,
+    MaxTokens,
     UnexpectedStopReason(String),
 }
 
@@ -128,6 +169,7 @@ impl std::fmt::Display for AgentError {
         match self {
             Self::Http(e) => write!(f, "HTTP error: {e}"),
             Self::MaxIterationsReached => write!(f, "Agent exceeded max iterations"),
+            Self::MaxTokens => write!(f, "Context window full (max_tokens)"),
             Self::UnexpectedStopReason(r) => write!(f, "Unexpected stop reason: {r}"),
         }
     }
@@ -139,9 +181,35 @@ impl std::error::Error for AgentError {
     }
 }
 
+// ── AgentEvent ────────────────────────────────────────────────────────────────
+
+/// Events emitted by [`AgentLoop::run_chat_streaming`] during a prompt turn.
+///
+/// Callers receive these on an `mpsc::Receiver` and can forward them to the
+/// client in real time (e.g. as NATS `PromptEvent` messages).
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    /// A chunk of assistant text.
+    TextDelta { text: String },
+    /// A chunk of the model's internal reasoning (extended thinking).
+    ThinkingDelta { text: String },
+    /// A tool call was dispatched — emitted immediately before execution.
+    ToolCallStarted { id: String, name: String, input: serde_json::Value },
+    /// A tool call completed — emitted immediately after execution.
+    ToolCallFinished { id: String, output: String },
+    /// Token usage summary emitted at the end of a turn.
+    UsageSummary {
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        cache_read_tokens: u32,
+    },
+}
+
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
+#[derive(Clone)]
 pub struct AgentLoop {
     pub http_client: reqwest::Client,
     /// Base URL of the running `trogon-secret-proxy`.
@@ -170,6 +238,8 @@ pub struct AgentLoop {
     pub split_client: Option<trogon_splitio::SplitClient>,
     /// Tenant identifier used as the Split.io user key for flag evaluation.
     pub tenant_id: String,
+    /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
+    pub permission_checker: Option<Arc<dyn PermissionChecker>>,
 }
 
 impl AgentLoop {
@@ -263,6 +333,10 @@ impl AgentLoop {
                     info!(iterations = iteration + 1, "Agent completed");
                     return Ok(text);
                 }
+                "max_tokens" => {
+                    warn!(iteration, "Agent hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
+                }
                 "tool_use" => {
                     let results = self.execute_tools(&response.content).await;
                     messages.push(Message::assistant(response.content));
@@ -342,6 +416,10 @@ impl AgentLoop {
                     info!(iterations = iteration + 1, "Chat completed");
                     return Ok((text, messages));
                 }
+                "max_tokens" => {
+                    warn!(iteration, "Chat hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
+                }
                 "tool_use" => {
                     let results = self.execute_tools(&response.content).await;
                     messages.push(Message::assistant(response.content));
@@ -355,6 +433,193 @@ impl AgentLoop {
 
         warn!(max = self.max_iterations, "Chat reached max iterations");
         Err(AgentError::MaxIterationsReached)
+    }
+
+    /// Like [`run_chat`] but emits [`AgentEvent`]s on `event_tx` throughout execution.
+    ///
+    /// - `TextDelta` is emitted when the model produces text at `end_turn`.
+    /// - `ToolCallStarted` is emitted for each tool call before it runs.
+    /// - `ToolCallFinished` is emitted for each tool call after it completes.
+    ///
+    /// Returns the updated message history (same as [`run_chat`]).
+    /// Errors on `event_tx` are swallowed — the receiver dropping does not abort the loop.
+    pub async fn run_chat_streaming(
+        &self,
+        initial_messages: Vec<Message>,
+        tools: &[ToolDef],
+        system_prompt: Option<&str>,
+        event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
+    ) -> Result<Vec<Message>, AgentError> {
+        let mut messages = initial_messages;
+
+        let mut all_tools: Vec<ToolDef> = tools.to_vec();
+        all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        let mut cached_tools: Vec<ToolDef> = all_tools;
+        if let Some(last) = cached_tools.last_mut() {
+            last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
+        }
+
+        let mut total_input: u32 = 0;
+        let mut total_output: u32 = 0;
+        let mut total_cache_creation: u32 = 0;
+        let mut total_cache_read: u32 = 0;
+
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Streaming chat loop iteration");
+
+            let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
+                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+            });
+
+            let request = AnthropicRequest {
+                model: &self.model,
+                max_tokens: 4096,
+                system,
+                tools: &cached_tools,
+                messages: &messages,
+            };
+
+            let response = self
+                .http_client
+                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                .header("anthropic-version", "2023-06-01")
+                .json(&request)
+                .send()
+                .await
+                .map_err(AgentError::Http)?
+                .json::<AnthropicResponse>()
+                .await
+                .map_err(AgentError::Http)?;
+
+            if let Some(ref u) = response.usage {
+                total_input = total_input.saturating_add(u.input_tokens);
+                total_output = total_output.saturating_add(u.output_tokens);
+                total_cache_creation = total_cache_creation.saturating_add(u.cache_creation_input_tokens);
+                total_cache_read = total_cache_read.saturating_add(u.cache_read_input_tokens);
+            }
+
+            match response.stop_reason.as_str() {
+                "end_turn" => {
+                    // Emit thinking blocks before text
+                    for block in &response.content {
+                        if let ContentBlock::Thinking { thinking } = block {
+                            let _ = event_tx.send(AgentEvent::ThinkingDelta { text: thinking.clone() }).await;
+                        }
+                    }
+
+                    let text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let _ = event_tx.send(AgentEvent::UsageSummary {
+                        input_tokens: total_input,
+                        output_tokens: total_output,
+                        cache_creation_tokens: total_cache_creation,
+                        cache_read_tokens: total_cache_read,
+                    }).await;
+                    let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+
+                    messages.push(Message::assistant(response.content));
+                    info!(iterations = iteration + 1, "Streaming chat completed");
+                    return Ok(messages);
+                }
+                "max_tokens" => {
+                    // Emit whatever partial text was in the response before signalling
+                    let text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let _ = event_tx.send(AgentEvent::UsageSummary {
+                        input_tokens: total_input,
+                        output_tokens: total_output,
+                        cache_creation_tokens: total_cache_creation,
+                        cache_read_tokens: total_cache_read,
+                    }).await;
+                    if !text.is_empty() {
+                        let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+                    }
+                    warn!(iteration, "Streaming chat hit max_tokens (context full)");
+                    return Err(AgentError::MaxTokens);
+                }
+                "tool_use" => {
+                    let results = self
+                        .execute_tools_streaming(&response.content, &event_tx)
+                        .await;
+                    messages.push(Message::assistant(response.content));
+                    messages.push(Message::tool_results(results));
+                }
+                other => {
+                    return Err(AgentError::UnexpectedStopReason(other.to_string()));
+                }
+            }
+        }
+
+        warn!(max = self.max_iterations, "Streaming chat reached max iterations");
+        Err(AgentError::MaxIterationsReached)
+    }
+
+    async fn execute_tools_streaming(
+        &self,
+        content: &[ContentBlock],
+        event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
+    ) -> Vec<ToolResult> {
+        let mut results = Vec::new();
+
+        for block in content {
+            if let ContentBlock::ToolUse { id, name, input } = block {
+                debug!(tool = %name, "Executing tool (streaming)");
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallStarted {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    })
+                    .await;
+
+                // Ask permission before executing (if a checker is installed)
+                let allowed = match &self.permission_checker {
+                    Some(checker) => {
+                        checker.check(&self.tenant_id, id, name, input).await
+                    }
+                    None => true,
+                };
+
+                let output = if !allowed {
+                    format!("Permission denied: user refused to run tool `{name}`")
+                } else if let Some((_, original, client)) =
+                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                {
+                    match client.call_tool(original, input).await {
+                        Ok(out) => out,
+                        Err(e) => format!("Tool error: {e}"),
+                    }
+                } else {
+                    dispatch_tool(&self.tool_context, name, input).await
+                };
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallFinished {
+                        id: id.clone(),
+                        output: output.clone(),
+                    })
+                    .await;
+
+                results.push(ToolResult { tool_use_id: id.clone(), content: output });
+            }
+        }
+
+        results
     }
 
     async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
@@ -581,6 +846,7 @@ mod tests {
             mcp_dispatch: vec![],
             split_client,
             tenant_id: "test-tenant".to_string(),
+            permission_checker: None,
         }
     }
 

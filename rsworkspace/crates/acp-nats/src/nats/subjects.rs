@@ -26,6 +26,23 @@ pub mod agent {
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
+
+    /// Subject the Bridge publishes prompt payloads to.
+    /// The Runner subscribes here via `{prefix}.*.agent.prompt`.
+    pub fn prompt(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.prompt", prefix, session_id)
+    }
+
+    /// Wildcard subject the Runner uses to subscribe to all prompt payloads.
+    pub fn prompt_wildcard(prefix: &str) -> String {
+        format!("{}.*.agent.prompt", prefix)
+    }
+
+    /// Subject the Runner publishes per-event streaming updates to.
+    /// The Bridge subscribes here while waiting for the turn to complete.
+    pub fn prompt_events(prefix: &str, session_id: &str, req_id: &str) -> String {
+        format!("{}.{}.agent.prompt.events.{}", prefix, session_id, req_id)
+    }
 }
 
 #[cfg(test)]
@@ -89,6 +106,24 @@ mod tests {
         assert_eq!(
             agent::ext_session_ready("myapp", "sess-42"),
             "myapp.sess-42.agent.ext.session.ready"
+        );
+    }
+
+    #[test]
+    fn prompt_subject() {
+        assert_eq!(agent::prompt("acp", "s1"), "acp.s1.agent.prompt");
+    }
+
+    #[test]
+    fn prompt_wildcard_subject() {
+        assert_eq!(agent::prompt_wildcard("acp"), "acp.*.agent.prompt");
+    }
+
+    #[test]
+    fn prompt_events_subject() {
+        assert_eq!(
+            agent::prompt_events("acp", "s1", "req-abc"),
+            "acp.s1.agent.prompt.events.req-abc"
         );
     }
 

@@ -1,7 +1,7 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, SubscribeClient,
     RetryPolicy, agent,
 };
 use crate::telemetry::metrics::Metrics;
@@ -72,7 +72,7 @@ fn map_new_session_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: NewSessionRequest,
 ) -> Result<NewSessionResponse> {
@@ -267,6 +267,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -281,6 +282,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }

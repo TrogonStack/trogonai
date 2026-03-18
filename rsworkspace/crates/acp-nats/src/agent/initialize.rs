@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use agent_client_protocol::{Error, ErrorCode, InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -48,7 +48,7 @@ fn map_initialize_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(protocol_version = ?args.protocol_version)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: InitializeRequest,
 ) -> Result<InitializeResponse> {
@@ -157,6 +157,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -171,6 +172,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }
