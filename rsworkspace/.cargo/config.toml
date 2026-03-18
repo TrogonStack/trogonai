@@ -4,5 +4,5 @@ cov = [
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/trogonai-proto/src/gen/.*",
+    "crates/(acp-nats-stdio|acp-telemetry)/|crates/acp-nats-ws/src/(main|connection|upgrade)\\.rs"
 ]

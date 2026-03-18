@@ -15,7 +15,9 @@ pub(crate) mod telemetry;
 
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;
-pub use config::Config;
+pub use config::{
+    Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout,
+};
 pub use error::AGENT_UNAVAILABLE;
 pub use ext_method_name::{ExtMethodName, ExtMethodNameError};
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
