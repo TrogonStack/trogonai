@@ -1,7 +1,7 @@
 use agent_client_protocol::{
     ContentBlock, ContentChunk, Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification,
     SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields,
+    ToolCallUpdateFields, UsageUpdate,
 };
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -79,7 +79,9 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("flush: {e}")))?;
 
     // 6. Stream events back to the ACP client until the runner signals Done
-    let op_timeout = bridge.config.operation_timeout();
+    // Prompts may be queued behind other running prompts — use a long timeout
+    // so queued prompts don't time out while waiting for the runner.
+    let op_timeout = std::time::Duration::from_secs(600); // 10 minutes
 
     loop {
         let msg = match timeout(op_timeout, subscriber.next()).await {
@@ -156,6 +158,18 @@ where
                 let notification = SessionNotification::new(
                     args.session_id.clone(),
                     SessionUpdate::ToolCallUpdate(update),
+                );
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
+            PromptEvent::UsageUpdate { input_tokens, output_tokens } => {
+                let used = (input_tokens as u64) + (output_tokens as u64);
+                let size = 200_000u64; // Claude's typical context window
+                let update = UsageUpdate::new(used, size);
+                let notification = SessionNotification::new(
+                    args.session_id.clone(),
+                    SessionUpdate::UsageUpdate(update),
                 );
                 if bridge.notification_sender.send(notification).await.is_err() {
                     warn!("notification receiver dropped; continuing prompt");

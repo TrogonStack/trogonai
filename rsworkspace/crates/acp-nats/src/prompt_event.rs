@@ -34,6 +34,8 @@ pub enum PromptEvent {
     },
     /// A tool call finished executing.
     ToolCallFinished { id: String, output: String },
+    /// Token usage summary for the completed turn.
+    UsageUpdate { input_tokens: u32, output_tokens: u32 },
 }
 
 #[cfg(test)]
@@ -76,6 +78,15 @@ mod tests {
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "error");
         assert_eq!(v["message"], "oops");
+    }
+
+    #[test]
+    fn prompt_event_usage_update_tag() {
+        let e = PromptEvent::UsageUpdate { input_tokens: 100, output_tokens: 50 };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "usage_update");
+        assert_eq!(v["input_tokens"], 100);
+        assert_eq!(v["output_tokens"], 50);
     }
 
     #[test]

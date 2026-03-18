@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         proxy_url,
         anthropic_token,
-        model,
+        model: model.clone(),
         max_iterations,
         tool_context,
         memory_owner: None,
@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         nats.clone(),
         acp_prefix,
         notification_tx,
+        model.clone(),
     );
 
     // ── ACP connection over stdio ─────────────────────────────────────────────

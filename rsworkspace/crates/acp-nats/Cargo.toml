@@ -7,7 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-agent-client-protocol = { version = "0.9.4", features = ["unstable_session_list", "unstable_session_model", "unstable_session_fork", "unstable_session_resume"] }
+agent-client-protocol = { version = "0.9.4", features = ["unstable_session_list", "unstable_session_model", "unstable_session_fork", "unstable_session_resume", "unstable_session_usage"] }
 opentelemetry = "0.31.0"
 async-nats = "0.45.0"
 async-trait = "0.1.89"

@@ -112,6 +112,14 @@ struct AnthropicRequest<'a> {
 struct AnthropicResponse {
     stop_reason: String,
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AnthropicUsage {
+    input_tokens: u32,
+    output_tokens: u32,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -153,6 +161,8 @@ pub enum AgentEvent {
     ToolCallStarted { id: String, name: String, input: serde_json::Value },
     /// A tool call completed — emitted immediately after execution.
     ToolCallFinished { id: String, output: String },
+    /// Token usage summary emitted at the end of a turn.
+    UsageSummary { input_tokens: u32, output_tokens: u32 },
 }
 
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
@@ -398,6 +408,9 @@ impl AgentLoop {
             last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
         }
 
+        let mut total_input: u32 = 0;
+        let mut total_output: u32 = 0;
+
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Streaming chat loop iteration");
 
@@ -426,6 +439,11 @@ impl AgentLoop {
                 .await
                 .map_err(AgentError::Http)?;
 
+            if let Some(ref u) = response.usage {
+                total_input = total_input.saturating_add(u.input_tokens);
+                total_output = total_output.saturating_add(u.output_tokens);
+            }
+
             match response.stop_reason.as_str() {
                 "end_turn" => {
                     let text = response
@@ -437,6 +455,10 @@ impl AgentLoop {
                         .collect::<Vec<_>>()
                         .join("\n");
 
+                    let _ = event_tx.send(AgentEvent::UsageSummary {
+                        input_tokens: total_input,
+                        output_tokens: total_output,
+                    }).await;
                     let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
 
                     messages.push(Message::assistant(response.content));

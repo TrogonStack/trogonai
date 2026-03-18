@@ -11,6 +11,9 @@ pub struct SessionState {
     /// Per-session model override. `None` means use the agent's default model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Permission mode (e.g. "default", "acceptEdits", "bypassPermissions").
+    #[serde(default)]
+    pub mode: String,
     /// Working directory recorded when the session was created.
     #[serde(default)]
     pub cwd: String,

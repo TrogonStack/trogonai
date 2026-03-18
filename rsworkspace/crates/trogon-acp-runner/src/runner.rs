@@ -138,6 +138,9 @@ impl Runner {
                                 AgentEvent::ToolCallFinished { id, output } => {
                                     PromptEvent::ToolCallFinished { id, output }
                                 }
+                                AgentEvent::UsageSummary { input_tokens, output_tokens } => {
+                                    PromptEvent::UsageUpdate { input_tokens, output_tokens }
+                                }
                             };
                             self.publish_event(&events_subject, &prompt_event).await;
                         }
@@ -227,6 +230,9 @@ impl Runner {
                 }
                 AgentEvent::ToolCallFinished { id, output } => {
                     PromptEvent::ToolCallFinished { id, output }
+                }
+                AgentEvent::UsageSummary { input_tokens, output_tokens } => {
+                    PromptEvent::UsageUpdate { input_tokens, output_tokens }
                 }
             };
             self.publish_event(&events_subject, &prompt_event).await;
