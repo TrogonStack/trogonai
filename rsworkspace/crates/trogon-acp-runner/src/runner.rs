@@ -104,7 +104,18 @@ impl Runner {
 
         // Capture the first prompt as the session title (before appending the user turn)
         if state.title.is_empty() {
-            state.title = truncate_title(&payload.user_message);
+            let title_source = if !payload.user_message.is_empty() {
+                payload.user_message.clone()
+            } else {
+                payload.content.iter().find_map(|b| {
+                    if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
+                        if !text.is_empty() { Some(text.clone()) } else { None }
+                    } else {
+                        None
+                    }
+                }).unwrap_or_default()
+            };
+            state.title = truncate_title(&title_source);
         }
 
         // Append the user turn
@@ -170,6 +181,10 @@ impl Runner {
         // Forward streaming events to NATS while watching for cancel
         let mut final_messages: Option<Vec<trogon_agent::agent_loop::Message>> = None;
         let mut cancelled = false;
+        let mut last_input_tokens: u32 = 0;
+        let mut last_output_tokens: u32 = 0;
+        let mut last_cache_creation_tokens: u32 = 0;
+        let mut last_cache_read_tokens: u32 = 0;
 
         loop {
             tokio::select! {
@@ -194,6 +209,10 @@ impl Runner {
                                     PromptEvent::SystemStatus { message }
                                 }
                                 AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+                                    last_input_tokens = input_tokens;
+                                    last_output_tokens = output_tokens;
+                                    last_cache_creation_tokens = cache_creation_tokens;
+                                    last_cache_read_tokens = cache_read_tokens;
                                     PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
                                 }
                             };
@@ -206,12 +225,34 @@ impl Runner {
                                     final_messages = Some(updated_messages);
                                 }
                                 Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => {
+                                    if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        self.publish_event(
+                                            &events_subject,
+                                            &PromptEvent::UsageUpdate {
+                                                input_tokens: last_input_tokens,
+                                                output_tokens: last_output_tokens,
+                                                cache_creation_tokens: last_cache_creation_tokens,
+                                                cache_read_tokens: last_cache_read_tokens,
+                                            },
+                                        ).await;
+                                    }
                                     self.publish_event(
                                         &events_subject,
                                         &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
                                     ).await;
                                 }
                                 Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => {
+                                    if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        self.publish_event(
+                                            &events_subject,
+                                            &PromptEvent::UsageUpdate {
+                                                input_tokens: last_input_tokens,
+                                                output_tokens: last_output_tokens,
+                                                cache_creation_tokens: last_cache_creation_tokens,
+                                                cache_read_tokens: last_cache_read_tokens,
+                                            },
+                                        ).await;
+                                    }
                                     self.publish_event(
                                         &events_subject,
                                         &PromptEvent::Done { stop_reason: "max_tokens".to_string() },
@@ -274,7 +315,18 @@ impl Runner {
         };
 
         if state.title.is_empty() {
-            state.title = truncate_title(&payload.user_message);
+            let title_source = if !payload.user_message.is_empty() {
+                payload.user_message.clone()
+            } else {
+                payload.content.iter().find_map(|b| {
+                    if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
+                        if !text.is_empty() { Some(text.clone()) } else { None }
+                    } else {
+                        None
+                    }
+                }).unwrap_or_default()
+            };
+            state.title = truncate_title(&title_source);
         }
 
         state.messages.push(user_message_from_payload(&payload));
@@ -326,6 +378,11 @@ impl Runner {
             agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
         });
 
+        let mut last_input_tokens: u32 = 0;
+        let mut last_output_tokens: u32 = 0;
+        let mut last_cache_creation_tokens: u32 = 0;
+        let mut last_cache_read_tokens: u32 = 0;
+
         while let Some(event) = event_rx.recv().await {
             let prompt_event = match event {
                 AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
@@ -340,30 +397,69 @@ impl Runner {
                     PromptEvent::SystemStatus { message }
                 }
                 AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+                    last_input_tokens = input_tokens;
+                    last_output_tokens = output_tokens;
+                    last_cache_creation_tokens = cache_creation_tokens;
+                    last_cache_read_tokens = cache_read_tokens;
                     PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens }
                 }
             };
             self.publish_event(&events_subject, &prompt_event).await;
         }
 
-        let stop_reason = match agent_handle.await {
+        match agent_handle.await {
             Ok(Ok(updated_messages)) => {
                 state.messages = updated_messages;
                 state.updated_at = crate::session_store::now_iso8601();
                 if let Err(e) = self.store.save(&payload.session_id, &state).await {
                     warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
                 }
-                "end_turn"
+                self.publish_event(
+                    &events_subject,
+                    &PromptEvent::Done { stop_reason: "end_turn".to_string() },
+                ).await;
             }
-            Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => "max_tokens",
-            Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => "max_turn_requests",
-            _ => "end_turn",
-        };
-        self.publish_event(
-            &events_subject,
-            &PromptEvent::Done { stop_reason: stop_reason.to_string() },
-        )
-        .await;
+            Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => {
+                if last_input_tokens > 0 || last_output_tokens > 0 {
+                    self.publish_event(
+                        &events_subject,
+                        &PromptEvent::UsageUpdate {
+                            input_tokens: last_input_tokens,
+                            output_tokens: last_output_tokens,
+                            cache_creation_tokens: last_cache_creation_tokens,
+                            cache_read_tokens: last_cache_read_tokens,
+                        },
+                    ).await;
+                }
+                self.publish_event(
+                    &events_subject,
+                    &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
+                ).await;
+            }
+            Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => {
+                if last_input_tokens > 0 || last_output_tokens > 0 {
+                    self.publish_event(
+                        &events_subject,
+                        &PromptEvent::UsageUpdate {
+                            input_tokens: last_input_tokens,
+                            output_tokens: last_output_tokens,
+                            cache_creation_tokens: last_cache_creation_tokens,
+                            cache_read_tokens: last_cache_read_tokens,
+                        },
+                    ).await;
+                }
+                self.publish_event(
+                    &events_subject,
+                    &PromptEvent::Done { stop_reason: "max_tokens".to_string() },
+                ).await;
+            }
+            _ => {
+                self.publish_event(
+                    &events_subject,
+                    &PromptEvent::Done { stop_reason: "end_turn".to_string() },
+                ).await;
+            }
+        }
     }
 
     async fn publish_event(&self, subject: &str, event: &PromptEvent) {

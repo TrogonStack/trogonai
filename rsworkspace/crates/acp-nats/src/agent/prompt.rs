@@ -192,10 +192,10 @@ where
                 }
             }
             PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
-                accumulated_input = input_tokens as u64;
-                accumulated_output = output_tokens as u64;
-                accumulated_cache_creation = cache_creation_tokens as u64;
-                accumulated_cache_read = cache_read_tokens as u64;
+                accumulated_input += input_tokens as u64;
+                accumulated_output += output_tokens as u64;
+                accumulated_cache_creation += cache_creation_tokens as u64;
+                accumulated_cache_read += cache_read_tokens as u64;
                 let used = accumulated_input + accumulated_output + accumulated_cache_read;
                 let size = 200_000u64; // Claude's typical context window
                 let update = UsageUpdate::new(used, size);

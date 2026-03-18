@@ -548,10 +548,13 @@ where
             );
             let _ = self.notification_sender.send(notification).await;
         } else if config_id == "model" {
-            let resolved = Self::resolve_model(&value)
-                .map(|s| s.to_string())
-                .unwrap_or(value.clone());
-            state.model = Some(resolved);
+            let resolved = Self::resolve_model(&value).ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InvalidParams.into(),
+                    format!("Unknown model: {value}"),
+                )
+            })?;
+            state.model = Some(resolved.to_string());
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "Failed to save session model");
             }
@@ -600,7 +603,7 @@ where
         Ok(SetSessionModelResponse::new())
     }
 
-    async fn list_sessions(&self, _args: ListSessionsRequest) -> Result<ListSessionsResponse> {
+    async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
         let ids = self.store.list_ids().await.map_err(|e| {
             Error::new(
                 ErrorCode::InternalError.into(),
@@ -611,6 +614,13 @@ where
         let mut sessions = Vec::with_capacity(ids.len());
         for id in &ids {
             let state = self.store.load(id).await.unwrap_or_default();
+            // cwd filter: if the caller supplied a directory, only return sessions under it
+            let requested_cwd = args.cwd.to_string_lossy();
+            if !requested_cwd.is_empty() && requested_cwd != "/" {
+                if !state.cwd.starts_with(requested_cwd.as_ref()) {
+                    continue;
+                }
+            }
             let cwd = PathBuf::from(if state.cwd.is_empty() { "/" } else { &state.cwd });
             let mut info = SessionInfo::new(id.clone(), cwd);
             let ts = if !state.updated_at.is_empty() {
@@ -653,6 +663,7 @@ where
             mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
             system_prompt: src_state.system_prompt.clone(),
             additional_roots: src_state.additional_roots.clone(),
+            disable_builtin_tools: src_state.disable_builtin_tools,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             warn!(session_id = %new_id, error = %e, "Failed to save forked session");
