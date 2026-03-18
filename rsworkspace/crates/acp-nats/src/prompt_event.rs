@@ -1,5 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+/// A rich content block transported over NATS from Bridge to Runner.
+///
+/// Mirrors the ACP `ContentBlock` variants we care about, in a compact wire format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UserContentBlock {
+    /// Plain text.
+    Text { text: String },
+    /// Base64-encoded image.
+    Image { data: String, mime_type: String },
+    /// Reference link to a resource (shown as `[@name](uri)`).
+    ResourceLink { uri: String, name: String },
+    /// Embedded text resource (shown as XML context block).
+    Context { uri: String, text: String },
+}
+
 /// Payload published by the Bridge to NATS when it receives a prompt from an ACP client.
 ///
 /// Subject: `{prefix}.{session_id}.agent.prompt`
@@ -9,7 +25,12 @@ pub struct PromptPayload {
     pub req_id: String,
     /// The ACP session ID.
     pub session_id: String,
-    /// Plain-text user message extracted from the PromptRequest content blocks.
+    /// Rich content blocks from the ACP prompt (text, images, resources).
+    /// Always populated by current Bridge versions.
+    pub content: Vec<UserContentBlock>,
+    /// Plain-text fallback for backward compatibility.
+    /// Used only when `content` is empty (old Bridge versions).
+    #[serde(default)]
     pub user_message: String,
 }
 

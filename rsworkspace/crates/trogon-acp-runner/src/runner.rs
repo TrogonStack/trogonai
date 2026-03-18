@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use acp_nats::nats::agent as subjects;
-use acp_nats::prompt_event::{PromptEvent, PromptPayload};
+use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use trogon_agent::agent_loop::{AgentEvent, AgentLoop};
+use trogon_agent::agent_loop::{AgentEvent, AgentLoop, ContentBlock, ImageSource, Message};
 use trogon_agent::tools::all_tool_defs;
 
 use crate::session_store::SessionStore;
@@ -102,7 +102,7 @@ impl Runner {
         }
 
         // Append the user turn
-        state.messages.push(trogon_agent::agent_loop::Message::user_text(&payload.user_message));
+        state.messages.push(user_message_from_payload(&payload));
 
         // Channel for streaming agent events
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
@@ -229,7 +229,7 @@ impl Runner {
             state.title = truncate_title(&payload.user_message);
         }
 
-        state.messages.push(trogon_agent::agent_loop::Message::user_text(&payload.user_message));
+        state.messages.push(user_message_from_payload(&payload));
 
         let tools = all_tool_defs();
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
@@ -291,6 +291,43 @@ impl Runner {
     async fn publish_error(&self, subject: &str, message: String) {
         self.publish_event(subject, &PromptEvent::Error { message }).await;
     }
+}
+
+/// Build a rich Anthropic user `Message` from a `PromptPayload`.
+///
+/// Converts `UserContentBlock`s to Anthropic `ContentBlock`s:
+/// - `Text`         → plain text block
+/// - `Image`        → base64 image block
+/// - `ResourceLink` → `[@name](uri)` text block
+/// - `Context`      → `<context ref="uri">\n{text}\n</context>` text block
+fn user_message_from_payload(payload: &PromptPayload) -> Message {
+    // If the new rich content field is populated, use it; otherwise fall back to
+    // the plain-text user_message (backward compatibility with older Bridge versions).
+    if payload.content.is_empty() {
+        return Message::user_text(&payload.user_message);
+    }
+
+    let blocks: Vec<ContentBlock> = payload
+        .content
+        .iter()
+        .map(|block| match block {
+            UserContentBlock::Text { text } => ContentBlock::Text { text: text.clone() },
+            UserContentBlock::Image { data, mime_type } => ContentBlock::Image {
+                source: ImageSource::Base64 {
+                    media_type: mime_type.clone(),
+                    data: data.clone(),
+                },
+            },
+            UserContentBlock::ResourceLink { uri, name } => ContentBlock::Text {
+                text: format!("[@{name}]({uri})"),
+            },
+            UserContentBlock::Context { uri, text } => ContentBlock::Text {
+                text: format!("<context ref=\"{uri}\">\n{text}\n</context>"),
+            },
+        })
+        .collect();
+
+    Message { role: "user".to_string(), content: blocks }
 }
 
 /// Truncate a prompt to at most 256 characters for use as a session title.

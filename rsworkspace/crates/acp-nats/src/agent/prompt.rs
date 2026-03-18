@@ -1,8 +1,9 @@
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification,
-    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, Usage, UsageUpdate,
+    ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode, PromptRequest,
+    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, Usage, UsageUpdate,
 };
+use crate::prompt_event::UserContentBlock;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::time::timeout;
@@ -26,16 +27,15 @@ where
         Error::new(ErrorCode::InvalidParams.into(), "invalid session id")
     })?;
 
-    // 2. Extract user message text from content blocks
+    // 2. Convert ACP content blocks to rich UserContentBlocks for the runner
+    let content = acp_blocks_to_user_content(&args.prompt);
+
+    // Plain-text fallback (used for title, backward compat)
     let user_message = args
         .prompt
         .iter()
         .filter_map(|block| {
-            if let ContentBlock::Text(t) = block {
-                Some(t.text.as_str())
-            } else {
-                None
-            }
+            if let ContentBlock::Text(t) = block { Some(t.text.as_str()) } else { None }
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -56,6 +56,7 @@ where
     let payload = PromptPayload {
         req_id,
         session_id: session_id.to_string(),
+        content,
         user_message,
     };
     let payload_bytes =
@@ -196,4 +197,70 @@ where
             }
         }
     }
+}
+
+/// Convert ACP `ContentBlock`s to `UserContentBlock`s for transport over NATS.
+///
+/// Follows the same logic as `promptToClaude()` in the TypeScript reference:
+/// - Text → plain text
+/// - ResourceLink → `[@name](uri)` formatted link
+/// - Resource (text) → `<context ref="uri">\n{text}\n</context>` appended at the end
+/// - Resource (blob) → skipped
+/// - Image (base64) → image block
+/// - Image (url only) → `![image](url)` text link
+fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
+    let mut content: Vec<UserContentBlock> = Vec::new();
+    let mut context_parts: Vec<UserContentBlock> = Vec::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(t) => {
+                content.push(UserContentBlock::Text { text: t.text.clone() });
+            }
+            ContentBlock::Image(img) => {
+                if !img.data.is_empty() {
+                    content.push(UserContentBlock::Image {
+                        data: img.data.clone(),
+                        mime_type: img.mime_type.clone(),
+                    });
+                } else if let Some(uri) = &img.uri {
+                    content.push(UserContentBlock::Text {
+                        text: format!("![image]({uri})"),
+                    });
+                }
+            }
+            ContentBlock::ResourceLink(r) => {
+                content.push(UserContentBlock::ResourceLink {
+                    uri: r.uri.clone(),
+                    name: r.name.clone(),
+                });
+            }
+            ContentBlock::Resource(r) => {
+                match &r.resource {
+                    EmbeddedResourceResource::TextResourceContents(t) => {
+                        context_parts.push(UserContentBlock::Context {
+                            uri: t.uri.clone(),
+                            text: t.text.clone(),
+                        });
+                    }
+                    EmbeddedResourceResource::BlobResourceContents(_) => {
+                        // Binary blobs can't be sent to text/image models — skip
+                    }
+                    _ => {
+                        // Future resource types — skip
+                    }
+                }
+            }
+            ContentBlock::Audio(_) => {
+                // Audio not supported — skip
+            }
+            _ => {
+                // Future content block types — skip
+            }
+        }
+    }
+
+    // Append context blocks at the end, matching the TS behaviour
+    content.extend(context_parts);
+    content
 }

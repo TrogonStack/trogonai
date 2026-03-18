@@ -53,12 +53,24 @@ impl Message {
     }
 }
 
+/// Source for an image content block sent to the Anthropic API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ImageSource {
+    /// Base64-encoded image data.
+    Base64 { media_type: String, data: String },
+    /// Remote image URL.
+    Url { url: String },
+}
+
 /// A single block within a message's `content` array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Plain text from the model or the user.
     Text { text: String },
+    /// Image sent by the user (base64 or URL).
+    Image { source: ImageSource },
     /// Extended thinking block produced by the model (requires thinking beta).
     Thinking { thinking: String },
     /// Tool invocation requested by the model.
