@@ -2,9 +2,9 @@ use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::{Resource, trace as sdktrace};
 use std::sync::OnceLock;
 
-pub(super) static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
+pub(crate) static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
 
-pub(super) fn init_provider(
+pub(crate) fn init_provider(
     resource: &Resource,
 ) -> Result<sdktrace::SdkTracerProvider, Box<dyn std::error::Error>> {
     let exporter = SpanExporter::builder().with_http().build()?;
@@ -17,7 +17,7 @@ pub(super) fn init_provider(
     Ok(provider)
 }
 
-pub(super) fn force_flush() {
+pub(crate) fn force_flush() {
     if let Some(provider) = TRACER_PROVIDER.get()
         && let Err(e) = provider.force_flush()
     {
@@ -25,7 +25,7 @@ pub(super) fn force_flush() {
     }
 }
 
-pub(super) fn shutdown() {
+pub(crate) fn shutdown() {
     if let Some(provider) = TRACER_PROVIDER.get()
         && let Err(e) = provider.shutdown()
     {

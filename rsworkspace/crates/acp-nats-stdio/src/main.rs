@@ -1,8 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod config;
-mod signal;
-mod telemetry;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, nats};
 use agent_client_protocol::AgentSideConnection;
@@ -13,15 +11,22 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_std::time::SystemClock;
 
+use acp_telemetry::ServiceName;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::base_config(&SystemEnv)?;
-    telemetry::init_logger(config.acp_prefix(), &SystemEnv, &SystemFs);
-    let config = config::apply_timeout_overrides(config, &SystemEnv);
+    acp_telemetry::init_logger(
+        ServiceName::AcpNatsStdio,
+        config.acp_prefix(),
+        &SystemEnv,
+        &SystemFs,
+    );
+    let config = acp_nats::apply_timeout_overrides(config, &SystemEnv);
 
     info!("ACP bridge starting");
 
-    let nats_connect_timeout = config::nats_connect_timeout(&SystemEnv);
+    let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = nats::connect(config.nats(), nats_connect_timeout).await?;
 
     let local = tokio::task::LocalSet::new();
@@ -34,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("ACP bridge stopped");
     }
 
-    telemetry::shutdown_otel();
+    acp_telemetry::shutdown_otel();
 
     result
 }
@@ -50,7 +55,7 @@ async fn run_bridge(
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
-    let meter = opentelemetry::global::meter("acp-io-bridge-nats");
+    let meter = acp_telemetry::meter("acp-io-bridge-nats");
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
         SystemClock,
@@ -66,15 +71,12 @@ async fn run_bridge(
 
     let client_connection = connection.clone();
     let bridge_for_client = bridge.clone();
-    let mut client_task = tokio::task::spawn_local(async move {
-        client::run(
-            nats_client,
-            client_connection,
-            bridge_for_client,
-            StdJsonSerialize,
-        )
-        .await;
-    });
+    let mut client_task = tokio::task::spawn_local(client::run(
+        nats_client,
+        client_connection,
+        bridge_for_client,
+        StdJsonSerialize,
+    ));
     info!("ACP bridge running on stdio with NATS client proxy");
 
     let shutdown_result = tokio::select! {
@@ -102,7 +104,7 @@ async fn run_bridge(
                 }
             }
         }
-        _ = signal::shutdown_signal() => {
+        _ = acp_telemetry::signal::shutdown_signal() => {
             info!("ACP bridge shutting down (signal received)");
             Ok(())
         }
