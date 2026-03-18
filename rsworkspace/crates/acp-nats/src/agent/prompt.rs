@@ -1,7 +1,8 @@
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode, PromptRequest,
-    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, Usage, UsageUpdate,
+    ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode, Plan, PlanEntry,
+    PlanEntryPriority, PlanEntryStatus, PromptRequest, PromptResponse, SessionNotification,
+    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, Usage, UsageUpdate,
 };
 use crate::prompt_event::UserContentBlock;
 use bytes::Bytes;
@@ -95,6 +96,11 @@ where
     let mut accumulated_cache_creation: u64 = 0;
     let mut accumulated_cache_read: u64 = 0;
     let mut seen_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // id → tool name cache for _meta.claudeCode.toolName on ToolCallFinished
+    let mut tool_name_cache: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    // ids of TodoWrite calls — emitted as Plan updates, no ToolCallUpdate on finish
+    let mut todo_write_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     loop {
         let msg = tokio::select! {
@@ -185,9 +191,27 @@ where
                     continue;
                 }
                 seen_tool_ids.insert(id.clone());
-                let tool_call = ToolCall::new(id, name)
+                tool_name_cache.insert(id.clone(), name.clone());
+
+                // TodoWrite → emit Plan update instead of a tool_call notification
+                if name == "TodoWrite" {
+                    if let Some(entries) = todo_write_to_plan_entries(&input) {
+                        todo_write_ids.insert(id);
+                        let notification = SessionNotification::new(
+                            args.session_id.clone(),
+                            SessionUpdate::Plan(Plan::new(entries)),
+                        );
+                        if bridge.notification_sender.send(notification).await.is_err() {
+                            warn!("notification receiver dropped; continuing prompt");
+                        }
+                        continue;
+                    }
+                }
+
+                let tool_call = ToolCall::new(id, name.clone())
                     .status(ToolCallStatus::InProgress)
-                    .raw_input(input);
+                    .raw_input(input)
+                    .meta(make_claude_code_meta(&name));
                 let notification = SessionNotification::new(
                     args.session_id.clone(),
                     SessionUpdate::ToolCall(tool_call),
@@ -197,6 +221,10 @@ where
                 }
             }
             PromptEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                // TodoWrite finished — Plan was already sent, skip the tool_call_update
+                if todo_write_ids.contains(&id) {
+                    continue;
+                }
                 let status = if exit_code.map(|c| c != 0).unwrap_or(false) || signal.is_some() {
                     ToolCallStatus::Failed
                 } else {
@@ -205,7 +233,12 @@ where
                 let fields = ToolCallUpdateFields::new()
                     .status(status)
                     .raw_output(serde_json::Value::String(output));
-                let update = ToolCallUpdate::new(id, fields);
+                let update = ToolCallUpdate::new(id.clone(), fields);
+                let update = if let Some(name) = tool_name_cache.get(&id) {
+                    update.meta(make_claude_code_meta(name))
+                } else {
+                    update
+                };
                 let notification = SessionNotification::new(
                     args.session_id.clone(),
                     SessionUpdate::ToolCallUpdate(update),
@@ -327,6 +360,44 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
     // Append context blocks at the end, matching the TS behaviour
     content.extend(context_parts);
     content
+}
+
+/// Build `_meta: { claudeCode: { toolName: "..." } }` for tool_call / tool_call_update.
+fn make_claude_code_meta(tool_name: &str) -> agent_client_protocol::Meta {
+    let mut claude_code = serde_json::Map::new();
+    claude_code.insert(
+        "toolName".to_string(),
+        serde_json::Value::String(tool_name.to_string()),
+    );
+    let mut meta = serde_json::Map::new();
+    meta.insert("claudeCode".to_string(), serde_json::Value::Object(claude_code));
+    meta
+}
+
+/// Convert a `TodoWrite` `input` JSON value to ACP `PlanEntry` list.
+///
+/// Expected input shape: `{ "todos": [{ "content": "...", "status": "pending"|"in_progress"|"completed", "priority": "high"|"medium"|"low" }] }`
+/// Returns `None` if the todos array is missing or empty.
+fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
+    let todos = input.get("todos")?.as_array()?;
+    let entries: Vec<PlanEntry> = todos
+        .iter()
+        .filter_map(|todo| {
+            let content = todo.get("content")?.as_str()?.to_string();
+            let status = match todo.get("status").and_then(|v| v.as_str()) {
+                Some("in_progress") => PlanEntryStatus::InProgress,
+                Some("completed") => PlanEntryStatus::Completed,
+                _ => PlanEntryStatus::Pending,
+            };
+            let priority = match todo.get("priority").and_then(|v| v.as_str()) {
+                Some("medium") => PlanEntryPriority::Medium,
+                Some("low") => PlanEntryPriority::Low,
+                _ => PlanEntryPriority::High,
+            };
+            Some(PlanEntry::new(content, priority, status))
+        })
+        .collect();
+    if entries.is_empty() { None } else { Some(entries) }
 }
 
 /// Rewrite `/mcp:server:command args` → `/server:command (MCP) args`

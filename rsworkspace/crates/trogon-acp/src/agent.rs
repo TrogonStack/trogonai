@@ -13,7 +13,8 @@ use agent_client_protocol::{
     ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities, ModelInfo,
-    NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
+    NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
+    PromptCapabilities, PromptRequest, PromptResponse,
     ProtocolVersion, Result, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
     SessionConfigOption, SessionConfigOptionCategory, SessionForkCapabilities, SessionId,
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
@@ -189,6 +190,10 @@ where
     /// - Assistant tool_use: `ToolCall` (InProgress → Completed)
     /// - User tool_result: `ToolCallUpdate` (Completed)
     async fn replay_history(&self, session_id: &SessionId, state: &SessionState) {
+        // Track TodoWrite tool-use ids so we skip their tool_result replays
+        let mut todo_write_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
         for msg in &state.messages {
             match msg.role.as_str() {
                 "assistant" => {
@@ -217,10 +222,31 @@ where
                                 }
                             }
                             AgentContentBlock::ToolUse { id, name, input } => {
-                                // Show as InProgress then immediately Completed
+                                // TodoWrite → replay as Plan update, not a tool_call
+                                if name == "TodoWrite" {
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(input) {
+                                        if let Some(entries) = replay_todo_write_to_plan(&v) {
+                                            todo_write_ids.insert(id.clone());
+                                            let n = SessionNotification::new(
+                                                session_id.clone(),
+                                                SessionUpdate::Plan(Plan::new(entries)),
+                                            );
+                                            if self.notification_sender.send(n).await.is_err() {
+                                                return;
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
+                                // Standard tool — show as InProgress then Completed
+                                let mut meta = serde_json::Map::new();
+                                let mut cc = serde_json::Map::new();
+                                cc.insert("toolName".to_string(), serde_json::Value::String(name.clone()));
+                                meta.insert("claudeCode".to_string(), serde_json::Value::Object(cc));
                                 let tool_call = ToolCall::new(id.clone(), name.clone())
                                     .status(ToolCallStatus::InProgress)
-                                    .raw_input(input.clone());
+                                    .raw_input(input.clone())
+                                    .meta(meta);
                                 let n = SessionNotification::new(
                                     session_id.clone(),
                                     SessionUpdate::ToolCall(tool_call),
@@ -236,6 +262,10 @@ where
                 "user" => {
                     for block in &msg.content {
                         if let AgentContentBlock::ToolResult { tool_use_id, content } = block {
+                            // Skip result for TodoWrite — Plan was already replayed
+                            if todo_write_ids.contains(tool_use_id) {
+                                continue;
+                            }
                             let fields = ToolCallUpdateFields::new()
                                 .status(ToolCallStatus::Completed)
                                 .raw_output(serde_json::Value::String(content.clone()));
@@ -853,6 +883,29 @@ where
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
         Ok(())
     }
+}
+
+/// Convert a `TodoWrite` input JSON to ACP `PlanEntry` list for history replay.
+fn replay_todo_write_to_plan(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
+    let todos = input.get("todos")?.as_array()?;
+    let entries: Vec<PlanEntry> = todos
+        .iter()
+        .filter_map(|todo| {
+            let content = todo.get("content")?.as_str()?.to_string();
+            let status = match todo.get("status").and_then(|v| v.as_str()) {
+                Some("in_progress") => PlanEntryStatus::InProgress,
+                Some("completed") => PlanEntryStatus::Completed,
+                _ => PlanEntryStatus::Pending,
+            };
+            let priority = match todo.get("priority").and_then(|v| v.as_str()) {
+                Some("medium") => PlanEntryPriority::Medium,
+                Some("low") => PlanEntryPriority::Low,
+                _ => PlanEntryPriority::High,
+            };
+            Some(PlanEntry::new(content, priority, status))
+        })
+        .collect();
+    if entries.is_empty() { None } else { Some(entries) }
 }
 
 /// Sanitize a session title: collapse whitespace, trim, truncate to 256 chars.
