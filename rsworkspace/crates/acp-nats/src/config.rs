@@ -1,11 +1,23 @@
 use std::time::Duration;
+use tracing::warn;
 use trogon_nats::NatsConfig;
+use trogon_std::env::ReadEnv;
 
 use crate::acp_prefix::AcpPrefix;
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(7200);
 const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
+
+const MIN_TIMEOUT_SECS: u64 = 1;
+const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
+
+pub const ENV_ACP_PREFIX: &str = "ACP_PREFIX";
+pub const DEFAULT_ACP_PREFIX: &str = "acp";
+
+const ENV_OPERATION_TIMEOUT_SECS: &str = "ACP_OPERATION_TIMEOUT_SECS";
+const ENV_PROMPT_TIMEOUT_SECS: &str = "ACP_PROMPT_TIMEOUT_SECS";
+const ENV_CONNECT_TIMEOUT_SECS: &str = "ACP_NATS_CONNECT_TIMEOUT_SECS";
 
 /// Above this value, prompt timeout errors are rendered in seconds instead of milliseconds.
 pub(crate) const PROMPT_TIMEOUT_MESSAGE_SECS_THRESHOLD: Duration = Duration::from_secs(60);
@@ -90,6 +102,65 @@ impl Config {
     }
 }
 
+pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> Config {
+    let mut config = config;
+
+    if let Ok(raw) = env_provider.var(ENV_OPERATION_TIMEOUT_SECS) {
+        match raw.parse::<u64>() {
+            Ok(secs) if secs >= MIN_TIMEOUT_SECS => {
+                config = config.with_operation_timeout(Duration::from_secs(secs));
+            }
+            Ok(secs) => {
+                warn!(
+                    "{ENV_OPERATION_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
+                );
+            }
+            Err(_) => {
+                warn!("{ENV_OPERATION_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+            }
+        }
+    }
+
+    if let Ok(raw) = env_provider.var(ENV_PROMPT_TIMEOUT_SECS) {
+        match raw.parse::<u64>() {
+            Ok(secs) if secs >= MIN_TIMEOUT_SECS => {
+                config = config.with_prompt_timeout(Duration::from_secs(secs));
+            }
+            Ok(secs) => {
+                warn!(
+                    "{ENV_PROMPT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
+                );
+            }
+            Err(_) => {
+                warn!("{ENV_PROMPT_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+            }
+        }
+    }
+
+    config
+}
+
+pub fn nats_connect_timeout<E: ReadEnv>(env_provider: &E) -> Duration {
+    let default = Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS);
+
+    match env_provider.var(ENV_CONNECT_TIMEOUT_SECS) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(secs) if secs >= MIN_TIMEOUT_SECS => Duration::from_secs(secs),
+            Ok(secs) => {
+                warn!(
+                    "{ENV_CONNECT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
+                );
+                default
+            }
+            Err(_) => {
+                warn!("{ENV_CONNECT_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+                default
+            }
+        },
+        Err(_) => default,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -153,5 +224,107 @@ mod tests {
     fn config_with_prefix_accepts_validated_prefix() {
         let config = Config::with_prefix(AcpPrefix::new("acp").unwrap(), default_nats());
         assert_eq!(config.acp_prefix(), "acp");
+    }
+
+    fn with_subscriber<F: FnOnce()>(f: F) {
+        use tracing_subscriber::util::SubscriberInitExt;
+        let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
+        f();
+    }
+
+    #[test]
+    fn test_nats_connect_timeout_from_env() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            assert_eq!(
+                nats_connect_timeout(&env),
+                Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)
+            );
+
+            env.set(ENV_CONNECT_TIMEOUT_SECS, "15");
+            assert_eq!(nats_connect_timeout(&env), Duration::from_secs(15));
+            env.set(ENV_CONNECT_TIMEOUT_SECS, "0");
+            assert_eq!(
+                nats_connect_timeout(&env),
+                Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)
+            );
+            env.set(ENV_CONNECT_TIMEOUT_SECS, "not-a-number");
+            assert_eq!(
+                nats_connect_timeout(&env),
+                Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)
+            );
+        });
+    }
+
+    #[test]
+    fn test_operation_timeout_invalid_env_is_ignored() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            let default = Config::for_test("acp");
+            let default_timeout = default.operation_timeout();
+
+            env.set("ACP_OPERATION_TIMEOUT_SECS", "not-a-number");
+            let invalid = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(invalid.operation_timeout(), default_timeout);
+        });
+    }
+
+    #[test]
+    fn test_operation_timeout_under_min_is_ignored() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            let default = Config::for_test("acp");
+            let default_timeout = default.operation_timeout();
+
+            env.set("ACP_OPERATION_TIMEOUT_SECS", "0");
+            let ignored = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(ignored.operation_timeout(), default_timeout);
+        });
+    }
+
+    #[test]
+    fn test_operation_timeout_valid_override() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            env.set("ACP_OPERATION_TIMEOUT_SECS", "60");
+            let config = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(config.operation_timeout(), Duration::from_secs(60));
+        });
+    }
+
+    #[test]
+    fn test_prompt_timeout_invalid_env_is_ignored() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            let default = Config::for_test("acp");
+            let default_timeout = default.prompt_timeout();
+
+            env.set("ACP_PROMPT_TIMEOUT_SECS", "not-a-number");
+            let invalid = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(invalid.prompt_timeout(), default_timeout);
+        });
+    }
+
+    #[test]
+    fn test_prompt_timeout_under_min_is_ignored() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            let default = Config::for_test("acp");
+            let default_timeout = default.prompt_timeout();
+
+            env.set("ACP_PROMPT_TIMEOUT_SECS", "0");
+            let ignored = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(ignored.prompt_timeout(), default_timeout);
+        });
+    }
+
+    #[test]
+    fn test_prompt_timeout_valid_override() {
+        with_subscriber(|| {
+            let env = trogon_std::env::InMemoryEnv::new();
+            env.set("ACP_PROMPT_TIMEOUT_SECS", "3600");
+            let config = apply_timeout_overrides(Config::for_test("acp"), &env);
+            assert_eq!(config.prompt_timeout(), Duration::from_secs(3600));
+        });
     }
 }

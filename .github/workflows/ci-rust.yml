@@ -43,7 +43,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Run tests with coverage
-        run: cargo llvm-cov --all-features --workspace --ignore-filename-regex "crates/acp-nats-stdio/" --cobertura --output-path coverage.xml
+        run: cargo cov --cobertura --output-path coverage.xml
         working-directory: rsworkspace
 
       - name: Coverage report and gate

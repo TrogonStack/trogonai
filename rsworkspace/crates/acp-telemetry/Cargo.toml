@@ -1,0 +1,18 @@
+[package]
+name = "acp-telemetry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+opentelemetry = "0.31.0"
+opentelemetry-appender-tracing = "0.31.0"
+opentelemetry-otlp = { version = "0.31.0", features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "logs", "metrics"] }
+tokio = { version = "1.49.0", features = ["signal"] }
+tracing = "0.1.44"
+tracing-opentelemetry = "0.32.1"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
+trogon-std = { path = "../trogon-std" }
+
+[dev-dependencies]
+trogon-std = { path = "../trogon-std", features = ["test-support"] }
