@@ -1173,8 +1173,8 @@ mod tests {
 
     #[test]
     fn sanitize_title_unicode_multibyte_does_not_panic() {
-        // "\u{1D56C}" is 4 bytes — 65 of them = 260 bytes, would panic on byte slice
-        let s = "\u{1D56C}".repeat(65);
+        // "\u{1D56C}" is 4 bytes — 260 of them = 260 chars > 256, would panic on byte slice
+        let s = "\u{1D56C}".repeat(260);
         let out = sanitize_title(&s);
         assert!(out.ends_with('…'));
         assert_eq!(out.chars().count(), 256);
