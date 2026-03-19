@@ -73,10 +73,7 @@ mod tests {
         assert_eq!(config.port, DEFAULT_PORT);
         assert_eq!(config.subject_prefix, "incidentio");
         assert_eq!(config.stream_name, "INCIDENTIO");
-        assert_eq!(
-            config.stream_max_age,
-            Duration::from_secs(7 * 24 * 60 * 60)
-        );
+        assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
     }
 
     #[test]

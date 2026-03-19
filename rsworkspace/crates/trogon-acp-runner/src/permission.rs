@@ -111,7 +111,10 @@ mod tests {
         let result = checker2
             .check("sess-1", "tc-1", "bash", &serde_json::Value::Null)
             .await;
-        assert!(!result, "lowercase bash must not match Bash in allowed list");
+        assert!(
+            !result,
+            "lowercase bash must not match Bash in allowed list"
+        );
         drop(checker);
     }
 
@@ -170,8 +173,6 @@ mod tests {
                 let _ = req.response_tx.send(true);
             }
         });
-        let _ = checker
-            .check("sess-1", "tc-99", "Read", &input)
-            .await;
+        let _ = checker.check("sess-1", "tc-99", "Read", &input).await;
     }
 }

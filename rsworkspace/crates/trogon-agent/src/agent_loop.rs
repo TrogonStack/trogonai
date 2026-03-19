@@ -49,7 +49,10 @@ impl Message {
 
     /// Assistant turn (used when appending a model response to history).
     pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Self { role: "assistant".to_string(), content }
+        Self {
+            role: "assistant".to_string(),
+            content,
+        }
     }
 
     /// User turn carrying `tool_result` blocks.
@@ -88,9 +91,16 @@ pub enum ContentBlock {
     /// Extended thinking block produced by the model (requires thinking beta).
     Thinking { thinking: String },
     /// Tool invocation requested by the model.
-    ToolUse { id: String, name: String, input: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     /// Result returned to the model after executing a tool.
-    ToolResult { tool_use_id: String, content: String },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
 }
 
 /// Pair of tool-use ID and the string result to feed back to the model.
@@ -121,7 +131,9 @@ struct CacheControl {
 
 impl CacheControl {
     const fn ephemeral() -> Self {
-        Self { cache_type: "ephemeral" }
+        Self {
+            cache_type: "ephemeral",
+        }
     }
 }
 
@@ -177,7 +189,11 @@ impl std::fmt::Display for AgentError {
 
 impl std::error::Error for AgentError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::Http(e) = self { Some(e) } else { None }
+        if let Self::Http(e) = self {
+            Some(e)
+        } else {
+            None
+        }
     }
 }
 
@@ -194,9 +210,18 @@ pub enum AgentEvent {
     /// A chunk of the model's internal reasoning (extended thinking).
     ThinkingDelta { text: String },
     /// A tool call was dispatched — emitted immediately before execution.
-    ToolCallStarted { id: String, name: String, input: serde_json::Value },
+    ToolCallStarted {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
     /// A tool call completed — emitted immediately after execution.
-    ToolCallFinished { id: String, output: String, exit_code: Option<i32>, signal: Option<String> },
+    ToolCallFinished {
+        id: String,
+        output: String,
+        exit_code: Option<i32>,
+        signal: Option<String>,
+    },
     /// A system-level status message (forward compatibility with Anthropic API system events).
     SystemStatus { message: String },
     /// Token usage summary emitted at the end of a turn.
@@ -305,7 +330,11 @@ impl AgentLoop {
 
             // Build the cacheable system block on each iteration (cheap — just wraps a &str).
             let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
-                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+                vec![SystemBlock {
+                    block_type: "text",
+                    text,
+                    cache_control: CacheControl::ephemeral(),
+                }]
             });
 
             let request = AnthropicRequest {
@@ -319,10 +348,7 @@ impl AgentLoop {
             let mut req_builder = self
                 .http_client
                 .post(self.messages_url())
-                .header(
-                    "Authorization",
-                    format!("Bearer {}", self.anthropic_token),
-                )
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
                 .header("anthropic-version", "2023-06-01");
             for (k, v) in &self.anthropic_extra_headers {
                 req_builder = req_builder.header(k.as_str(), v.as_str());
@@ -400,7 +426,11 @@ impl AgentLoop {
             debug!(iteration, "Chat loop iteration");
 
             let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
-                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+                vec![SystemBlock {
+                    block_type: "text",
+                    text,
+                    cache_control: CacheControl::ephemeral(),
+                }]
             });
 
             let request = AnthropicRequest {
@@ -434,7 +464,11 @@ impl AgentLoop {
                         .content
                         .iter()
                         .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -495,7 +529,11 @@ impl AgentLoop {
             debug!(iteration, "Streaming chat loop iteration");
 
             let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
-                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+                vec![SystemBlock {
+                    block_type: "text",
+                    text,
+                    cache_control: CacheControl::ephemeral(),
+                }]
             });
 
             let request = AnthropicRequest {
@@ -506,14 +544,15 @@ impl AgentLoop {
                 messages: &messages,
             };
 
-            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
-            if let Some(budget) = self.thinking_budget {
-                if budget > 0 {
-                    body["thinking"] = serde_json::json!({
-                        "type": "enabled",
-                        "budget_tokens": budget
-                    });
-                }
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
+            if let Some(budget) = self.thinking_budget
+                && budget > 0
+            {
+                body["thinking"] = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": budget
+                });
             }
 
             let mut req_builder = self
@@ -536,7 +575,8 @@ impl AgentLoop {
             if let Some(ref u) = response.usage {
                 total_input = total_input.saturating_add(u.input_tokens);
                 total_output = total_output.saturating_add(u.output_tokens);
-                total_cache_creation = total_cache_creation.saturating_add(u.cache_creation_input_tokens);
+                total_cache_creation =
+                    total_cache_creation.saturating_add(u.cache_creation_input_tokens);
                 total_cache_read = total_cache_read.saturating_add(u.cache_read_input_tokens);
             }
 
@@ -545,7 +585,11 @@ impl AgentLoop {
                     // Emit thinking blocks before text
                     for block in &response.content {
                         if let ContentBlock::Thinking { thinking } = block {
-                            let _ = event_tx.send(AgentEvent::ThinkingDelta { text: thinking.clone() }).await;
+                            let _ = event_tx
+                                .send(AgentEvent::ThinkingDelta {
+                                    text: thinking.clone(),
+                                })
+                                .await;
                         }
                     }
 
@@ -553,17 +597,23 @@ impl AgentLoop {
                         .content
                         .iter()
                         .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    let _ = event_tx.send(AgentEvent::UsageSummary {
-                        input_tokens: total_input,
-                        output_tokens: total_output,
-                        cache_creation_tokens: total_cache_creation,
-                        cache_read_tokens: total_cache_read,
-                    }).await;
+                    let _ = event_tx
+                        .send(AgentEvent::UsageSummary {
+                            input_tokens: total_input,
+                            output_tokens: total_output,
+                            cache_creation_tokens: total_cache_creation,
+                            cache_read_tokens: total_cache_read,
+                        })
+                        .await;
                     let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
 
                     messages.push(Message::assistant(response.content));
@@ -576,16 +626,22 @@ impl AgentLoop {
                         .content
                         .iter()
                         .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let _ = event_tx.send(AgentEvent::UsageSummary {
-                        input_tokens: total_input,
-                        output_tokens: total_output,
-                        cache_creation_tokens: total_cache_creation,
-                        cache_read_tokens: total_cache_read,
-                    }).await;
+                    let _ = event_tx
+                        .send(AgentEvent::UsageSummary {
+                            input_tokens: total_input,
+                            output_tokens: total_output,
+                            cache_creation_tokens: total_cache_creation,
+                            cache_read_tokens: total_cache_read,
+                        })
+                        .await;
                     if !text.is_empty() {
                         let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
                     }
@@ -605,7 +661,10 @@ impl AgentLoop {
             }
         }
 
-        warn!(max = self.max_iterations, "Streaming chat reached max iterations");
+        warn!(
+            max = self.max_iterations,
+            "Streaming chat reached max iterations"
+        );
         Err(AgentError::MaxIterationsReached)
     }
 
@@ -630,16 +689,16 @@ impl AgentLoop {
 
                 // Ask permission before executing (if a checker is installed)
                 let allowed = match &self.permission_checker {
-                    Some(checker) => {
-                        checker.check(&self.tenant_id, id, name, input).await
-                    }
+                    Some(checker) => checker.check(&self.tenant_id, id, name, input).await,
                     None => true,
                 };
 
                 let output = if !allowed {
                     format!("Permission denied: user refused to run tool `{name}`")
-                } else if let Some((_, original, client)) =
-                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                } else if let Some((_, original, client)) = self
+                    .mcp_dispatch
+                    .iter()
+                    .find(|(prefixed, _, _)| prefixed == name)
                 {
                     match client.call_tool(original, input).await {
                         Ok(out) => out,
@@ -658,7 +717,10 @@ impl AgentLoop {
                     })
                     .await;
 
-                results.push(ToolResult { tool_use_id: id.clone(), content: output });
+                results.push(ToolResult {
+                    tool_use_id: id.clone(),
+                    content: output,
+                });
             }
         }
 
@@ -673,8 +735,10 @@ impl AgentLoop {
                 debug!(tool = %name, "Executing tool");
 
                 // Check MCP dispatch first, then fall back to built-in tools.
-                let output = if let Some((_, original, client)) =
-                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                let output = if let Some((_, original, client)) = self
+                    .mcp_dispatch
+                    .iter()
+                    .find(|(prefixed, _, _)| prefixed == name)
                 {
                     match client.call_tool(original, input).await {
                         Ok(out) => out,
@@ -726,12 +790,16 @@ mod tests {
 
     #[test]
     fn agent_error_display() {
-        assert!(AgentError::MaxIterationsReached
-            .to_string()
-            .contains("max iterations"));
-        assert!(AgentError::UnexpectedStopReason("pause".to_string())
-            .to_string()
-            .contains("pause"));
+        assert!(
+            AgentError::MaxIterationsReached
+                .to_string()
+                .contains("max iterations")
+        );
+        assert!(
+            AgentError::UnexpectedStopReason("pause".to_string())
+                .to_string()
+                .contains("pause")
+        );
     }
 
     #[test]
@@ -747,9 +815,7 @@ mod tests {
 
     #[test]
     fn agent_error_source_none_for_non_http() {
-        assert!(
-            std::error::Error::source(&AgentError::MaxIterationsReached).is_none()
-        );
+        assert!(std::error::Error::source(&AgentError::MaxIterationsReached).is_none());
     }
 
     /// When `system_prompt` is `Some`, the serialized request body contains a
@@ -762,9 +828,11 @@ mod tests {
 
         let tools = vec![tool_def("t", "d", json!({"type": "object"}))];
         let text = "You are helpful.";
-        let system: Option<Vec<SystemBlock<'_>>> = Some(vec![
-            SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() },
-        ]);
+        let system: Option<Vec<SystemBlock<'_>>> = Some(vec![SystemBlock {
+            block_type: "text",
+            text,
+            cache_control: CacheControl::ephemeral(),
+        }]);
         let req = AnthropicRequest {
             model: "test-model",
             max_tokens: 1024,
@@ -774,7 +842,9 @@ mod tests {
         };
         let body = serde_json::to_value(&req).unwrap();
 
-        let sys_arr = body["system"].as_array().expect("system should be an array");
+        let sys_arr = body["system"]
+            .as_array()
+            .expect("system should be an array");
         assert_eq!(sys_arr.len(), 1);
         assert_eq!(sys_arr[0]["type"], "text");
         assert_eq!(sys_arr[0]["text"], text);
@@ -790,7 +860,7 @@ mod tests {
         use serde_json::json;
 
         // Simulate what AgentLoop::run does with cached_tools.
-        let mut cached_tools = vec![
+        let mut cached_tools = [
             tool_def("tool_a", "first tool", json!({"type": "object"})),
             tool_def("tool_b", "second tool", json!({"type": "object"})),
             tool_def("tool_c", "last tool", json!({"type": "object"})),
@@ -821,7 +891,7 @@ mod tests {
         use crate::tools::tool_def;
         use serde_json::json;
 
-        let mut cached_tools = vec![tool_def("only", "only tool", json!({"type": "object"}))];
+        let mut cached_tools = [tool_def("only", "only tool", json!({"type": "object"}))];
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }
@@ -860,14 +930,17 @@ mod tests {
             messages: &[],
         };
         let body = serde_json::to_value(&req).unwrap();
-        assert!(body.get("system").is_none(), "system key should be absent when None");
+        assert!(
+            body.get("system").is_none(),
+            "system key should be absent when None"
+        );
     }
 
     // ── is_flag_enabled ───────────────────────────────────────────────────────
 
     fn make_test_agent(split_client: Option<trogon_splitio::SplitClient>) -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let http = reqwest::Client::new();
         AgentLoop {
             http_client: http.clone(),

@@ -1,5 +1,7 @@
 mod authenticate;
 mod cancel;
+mod ext_method;
+mod ext_notification;
 mod initialize;
 mod load_session;
 mod new_session;
@@ -8,10 +10,10 @@ mod set_session_mode;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
-use agent_client_protocol::ErrorCode;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     Result, SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
@@ -28,6 +30,8 @@ pub struct Bridge<N: RequestClient + PublishClient + SubscribeClient + FlushClie
     /// Sender for ACP `session/update` notifications produced while processing a prompt.
     /// The binary wires this to an `AgentSideConnection::session_notification()` forwarding task.
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
+    /// Waiter registry for correlating async prompt request/response over NATS.
+    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
 }
 
 impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Bridge<N, C> {
@@ -44,6 +48,7 @@ impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetEla
             config,
             metrics: Metrics::new(meter),
             notification_sender,
+            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
         }
     }
 
@@ -87,18 +92,12 @@ impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetEla
         cancel::handle(self, args).await
     }
 
-    async fn ext_method(&self, _args: ExtRequest) -> Result<ExtResponse> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        ext_method::handle(self, args).await
     }
 
-    async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
-        Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "not yet implemented",
-        ))
+    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
+        ext_notification::handle(self, args).await
     }
 }
 
@@ -136,42 +135,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ext_methods_return_not_implemented() {
-        let bridge = mock_bridge();
-        let msg = "not yet implemented";
+    async fn ext_method_returns_agent_unavailable_when_nats_fails() {
+        use agent_client_protocol::ErrorCode;
 
+        let bridge = mock_bridge();
         let err = bridge
             .ext_method(ExtRequest::new("ext", empty_raw_value()))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains(msg));
-
-        let err = bridge
-            .ext_notification(ExtNotification::new("ext", empty_raw_value()))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains(msg));
+        assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
     }
 
     #[tokio::test]
-    async fn ext_methods_use_internal_error_code() {
-        use agent_client_protocol::ErrorCode;
-
+    async fn ext_notification_returns_ok_even_when_publish_fails() {
         let bridge = mock_bridge();
-
-        macro_rules! check_internal {
-            ($fut:expr) => {{
-                let err = $fut.await.unwrap_err();
-                assert_eq!(
-                    err.code,
-                    ErrorCode::InternalError.into(),
-                    "stub must return InternalError, got {:?}",
-                    err.code
-                );
-            }};
-        }
-
-        check_internal!(bridge.ext_method(ExtRequest::new("ext", empty_raw_value())));
-        check_internal!(bridge.ext_notification(ExtNotification::new("ext", empty_raw_value())));
+        // fire-and-forget: always Ok(())
+        assert!(
+            bridge
+                .ext_notification(ExtNotification::new("ext", empty_raw_value()))
+                .await
+                .is_ok()
+        );
     }
 }

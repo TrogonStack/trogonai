@@ -78,7 +78,13 @@ mod tests {
     #[test]
     fn record_request_all_methods_do_not_panic() {
         let m = Metrics::new(&test_meter());
-        for method in &["initialize", "authenticate", "new_session", "load_session", "prompt"] {
+        for method in &[
+            "initialize",
+            "authenticate",
+            "new_session",
+            "load_session",
+            "prompt",
+        ] {
             m.record_request(method, 0.001, true);
         }
     }

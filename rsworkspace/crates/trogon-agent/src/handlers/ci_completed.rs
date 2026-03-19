@@ -7,9 +7,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{DEFAULT_MEMORY_PATH, fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
-use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Run the CI-completed agent from a raw GitHub `check_run` webhook payload.
 ///
@@ -42,7 +42,10 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
         .and_then(|prs| prs.first())
         .and_then(|pr| pr["number"].as_u64());
 
-    info!(owner, repo, check_name, conclusion, "Starting CI-completed agent");
+    info!(
+        owner,
+        repo, check_name, conclusion, "Starting CI-completed agent"
+    );
 
     let pr_context = match pr_number {
         Some(n) => format!("This check is associated with PR #{n}."),
@@ -76,7 +79,8 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
 fn ci_tools() -> Vec<ToolDef> {
     let mut tools = vec![
-        tool_def("get_file_contents",
+        tool_def(
+            "get_file_contents",
             "Read a file from the repository. Returns JSON with `sha` and `content`.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","path"],
@@ -86,7 +90,9 @@ fn ci_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("post_pr_comment", "Post a comment on a pull request.",
+        tool_def(
+            "post_pr_comment",
+            "Post a comment on a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number","body"],
                 "properties": {
@@ -111,9 +117,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_non_completed_action() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -125,7 +131,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -134,20 +140,28 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let payload = serde_json::json!({
             "action": "created",
             "check_run": {"name": "CI", "conclusion": null, "pull_requests": [], "details_url": ""},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn handle_skips_successful_run() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -159,7 +173,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -168,12 +182,20 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let payload = serde_json::json!({
             "action": "completed",
             "check_run": {"name": "CI", "conclusion": "success", "pull_requests": [], "details_url": ""},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 }

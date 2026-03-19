@@ -125,32 +125,51 @@ pub fn now_iso8601() -> String {
 }
 
 fn epoch_to_parts(mut secs: u64) -> (u64, u64, u64, u64, u64, u64) {
-    let s = secs % 60; secs /= 60;
-    let min = secs % 60; secs /= 60;
-    let h = secs % 24; secs /= 24;
+    let s = secs % 60;
+    secs /= 60;
+    let min = secs % 60;
+    secs /= 60;
+    let h = secs % 24;
+    secs /= 24;
     let mut days = secs;
     let mut year = 1970u64;
     loop {
         let dy = days_in_year(year);
-        if days < dy { break; }
-        days -= dy; year += 1;
+        if days < dy {
+            break;
+        }
+        days -= dy;
+        year += 1;
     }
     let mut month = 1u64;
     loop {
         let dm = days_in_month(year, month);
-        if days < dm { break; }
-        days -= dm; month += 1;
+        if days < dm {
+            break;
+        }
+        days -= dm;
+        month += 1;
     }
     (year, month, days + 1, h, min, s)
 }
 
-fn is_leap(y: u64) -> bool { (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 }
-fn days_in_year(y: u64) -> u64 { if is_leap(y) { 366 } else { 365 } }
+fn is_leap(y: u64) -> bool {
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+fn days_in_year(y: u64) -> u64 {
+    if is_leap(y) { 366 } else { 365 }
+}
 fn days_in_month(y: u64, m: u64) -> u64 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        2 => if is_leap(y) { 29 } else { 28 },
+        2 => {
+            if is_leap(y) {
+                29
+            } else {
+                28
+            }
+        }
         _ => 30,
     }
 }
@@ -285,9 +304,15 @@ mod tests {
 
     #[test]
     fn session_state_optional_fields_omitted_from_json() {
-        let state = SessionState { model: None, ..Default::default() };
+        let state = SessionState {
+            model: None,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(!json.contains("\"model\""), "None model must be omitted: {json}");
+        assert!(
+            !json.contains("\"model\""),
+            "None model must be omitted: {json}"
+        );
     }
 
     #[test]
@@ -297,6 +322,9 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
+        assert!(
+            json.contains("claude-opus-4-6"),
+            "model must be serialized: {json}"
+        );
     }
 }

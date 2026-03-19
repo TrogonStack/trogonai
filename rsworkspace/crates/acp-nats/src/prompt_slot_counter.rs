@@ -1,4 +1,5 @@
 //! Backpressure gate for `session/prompt` handling.
+#![allow(dead_code)]
 //!
 //! **When to use**
 //! - At the start of prompt handling, before publishing work to the backend.

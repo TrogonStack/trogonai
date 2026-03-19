@@ -162,13 +162,13 @@ impl ApiKeyToken {
     /// Return the env segment (e.g. `"prod"`).
     pub fn env_str(&self) -> &str {
         let without_prefix = &self.0["tok_".len()..];
-        without_prefix.splitn(3, '_').nth(1).unwrap_or("")
+        without_prefix.split('_').nth(1).unwrap_or("")
     }
 
     /// Return the unique ID segment (e.g. `"a1b2c3"`).
     pub fn id_str(&self) -> &str {
         let without_prefix = &self.0["tok_".len()..];
-        without_prefix.splitn(3, '_').nth(2).unwrap_or("")
+        without_prefix.split('_').nth(2).unwrap_or("")
     }
 }
 
@@ -299,7 +299,10 @@ mod tests {
     fn ai_provider_display() {
         assert_eq!(AiProvider::Anthropic.to_string(), "anthropic");
         assert_eq!(AiProvider::OpenAi.to_string(), "openai");
-        assert_eq!(AiProvider::Other("custom".to_string()).to_string(), "custom");
+        assert_eq!(
+            AiProvider::Other("custom".to_string()).to_string(),
+            "custom"
+        );
     }
 
     #[test]

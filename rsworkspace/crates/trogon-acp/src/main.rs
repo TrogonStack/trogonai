@@ -40,9 +40,8 @@ use std::sync::Arc;
 
 use acp_nats::{AcpPrefix, Bridge, Config};
 use agent_client_protocol::{
-    AgentSideConnection, Client, PermissionOption, PermissionOptionKind,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, ToolCallUpdate,
-    ToolCallUpdateFields,
+    AgentSideConnection, Client, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    RequestPermissionRequest, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_nats::jetstream;
 use tokio::sync::mpsc;
@@ -50,9 +49,9 @@ use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::info;
 
+use trogon_acp_runner::{GatewayConfig, PermissionReq, Runner, SessionStore};
 use trogon_agent::agent_loop::AgentLoop;
 use trogon_agent::tools::ToolContext;
-use trogon_acp_runner::{GatewayConfig, PermissionReq, Runner, SessionStore};
 use trogon_nats::NatsConfig;
 
 #[tokio::main]
@@ -67,9 +66,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Config from environment ───────────────────────────────────────────────
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let acp_prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let proxy_url =
+        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let github_token = std::env::var("GITHUB_TOKEN").unwrap_or_default();
     let linear_token = std::env::var("LINEAR_TOKEN").unwrap_or_default();
@@ -137,7 +138,15 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Runner (NATS subscriber + agent) ─────────────────────────────────────
 
-    let runner = Runner::new(nats.clone(), &js, agent_loop, acp_prefix.clone(), Some(perm_tx), gateway_config.clone()).await?;
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent_loop,
+        acp_prefix.clone(),
+        Some(perm_tx),
+        gateway_config.clone(),
+    )
+    .await?;
     tokio::spawn(async move { runner.run().await });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
@@ -235,10 +244,10 @@ fn allow_bypass() -> bool {
     {
         if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
             for line in status.lines() {
-                if let Some(rest) = line.strip_prefix("Uid:\t") {
-                    if let Some(uid) = rest.split_whitespace().next() {
-                        return uid != "0";
-                    }
+                if let Some(rest) = line.strip_prefix("Uid:\t")
+                    && let Some(uid) = rest.split_whitespace().next()
+                {
+                    return uid != "0";
                 }
             }
         }
@@ -319,7 +328,9 @@ async fn handle_permission_request(
                 let config_options = agent::TrogonAcpAgent::<
                     async_nats::Client,
                     trogon_std::time::SystemClock,
-                >::build_config_options(&mode, current_model, allow_bypass());
+                >::build_config_options(
+                    &mode, current_model, allow_bypass()
+                );
                 let config_n = SessionNotification::new(
                     req.session_id.clone(),
                     SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -339,7 +350,11 @@ async fn handle_permission_request(
 
     // ── Standard tool permission request ──────────────────────────────────────
     let options = vec![
-        PermissionOption::new("allow_always", "Always Allow", PermissionOptionKind::AllowAlways),
+        PermissionOption::new(
+            "allow_always",
+            "Always Allow",
+            PermissionOptionKind::AllowAlways,
+        ),
         PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
         PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
     ];
@@ -372,14 +387,13 @@ async fn handle_permission_request(
 
     // Persist allow-always decision so ChannelPermissionChecker can auto-approve
     // future calls to this tool within the session.
-    if save_always {
-        if let Ok(mut state) = store.load(&req.session_id).await {
-            if !state.allowed_tools.contains(&req.tool_name) {
-                state.allowed_tools.push(req.tool_name.clone());
-                if let Err(e) = store.save(&req.session_id, &state).await {
-                    tracing::warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
-                }
-            }
+    if save_always
+        && let Ok(mut state) = store.load(&req.session_id).await
+        && !state.allowed_tools.contains(&req.tool_name)
+    {
+        state.allowed_tools.push(req.tool_name.clone());
+        if let Err(e) = store.save(&req.session_id, &state).await {
+            tracing::warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
         }
     }
 
@@ -400,7 +414,10 @@ mod tests {
         unsafe { std::env::set_var("SUDO_UID", "1000") };
         let result = allow_bypass();
         unsafe { std::env::remove_var("SUDO_UID") };
-        assert!(!result, "allow_bypass must return false when SUDO_UID is set");
+        assert!(
+            !result,
+            "allow_bypass must return false when SUDO_UID is set"
+        );
     }
 
     #[test]
@@ -410,7 +427,10 @@ mod tests {
         unsafe { std::env::set_var("SUDO_USER", "jorge") };
         let result = allow_bypass();
         unsafe { std::env::remove_var("SUDO_USER") };
-        assert!(!result, "allow_bypass must return false when SUDO_USER is set");
+        assert!(
+            !result,
+            "allow_bypass must return false when SUDO_USER is set"
+        );
     }
 
     #[test]
@@ -431,6 +451,9 @@ mod tests {
         if running_as_root {
             return;
         }
-        assert!(allow_bypass(), "allow_bypass must return true for a normal (non-root) user");
+        assert!(
+            allow_bypass(),
+            "allow_bypass must return true for a normal (non-root) user"
+        );
     }
 }

@@ -8,9 +8,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{DEFAULT_MEMORY_PATH, fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
-use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Run the PR-merged agent from a raw GitHub `pull_request` webhook payload.
 ///
@@ -31,8 +31,12 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let owner = event["repository"]["owner"]["login"].as_str()?;
     let repo = event["repository"]["name"].as_str()?;
     let pr_number = event["number"].as_u64()?;
-    let title = event["pull_request"]["title"].as_str().unwrap_or("(no title)");
-    let merged_by = event["pull_request"]["merged_by"]["login"].as_str().unwrap_or("unknown");
+    let title = event["pull_request"]["title"]
+        .as_str()
+        .unwrap_or("(no title)");
+    let merged_by = event["pull_request"]["merged_by"]["login"]
+        .as_str()
+        .unwrap_or("unknown");
 
     info!(owner, repo, pr_number, "Starting PR-merged agent");
 
@@ -65,7 +69,9 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
 fn merged_tools() -> Vec<ToolDef> {
     let mut tools = vec![
-        tool_def("get_pr_diff", "Get the unified diff of a pull request.",
+        tool_def(
+            "get_pr_diff",
+            "Get the unified diff of a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number"],
                 "properties": {
@@ -74,7 +80,9 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("get_pr_comments", "Get all comments on a pull request.",
+        tool_def(
+            "get_pr_comments",
+            "Get all comments on a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number"],
                 "properties": {
@@ -83,7 +91,9 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("post_pr_comment", "Post a comment on a pull request.",
+        tool_def(
+            "post_pr_comment",
+            "Post a comment on a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number","body"],
                 "properties": {
@@ -93,7 +103,8 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("get_file_contents",
+        tool_def(
+            "get_file_contents",
             "Read a file. Returns JSON with `sha` and `content`.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","path"],
@@ -103,7 +114,9 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("update_file", "Create or update a file in the repository.",
+        tool_def(
+            "update_file",
+            "Create or update a file in the repository.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","path","message","content"],
                 "properties": {
@@ -114,7 +127,9 @@ fn merged_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("create_pull_request", "Open a pull request.",
+        tool_def(
+            "create_pull_request",
+            "Open a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","title","head"],
                 "properties": {
@@ -140,79 +155,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_non_closed_action() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
-        let agent = AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-            slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        };
-        let payload = serde_json::json!({
-            "action": "opened",
-            "number": 1,
-            "pull_request": {"merged": true, "title": "t", "merged_by": {"login": "u"}},
-            "repository": {"owner": {"login": "o"}, "name": "r"}
-        });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn handle_skips_closed_but_not_merged() {
         use std::sync::Arc;
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
-        let agent = AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-            slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        };
-        let payload = serde_json::json!({
-            "action": "closed",
-            "number": 1,
-            "pull_request": {"merged": false, "title": "t", "merged_by": null},
-            "repository": {"owner": {"login": "o"}, "name": "r"}
-        });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn handle_returns_error_on_invalid_json() {
-        use std::sync::Arc;
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -233,6 +178,96 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
+        };
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 1,
+            "pull_request": {"merged": true, "title": "t", "merged_by": {"login": "u"}},
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_skips_closed_but_not_merged() {
+        use crate::agent_loop::AgentLoop;
+        use crate::tools::ToolContext;
+        use std::sync::Arc;
+        let agent = AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:9999".to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://localhost:9999".to_string(),
+                github_token: String::new(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
+        };
+        let payload = serde_json::json!({
+            "action": "closed",
+            "number": 1,
+            "pull_request": {"merged": false, "title": "t", "merged_by": null},
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        use crate::agent_loop::AgentLoop;
+        use crate::tools::ToolContext;
+        use std::sync::Arc;
+        let agent = AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:9999".to_string(),
+            anthropic_token: String::new(),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_context: Arc::new(ToolContext {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://localhost:9999".to_string(),
+                github_token: String::new(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         assert!(matches!(handle(&agent, b"not json").await, Some(Err(_))));
     }

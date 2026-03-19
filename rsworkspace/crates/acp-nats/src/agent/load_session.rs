@@ -1,9 +1,9 @@
 use super::Bridge;
-use crate::config::AcpPrefix;
+use crate::acp_prefix::AcpPrefix;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, SubscribeClient,
-    RetryPolicy, agent,
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    RetryPolicy, SubscribeClient, agent,
 };
 use crate::session_id::AcpSessionId;
 use crate::telemetry::metrics::Metrics;
@@ -60,7 +60,10 @@ fn map_load_session_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed>(
+pub async fn handle<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+>(
     bridge: &Bridge<N, C>,
     args: LoadSessionRequest,
 ) -> Result<LoadSessionResponse> {

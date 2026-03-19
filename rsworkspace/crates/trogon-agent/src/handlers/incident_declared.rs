@@ -23,9 +23,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
 use crate::tools::{ToolDef, slack};
-use super::{fetch_memory, run_agent};
 
 /// Run the incident-response agent from a raw incident.io webhook payload.
 ///
@@ -49,11 +49,7 @@ pub async fn handle(
 
     info!(
         incident_id,
-        name,
-        status,
-        severity,
-        event_type,
-        "Starting incident.io handler"
+        name, status, severity, event_type, "Starting incident.io handler"
     );
 
     let action_guidance = match event_type {
@@ -90,7 +86,10 @@ pub async fn handle(
 
     let tools = incident_tools();
 
-    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent
+        .memory_path
+        .as_deref()
+        .unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -121,12 +120,15 @@ mod tests {
         let tools = incident_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"send_slack_message"), "slack tool missing");
-        assert!(names.contains(&"read_slack_channel"), "read channel tool missing");
+        assert!(
+            names.contains(&"read_slack_channel"),
+            "read channel tool missing"
+        );
     }
 
     fn make_agent(proxy_url: &str) -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: proxy_url.to_string(),
@@ -147,6 +149,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         }
     }
 
@@ -261,7 +267,8 @@ mod tests {
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
         assert!(
             matches!(result, Some(Err(_))),
-            "agent failure must produce Some(Err), got: {:?}", result
+            "agent failure must produce Some(Err), got: {:?}",
+            result
         );
     }
 
@@ -338,7 +345,7 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
-                .body_contains("unknown")   // status fallback
+                .body_contains("unknown") // status fallback
                 .body_contains("(no name)"); // name fallback
             then.status(200)
                 .header("content-type", "application/json")
@@ -368,10 +375,10 @@ mod tests {
     async fn handle_uses_memory_as_system_prompt_when_fetch_succeeds() {
         // When GitHub returns a valid memory file, handle() must forward its
         // decoded content as the system prompt to the Anthropic API.
+        use crate::tools::ToolContext;
         use base64::Engine as _;
         use base64::engine::general_purpose;
         use std::sync::Arc;
-        use crate::tools::ToolContext;
 
         let server = httpmock::MockServer::start_async().await;
 
@@ -421,6 +428,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let payload = serde_json::json!({
@@ -434,7 +445,11 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
+        assert!(
+            matches!(result, Some(Ok(_))),
+            "expected Ok, got: {:?}",
+            result
+        );
         anthropic_mock.assert_async().await;
     }
 
@@ -442,10 +457,10 @@ mod tests {
     async fn handle_uses_custom_memory_path_from_agent() {
         // When the AgentLoop has a custom memory_path, the GitHub fetch must use
         // that path — not the default ".trogon/memory.md".
+        use crate::tools::ToolContext;
         use base64::Engine as _;
         use base64::engine::general_purpose;
         use std::sync::Arc;
-        use crate::tools::ToolContext;
 
         let server = httpmock::MockServer::start_async().await;
 
@@ -453,13 +468,15 @@ mod tests {
         let encoded = general_purpose::STANDARD.encode(memory_content.as_bytes());
 
         // The custom path must appear in the GET request — not the default path.
-        let custom_path_mock = server.mock_async(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("custom/runbook.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": encoded }));
-        }).await;
+        let custom_path_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path_contains("custom/runbook.md");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({ "content": encoded }));
+            })
+            .await;
 
         server.mock(|when, then| {
             when.method(httpmock::Method::POST)
@@ -495,6 +512,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let payload = serde_json::json!({
@@ -508,7 +529,11 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
+        assert!(
+            matches!(result, Some(Ok(_))),
+            "expected Ok, got: {:?}",
+            result
+        );
         // Verify the custom path was fetched from GitHub.
         custom_path_mock.assert_async().await;
     }
@@ -517,7 +542,8 @@ mod tests {
     async fn handle_proceeds_without_memory_when_fetch_fails() {
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(404);
         });
         let anthropic_mock = server.mock(|when, then| {
@@ -531,8 +557,8 @@ mod tests {
                 }));
         });
 
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let http_client = reqwest::Client::new();
         let agent = AgentLoop {
             http_client: http_client.clone(),
@@ -554,6 +580,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let payload = serde_json::json!({
@@ -562,7 +592,10 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(matches!(result, Some(Ok(_))), "expected Ok even without memory");
+        assert!(
+            matches!(result, Some(Ok(_))),
+            "expected Ok even without memory"
+        );
         anthropic_mock.assert_async().await;
     }
 }

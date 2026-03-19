@@ -93,10 +93,16 @@ async fn overwrite_save_updates_value() {
     let (_c, _nats, js) = setup().await;
     let store = SessionStore::open(&js).await.unwrap();
 
-    let v1 = SessionState { mode: "default".to_string(), ..Default::default() };
+    let v1 = SessionState {
+        mode: "default".to_string(),
+        ..Default::default()
+    };
     store.save("sess-rw", &v1).await.unwrap();
 
-    let v2 = SessionState { mode: "plan".to_string(), ..Default::default() };
+    let v2 = SessionState {
+        mode: "plan".to_string(),
+        ..Default::default()
+    };
     store.save("sess-rw", &v2).await.unwrap();
 
     let loaded = store.load("sess-rw").await.unwrap();
@@ -110,7 +116,10 @@ async fn delete_removes_session() {
     let (_c, _nats, js) = setup().await;
     let store = SessionStore::open(&js).await.unwrap();
 
-    let state = SessionState { mode: "default".to_string(), ..Default::default() };
+    let state = SessionState {
+        mode: "default".to_string(),
+        ..Default::default()
+    };
     store.save("sess-del", &state).await.unwrap();
     store.delete("sess-del").await.unwrap();
 
@@ -145,7 +154,13 @@ async fn list_ids_returns_all_saved_sessions() {
 
     for id in &["alpha", "beta", "gamma"] {
         store
-            .save(id, &SessionState { mode: "default".to_string(), ..Default::default() })
+            .save(
+                id,
+                &SessionState {
+                    mode: "default".to_string(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
     }
@@ -161,11 +176,23 @@ async fn list_ids_excludes_deleted_session() {
     let store = SessionStore::open(&js).await.unwrap();
 
     store
-        .save("keep", &SessionState { mode: "default".to_string(), ..Default::default() })
+        .save(
+            "keep",
+            &SessionState {
+                mode: "default".to_string(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     store
-        .save("drop", &SessionState { mode: "default".to_string(), ..Default::default() })
+        .save(
+            "drop",
+            &SessionState {
+                mode: "default".to_string(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     store.delete("drop").await.unwrap();
@@ -184,7 +211,13 @@ async fn open_twice_is_idempotent() {
     let store2 = SessionStore::open(&js).await.unwrap();
 
     store1
-        .save("s1", &SessionState { mode: "plan".to_string(), ..Default::default() })
+        .save(
+            "s1",
+            &SessionState {
+                mode: "plan".to_string(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 

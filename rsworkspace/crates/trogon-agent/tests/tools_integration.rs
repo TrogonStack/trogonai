@@ -40,7 +40,10 @@ async fn get_pr_diff_calls_correct_proxy_path() {
     let input = json!({ "owner": "owner", "repo": "repo", "pr_number": 42 });
     let result = dispatch_tool(&ctx, "get_pr_diff", &input).await;
 
-    assert!(result.contains("diff --git"), "expected diff content, got: {result}");
+    assert!(
+        result.contains("diff --git"),
+        "expected diff content, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -62,7 +65,10 @@ async fn list_pr_files_returns_json_array() {
     let input = json!({ "owner": "owner", "repo": "repo", "pr_number": 7 });
     let result = dispatch_tool(&ctx, "list_pr_files", &input).await;
 
-    assert!(result.contains("src/main.rs"), "expected filename in result, got: {result}");
+    assert!(
+        result.contains("src/main.rs"),
+        "expected filename in result, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -313,7 +319,8 @@ async fn send_slack_message_returns_error_on_slack_error() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/slack/chat.postMessage");
+        when.method(httpmock::Method::POST)
+            .path("/slack/chat.postMessage");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": false, "error": "channel_not_found" }));
@@ -323,8 +330,14 @@ async fn send_slack_message_returns_error_on_slack_error() {
     let input = json!({ "channel": "#nonexistent", "text": "hello" });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
-    assert!(result.contains("Tool error:"), "unexpected result: {result}");
-    assert!(result.contains("channel_not_found"), "unexpected result: {result}");
+    assert!(
+        result.contains("Tool error:"),
+        "unexpected result: {result}"
+    );
+    assert!(
+        result.contains("channel_not_found"),
+        "unexpected result: {result}"
+    );
 }
 
 #[tokio::test]
@@ -350,8 +363,14 @@ async fn read_slack_channel_calls_correct_proxy_path() {
     let input = json!({ "channel": "#general", "limit": 10 });
     let result = dispatch_tool(&ctx, "read_slack_channel", &input).await;
 
-    assert!(result.contains("Hello team!"), "unexpected result: {result}");
-    assert!(result.contains("CI is green."), "unexpected result: {result}");
+    assert!(
+        result.contains("Hello team!"),
+        "unexpected result: {result}"
+    );
+    assert!(
+        result.contains("CI is green."),
+        "unexpected result: {result}"
+    );
 }
 
 #[tokio::test]
@@ -359,7 +378,8 @@ async fn read_slack_channel_returns_error_on_slack_error() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::GET).path("/slack/conversations.history");
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": false, "error": "not_in_channel" }));
@@ -369,6 +389,12 @@ async fn read_slack_channel_returns_error_on_slack_error() {
     let input = json!({ "channel": "#private" });
     let result = dispatch_tool(&ctx, "read_slack_channel", &input).await;
 
-    assert!(result.contains("Tool error:"), "unexpected result: {result}");
-    assert!(result.contains("not_in_channel"), "unexpected result: {result}");
+    assert!(
+        result.contains("Tool error:"),
+        "unexpected result: {result}"
+    );
+    assert!(
+        result.contains("not_in_channel"),
+        "unexpected result: {result}"
+    );
 }

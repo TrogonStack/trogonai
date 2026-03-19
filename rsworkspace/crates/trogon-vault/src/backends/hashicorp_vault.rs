@@ -41,11 +41,7 @@ pub struct HashicorpVaultConfig {
 }
 
 impl HashicorpVaultConfig {
-    pub fn new(
-        vault_addr: impl Into<String>,
-        mount: impl Into<String>,
-        auth: VaultAuth,
-    ) -> Self {
+    pub fn new(vault_addr: impl Into<String>, mount: impl Into<String>, auth: VaultAuth) -> Self {
         Self {
             vault_addr: vault_addr.into(),
             mount: mount.into(),
@@ -256,8 +252,7 @@ async fn kubernetes_login(
     jwt_path: Option<&str>,
 ) -> Result<String, HashicorpVaultError> {
     let path = jwt_path.unwrap_or("/var/run/secrets/kubernetes.io/serviceaccount/token");
-    let jwt = std::fs::read_to_string(path)
-        .map_err(|e| HashicorpVaultError::Io(e.to_string()))?;
+    let jwt = std::fs::read_to_string(path).map_err(|e| HashicorpVaultError::Io(e.to_string()))?;
     let jwt = jwt.trim().to_string();
     if jwt.is_empty() {
         return Err(HashicorpVaultError::Io(format!(
@@ -570,7 +565,10 @@ mod tests {
         let store = token_store(&server).await;
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.revoke(&token).await;
-        assert!(result.is_ok(), "404 on revoke must be treated as success (idempotent)");
+        assert!(
+            result.is_ok(),
+            "404 on revoke must be treated as success (idempotent)"
+        );
         mock.assert();
     }
 
@@ -581,7 +579,8 @@ mod tests {
     async fn parse_vault_errors_with_non_array_errors_field_returns_empty() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(500)
                 .header("content-type", "application/json")
                 // "errors" is a string, not an array
@@ -592,7 +591,10 @@ mod tests {
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.resolve(&token).await;
         match result {
-            Err(HashicorpVaultError::Api { status: 500, errors }) => {
+            Err(HashicorpVaultError::Api {
+                status: 500,
+                errors,
+            }) => {
                 assert!(
                     errors.is_empty(),
                     "non-array errors field must yield empty Vec, got: {:?}",
@@ -610,7 +612,8 @@ mod tests {
     async fn token_auth_403_returned_immediately_without_retry() {
         let server = MockServer::start();
         let resolve_mock = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(403)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["permission denied"]}"#);
@@ -644,7 +647,10 @@ mod tests {
         let store = token_store(&server).await;
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.resolve(&token).await;
-        assert!(matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })));
+        assert!(matches!(
+            result,
+            Err(HashicorpVaultError::Api { status: 403, .. })
+        ));
     }
 
     #[tokio::test]
@@ -721,7 +727,11 @@ mod tests {
             },
         );
         let result = HashicorpVaultStore::new(config).await;
-        assert!(result.is_ok(), "Kubernetes auth must succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Kubernetes auth must succeed: {:?}",
+            result.err()
+        );
         mock.assert();
 
         std::fs::remove_file(&jwt_file).ok();
@@ -892,7 +902,8 @@ mod tests {
     async fn resolve_returns_deserialize_error_when_api_key_is_null() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"data":{"api_key":null},"metadata":{}}}"#);
@@ -914,7 +925,8 @@ mod tests {
     async fn resolve_returns_deserialize_error_when_api_key_field_absent() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"data":{},"metadata":{}}}"#);
@@ -936,7 +948,8 @@ mod tests {
     async fn resolve_non_json_error_response_propagates_status_with_empty_errors() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(500)
                 .header("content-type", "text/plain")
                 .body("internal server error");
@@ -948,7 +961,10 @@ mod tests {
         match result {
             Err(HashicorpVaultError::Api { status, errors }) => {
                 assert_eq!(status, 500);
-                assert!(errors.is_empty(), "non-JSON body must produce empty errors vec");
+                assert!(
+                    errors.is_empty(),
+                    "non-JSON body must produce empty errors vec"
+                );
             }
             other => panic!("expected Api error, got: {:?}", other.err()),
         }
@@ -973,7 +989,8 @@ mod tests {
 
         // Resolve returns 403 → triggers re-auth.
         let _resolve_403 = server.mock(|when, then| {
-            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET)
+                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(403)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["permission denied"]}"#);
@@ -1149,7 +1166,10 @@ mod tests {
         )
         .with_tls_skip_verify();
 
-        assert!(config.tls_skip_verify, "flag must be true after with_tls_skip_verify()");
+        assert!(
+            config.tls_skip_verify,
+            "flag must be true after with_tls_skip_verify()"
+        );
 
         // Creating the store must succeed — the dangerous-cert client builds
         // without error even though we are not actually bypassing TLS here.
@@ -1190,7 +1210,8 @@ mod tests {
             "expected Io error, got: {err}"
         );
         assert!(
-            err.to_string().contains("empty or contains only whitespace"),
+            err.to_string()
+                .contains("empty or contains only whitespace"),
             "error message must mention the cause, got: {err}"
         );
     }

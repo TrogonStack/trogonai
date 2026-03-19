@@ -20,7 +20,7 @@ use bytes::Bytes;
 use httpmock::MockServer;
 use serde_json::json;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, RunnerError};
 use trogon_nats::{NatsAuth, NatsConfig};
 
@@ -52,7 +52,7 @@ fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -122,7 +122,7 @@ async fn runner_nats_connect_error_missing_credentials() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
         linear_token: String::new(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -190,12 +190,15 @@ async fn runner_dispatches_github_pr_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -233,12 +236,15 @@ async fn runner_dispatches_linear_issue_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -275,12 +281,15 @@ async fn runner_skips_irrelevant_github_pr_action() {
 
     let proxy = MockServer::start_async().await;
     // No mock registered — any call would return 404 and the test should never reach it.
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -319,12 +328,15 @@ async fn runner_skips_irrelevant_linear_event() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -363,12 +375,15 @@ async fn runner_pr_handler_json_error_does_not_crash() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -376,12 +391,19 @@ async fn runner_pr_handler_json_error_does_not_crash() {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     // First: publish garbage bytes → handler JSON parse error, no proxy call.
-    js.publish("github.pull_request", Bytes::from_static(b"not json at all"))
-        .await
-        .expect("publish failed");
+    js.publish(
+        "github.pull_request",
+        Bytes::from_static(b"not json at all"),
+    )
+    .await
+    .expect("publish failed");
 
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(mock.hits_async().await, 0, "proxy must not be called for invalid JSON");
+    assert_eq!(
+        mock.hits_async().await,
+        0,
+        "proxy must not be called for invalid JSON"
+    );
 
     // Second: publish a valid event → runner is still alive and processes it.
     let valid = json!({
@@ -410,12 +432,15 @@ async fn runner_issue_handler_json_error_does_not_crash() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -428,7 +453,11 @@ async fn runner_issue_handler_json_error_does_not_crash() {
         .expect("publish failed");
 
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(mock.hits_async().await, 0, "proxy must not be called for invalid JSON");
+    assert_eq!(
+        mock.hits_async().await,
+        0,
+        "proxy must not be called for invalid JSON"
+    );
 
     // Valid event → runner still alive.
     let valid = json!({
@@ -461,22 +490,26 @@ async fn runner_pr_handler_agent_error_does_not_crash() {
     let proxy = MockServer::start_async().await;
 
     // First call: 500 → AgentError::Http → handler returns Some(Err(...)).
-    let error_mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("Review the pull request #1 ");
-        then.status(500);
-    }).await;
+    let error_mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Review the pull request #1 ");
+            then.status(500);
+        })
+        .await;
 
     // Second call (different PR number): 200 end_turn → success.
-    let ok_mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("Review the pull request #2 ");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let ok_mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Review the pull request #2 ");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -528,21 +561,25 @@ async fn runner_issue_handler_agent_error_does_not_crash() {
 
     let proxy = MockServer::start_async().await;
 
-    let error_mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("ISS-ERR");
-        then.status(500);
-    }).await;
+    let error_mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("ISS-ERR");
+            then.status(500);
+        })
+        .await;
 
-    let ok_mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("ISS-OK");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let ok_mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("ISS-OK");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -589,12 +626,15 @@ async fn runner_dispatches_pr_merged_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -631,12 +671,15 @@ async fn runner_dispatches_issue_comment_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -669,12 +712,15 @@ async fn runner_dispatches_push_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -709,12 +755,15 @@ async fn runner_dispatches_ci_failure_event_to_anthropic() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let cfg = make_config(nats_port, &proxy.base_url());
     tokio::spawn(async move { trogon_agent::run(cfg).await });
@@ -753,12 +802,15 @@ async fn runner_respects_custom_stream_names() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let proxy = MockServer::start_async().await;
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn_response());
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_response());
+        })
+        .await;
 
     let mut cfg = make_config(nats_port, &proxy.base_url());
     cfg.github_stream_name = Some("MY_GH".to_string());

@@ -12,7 +12,7 @@ use futures_util::StreamExt as _;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_datadog::{DatadogConfig, serve};
 use trogon_std::env::InMemoryEnv;
 
@@ -129,7 +129,10 @@ async fn webhook_alert_recovered_publishes_to_correct_subject() {
     let body = br#"{"alert_transition":"Recovered","monitor_name":"High error rate"}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("datadog.alert.recovered").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("datadog.alert.recovered")
+        .await
+        .expect("subscribe");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -315,7 +318,9 @@ async fn webhook_returns_500_when_jetstream_stream_is_gone() {
     let nats = spawn_server(nats_port, http_port, None).await;
 
     let js = async_nats::jetstream::new(nats);
-    js.delete_stream("DATADOG").await.expect("failed to delete DATADOG stream");
+    js.delete_stream("DATADOG")
+        .await
+        .expect("failed to delete DATADOG stream");
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let resp = reqwest::Client::new()
@@ -352,7 +357,11 @@ async fn webhook_preserves_payload_bytes_exactly() {
         .expect("timed out")
         .expect("subscriber closed");
 
-    assert_eq!(msg.payload.as_ref(), body.as_ref(), "payload must be bit-for-bit identical");
+    assert_eq!(
+        msg.payload.as_ref(),
+        body.as_ref(),
+        "payload must be bit-for-bit identical"
+    );
 }
 
 /// Non-JSON body is accepted and published on `datadog.event`.
@@ -434,7 +443,11 @@ async fn webhook_github_style_signature_prefix_is_rejected() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 401, "sha256= prefixed signature must be rejected");
+    assert_eq!(
+        resp.status(),
+        401,
+        "sha256= prefixed signature must be rejected"
+    );
 }
 
 /// Custom subject prefix via DATADOG_SUBJECT_PREFIX env var.

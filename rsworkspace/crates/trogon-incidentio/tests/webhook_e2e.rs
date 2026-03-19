@@ -12,7 +12,7 @@ use futures_util::StreamExt as _;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_incidentio::{IncidentioConfig, serve};
 use trogon_std::env::InMemoryEnv;
 
@@ -98,7 +98,10 @@ async fn webhook_incident_created_returns_200_and_published_to_nats() {
     let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"DB outage"}}"#;
 
     let nats = spawn_server(nats_port, http_port, Some(secret)).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     let sig = compute_sig(secret, body);
     let resp = reqwest::Client::new()
@@ -126,10 +129,14 @@ async fn webhook_incident_created_returns_200_and_published_to_nats() {
 async fn webhook_incident_resolved_publishes_to_correct_subject() {
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
-    let body = br#"{"event_type":"incident.resolved","incident":{"id":"inc-2","name":"DB outage"}}"#;
+    let body =
+        br#"{"event_type":"incident.resolved","incident":{"id":"inc-2","name":"DB outage"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.resolved").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.resolved")
+        .await
+        .expect("subscribe");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -157,7 +164,10 @@ async fn webhook_incident_updated_publishes_to_correct_subject() {
     let body = br#"{"event_type":"incident.updated","incident":{"id":"inc-3","name":"DB outage"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.updated").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.updated")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -276,7 +286,10 @@ async fn webhook_sets_nats_headers() {
     let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -311,7 +324,10 @@ async fn webhook_preserves_payload_bytes_exactly() {
     let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"DB outage","severity":{"name":"critical"},"status":"active"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -326,7 +342,11 @@ async fn webhook_preserves_payload_bytes_exactly() {
         .expect("timed out")
         .expect("subscriber closed");
 
-    assert_eq!(msg.payload.as_ref(), body.as_ref(), "payload must be bit-for-bit identical");
+    assert_eq!(
+        msg.payload.as_ref(),
+        body.as_ref(),
+        "payload must be bit-for-bit identical"
+    );
 }
 
 /// Webhook upserts incident state into the INCIDENTS KV bucket.
@@ -361,7 +381,11 @@ async fn webhook_kv_store_upserted_on_incident_event() {
         .expect("KV get failed")
         .expect("incident should be stored in KV");
 
-    assert_eq!(stored.as_ref(), body.as_ref(), "KV value must match original payload");
+    assert_eq!(
+        stored.as_ref(),
+        body.as_ref(),
+        "KV value must match original payload"
+    );
 }
 
 /// GET /incidents returns an empty JSON array when no incidents have been received.
@@ -399,11 +423,16 @@ async fn get_incidents_returns_stored_incidents() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, None).await;
 
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     // Post two incidents.
     for id in ["inc-list-1", "inc-list-2"] {
-        let body = format!(r#"{{"event_type":"incident.created","incident":{{"id":"{id}","name":"Test {id}"}}}}"#);
+        let body = format!(
+            r#"{{"event_type":"incident.created","incident":{{"id":"{id}","name":"Test {id}"}}}}"#
+        );
         reqwest::Client::new()
             .post(format!("http://127.0.0.1:{http_port}/webhook"))
             .header("Content-Type", "application/json")
@@ -426,7 +455,11 @@ async fn get_incidents_returns_stored_incidents() {
 
     assert_eq!(resp.status(), 200);
     let incidents: Vec<serde_json::Value> = resp.json().await.expect("response is not JSON");
-    assert_eq!(incidents.len(), 2, "should return exactly 2 stored incidents");
+    assert_eq!(
+        incidents.len(),
+        2,
+        "should return exactly 2 stored incidents"
+    );
 
     let ids: Vec<&str> = incidents
         .iter()
@@ -444,7 +477,9 @@ async fn get_incident_by_id_returns_404_for_unknown() {
     spawn_server(nats_port, http_port, None).await;
 
     let resp = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{http_port}/incidents/does-not-exist"))
+        .get(format!(
+            "http://127.0.0.1:{http_port}/incidents/does-not-exist"
+        ))
         .send()
         .await
         .expect("HTTP request failed");
@@ -459,7 +494,10 @@ async fn get_incident_by_id_returns_stored_incident() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, None).await;
 
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     let body = r#"{"event_type":"incident.created","incident":{"id":"inc-get-1","name":"Get by ID test"}}"#;
     reqwest::Client::new()
@@ -484,7 +522,10 @@ async fn get_incident_by_id_returns_stored_incident() {
     assert_eq!(resp.status(), 200);
     let incident: serde_json::Value = resp.json().await.expect("response is not JSON");
     assert_eq!(incident["incident"]["id"].as_str(), Some("inc-get-1"));
-    assert_eq!(incident["incident"]["name"].as_str(), Some("Get by ID test"));
+    assert_eq!(
+        incident["incident"]["name"].as_str(),
+        Some("Get by ID test")
+    );
 }
 
 /// When the INCIDENTIO JetStream stream is deleted, the server returns 500.
@@ -496,7 +537,9 @@ async fn webhook_returns_500_when_jetstream_stream_is_gone() {
     let nats = spawn_server(nats_port, http_port, None).await;
 
     let js = async_nats::jetstream::new(nats);
-    js.delete_stream("INCIDENTIO").await.expect("failed to delete INCIDENTIO stream");
+    js.delete_stream("INCIDENTIO")
+        .await
+        .expect("failed to delete INCIDENTIO stream");
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let resp = reqwest::Client::new()
@@ -532,7 +575,10 @@ async fn webhook_custom_subject_prefix_is_used() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .expect("connect");
-    let mut sub = nats.subscribe("iio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("iio.incident.created")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -558,9 +604,18 @@ async fn webhook_multiple_events_published_in_order() {
     let mut sub = nats.subscribe("incidentio.>").await.expect("subscribe");
 
     let events = [
-        (r#"{"event_type":"incident.created","incident":{"id":"inc-a"}}"#, "incidentio.incident.created"),
-        (r#"{"event_type":"incident.updated","incident":{"id":"inc-a"}}"#, "incidentio.incident.updated"),
-        (r#"{"event_type":"incident.resolved","incident":{"id":"inc-a"}}"#, "incidentio.incident.resolved"),
+        (
+            r#"{"event_type":"incident.created","incident":{"id":"inc-a"}}"#,
+            "incidentio.incident.created",
+        ),
+        (
+            r#"{"event_type":"incident.updated","incident":{"id":"inc-a"}}"#,
+            "incidentio.incident.updated",
+        ),
+        (
+            r#"{"event_type":"incident.resolved","incident":{"id":"inc-a"}}"#,
+            "incidentio.incident.resolved",
+        ),
     ];
 
     for (body, _) in &events {
@@ -620,9 +675,15 @@ async fn webhook_malformed_json_body_published_to_fallback_subject() {
 
     // KV must remain empty — no incident_id to key on.
     let js = async_nats::jetstream::new(nats_client(nats_port).await);
-    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    let kv = js
+        .get_key_value("INCIDENTS")
+        .await
+        .expect("INCIDENTS bucket must exist");
     let mut keys = kv.keys().await.expect("keys");
-    assert!(keys.next().await.is_none(), "KV must be empty for malformed-JSON body");
+    assert!(
+        keys.next().await.is_none(),
+        "KV must be empty for malformed-JSON body"
+    );
 }
 
 /// A valid JSON body with a correct signature but without `incident.id` is
@@ -635,7 +696,10 @@ async fn webhook_body_without_incident_id_is_published_but_not_stored() {
     let body = br#"{"event_type":"incident.created","incident":{"name":"no-id-incident"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -654,9 +718,15 @@ async fn webhook_body_without_incident_id_is_published_but_not_stored() {
     // KV must remain empty — no incident_id was extracted.
     tokio::time::sleep(Duration::from_millis(200)).await;
     let js = async_nats::jetstream::new(nats_client(nats_port).await);
-    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
+    let kv = js
+        .get_key_value("INCIDENTS")
+        .await
+        .expect("INCIDENTS bucket must exist");
     let mut keys = kv.keys().await.expect("keys");
-    assert!(keys.next().await.is_none(), "KV must be empty when incident.id is missing");
+    assert!(
+        keys.next().await.is_none(),
+        "KV must be empty when incident.id is missing"
+    );
 }
 
 /// GET /incidents/:id returns 500 when the stored entry contains invalid JSON.
@@ -673,18 +743,30 @@ async fn get_incident_by_id_returns_500_for_corrupt_stored_entry() {
 
     // Inject corrupt JSON directly into the INCIDENTS KV bucket.
     let js = async_nats::jetstream::new(nats_client(nats_port).await);
-    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
-    kv.put("inc-corrupt-get", bytes::Bytes::from_static(b"<<<not json>>>"))
+    let kv = js
+        .get_key_value("INCIDENTS")
         .await
-        .expect("KV put failed");
+        .expect("INCIDENTS bucket must exist");
+    kv.put(
+        "inc-corrupt-get",
+        bytes::Bytes::from_static(b"<<<not json>>>"),
+    )
+    .await
+    .expect("KV put failed");
 
     let resp = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{http_port}/incidents/inc-corrupt-get"))
+        .get(format!(
+            "http://127.0.0.1:{http_port}/incidents/inc-corrupt-get"
+        ))
         .send()
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 500, "corrupt KV entry must yield 500 from GET /incidents/:id");
+    assert_eq!(
+        resp.status(),
+        500,
+        "corrupt KV entry must yield 500 from GET /incidents/:id"
+    );
 }
 
 /// GET /incidents silently skips KV entries that contain invalid JSON.
@@ -698,10 +780,14 @@ async fn list_incidents_skips_unparseable_kv_entries() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     // Post one valid incident so the INCIDENTS bucket is created and populated.
-    let valid_body = r#"{"event_type":"incident.created","incident":{"id":"inc-valid","name":"Valid"}}"#;
+    let valid_body =
+        r#"{"event_type":"incident.created","incident":{"id":"inc-valid","name":"Valid"}}"#;
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
         .header("Content-Type", "application/json")
@@ -718,10 +804,16 @@ async fn list_incidents_skips_unparseable_kv_entries() {
 
     // Inject corrupt JSON directly into the INCIDENTS KV bucket.
     let js = async_nats::jetstream::new(nats_client(nats_port).await);
-    let kv = js.get_key_value("INCIDENTS").await.expect("INCIDENTS bucket must exist");
-    kv.put("inc-corrupt", bytes::Bytes::from_static(b"{this is not valid json"))
+    let kv = js
+        .get_key_value("INCIDENTS")
         .await
-        .expect("KV put failed");
+        .expect("INCIDENTS bucket must exist");
+    kv.put(
+        "inc-corrupt",
+        bytes::Bytes::from_static(b"{this is not valid json"),
+    )
+    .await
+    .expect("KV put failed");
 
     // GET /incidents must return only the one valid incident.
     let resp = reqwest::Client::new()
@@ -732,7 +824,11 @@ async fn list_incidents_skips_unparseable_kv_entries() {
 
     assert_eq!(resp.status(), 200);
     let incidents: Vec<serde_json::Value> = resp.json().await.expect("response is not JSON");
-    assert_eq!(incidents.len(), 1, "corrupt KV entry must be silently skipped");
+    assert_eq!(
+        incidents.len(),
+        1,
+        "corrupt KV entry must be silently skipped"
+    );
     assert_eq!(incidents[0]["incident"]["id"].as_str(), Some("inc-valid"));
 }
 
@@ -876,14 +972,22 @@ async fn webhook_kv_upsert_failure_still_publishes_to_nats() {
         .send()
         .await
         .expect("HTTP request failed");
-    assert_eq!(resp.status(), 200, "KV failure must not prevent 200 response");
+    assert_eq!(
+        resp.status(),
+        200,
+        "KV failure must not prevent 200 response"
+    );
 
     // NATS publish must still succeed.
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
         .expect("timed out waiting for NATS message after KV bucket deletion")
         .expect("subscriber closed");
-    assert_eq!(msg.payload.as_ref(), body.as_ref(), "payload must be bit-for-bit identical");
+    assert_eq!(
+        msg.payload.as_ref(),
+        body.as_ref(),
+        "payload must be bit-for-bit identical"
+    );
 }
 
 /// HTTP header names are case-insensitive; a sender using `X-INCIDENT-SIGNATURE`
@@ -919,7 +1023,10 @@ async fn webhook_missing_delivery_header_defaults_to_unknown() {
     let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1"}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("incidentio.incident.created").await.expect("subscribe");
+    let mut sub = nats
+        .subscribe("incidentio.incident.created")
+        .await
+        .expect("subscribe");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))

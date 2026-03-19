@@ -27,12 +27,8 @@ use crate::permission::{ChannelPermissionChecker, PermissionTx};
 use crate::session_store::{SessionStore, StoredMcpServer};
 
 /// Returns the context window token limit for a given model ID.
-fn context_window_tokens(model: &str) -> u64 {
-    if model.contains("opus") || model.contains("sonnet") || model.contains("haiku") {
-        200_000
-    } else {
-        200_000 // safe default
-    }
+fn context_window_tokens(_model: &str) -> u64 {
+    200_000
 }
 
 /// Subscribes to `{prefix}.*.agent.prompt` via NATS Core, runs the agentic loop
@@ -92,11 +88,8 @@ impl Runner {
                 }
             };
 
-            let events_subject = subjects::prompt_events(
-                &self.prefix,
-                &payload.session_id,
-                &payload.req_id,
-            );
+            let events_subject =
+                subjects::prompt_events(&self.prefix, &payload.session_id, &payload.req_id);
 
             self.handle_prompt(payload, events_subject).await;
         }
@@ -106,8 +99,7 @@ impl Runner {
 
     async fn handle_prompt(&self, payload: PromptPayload, events_subject: String) {
         // Subscribe to the cancel subject for this session so we can abort mid-run
-        let cancel_subject =
-            subjects::session_cancel(&self.prefix, &payload.session_id);
+        let cancel_subject = subjects::session_cancel(&self.prefix, &payload.session_id);
         let mut cancel_sub = match self.nats.subscribe(cancel_subject.clone()).await {
             Ok(s) => s,
             Err(e) => {
@@ -122,7 +114,8 @@ impl Runner {
             Ok(s) => s,
             Err(e) => {
                 error!(session_id = %payload.session_id, error = %e, "runner: failed to load session");
-                self.publish_error(&events_subject, format!("session load failed: {e}")).await;
+                self.publish_error(&events_subject, format!("session load failed: {e}"))
+                    .await;
                 return;
             }
         };
@@ -132,13 +125,21 @@ impl Runner {
             let title_source = if !payload.user_message.is_empty() {
                 payload.user_message.clone()
             } else {
-                payload.content.iter().find_map(|b| {
-                    if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
-                        if !text.is_empty() { Some(text.clone()) } else { None }
-                    } else {
-                        None
-                    }
-                }).unwrap_or_default()
+                payload
+                    .content
+                    .iter()
+                    .find_map(|b| {
+                        if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
+                            if !text.is_empty() {
+                                Some(text.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default()
             };
             state.title = truncate_title(&title_source);
         }
@@ -152,7 +153,10 @@ impl Runner {
         let tools = if state.disable_builtin_tools {
             vec![]
         } else {
-            all_tool_defs().into_iter().filter(|t| t.name != "AskUserQuestion").collect()
+            all_tool_defs()
+                .into_iter()
+                .filter(|t| t.name != "AskUserQuestion")
+                .collect()
         };
         // Build per-session agent with model + MCP overrides and permission gate
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
@@ -173,14 +177,12 @@ impl Runner {
                     a.mcp_tool_defs.extend(mcp_defs);
                     a.mcp_dispatch.extend(mcp_dispatch);
                 }
-                if needs_perm {
-                    if let Some(ref perm_tx) = self.permission_tx {
-                        a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
-                            session_id: payload.session_id.clone(),
-                            tx: perm_tx.clone(),
-                            allowed_tools: state.allowed_tools.clone(),
-                        }));
-                    }
+                if needs_perm && let Some(ref perm_tx) = self.permission_tx {
+                    a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
+                        session_id: payload.session_id.clone(),
+                        tx: perm_tx.clone(),
+                        allowed_tools: state.allowed_tools.clone(),
+                    }));
                 }
                 if let Some(ref gw) = gateway {
                     a.anthropic_base_url = Some(gw.base_url.clone());
@@ -195,7 +197,9 @@ impl Runner {
         let messages = state.messages.clone();
         let system_prompt = state.system_prompt.clone();
         let system_prompt = if !state.additional_roots.is_empty() {
-            let roots_info = state.additional_roots.iter()
+            let roots_info = state
+                .additional_roots
+                .iter()
                 .map(|r| format!("- {r}"))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -210,11 +214,16 @@ impl Runner {
 
         // Capture context window size and current model before agent is moved into spawn_local
         let context_window = Some(context_window_tokens(&agent.model));
-        let current_model = state.model.clone().unwrap_or_else(|| self.agent.model.clone());
+        let current_model = state
+            .model
+            .clone()
+            .unwrap_or_else(|| self.agent.model.clone());
 
         // Spawn the agent loop so we can select! against cancel
         let agent_fut = tokio::task::spawn_local(async move {
-            agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
+            agent
+                .run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx)
+                .await
         });
 
         // Forward streaming events to NATS while watching for cancel
@@ -225,7 +234,8 @@ impl Runner {
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
         // id → tool name, used to detect EnterPlanMode completion
-        let mut tool_name_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut tool_name_by_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         loop {
             tokio::select! {
@@ -342,7 +352,9 @@ impl Runner {
         if cancelled {
             self.publish_event(
                 &events_subject,
-                &PromptEvent::Done { stop_reason: "cancelled".to_string() },
+                &PromptEvent::Done {
+                    stop_reason: "cancelled".to_string(),
+                },
             )
             .await;
             return;
@@ -356,7 +368,9 @@ impl Runner {
             }
             self.publish_event(
                 &events_subject,
-                &PromptEvent::Done { stop_reason: "end_turn".to_string() },
+                &PromptEvent::Done {
+                    stop_reason: "end_turn".to_string(),
+                },
             )
             .await;
         }
@@ -368,7 +382,8 @@ impl Runner {
             Ok(s) => s,
             Err(e) => {
                 error!(session_id = %payload.session_id, error = %e, "runner: failed to load session");
-                self.publish_error(&events_subject, format!("session load failed: {e}")).await;
+                self.publish_error(&events_subject, format!("session load failed: {e}"))
+                    .await;
                 return;
             }
         };
@@ -377,13 +392,21 @@ impl Runner {
             let title_source = if !payload.user_message.is_empty() {
                 payload.user_message.clone()
             } else {
-                payload.content.iter().find_map(|b| {
-                    if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
-                        if !text.is_empty() { Some(text.clone()) } else { None }
-                    } else {
-                        None
-                    }
-                }).unwrap_or_default()
+                payload
+                    .content
+                    .iter()
+                    .find_map(|b| {
+                        if let acp_nats::prompt_event::UserContentBlock::Text { text } = b {
+                            if !text.is_empty() {
+                                Some(text.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default()
             };
             state.title = truncate_title(&title_source);
         }
@@ -393,7 +416,10 @@ impl Runner {
         let tools = if state.disable_builtin_tools {
             vec![]
         } else {
-            all_tool_defs().into_iter().filter(|t| t.name != "AskUserQuestion").collect()
+            all_tool_defs()
+                .into_iter()
+                .filter(|t| t.name != "AskUserQuestion")
+                .collect()
         };
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
@@ -414,14 +440,12 @@ impl Runner {
                     a.mcp_tool_defs.extend(mcp_defs);
                     a.mcp_dispatch.extend(mcp_dispatch);
                 }
-                if needs_perm {
-                    if let Some(ref perm_tx) = self.permission_tx {
-                        a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
-                            session_id: payload.session_id.clone(),
-                            tx: perm_tx.clone(),
-                            allowed_tools: state.allowed_tools.clone(),
-                        }));
-                    }
+                if needs_perm && let Some(ref perm_tx) = self.permission_tx {
+                    a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
+                        session_id: payload.session_id.clone(),
+                        tx: perm_tx.clone(),
+                        allowed_tools: state.allowed_tools.clone(),
+                    }));
                 }
                 if let Some(ref gw) = gateway {
                     a.anthropic_base_url = Some(gw.base_url.clone());
@@ -436,7 +460,9 @@ impl Runner {
         let messages = state.messages.clone();
         let system_prompt = state.system_prompt.clone();
         let system_prompt = if !state.additional_roots.is_empty() {
-            let roots_info = state.additional_roots.iter()
+            let roots_info = state
+                .additional_roots
+                .iter()
                 .map(|r| format!("- {r}"))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -451,17 +477,23 @@ impl Runner {
 
         // Capture context window size and current model before agent is moved into spawn_local
         let context_window = Some(context_window_tokens(&agent.model));
-        let current_model = state.model.clone().unwrap_or_else(|| self.agent.model.clone());
+        let current_model = state
+            .model
+            .clone()
+            .unwrap_or_else(|| self.agent.model.clone());
 
         let agent_handle = tokio::task::spawn_local(async move {
-            agent.run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx).await
+            agent
+                .run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx)
+                .await
         });
 
         let mut last_input_tokens: u32 = 0;
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
-        let mut tool_name_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut tool_name_by_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         while let Some(event) = event_rx.recv().await {
             let prompt_event = match event {
@@ -471,11 +503,22 @@ impl Runner {
                     tool_name_by_id.insert(id.clone(), name.clone());
                     PromptEvent::ToolCallStarted { id, name, input }
                 }
-                AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
-                    let is_enter_plan = tool_name_by_id.get(&id)
+                AgentEvent::ToolCallFinished {
+                    id,
+                    output,
+                    exit_code,
+                    signal,
+                } => {
+                    let is_enter_plan = tool_name_by_id
+                        .get(&id)
                         .map(|n| n == "EnterPlanMode")
                         .unwrap_or(false);
-                    let finished_event = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
+                    let finished_event = PromptEvent::ToolCallFinished {
+                        id,
+                        output,
+                        exit_code,
+                        signal,
+                    };
                     self.publish_event(&events_subject, &finished_event).await;
                     if is_enter_plan {
                         state.mode = "plan".to_string();
@@ -485,19 +528,29 @@ impl Runner {
                                 mode: "plan".to_string(),
                                 model: current_model.clone(),
                             },
-                        ).await;
+                        )
+                        .await;
                     }
                     continue;
                 }
-                AgentEvent::SystemStatus { message } => {
-                    PromptEvent::SystemStatus { message }
-                }
-                AgentEvent::UsageSummary { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } => {
+                AgentEvent::SystemStatus { message } => PromptEvent::SystemStatus { message },
+                AgentEvent::UsageSummary {
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                } => {
                     last_input_tokens = input_tokens;
                     last_output_tokens = output_tokens;
                     last_cache_creation_tokens = cache_creation_tokens;
                     last_cache_read_tokens = cache_read_tokens;
-                    PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window }
+                    PromptEvent::UsageUpdate {
+                        input_tokens,
+                        output_tokens,
+                        cache_creation_tokens,
+                        cache_read_tokens,
+                        context_window,
+                    }
                 }
             };
             self.publish_event(&events_subject, &prompt_event).await;
@@ -512,8 +565,11 @@ impl Runner {
                 }
                 self.publish_event(
                     &events_subject,
-                    &PromptEvent::Done { stop_reason: "end_turn".to_string() },
-                ).await;
+                    &PromptEvent::Done {
+                        stop_reason: "end_turn".to_string(),
+                    },
+                )
+                .await;
             }
             Ok(Err(trogon_agent::agent_loop::AgentError::MaxIterationsReached)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
@@ -526,12 +582,16 @@ impl Runner {
                             cache_read_tokens: last_cache_read_tokens,
                             context_window,
                         },
-                    ).await;
+                    )
+                    .await;
                 }
                 self.publish_event(
                     &events_subject,
-                    &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
-                ).await;
+                    &PromptEvent::Done {
+                        stop_reason: "max_turn_requests".to_string(),
+                    },
+                )
+                .await;
             }
             Ok(Err(trogon_agent::agent_loop::AgentError::MaxTokens)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
@@ -544,18 +604,25 @@ impl Runner {
                             cache_read_tokens: last_cache_read_tokens,
                             context_window,
                         },
-                    ).await;
+                    )
+                    .await;
                 }
                 self.publish_event(
                     &events_subject,
-                    &PromptEvent::Done { stop_reason: "max_tokens".to_string() },
-                ).await;
+                    &PromptEvent::Done {
+                        stop_reason: "max_tokens".to_string(),
+                    },
+                )
+                .await;
             }
             _ => {
                 self.publish_event(
                     &events_subject,
-                    &PromptEvent::Done { stop_reason: "end_turn".to_string() },
-                ).await;
+                    &PromptEvent::Done {
+                        stop_reason: "end_turn".to_string(),
+                    },
+                )
+                .await;
             }
         }
     }
@@ -563,7 +630,11 @@ impl Runner {
     async fn publish_event(&self, subject: &str, event: &PromptEvent) {
         match serde_json::to_vec(event) {
             Ok(bytes) => {
-                if let Err(e) = self.nats.publish(subject.to_string(), Bytes::from(bytes)).await {
+                if let Err(e) = self
+                    .nats
+                    .publish(subject.to_string(), Bytes::from(bytes))
+                    .await
+                {
                     warn!(subject, error = %e, "runner: failed to publish event");
                 }
             }
@@ -574,7 +645,8 @@ impl Runner {
     }
 
     async fn publish_error(&self, subject: &str, message: String) {
-        self.publish_event(subject, &PromptEvent::Error { message }).await;
+        self.publish_event(subject, &PromptEvent::Error { message })
+            .await;
     }
 }
 
@@ -582,7 +654,10 @@ impl Runner {
 async fn build_session_mcp(
     _nats: &async_nats::Client,
     servers: &[StoredMcpServer],
-) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
+) -> (
+    Vec<ToolDef>,
+    Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+) {
     let http = reqwest::Client::new();
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
@@ -660,7 +735,10 @@ fn user_message_from_payload(payload: &PromptPayload) -> Message {
         })
         .collect();
 
-    Message { role: "user".to_string(), content: blocks }
+    Message {
+        role: "user".to_string(),
+        content: blocks,
+    }
 }
 
 /// Truncate a prompt to at most 256 characters for use as a session title.
@@ -668,10 +746,11 @@ fn truncate_title(text: &str) -> String {
     let no_newlines = text.replace(['\r', '\n'], " ");
     let collapsed: String = no_newlines.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = collapsed.trim().to_string();
-    if trimmed.len() <= 256 {
+    if trimmed.chars().count() <= 256 {
         trimmed
     } else {
-        format!("{}…", &trimmed[..255])
+        let truncated: String = trimmed.chars().take(255).collect();
+        format!("{truncated}…")
     }
 }
 
@@ -713,7 +792,10 @@ mod tests {
                 .get(*id)
                 .map(|n| n == "EnterPlanMode")
                 .unwrap_or(false);
-            assert!(!is_enter_plan, "tool {id} must not be detected as EnterPlanMode");
+            assert!(
+                !is_enter_plan,
+                "tool {id} must not be detected as EnterPlanMode"
+            );
         }
     }
 
@@ -773,7 +855,9 @@ mod tests {
         let payload = PromptPayload {
             req_id: "r1".to_string(),
             session_id: "s1".to_string(),
-            content: vec![UserContentBlock::Text { text: "hi".to_string() }],
+            content: vec![UserContentBlock::Text {
+                text: "hi".to_string(),
+            }],
             user_message: String::new(),
         };
         let msg = user_message_from_payload(&payload);
@@ -794,7 +878,9 @@ mod tests {
             user_message: String::new(),
         };
         let msg = user_message_from_payload(&payload);
-        assert!(matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Base64 { data, media_type } } if data == "abc123" && media_type == "image/png"));
+        assert!(
+            matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Base64 { data, media_type } } if data == "abc123" && media_type == "image/png")
+        );
     }
 
     #[test]
@@ -803,11 +889,15 @@ mod tests {
         let payload = PromptPayload {
             req_id: "r1".to_string(),
             session_id: "s1".to_string(),
-            content: vec![UserContentBlock::ImageUrl { url: "https://example.com/img.png".to_string() }],
+            content: vec![UserContentBlock::ImageUrl {
+                url: "https://example.com/img.png".to_string(),
+            }],
             user_message: String::new(),
         };
         let msg = user_message_from_payload(&payload);
-        assert!(matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Url { url } } if url == "https://example.com/img.png"));
+        assert!(
+            matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Url { url } } if url == "https://example.com/img.png")
+        );
     }
 
     #[test]
@@ -823,7 +913,9 @@ mod tests {
             user_message: String::new(),
         };
         let msg = user_message_from_payload(&payload);
-        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "[@foo.rs](file:///foo.rs)"));
+        assert!(
+            matches!(&msg.content[0], ContentBlock::Text { text } if text == "[@foo.rs](file:///foo.rs)")
+        );
     }
 
     #[test]
@@ -839,7 +931,9 @@ mod tests {
             user_message: String::new(),
         };
         let msg = user_message_from_payload(&payload);
-        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text.contains("<context ref=\"file:///bar.txt\">") && text.contains("content here")));
+        assert!(
+            matches!(&msg.content[0], ContentBlock::Text { text } if text.contains("<context ref=\"file:///bar.txt\">") && text.contains("content here"))
+        );
     }
 
     // ── truncate_title ────────────────────────────────────────────────────────
@@ -869,5 +963,214 @@ mod tests {
     fn truncate_title_short_text_unchanged() {
         let out = truncate_title("short");
         assert_eq!(out, "short");
+    }
+
+    #[test]
+    fn truncate_title_unicode_multibyte_does_not_panic() {
+        // "\u{1D56C}" is 4 bytes — 65 of them = 260 bytes, would panic on byte slice
+        let s = "\u{1D56C}".repeat(65);
+        let out = truncate_title(&s);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 256);
+    }
+
+    #[test]
+    fn truncate_title_short_unicode_preserved() {
+        let s = "こんにちは世界"; // 7 chars, 21 bytes — under limit
+        let out = truncate_title(s);
+        assert_eq!(out, s);
+    }
+
+    #[test]
+    fn truncate_title_exactly_256_chars_not_truncated() {
+        let s = "a".repeat(256);
+        let out = truncate_title(&s);
+        assert_eq!(out.chars().count(), 256);
+        assert!(!out.ends_with('…'));
+    }
+
+    #[test]
+    fn user_message_from_payload_multiple_mixed_blocks() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![
+                UserContentBlock::Text {
+                    text: "explain this file".to_string(),
+                },
+                UserContentBlock::Context {
+                    uri: "file:///main.rs".to_string(),
+                    text: "fn main() {}".to_string(),
+                },
+            ],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert_eq!(msg.content.len(), 2);
+        assert!(
+            matches!(&msg.content[0], ContentBlock::Text { text } if text == "explain this file")
+        );
+        assert!(
+            matches!(&msg.content[1], ContentBlock::Text { text } if text.contains("fn main()"))
+        );
+    }
+
+    mod integration {
+        use super::super::*;
+        use async_nats::jetstream;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::runners::AsyncRunner;
+        use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
+        use tokio::sync::RwLock;
+        use trogon_agent::tools::ToolContext;
+
+        async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
+            let container: ContainerAsync<Nats> = Nats::default()
+                .with_cmd(["--jetstream"])
+                .start()
+                .await
+                .expect("Docker must be running");
+            let port = container.get_host_port_ipv4(4222).await.unwrap();
+            let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+                .await
+                .expect("failed to connect to NATS");
+            let js = jetstream::new(nats.clone());
+            (container, nats, js)
+        }
+
+        fn make_agent_loop() -> AgentLoop {
+            AgentLoop {
+                http_client: reqwest::Client::new(),
+                proxy_url: "http://unused:9999".to_string(),
+                anthropic_token: "dummy".to_string(),
+                anthropic_base_url: None,
+                anthropic_extra_headers: vec![],
+                model: "claude-sonnet-4-6".to_string(),
+                max_iterations: 5,
+                thinking_budget: None,
+                tool_context: Arc::new(ToolContext {
+                    http_client: reqwest::Client::new(),
+                    proxy_url: "http://unused:9999".to_string(),
+                    github_token: "dummy".to_string(),
+                    linear_token: "dummy".to_string(),
+                    slack_token: "dummy".to_string(),
+                }),
+                memory_owner: None,
+                memory_repo: None,
+                memory_path: None,
+                mcp_tool_defs: vec![],
+                mcp_dispatch: vec![],
+                split_client: None,
+                tenant_id: "test".to_string(),
+                permission_checker: None,
+            }
+        }
+
+        async fn make_runner(nats: async_nats::Client, js: &jetstream::Context) -> Runner {
+            Runner::new(
+                nats,
+                js,
+                make_agent_loop(),
+                "acp",
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await
+            .unwrap()
+        }
+
+        #[tokio::test]
+        async fn publish_event_sends_serialized_event_to_nats() {
+            let (_c, nats, js) = start_nats().await;
+            let runner = make_runner(nats.clone(), &js).await;
+            let mut sub = nats.subscribe("acp.s1.events").await.unwrap();
+
+            runner
+                .publish_event(
+                    "acp.s1.events",
+                    &PromptEvent::TextDelta {
+                        text: "hello world".to_string(),
+                    },
+                )
+                .await;
+
+            let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+                .await
+                .expect("timeout waiting for event")
+                .expect("no message received");
+            let event: PromptEvent = serde_json::from_slice(&msg.payload).unwrap();
+            assert!(matches!(event, PromptEvent::TextDelta { text } if text == "hello world"));
+        }
+
+        #[tokio::test]
+        async fn publish_error_sends_error_event_to_nats() {
+            let (_c, nats, js) = start_nats().await;
+            let runner = make_runner(nats.clone(), &js).await;
+            let mut sub = nats.subscribe("acp.s1.events").await.unwrap();
+
+            runner
+                .publish_error("acp.s1.events", "something went wrong".to_string())
+                .await;
+
+            let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+                .await
+                .expect("timeout waiting for error event")
+                .expect("no message received");
+            let event: PromptEvent = serde_json::from_slice(&msg.payload).unwrap();
+            assert!(
+                matches!(event, PromptEvent::Error { message } if message == "something went wrong")
+            );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn runner_skips_bad_json_prompt_payload_without_crash() {
+            let (_c, nats, js) = start_nats().await;
+            let runner = make_runner(nats.clone(), &js).await;
+
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let handle = tokio::task::spawn_local(runner.run());
+
+                    // Publish bad JSON to the prompt wildcard subject
+                    nats.publish(
+                        "acp.test-session.agent.prompt",
+                        b"not valid json at all".as_ref().into(),
+                    )
+                    .await
+                    .unwrap();
+
+                    // Give runner time to receive and skip the bad message
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+
+                    // Runner must still be alive — bad JSON must not crash it
+                    assert!(
+                        !handle.is_finished(),
+                        "runner should still be running after bad JSON"
+                    );
+                    handle.abort();
+                })
+                .await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn runner_publish_event_does_not_crash_on_nats_error() {
+            let (_c, nats, js) = start_nats().await;
+            let runner = make_runner(nats.clone(), &js).await;
+
+            // Publish to an ungrouped subject with no subscriber — should not crash
+            runner
+                .publish_event(
+                    "acp.no-subscriber.events",
+                    &PromptEvent::SystemStatus {
+                        message: "test".to_string(),
+                    },
+                )
+                .await;
+            // If we reach here without panic, publish_event handles missing subscribers gracefully
+        }
     }
 }

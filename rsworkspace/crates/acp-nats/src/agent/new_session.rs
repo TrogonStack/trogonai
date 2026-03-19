@@ -1,8 +1,8 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, SubscribeClient,
-    RetryPolicy, agent,
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    RetryPolicy, SubscribeClient, agent,
 };
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
@@ -72,7 +72,10 @@ fn map_new_session_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed>(
+pub async fn handle<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+>(
     bridge: &Bridge<N, C>,
     args: NewSessionRequest,
 ) -> Result<NewSessionResponse> {

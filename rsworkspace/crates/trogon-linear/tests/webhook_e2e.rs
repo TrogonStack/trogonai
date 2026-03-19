@@ -16,7 +16,7 @@ use futures_util::StreamExt as _;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_linear::{LinearConfig, serve};
 use trogon_std::env::InMemoryEnv;
 
@@ -78,11 +78,7 @@ fn make_config(nats_port: u16, http_port: u16, secret: Option<&str>) -> LinearCo
     LinearConfig::from_env(&env)
 }
 
-async fn spawn_server(
-    nats_port: u16,
-    http_port: u16,
-    secret: Option<&str>,
-) -> async_nats::Client {
+async fn spawn_server(nats_port: u16, http_port: u16, secret: Option<&str>) -> async_nats::Client {
     let config = make_config(nats_port, http_port, secret);
     let nats_for_server = nats_client(nats_port).await;
 
@@ -106,7 +102,10 @@ async fn webhook_issue_create_returns_200_and_is_published_to_nats() {
     let body = br#"{"type":"Issue","action":"create","data":{"id":"abc"},"webhookId":"wh-001"}"#;
 
     let nats = spawn_server(nats_port, http_port, Some(secret)).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let sig = compute_sig(secret, body);
     let resp = reqwest::Client::new()
@@ -125,7 +124,11 @@ async fn webhook_issue_create_returns_200_and_is_published_to_nats() {
         .expect("timed out waiting for NATS message")
         .expect("subscriber closed");
 
-    assert_eq!(msg.payload.as_ref(), body.as_ref(), "NATS payload must match request body");
+    assert_eq!(
+        msg.payload.as_ref(),
+        body.as_ref(),
+        "NATS payload must match request body"
+    );
 }
 
 /// A request with an incorrect HMAC signature is rejected with 401 Unauthorized.
@@ -136,7 +139,10 @@ async fn webhook_invalid_signature_returns_401() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, Some("correct-secret")).await;
 
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -150,7 +156,10 @@ async fn webhook_invalid_signature_returns_401() {
     assert_eq!(resp.status(), 401, "expected 401; got {}", resp.status());
 
     let result = tokio::time::timeout(Duration::from_millis(200), sub.next()).await;
-    assert!(result.is_err(), "must not publish to NATS on invalid signature");
+    assert!(
+        result.is_err(),
+        "must not publish to NATS on invalid signature"
+    );
 }
 
 /// When a webhook secret is configured but the `linear-signature` header is
@@ -192,7 +201,12 @@ async fn webhook_missing_type_field_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "expected 400 when 'type' absent; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "expected 400 when 'type' absent; got {}",
+        resp.status()
+    );
 }
 
 /// A payload missing the `action` field must be rejected with 400 Bad Request.
@@ -210,7 +224,12 @@ async fn webhook_missing_action_field_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "expected 400 when 'action' absent; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "expected 400 when 'action' absent; got {}",
+        resp.status()
+    );
 }
 
 /// A non-JSON body must be rejected with 400 Bad Request.
@@ -228,7 +247,12 @@ async fn webhook_non_json_body_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "expected 400 for non-JSON body; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "expected 400 for non-JSON body; got {}",
+        resp.status()
+    );
 }
 
 /// When no webhook secret is configured, signature validation is skipped
@@ -239,7 +263,10 @@ async fn webhook_no_secret_configured_accepts_any_request() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, None).await;
 
-    let mut sub = nats.subscribe("linear.Comment.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Comment.create")
+        .await
+        .expect("subscribe failed");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -250,7 +277,12 @@ async fn webhook_no_secret_configured_accepts_any_request() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "expected 200 with no secret configured; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "expected 200 with no secret configured; got {}",
+        resp.status()
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -268,8 +300,14 @@ async fn webhook_different_event_types_use_distinct_nats_subjects() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut create_sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
-    let mut update_sub = nats.subscribe("linear.Comment.update").await.expect("subscribe failed");
+    let mut create_sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
+    let mut update_sub = nats
+        .subscribe("linear.Comment.update")
+        .await
+        .expect("subscribe failed");
 
     let create_body = br#"{"type":"Issue","action":"create","data":{"id":"i-1"}}"#;
     let update_body = br#"{"type":"Comment","action":"update","data":{"id":"c-1"}}"#;
@@ -314,7 +352,10 @@ async fn webhook_nats_headers_forwarded() {
     let body = br#"{"type":"Project","action":"update","data":{},"webhookId":"wh-xyz-999"}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Project.update").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Project.update")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -332,17 +373,26 @@ async fn webhook_nats_headers_forwarded() {
     let headers = msg.headers.expect("NATS message must have headers");
 
     assert_eq!(
-        headers.get("X-Linear-Type").map(|v| v.as_str()).unwrap_or(""),
+        headers
+            .get("X-Linear-Type")
+            .map(|v| v.as_str())
+            .unwrap_or(""),
         "Project",
         "X-Linear-Type must be forwarded"
     );
     assert_eq!(
-        headers.get("X-Linear-Action").map(|v| v.as_str()).unwrap_or(""),
+        headers
+            .get("X-Linear-Action")
+            .map(|v| v.as_str())
+            .unwrap_or(""),
         "update",
         "X-Linear-Action must be forwarded"
     );
     assert_eq!(
-        headers.get("X-Linear-Webhook-Id").map(|v| v.as_str()).unwrap_or(""),
+        headers
+            .get("X-Linear-Webhook-Id")
+            .map(|v| v.as_str())
+            .unwrap_or(""),
         "wh-xyz-999",
         "X-Linear-Webhook-Id must be forwarded"
     );
@@ -357,7 +407,10 @@ async fn webhook_missing_webhook_id_defaults_to_unknown() {
     let body = br#"{"type":"Cycle","action":"create","data":{}}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Cycle.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Cycle.create")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -373,8 +426,14 @@ async fn webhook_missing_webhook_id_defaults_to_unknown() {
         .expect("subscriber closed");
 
     let headers = msg.headers.expect("NATS message must have headers");
-    let got_id = headers.get("X-Linear-Webhook-Id").map(|v| v.as_str()).unwrap_or("");
-    assert_eq!(got_id, "unknown", "missing webhookId must default to 'unknown'; got: {got_id:?}");
+    let got_id = headers
+        .get("X-Linear-Webhook-Id")
+        .map(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(
+        got_id, "unknown",
+        "missing webhookId must default to 'unknown'; got: {got_id:?}"
+    );
 }
 
 /// Only `POST /webhook` is handled. A `GET` to the same path must return
@@ -391,7 +450,12 @@ async fn webhook_get_request_returns_405() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "expected 405 Method Not Allowed for GET; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "expected 405 Method Not Allowed for GET; got {}",
+        resp.status()
+    );
 }
 
 /// The raw request body is forwarded byte-for-byte to NATS without any
@@ -400,11 +464,13 @@ async fn webhook_get_request_returns_405() {
 async fn webhook_raw_body_preserved_in_nats_message() {
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
-    let body =
-        r#"{"type":"Issue","action":"create","data":{"title":"héllo wörld 🚀"}}"#.as_bytes();
+    let body = r#"{"type":"Issue","action":"create","data":{"title":"héllo wörld 🚀"}}"#.as_bytes();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -445,8 +511,14 @@ async fn webhook_custom_subject_prefix_changes_nats_subject() {
     wait_for_port(http_port, Duration::from_secs(5)).await;
 
     let nats = nats_client(nats_port).await;
-    let mut sub = nats.subscribe("mylinear.Issue.create").await.expect("subscribe failed");
-    let mut default_sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("mylinear.Issue.create")
+        .await
+        .expect("subscribe failed");
+    let mut default_sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let body = br#"{"type":"Issue","action":"create","data":{}}"#;
     reqwest::Client::new()
@@ -464,7 +536,10 @@ async fn webhook_custom_subject_prefix_changes_nats_subject() {
     assert_eq!(msg.subject.as_str(), "mylinear.Issue.create");
 
     let stray = tokio::time::timeout(Duration::from_millis(200), default_sub.next()).await;
-    assert!(stray.is_err(), "must not publish to linear.Issue.create when prefix is mylinear");
+    assert!(
+        stray.is_err(),
+        "must not publish to linear.Issue.create when prefix is mylinear"
+    );
 }
 
 /// A large payload (~100 KB) must be forwarded to NATS unchanged.
@@ -474,10 +549,14 @@ async fn webhook_large_payload_is_forwarded() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let large_value = "x".repeat(100_000);
-    let body = format!(r#"{{"type":"Issue","action":"create","data":{{"description":"{large_value}"}}}}"#);
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{"description":"{large_value}"}}}}"#);
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -506,7 +585,10 @@ async fn webhook_concurrent_requests_all_published() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{http_port}/webhook");
@@ -519,7 +601,9 @@ async fn webhook_concurrent_requests_all_published() {
                 client
                     .post(&url)
                     .header("Content-Type", "application/json")
-                    .body(format!(r#"{{"type":"Issue","action":"create","data":{{"i":{i}}}}}"#))
+                    .body(format!(
+                        r#"{{"type":"Issue","action":"create","data":{{"i":{i}}}}}"#
+                    ))
                     .send()
                     .await
                     .unwrap()
@@ -604,7 +688,12 @@ async fn health_endpoint_returns_200() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "expected 200 from /health; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "expected 200 from /health; got {}",
+        resp.status()
+    );
 }
 
 /// `POST /health` is not registered — axum returns 405 Method Not Allowed.
@@ -620,7 +709,12 @@ async fn health_endpoint_only_accepts_get() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "expected 405 for POST /health; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "expected 405 for POST /health; got {}",
+        resp.status()
+    );
 }
 
 /// A request to an unknown path must return 404 Not Found.
@@ -636,7 +730,12 @@ async fn unknown_path_returns_404() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 404, "expected 404 for unknown path; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        404,
+        "expected 404 for unknown path; got {}",
+        resp.status()
+    );
 }
 
 // ── Stream management ─────────────────────────────────────────────────────────
@@ -652,7 +751,10 @@ async fn server_starts_normally_when_stream_already_exists() {
 
     let http_port2 = next_port();
     let nats = spawn_server(nats_port, http_port2, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let body = br#"{"type":"Issue","action":"create","data":{}}"#;
     let resp = reqwest::Client::new()
@@ -663,7 +765,11 @@ async fn server_starts_normally_when_stream_already_exists() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "second server instance must publish normally");
+    assert_eq!(
+        resp.status(),
+        200,
+        "second server instance must publish normally"
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -684,7 +790,9 @@ async fn webhook_recovers_when_jetstream_stream_is_gone() {
 
     let admin = nats_client(nats_port).await;
     let js = async_nats::jetstream::new(admin);
-    js.delete_stream("LINEAR").await.expect("failed to delete LINEAR stream");
+    js.delete_stream("LINEAR")
+        .await
+        .expect("failed to delete LINEAR stream");
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -721,7 +829,9 @@ async fn webhook_recovery_publishes_correct_message_to_nats() {
 
     // Delete the stream to force the recovery path.
     let js = async_nats::jetstream::new(nats_client(nats_port).await);
-    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+    js.delete_stream("LINEAR")
+        .await
+        .expect("failed to delete stream");
 
     let body = r#"{"type":"Issue","action":"create","webhookId":"wh-42","data":{}}"#;
     let resp = reqwest::Client::new()
@@ -887,7 +997,10 @@ async fn spawn_server_with_tolerance(
     let env = InMemoryEnv::new();
     env.set("NATS_URL", format!("localhost:{nats_port}"));
     env.set("LINEAR_WEBHOOK_PORT", http_port.to_string());
-    env.set("LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS", tolerance_secs.to_string());
+    env.set(
+        "LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS",
+        tolerance_secs.to_string(),
+    );
     let config = LinearConfig::from_env(&env);
     let nats_for_server = nats_client(nats_port).await;
     tokio::spawn(async move { serve(config, nats_for_server).await.expect("server error") });
@@ -917,11 +1030,18 @@ async fn webhook_recovers_after_stream_deletion() {
         .send()
         .await
         .expect("first request failed");
-    assert_eq!(resp.status(), 200, "expected 200 before stream deletion; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "expected 200 before stream deletion; got {}",
+        resp.status()
+    );
 
     // 2. Delete the stream to simulate the loss that occurs after a NATS restart
     //    with ephemeral (in-memory) JetStream storage.
-    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+    js.delete_stream("LINEAR")
+        .await
+        .expect("failed to delete stream");
 
     // 3. Server detects the ack failure, re-creates the stream, retries — returns 200.
     let resp = reqwest::Client::new()
@@ -970,7 +1090,9 @@ async fn webhook_returns_error_when_nats_connection_lost() {
             r.status()
         ),
         Err(e) if e.is_timeout() => {
-            panic!("server hung waiting for NATS — the HTTP handler must not block indefinitely: {e}")
+            panic!(
+                "server hung waiting for NATS — the HTTP handler must not block indefinitely: {e}"
+            )
         }
         Err(e) => panic!("unexpected HTTP error: {e}"),
     }
@@ -999,9 +1121,8 @@ async fn webhook_current_timestamp_accepted() {
         .unwrap()
         .as_millis() as u64;
 
-    let body = format!(
-        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{now_ms}}}"#
-    );
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{now_ms}}}"#);
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -1011,7 +1132,12 @@ async fn webhook_current_timestamp_accepted() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "current timestamp must be accepted; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "current timestamp must be accepted; got {}",
+        resp.status()
+    );
 }
 
 /// A webhook with a `webhookTimestamp` older than the tolerance must be
@@ -1116,9 +1242,8 @@ async fn webhook_timestamp_check_disabled_accepts_stale() {
         .as_millis() as u64
         - 3_600_000;
 
-    let body = format!(
-        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{old_ms}}}"#
-    );
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{old_ms}}}"#);
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -1153,8 +1278,9 @@ async fn webhook_future_timestamp_accepted() {
         .as_millis() as u64
         + 3_600_000; // 1 hour in the future
 
-    let body =
-        format!(r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{future_ms}}}"#);
+    let body = format!(
+        r#"{{"type":"Issue","action":"create","data":{{}},"webhookTimestamp":{future_ms}}}"#
+    );
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -1164,7 +1290,12 @@ async fn webhook_future_timestamp_accepted() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "future timestamp must be accepted; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "future timestamp must be accepted; got {}",
+        resp.status()
+    );
 }
 
 /// When `webhookTimestamp` is a JSON float, `serde_json::Value::as_u64()` returns None,
@@ -1204,8 +1335,7 @@ async fn webhook_string_timestamp_skips_replay_check() {
     spawn_server_with_tolerance(nats_port, http_port, 5).await;
 
     // String timestamp from long ago — as_u64() returns None for strings → check skipped.
-    let body =
-        r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":"1234567890000"}"#;
+    let body = r#"{"type":"Issue","action":"create","data":{},"webhookTimestamp":"1234567890000"}"#;
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -1240,7 +1370,12 @@ async fn webhook_type_as_number_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "numeric 'type' must be rejected with 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "numeric 'type' must be rejected with 400; got {}",
+        resp.status()
+    );
 }
 
 /// When `action` is a JSON boolean instead of a string, `as_str()` returns None → 400.
@@ -1275,7 +1410,10 @@ async fn webhook_webhook_id_as_number_defaults_to_unknown() {
     let body = br#"{"type":"Issue","action":"create","data":{},"webhookId":42}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -1291,7 +1429,10 @@ async fn webhook_webhook_id_as_number_defaults_to_unknown() {
         .expect("subscriber closed");
 
     let headers = msg.headers.expect("NATS message must have headers");
-    let webhook_id = headers.get("X-Linear-Webhook-Id").map(|v| v.as_str()).unwrap_or("");
+    let webhook_id = headers
+        .get("X-Linear-Webhook-Id")
+        .map(|v| v.as_str())
+        .unwrap_or("");
     assert_eq!(
         webhook_id, "unknown",
         "numeric webhookId must default to 'unknown'; got: {webhook_id:?}"
@@ -1315,7 +1456,12 @@ async fn webhook_json_null_body_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "JSON null body must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "JSON null body must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// A JSON array body is valid JSON but `parsed.get("type")` returns None → 400.
@@ -1333,7 +1479,12 @@ async fn webhook_json_array_body_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "JSON array body must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "JSON array body must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// A JSON string body is valid JSON but `parsed.get("type")` returns None → 400.
@@ -1351,7 +1502,12 @@ async fn webhook_json_string_body_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "JSON string body must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "JSON string body must return 400; got {}",
+        resp.status()
+    );
 }
 
 // ── Signature edge cases ───────────────────────────────────────────────────────
@@ -1404,7 +1560,9 @@ async fn server_creates_stream_with_custom_name() {
     let js = async_nats::jetstream::new(admin);
 
     // Custom stream must exist.
-    js.get_stream("MYLINEAR").await.expect("MYLINEAR stream must exist");
+    js.get_stream("MYLINEAR")
+        .await
+        .expect("MYLINEAR stream must exist");
 
     // Default stream must NOT exist.
     let default_result = js.get_stream("LINEAR").await;
@@ -1434,7 +1592,10 @@ async fn server_creates_stream_with_custom_max_age() {
     let admin = nats_client(nats_port).await;
     let js = async_nats::jetstream::new(admin);
 
-    let stream = js.get_stream("LINEAR_AGE_TEST").await.expect("stream must exist");
+    let stream = js
+        .get_stream("LINEAR_AGE_TEST")
+        .await
+        .expect("stream must exist");
     let info = stream.cached_info();
 
     assert_eq!(
@@ -1487,7 +1648,10 @@ async fn stream_subjects_filter_uses_custom_prefix() {
     let admin = nats_client(nats_port).await;
     let js = async_nats::jetstream::new(admin);
 
-    let stream = js.get_stream("MYLIN_STREAM").await.expect("stream must exist");
+    let stream = js
+        .get_stream("MYLIN_STREAM")
+        .await
+        .expect("stream must exist");
     let info = stream.cached_info();
 
     assert_eq!(
@@ -1503,7 +1667,7 @@ async fn stream_subjects_filter_uses_custom_prefix() {
 /// guarantee that is the purpose of the integration.
 #[tokio::test]
 async fn webhook_message_is_persisted_in_jetstream() {
-    use async_nats::jetstream::consumer::{pull, DeliverPolicy};
+    use async_nats::jetstream::consumer::{DeliverPolicy, pull};
 
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
@@ -1564,7 +1728,12 @@ async fn webhook_empty_body_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "empty body must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "empty body must return 400; got {}",
+        resp.status()
+    );
 }
 
 // ── Signature header case sensitivity ─────────────────────────────────────────
@@ -1648,7 +1817,12 @@ async fn webhook_empty_type_field_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "empty 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "empty 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// An `action` field that is an empty string must be rejected with 400.
@@ -1670,7 +1844,12 @@ async fn webhook_empty_action_field_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "empty 'action' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "empty 'action' must return 400; got {}",
+        resp.status()
+    );
 }
 
 // ── webhookId as JSON null ─────────────────────────────────────────────────────
@@ -1682,7 +1861,10 @@ async fn webhook_webhook_id_as_null_defaults_to_unknown() {
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("linear.Issue.create").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("linear.Issue.create")
+        .await
+        .expect("subscribe failed");
 
     let body = r#"{"type":"Issue","action":"create","data":{},"webhookId":null}"#;
 
@@ -1694,7 +1876,12 @@ async fn webhook_webhook_id_as_null_defaults_to_unknown() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "null webhookId must be accepted; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "null webhookId must be accepted; got {}",
+        resp.status()
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -1707,7 +1894,11 @@ async fn webhook_webhook_id_as_null_defaults_to_unknown() {
         .and_then(|h| h.get("X-Linear-Webhook-Id"))
         .map(|v| v.as_str());
 
-    assert_eq!(webhook_id, Some("unknown"), "null webhookId must produce X-Linear-Webhook-Id: unknown");
+    assert_eq!(
+        webhook_id,
+        Some("unknown"),
+        "null webhookId must produce X-Linear-Webhook-Id: unknown"
+    );
 }
 
 // ── Additional HTTP methods on /webhook ───────────────────────────────────────
@@ -1727,7 +1918,12 @@ async fn webhook_put_returns_405() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "PUT /webhook must return 405; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "PUT /webhook must return 405; got {}",
+        resp.status()
+    );
 }
 
 /// DELETE /webhook must return 405 Method Not Allowed.
@@ -1743,7 +1939,12 @@ async fn webhook_delete_returns_405() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "DELETE /webhook must return 405; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "DELETE /webhook must return 405; got {}",
+        resp.status()
+    );
 }
 
 /// PATCH /webhook must return 405 Method Not Allowed.
@@ -1761,7 +1962,12 @@ async fn webhook_patch_returns_405() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "PATCH /webhook must return 405; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "PATCH /webhook must return 405; got {}",
+        resp.status()
+    );
 }
 
 // ── webhookTimestamp = 0 ──────────────────────────────────────────────────────
@@ -1846,7 +2052,12 @@ async fn webhook_type_with_space_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "space in 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "space in 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `action` containing a space must also be rejected with 400.
@@ -1864,7 +2075,12 @@ async fn webhook_action_with_space_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "space in 'action' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "space in 'action' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `type` containing `*` (NATS single-token wildcard) must be rejected with 400.
@@ -1882,7 +2098,12 @@ async fn webhook_type_with_nats_wildcard_star_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "'*' in 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "'*' in 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `type` containing `>` (NATS full-wildcard) must be rejected with 400.
@@ -1900,7 +2121,12 @@ async fn webhook_type_with_nats_wildcard_gt_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "'>' in 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "'>' in 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `type` containing `.` would silently add extra subject levels
@@ -1919,7 +2145,12 @@ async fn webhook_type_with_dot_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "'.' in 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "'.' in 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `action` containing `*` (NATS wildcard) must be rejected with 400.
@@ -1937,7 +2168,12 @@ async fn webhook_action_with_nats_wildcard_star_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "'*' in 'action' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "'*' in 'action' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `action` containing a control character (tab, `\t`) must be rejected with 400.
@@ -1956,7 +2192,12 @@ async fn webhook_action_with_control_char_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "control char in 'action' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "control char in 'action' must return 400; got {}",
+        resp.status()
+    );
 }
 
 /// `type` containing a null byte (U+0000) is valid JSON but produces a NATS
@@ -1976,7 +2217,12 @@ async fn webhook_type_with_null_byte_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "null byte in 'type' must return 400; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "null byte in 'type' must return 400; got {}",
+        resp.status()
+    );
 }
 
 // ── NATS authentication ────────────────────────────────────────────────────────
@@ -2017,7 +2263,10 @@ async fn binary_connects_with_nats_token_auth() {
     child.kill().await.ok();
     let _ = child.wait().await;
 
-    assert_eq!(status, 200, "binary must publish to NATS with token auth; got {status}");
+    assert_eq!(
+        status, 200,
+        "binary must publish to NATS with token auth; got {status}"
+    );
 }
 
 /// When NATS requires user/password, the binary must connect using
@@ -2058,7 +2307,10 @@ async fn binary_connects_with_nats_user_password_auth() {
     child.kill().await.ok();
     let _ = child.wait().await;
 
-    assert_eq!(status, 200, "binary must publish to NATS with user/password auth; got {status}");
+    assert_eq!(
+        status, 200,
+        "binary must publish to NATS with user/password auth; got {status}"
+    );
 }
 
 // ── main.rs tracing configuration ─────────────────────────────────────────────
@@ -2092,7 +2344,10 @@ async fn binary_starts_with_invalid_rust_log_falls_back_to_info() {
     child.kill().await.ok();
     let _ = child.wait().await;
 
-    assert_eq!(status, 200, "binary must start normally with invalid RUST_LOG; got {status}");
+    assert_eq!(
+        status, 200,
+        "binary must start normally with invalid RUST_LOG; got {status}"
+    );
 }
 
 // ── NATS reconnect ─────────────────────────────────────────────────────────────
@@ -2198,7 +2453,7 @@ async fn server_resumes_publishing_after_nats_reconnects() {
 /// recovery — not just that the HTTP handler returned 200.
 #[tokio::test]
 async fn webhook_message_is_persisted_after_stream_recovery() {
-    use async_nats::jetstream::consumer::{pull, DeliverPolicy};
+    use async_nats::jetstream::consumer::{DeliverPolicy, pull};
 
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
@@ -2206,7 +2461,9 @@ async fn webhook_message_is_persisted_after_stream_recovery() {
     let js = async_nats::jetstream::new(nats);
 
     // 1. Delete the stream to force the recovery path.
-    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+    js.delete_stream("LINEAR")
+        .await
+        .expect("failed to delete stream");
 
     let body = r#"{"type":"Issue","action":"create","webhookId":"wh-persist","data":{}}"#;
 
@@ -2218,10 +2475,18 @@ async fn webhook_message_is_persisted_after_stream_recovery() {
         .send()
         .await
         .expect("request failed");
-    assert_eq!(resp.status(), 200, "server must self-heal; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "server must self-heal; got {}",
+        resp.status()
+    );
 
     // 3. Verify the retried message is durably stored in the re-created stream.
-    let stream = js.get_stream("LINEAR").await.expect("stream must exist after recovery");
+    let stream = js
+        .get_stream("LINEAR")
+        .await
+        .expect("stream must exist after recovery");
     let consumer = stream
         .create_consumer(pull::Config {
             deliver_policy: DeliverPolicy::All,
@@ -2278,8 +2543,14 @@ async fn webhook_ack_timeout_returns_500() {
     let http_port = next_port();
 
     // Zero ack_timeout → every ACK wait times out immediately.
-    spawn_server_with_timeouts(nats_port, http_port, None, Duration::ZERO, Duration::from_secs(10))
-        .await;
+    spawn_server_with_timeouts(
+        nats_port,
+        http_port,
+        None,
+        Duration::ZERO,
+        Duration::from_secs(10),
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -2324,7 +2595,9 @@ async fn webhook_stream_recreation_timeout_returns_500() {
 
     // Delete the stream so the ack returns an error → triggers recovery path.
     let js = async_nats::jetstream::new(nats);
-    js.delete_stream("LINEAR").await.expect("failed to delete stream");
+    js.delete_stream("LINEAR")
+        .await
+        .expect("failed to delete stream");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))

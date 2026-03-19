@@ -50,6 +50,11 @@ pub mod agent {
     pub fn prompt_events(prefix: &str, session_id: &str, req_id: &str) -> String {
         format!("{}.{}.agent.prompt.events.{}", prefix, session_id, req_id)
     }
+
+    /// Extension method subject: `{prefix}.agent.ext.{method}`.
+    pub fn ext(prefix: &str, method: &str) -> String {
+        format!("{}.agent.ext.{}", prefix, method)
+    }
 }
 
 #[cfg(test)]

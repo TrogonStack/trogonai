@@ -48,7 +48,10 @@ fn map_initialize_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(protocol_version = ?args.protocol_version)
 )]
-pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed>(
+pub async fn handle<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+>(
     bridge: &Bridge<N, C>,
     args: InitializeRequest,
 ) -> Result<InitializeResponse> {
@@ -328,6 +331,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("myorg.prod"),
+            tokio::sync::mpsc::channel(1).0,
         );
         let expected = InitializeResponse::new(ProtocolVersion::LATEST);
         set_json_response(&mock, "myorg.prod.agent.initialize", &expected);

@@ -21,7 +21,11 @@ pub(crate) fn parse_mcp_servers(s: &str) -> Vec<McpServerConfig> {
             let mut parts = entry.splitn(2, '=');
             let name = parts.next()?.trim().to_string();
             let url = parts.next()?.trim().to_string();
-            if name.is_empty() || url.is_empty() { None } else { Some(McpServerConfig { name, url }) }
+            if name.is_empty() || url.is_empty() {
+                None
+            } else {
+                Some(McpServerConfig { name, url })
+            }
         })
         .collect()
 }
@@ -376,7 +380,10 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("SPLIT_EVALUATOR_URL", "http://split:7548");
         let cfg = AgentConfig::from_env(&env);
-        assert_eq!(cfg.split_evaluator_url.as_deref(), Some("http://split:7548"));
+        assert_eq!(
+            cfg.split_evaluator_url.as_deref(),
+            Some("http://split:7548")
+        );
     }
 
     #[test]

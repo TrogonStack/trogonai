@@ -17,7 +17,7 @@ use std::sync::Arc;
 use base64::{Engine as _, engine::general_purpose};
 use tracing::debug;
 
-use crate::agent_loop::{AgentLoop, AgentError, Message};
+use crate::agent_loop::{AgentError, AgentLoop, Message};
 use crate::tools::{ToolContext, ToolDef};
 
 /// Common entry point used by both handlers.
@@ -59,7 +59,10 @@ pub async fn fetch_memory(
     let response = agent
         .http_client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", agent.tool_context.github_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", agent.tool_context.github_token),
+        )
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
@@ -74,6 +77,129 @@ pub async fn fetch_memory(
     let raw = body["content"].as_str()?.replace('\n', "");
     let bytes = general_purpose::STANDARD.decode(&raw).ok()?;
     String::from_utf8(bytes).ok()
+}
+
+/// Convenience: build the shared [`ToolContext`] that all handlers share.
+pub fn make_tool_context(
+    http_client: reqwest::Client,
+    proxy_url: String,
+    github_token: String,
+    linear_token: String,
+    slack_token: String,
+) -> Arc<ToolContext> {
+    Arc::new(ToolContext {
+        http_client,
+        proxy_url,
+        github_token,
+        linear_token,
+        slack_token,
+    })
+}
+
+/// Run a single automation against a raw NATS event payload.
+///
+/// - Prepends the NATS subject and raw event JSON to `automation.prompt` so
+///   the model always has the full event context.
+/// - If `automation.tools` is empty, all built-in tools are available;
+///   otherwise only the named tools are included.
+/// - `automation.memory_path` overrides the per-handler default; if both are
+///   `None` the global [`DEFAULT_MEMORY_PATH`] is used.
+pub async fn run_automation(
+    agent: &AgentLoop,
+    automation: &trogon_automations::Automation,
+    nats_subject: &str,
+    payload: &[u8],
+) -> Result<String, String> {
+    // Build the built-in tool list (optionally filtered by the automation config).
+    let all = crate::tools::all_tool_defs();
+    let mut tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
+        all
+    } else {
+        all.into_iter()
+            .filter(|t| automation.tools.contains(&t.name))
+            .collect()
+    };
+
+    // Initialise automation-specific MCP servers and extend the tool list.
+    let auto_mcp_configs: Vec<crate::config::McpServerConfig> = automation
+        .mcp_servers
+        .iter()
+        .map(|s| crate::config::McpServerConfig {
+            name: s.name.clone(),
+            url: s.url.clone(),
+        })
+        .collect();
+    let (auto_mcp_defs, auto_mcp_dispatch) =
+        crate::runner::init_mcp_servers(&agent.http_client, &auto_mcp_configs).await;
+    tools.extend(auto_mcp_defs);
+
+    // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
+    let merged;
+    let effective: &AgentLoop = if auto_mcp_dispatch.is_empty() && automation.model.is_none() {
+        agent
+    } else {
+        let mut merged_dispatch = agent.mcp_dispatch.clone();
+        merged_dispatch.extend(auto_mcp_dispatch);
+        merged = AgentLoop {
+            http_client: agent.http_client.clone(),
+            proxy_url: agent.proxy_url.clone(),
+            anthropic_token: agent.anthropic_token.clone(),
+            anthropic_base_url: agent.anthropic_base_url.clone(),
+            anthropic_extra_headers: agent.anthropic_extra_headers.clone(),
+            model: automation
+                .model
+                .clone()
+                .unwrap_or_else(|| agent.model.clone()),
+            max_iterations: agent.max_iterations,
+            thinking_budget: agent.thinking_budget,
+            tool_context: Arc::clone(&agent.tool_context),
+            memory_owner: agent.memory_owner.clone(),
+            memory_repo: agent.memory_repo.clone(),
+            memory_path: agent.memory_path.clone(),
+            mcp_tool_defs: agent.mcp_tool_defs.clone(),
+            mcp_dispatch: merged_dispatch,
+            split_client: agent.split_client.clone(),
+            tenant_id: agent.tenant_id.clone(),
+            permission_checker: agent.permission_checker.clone(),
+        };
+        &merged
+    };
+
+    // Format the user prompt: event context + automation-specific instructions.
+    let event_json = serde_json::from_slice::<serde_json::Value>(payload)
+        .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+        .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
+
+    let full_prompt = format!(
+        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{}",
+        automation.prompt
+    );
+
+    // Resolve the memory path: automation override → agent default → built-in default.
+    let mem_path = automation
+        .memory_path
+        .as_deref()
+        .or(effective.memory_path.as_deref())
+        .unwrap_or(DEFAULT_MEMORY_PATH);
+
+    let memory = match (&effective.memory_owner, &effective.memory_repo) {
+        (Some(owner), Some(repo)) => {
+            if effective
+                .is_flag_enabled(&crate::flags::AgentFlag::MemoryEnabled)
+                .await
+            {
+                fetch_memory(effective, owner, repo, mem_path).await
+            } else {
+                debug!("Memory fetch skipped — agent_memory_enabled flag is off");
+                None
+            }
+        }
+        _ => None,
+    };
+
+    run_agent(effective, full_prompt, tools, memory)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -174,10 +300,15 @@ mod tests {
         });
 
         let agent = make_agent(&server.base_url());
-        let automation =
-            make_automation(vec!["get_pr_diff".to_string(), "post_pr_comment".to_string()]);
+        let automation = make_automation(vec![
+            "get_pr_diff".to_string(),
+            "post_pr_comment".to_string(),
+        ]);
         let result = run_automation(&agent, &automation, "github.push", b"{}").await;
-        assert!(result.is_ok(), "list_pr_files was incorrectly included: {result:?}");
+        assert!(
+            result.is_ok(),
+            "list_pr_files was incorrectly included: {result:?}"
+        );
     }
 
     /// Automation memory_path overrides the agent's default memory path.
@@ -225,6 +356,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let mut automation = make_automation(vec![]);
         automation.memory_path = Some("custom/notes.md".to_string()); // override
@@ -255,6 +390,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         }
     }
 
@@ -297,13 +436,15 @@ mod tests {
     async fn fetch_memory_uses_custom_path() {
         let server = MockServer::start_async().await;
         let raw = general_purpose::STANDARD.encode("custom memory");
-        let mock = server.mock_async(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("custom/notes.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": raw }));
-        }).await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path_contains("custom/notes.md");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({ "content": raw }));
+            })
+            .await;
 
         let agent = make_agent(&server.base_url());
         let result = fetch_memory(&agent, "owner", "repo", "custom/notes.md").await;
@@ -325,7 +466,8 @@ mod tests {
     async fn fetch_memory_returns_none_on_403() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(403);
         });
 
@@ -339,7 +481,8 @@ mod tests {
     async fn fetch_memory_returns_none_on_500() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(500);
         });
 
@@ -353,7 +496,8 @@ mod tests {
     async fn fetch_memory_returns_none_when_content_field_missing() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({ "name": "memory.md", "sha": "abc" }));
@@ -369,7 +513,8 @@ mod tests {
     async fn fetch_memory_returns_none_on_invalid_base64() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({ "content": "!!!not-valid-base64!!!" }));
@@ -379,113 +524,4 @@ mod tests {
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
-}
-
-/// Convenience: build the shared [`ToolContext`] that all handlers share.
-pub fn make_tool_context(
-    http_client: reqwest::Client,
-    proxy_url: String,
-    github_token: String,
-    linear_token: String,
-    slack_token: String,
-) -> Arc<ToolContext> {
-    Arc::new(ToolContext { http_client, proxy_url, github_token, linear_token, slack_token })
-}
-
-/// Run a single automation against a raw NATS event payload.
-///
-/// - Prepends the NATS subject and raw event JSON to `automation.prompt` so
-///   the model always has the full event context.
-/// - If `automation.tools` is empty, all built-in tools are available;
-///   otherwise only the named tools are included.
-/// - `automation.memory_path` overrides the per-handler default; if both are
-///   `None` the global [`DEFAULT_MEMORY_PATH`] is used.
-pub async fn run_automation(
-    agent: &AgentLoop,
-    automation: &trogon_automations::Automation,
-    nats_subject: &str,
-    payload: &[u8],
-) -> Result<String, String> {
-    // Build the built-in tool list (optionally filtered by the automation config).
-    let all = crate::tools::all_tool_defs();
-    let mut tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
-        all
-    } else {
-        all.into_iter()
-            .filter(|t| automation.tools.contains(&t.name))
-            .collect()
-    };
-
-    // Initialise automation-specific MCP servers and extend the tool list.
-    let auto_mcp_configs: Vec<crate::config::McpServerConfig> = automation
-        .mcp_servers
-        .iter()
-        .map(|s| crate::config::McpServerConfig { name: s.name.clone(), url: s.url.clone() })
-        .collect();
-    let (auto_mcp_defs, auto_mcp_dispatch) =
-        crate::runner::init_mcp_servers(&agent.http_client, &auto_mcp_configs).await;
-    tools.extend(auto_mcp_defs);
-
-    // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
-    let merged;
-    let effective: &AgentLoop =
-        if auto_mcp_dispatch.is_empty() && automation.model.is_none() {
-            agent
-        } else {
-            let mut merged_dispatch = agent.mcp_dispatch.clone();
-            merged_dispatch.extend(auto_mcp_dispatch);
-            merged = AgentLoop {
-                http_client: agent.http_client.clone(),
-                proxy_url: agent.proxy_url.clone(),
-                anthropic_token: agent.anthropic_token.clone(),
-                anthropic_base_url: agent.anthropic_base_url.clone(),
-                anthropic_extra_headers: agent.anthropic_extra_headers.clone(),
-                model: automation.model.clone().unwrap_or_else(|| agent.model.clone()),
-                max_iterations: agent.max_iterations,
-                thinking_budget: agent.thinking_budget,
-                tool_context: Arc::clone(&agent.tool_context),
-                memory_owner: agent.memory_owner.clone(),
-                memory_repo: agent.memory_repo.clone(),
-                memory_path: agent.memory_path.clone(),
-                mcp_tool_defs: agent.mcp_tool_defs.clone(),
-                mcp_dispatch: merged_dispatch,
-                split_client: agent.split_client.clone(),
-                tenant_id: agent.tenant_id.clone(),
-                permission_checker: agent.permission_checker.clone(),
-            };
-            &merged
-        };
-
-    // Format the user prompt: event context + automation-specific instructions.
-    let event_json = serde_json::from_slice::<serde_json::Value>(payload)
-        .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-        .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
-
-    let full_prompt = format!(
-        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{}",
-        automation.prompt
-    );
-
-    // Resolve the memory path: automation override → agent default → built-in default.
-    let mem_path = automation
-        .memory_path
-        .as_deref()
-        .or(effective.memory_path.as_deref())
-        .unwrap_or(DEFAULT_MEMORY_PATH);
-
-    let memory = match (&effective.memory_owner, &effective.memory_repo) {
-        (Some(owner), Some(repo)) => {
-            if effective.is_flag_enabled(&crate::flags::AgentFlag::MemoryEnabled).await {
-                fetch_memory(effective, owner, repo, mem_path).await
-            } else {
-                debug!("Memory fetch skipped — agent_memory_enabled flag is off");
-                None
-            }
-        }
-        _ => None,
-    };
-
-    run_agent(effective, full_prompt, tools, memory)
-        .await
-        .map_err(|e| e.to_string())
 }

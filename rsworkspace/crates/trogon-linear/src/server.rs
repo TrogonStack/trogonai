@@ -34,7 +34,13 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let js = jetstream::new(nats);
 
-    ensure_stream(&js, &config.stream_name, &config.subject_prefix, config.stream_max_age).await?;
+    ensure_stream(
+        &js,
+        &config.stream_name,
+        &config.subject_prefix,
+        config.stream_max_age,
+    )
+    .await?;
 
     let state = AppState {
         js,
@@ -92,7 +98,11 @@ async fn ensure_stream(
     })
     .await?;
 
-    info!(stream = stream_name, max_age_secs = max_age.as_secs(), "JetStream stream ready");
+    info!(
+        stream = stream_name,
+        max_age_secs = max_age.as_secs(),
+        "JetStream stream ready"
+    );
     Ok(())
 }
 
@@ -105,86 +115,6 @@ async fn handle_health() -> StatusCode {
 /// control character (bytes 0–31 and 127).
 fn has_invalid_nats_chars(s: &str) -> bool {
     s.contains(['.', ' ', '*', '>']) || s.bytes().any(|b| b < 32 || b == 127)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::has_invalid_nats_chars;
-
-    // ── Valid tokens ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn valid_alphanumeric_passes() {
-        assert!(!has_invalid_nats_chars("Issue"));
-        assert!(!has_invalid_nats_chars("create"));
-        assert!(!has_invalid_nats_chars("ProjectUpdate"));
-    }
-
-    #[test]
-    fn valid_with_hyphen_and_underscore_passes() {
-        assert!(!has_invalid_nats_chars("foo_bar"));
-        assert!(!has_invalid_nats_chars("foo-bar"));
-    }
-
-    // ── Separator / wildcard chars (branch 1) ─────────────────────────────────
-
-    #[test]
-    fn dot_fails() {
-        assert!(has_invalid_nats_chars("foo.bar"));
-        assert!(has_invalid_nats_chars("."));
-    }
-
-    #[test]
-    fn space_fails() {
-        assert!(has_invalid_nats_chars("foo bar"));
-        assert!(has_invalid_nats_chars(" "));
-    }
-
-    #[test]
-    fn star_wildcard_fails() {
-        assert!(has_invalid_nats_chars("foo*"));
-        assert!(has_invalid_nats_chars("*"));
-    }
-
-    #[test]
-    fn gt_wildcard_fails() {
-        assert!(has_invalid_nats_chars("foo>"));
-        assert!(has_invalid_nats_chars(">"));
-    }
-
-    // ── Control characters (branch 2) ─────────────────────────────────────────
-
-    #[test]
-    fn null_byte_fails() {
-        assert!(has_invalid_nats_chars("foo\0bar"));
-    }
-
-    #[test]
-    fn tab_fails() {
-        assert!(has_invalid_nats_chars("foo\tbar"));
-    }
-
-    #[test]
-    fn newline_fails() {
-        assert!(has_invalid_nats_chars("foo\nbar"));
-    }
-
-    #[test]
-    fn carriage_return_fails() {
-        assert!(has_invalid_nats_chars("foo\rbar"));
-    }
-
-    #[test]
-    fn del_byte_127_fails() {
-        assert!(has_invalid_nats_chars("foo\x7fbar"));
-    }
-
-    // ── Edge: empty string is not flagged (caught by is_empty() upstream) ─────
-
-    #[test]
-    fn empty_string_passes() {
-        assert!(!has_invalid_nats_chars(""));
-    }
 }
 
 #[instrument(
@@ -232,21 +162,29 @@ async fn handle_webhook(
 
     // Replay-attack protection: reject events whose `webhookTimestamp` (ms)
     // falls outside the configured tolerance window.
-    if let Some(tolerance) = state.timestamp_tolerance {
-        if let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64()) {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let age_ms = now_ms.saturating_sub(ts_ms);
-            if age_ms > tolerance.as_millis() as u64 {
-                warn!(age_ms, tolerance_ms = tolerance.as_millis() as u64, "Stale webhookTimestamp — potential replay attack");
-                return StatusCode::BAD_REQUEST;
-            }
+    if let Some(tolerance) = state.timestamp_tolerance
+        && let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64())
+    {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let age_ms = now_ms.saturating_sub(ts_ms);
+        if age_ms > tolerance.as_millis() as u64 {
+            warn!(
+                age_ms,
+                tolerance_ms = tolerance.as_millis() as u64,
+                "Stale webhookTimestamp — potential replay attack"
+            );
+            return StatusCode::BAD_REQUEST;
         }
     }
 
-    let Some(event_type) = parsed.get("type").and_then(|v| v.as_str()).map(str::to_owned) else {
+    let Some(event_type) = parsed
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+    else {
         warn!("Missing 'type' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
@@ -259,7 +197,11 @@ async fn handle_webhook(
         return StatusCode::BAD_REQUEST;
     }
 
-    let Some(action) = parsed.get("action").and_then(|v| v.as_str()).map(str::to_owned) else {
+    let Some(action) = parsed
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+    else {
         warn!("Missing 'action' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
@@ -339,7 +281,9 @@ async fn handle_webhook(
                         Ok(ack_future) => {
                             match tokio::time::timeout(state.ack_timeout, ack_future).await {
                                 Ok(Ok(_)) => {
-                                    info!("Published Linear event to NATS after stream re-creation");
+                                    info!(
+                                        "Published Linear event to NATS after stream re-creation"
+                                    );
                                     StatusCode::OK
                                 }
                                 Ok(Err(e)) => {
@@ -359,7 +303,10 @@ async fn handle_webhook(
                     }
                 }
                 Err(_) => {
-                    warn!(ack_timeout_ms = state.ack_timeout.as_millis(), "NATS ack timed out");
+                    warn!(
+                        ack_timeout_ms = state.ack_timeout.as_millis(),
+                        "NATS ack timed out"
+                    );
                     StatusCode::INTERNAL_SERVER_ERROR
                 }
             }
@@ -368,5 +315,84 @@ async fn handle_webhook(
             warn!(error = %e, "Failed to publish Linear event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::has_invalid_nats_chars;
+
+    // ── Valid tokens ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn valid_alphanumeric_passes() {
+        assert!(!has_invalid_nats_chars("Issue"));
+        assert!(!has_invalid_nats_chars("create"));
+        assert!(!has_invalid_nats_chars("ProjectUpdate"));
+    }
+
+    #[test]
+    fn valid_with_hyphen_and_underscore_passes() {
+        assert!(!has_invalid_nats_chars("foo_bar"));
+        assert!(!has_invalid_nats_chars("foo-bar"));
+    }
+
+    // ── Separator / wildcard chars (branch 1) ─────────────────────────────────
+
+    #[test]
+    fn dot_fails() {
+        assert!(has_invalid_nats_chars("foo.bar"));
+        assert!(has_invalid_nats_chars("."));
+    }
+
+    #[test]
+    fn space_fails() {
+        assert!(has_invalid_nats_chars("foo bar"));
+        assert!(has_invalid_nats_chars(" "));
+    }
+
+    #[test]
+    fn star_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo*"));
+        assert!(has_invalid_nats_chars("*"));
+    }
+
+    #[test]
+    fn gt_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo>"));
+        assert!(has_invalid_nats_chars(">"));
+    }
+
+    // ── Control characters (branch 2) ─────────────────────────────────────────
+
+    #[test]
+    fn null_byte_fails() {
+        assert!(has_invalid_nats_chars("foo\0bar"));
+    }
+
+    #[test]
+    fn tab_fails() {
+        assert!(has_invalid_nats_chars("foo\tbar"));
+    }
+
+    #[test]
+    fn newline_fails() {
+        assert!(has_invalid_nats_chars("foo\nbar"));
+    }
+
+    #[test]
+    fn carriage_return_fails() {
+        assert!(has_invalid_nats_chars("foo\rbar"));
+    }
+
+    #[test]
+    fn del_byte_127_fails() {
+        assert!(has_invalid_nats_chars("foo\x7fbar"));
+    }
+
+    // ── Edge: empty string is not flagged (caught by is_empty() upstream) ─────
+
+    #[test]
+    fn empty_string_passes() {
+        assert!(!has_invalid_nats_chars(""));
     }
 }

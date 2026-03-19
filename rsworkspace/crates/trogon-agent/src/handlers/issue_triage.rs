@@ -16,9 +16,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent};
+use crate::agent_loop::AgentLoop;
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Run the issue-triage agent from a raw Linear webhook payload.
 ///
@@ -33,7 +33,10 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let event_type = event["type"].as_str().unwrap_or("");
 
     if action != "create" || event_type != "Issue" {
-        info!(action, event_type, "Linear event not relevant for triage — skipping");
+        info!(
+            action,
+            event_type, "Linear event not relevant for triage — skipping"
+        );
         return None;
     }
 
@@ -56,7 +59,10 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let tools = triage_tools();
 
-    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent
+        .memory_path
+        .as_deref()
+        .unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -157,9 +163,9 @@ mod tests {
         let bytes = serde_json::to_vec(&payload).unwrap();
 
         // Build a stub AgentLoop (it must never be called for non-create actions).
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -171,15 +177,19 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
-        mcp_tool_defs: vec![],
-        mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let result = handle(&agent, &bytes).await;
@@ -188,9 +198,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_non_issue_type() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -202,15 +212,19 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
-        mcp_tool_defs: vec![],
-        mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let payload = serde_json::json!({
@@ -224,9 +238,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -238,15 +252,19 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
-        mcp_tool_defs: vec![],
-        mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            split_client: None,
+            tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
 
         let result = handle(&agent, b"not json").await;

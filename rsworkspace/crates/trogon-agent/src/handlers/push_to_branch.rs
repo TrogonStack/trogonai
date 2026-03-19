@@ -6,9 +6,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{DEFAULT_MEMORY_PATH, fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
-use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Run the push-to-branch agent from a raw GitHub `push` webhook payload.
 ///
@@ -33,9 +33,14 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let branch = git_ref.trim_start_matches("refs/heads/");
     let pusher = event["pusher"]["name"].as_str().unwrap_or("unknown");
     let commit_count = event["commits"].as_array().map(|c| c.len()).unwrap_or(0);
-    let head_commit_msg = event["head_commit"]["message"].as_str().unwrap_or("(no message)");
+    let head_commit_msg = event["head_commit"]["message"]
+        .as_str()
+        .unwrap_or("(no message)");
 
-    info!(owner, repo, branch, pusher, commit_count, "Starting push-to-branch agent");
+    info!(
+        owner,
+        repo, branch, pusher, commit_count, "Starting push-to-branch agent"
+    );
 
     let prompt = format!(
         "{pusher} pushed {commit_count} commit(s) to branch `{branch}` in {owner}/{repo}.\n\
@@ -65,7 +70,8 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
 fn push_tools() -> Vec<ToolDef> {
     let mut tools = vec![
-        tool_def("get_file_contents",
+        tool_def(
+            "get_file_contents",
             "Read a file from the repository. Returns JSON with `sha` and `content`.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","path"],
@@ -75,7 +81,9 @@ fn push_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("post_pr_comment", "Post a comment on a pull request.",
+        tool_def(
+            "post_pr_comment",
+            "Post a comment on a pull request.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number","body"],
                 "properties": {
@@ -100,9 +108,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_tag_push() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -114,7 +122,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -123,6 +131,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let payload = serde_json::json!({
             "ref": "refs/tags/v1.0.0",
@@ -132,14 +144,18 @@ mod tests {
             "head_commit": {"message": "tag"},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn handle_skips_deletion_event() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -151,7 +167,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -160,6 +176,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let payload = serde_json::json!({
             "ref": "refs/heads/feature-x",
@@ -169,6 +189,10 @@ mod tests {
             "head_commit": null,
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 }

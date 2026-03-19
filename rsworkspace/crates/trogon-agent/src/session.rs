@@ -85,8 +85,7 @@ impl SessionStore {
     /// Persist a session (create or overwrite).
     pub async fn put(&self, session: &ChatSession) -> Result<(), SessionStoreError> {
         let key = kv_key(&session.tenant_id, &session.id);
-        let bytes =
-            serde_json::to_vec(session).map_err(|e| SessionStoreError(e.to_string()))?;
+        let bytes = serde_json::to_vec(session).map_err(|e| SessionStoreError(e.to_string()))?;
         self.kv
             .put(&key, Bytes::from(bytes))
             .await
@@ -101,7 +100,12 @@ impl SessionStore {
         id: &str,
     ) -> Result<Option<ChatSession>, SessionStoreError> {
         let key = kv_key(tenant_id, id);
-        match self.kv.get(&key).await.map_err(|e| SessionStoreError(e.to_string()))? {
+        match self
+            .kv
+            .get(&key)
+            .await
+            .map_err(|e| SessionStoreError(e.to_string()))?
+        {
             None => Ok(None),
             Some(bytes) => {
                 let s = serde_json::from_slice::<ChatSession>(&bytes)
@@ -112,24 +116,23 @@ impl SessionStore {
     }
 
     /// Delete a session.
-    pub async fn delete(
-        &self,
-        tenant_id: &str,
-        id: &str,
-    ) -> Result<(), SessionStoreError> {
+    pub async fn delete(&self, tenant_id: &str, id: &str) -> Result<(), SessionStoreError> {
         let key = kv_key(tenant_id, id);
-        self.kv.delete(&key).await.map_err(|e| SessionStoreError(e.to_string()))?;
+        self.kv
+            .delete(&key)
+            .await
+            .map_err(|e| SessionStoreError(e.to_string()))?;
         Ok(())
     }
 
     /// Return all sessions for `tenant_id`, sorted newest-first by `updated_at`.
-    pub async fn list(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Vec<ChatSession>, SessionStoreError> {
+    pub async fn list(&self, tenant_id: &str) -> Result<Vec<ChatSession>, SessionStoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys =
-            self.kv.keys().await.map_err(|e| SessionStoreError(e.to_string()))?;
+        let mut keys = self
+            .kv
+            .keys()
+            .await
+            .map_err(|e| SessionStoreError(e.to_string()))?;
         let mut result = Vec::new();
 
         while let Some(key) = keys.next().await {
@@ -165,7 +168,9 @@ mod tests {
             memory_path: None,
             messages: vec![
                 Message::user_text("Hello"),
-                Message::assistant(vec![ContentBlock::Text { text: "Hi there!".to_string() }]),
+                Message::assistant(vec![ContentBlock::Text {
+                    text: "Hi there!".to_string(),
+                }]),
             ],
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),

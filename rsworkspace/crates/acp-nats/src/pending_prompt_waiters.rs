@@ -24,6 +24,7 @@ use agent_client_protocol::{PromptResponse, SessionId};
 use tokio::sync::oneshot;
 use trogon_std::time::GetElapsed;
 
+#[allow(dead_code)]
 type PromptResponseReceiver = oneshot::Receiver<std::result::Result<PromptResponse, String>>;
 
 /// Per-prompt correlation token. Ensures late responses for prompt A cannot resolve prompt B.
@@ -38,6 +39,7 @@ struct WaiterEntry {
 /// Lifetime token for a registered session waiter.
 ///
 /// Dropping the guard removes the waiter so cancellations and task aborts do not leak entries.
+#[allow(dead_code)]
 pub(crate) struct PromptWaiterGuard<'a, I: Copy> {
     waiters: &'a PendingSessionPromptResponseWaiters<I>,
     session_id: SessionId,
@@ -71,6 +73,7 @@ impl<'a, I: Copy> Drop for PromptWaiterGuard<'a, I> {
 /// subjects and backend state.
 pub(crate) struct PendingSessionPromptResponseWaiters<I: Copy> {
     waiters: Mutex<HashMap<SessionId, WaiterEntry>>,
+    #[allow(dead_code)]
     next_waiter_token: AtomicU64,
     timed_out: Mutex<HashMap<(SessionId, PromptToken), I>>,
 }
@@ -85,6 +88,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         }
     }
 
+    #[allow(dead_code)]
     /// Registers the receiver for the next prompt response of `session_id`.
     ///
     /// Returns `Err(())` when another waiter is already active for the same session.
@@ -126,6 +130,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         ))
     }
 
+    #[allow(dead_code)]
     /// Marks a prompt waiter as timed out to suppress transient duplicate warnings for late responses.
     pub(crate) fn mark_prompt_waiter_timed_out<C: GetElapsed<Instant = I>>(
         &self,
@@ -163,6 +168,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
             .contains_key(&(session_id.clone(), prompt_token))
     }
 
+    #[allow(dead_code)]
     /// Cancels any pending waiter for the session with a Cancelled response.
     /// Used when a cancel notification arrives; we don't have a prompt_token.
     pub fn cancel_waiter_for_session(
@@ -213,6 +219,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         }
     }
 
+    #[allow(dead_code)]
     fn remove_waiter_if_token_matches(&self, session_id: &SessionId, prompt_token: PromptToken) {
         let mut waiters = self.waiters.lock().unwrap();
         if waiters

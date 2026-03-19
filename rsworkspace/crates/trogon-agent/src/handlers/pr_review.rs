@@ -18,9 +18,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
 use super::{fetch_memory, run_agent};
+use crate::agent_loop::AgentLoop;
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Actions that trigger a review.
 const REVIEW_ACTIONS: &[&str] = &["opened", "reopened", "synchronize"];
@@ -65,7 +65,10 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     // Pre-fetch memory file and inject as Anthropic system prompt.
     // Returns None gracefully when the file doesn't exist yet.
-    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent
+        .memory_path
+        .as_deref()
+        .unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = fetch_memory(agent, owner, repo, mem_path).await;
 
     match run_agent(agent, prompt, tools, memory).await {
@@ -231,8 +234,8 @@ mod tests {
     }
 
     fn make_agent() -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -253,6 +256,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         }
     }
 
@@ -263,11 +270,18 @@ mod tests {
             "number": 5,
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&make_agent(), &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
+        assert!(matches!(
+            handle(&make_agent(), b"not json").await,
+            Some(Err(_))
+        ));
     }
 }

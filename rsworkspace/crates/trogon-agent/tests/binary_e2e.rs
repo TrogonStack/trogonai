@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::process::Command;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -33,7 +33,11 @@ async fn create_required_streams(nats_port: u16) {
         .expect("Failed to connect to NATS");
     let js = async_nats::jetstream::new(nats);
 
-    for (name, subject) in [("GITHUB", "github.pull_request"), ("LINEAR", "linear.Issue.>"), ("CRON_TICKS", "cron.>")] {
+    for (name, subject) in [
+        ("GITHUB", "github.pull_request"),
+        ("LINEAR", "linear.Issue.>"),
+        ("CRON_TICKS", "cron.>"),
+    ] {
         js.get_or_create_stream(async_nats::jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],

@@ -25,5 +25,6 @@ trogon-std = { path = "../trogon-std" }
 [dev-dependencies]
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "testing"] }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }

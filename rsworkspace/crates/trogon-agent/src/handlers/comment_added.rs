@@ -7,9 +7,9 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{DEFAULT_MEMORY_PATH, fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
-use crate::tools::{ToolDef, tool_def, slack};
-use super::{fetch_memory, run_agent, DEFAULT_MEMORY_PATH};
+use crate::tools::{ToolDef, slack, tool_def};
 
 /// Run the comment-added agent from a raw GitHub `issue_comment` webhook payload.
 ///
@@ -28,12 +28,17 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let repo = event["repository"]["name"].as_str()?;
     let issue_number = event["issue"]["number"].as_u64()?;
     let comment_body = event["comment"]["body"].as_str().unwrap_or("");
-    let commenter = event["comment"]["user"]["login"].as_str().unwrap_or("unknown");
+    let commenter = event["comment"]["user"]["login"]
+        .as_str()
+        .unwrap_or("unknown");
     let is_pr = event["issue"]["pull_request"].is_object();
 
     let kind = if is_pr { "pull request" } else { "issue" };
 
-    info!(owner, repo, issue_number, commenter, "Starting comment-added agent");
+    info!(
+        owner,
+        repo, issue_number, commenter, "Starting comment-added agent"
+    );
 
     let prompt = format!(
         "{commenter} commented on {kind} #{issue_number} in {owner}/{repo}:\n\
@@ -62,7 +67,9 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
 fn comment_tools() -> Vec<ToolDef> {
     let mut tools = vec![
-        tool_def("get_pr_comments", "Get all comments on a pull request or issue.",
+        tool_def(
+            "get_pr_comments",
+            "Get all comments on a pull request or issue.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number"],
                 "properties": {
@@ -71,7 +78,9 @@ fn comment_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("post_pr_comment", "Post a comment on a pull request or issue.",
+        tool_def(
+            "post_pr_comment",
+            "Post a comment on a pull request or issue.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","pr_number","body"],
                 "properties": {
@@ -81,7 +90,8 @@ fn comment_tools() -> Vec<ToolDef> {
                 }
             }),
         ),
-        tool_def("get_file_contents",
+        tool_def(
+            "get_file_contents",
             "Read a file from the repository. Returns JSON with `sha` and `content`.",
             serde_json::json!({
                 "type": "object", "required": ["owner","repo","path"],
@@ -107,9 +117,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_non_created_action() {
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let agent = AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -121,7 +131,7 @@ mod tests {
                 proxy_url: "http://localhost:9999".to_string(),
                 github_token: String::new(),
                 linear_token: String::new(),
-            slack_token: String::new(),
+                slack_token: String::new(),
             }),
             memory_owner: None,
             memory_repo: None,
@@ -130,6 +140,10 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         };
         let payload = serde_json::json!({
             "action": "deleted",
@@ -137,12 +151,16 @@ mod tests {
             "comment": {"body": "hi", "user": {"login": "u"}},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 
     fn make_agent() -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
@@ -163,12 +181,19 @@ mod tests {
             mcp_dispatch: vec![],
             split_client: None,
             tenant_id: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            thinking_budget: None,
+            permission_checker: None,
         }
     }
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
+        assert!(matches!(
+            handle(&make_agent(), b"not json").await,
+            Some(Err(_))
+        ));
     }
 
     #[tokio::test]
@@ -179,6 +204,10 @@ mod tests {
             "comment": {"body": "hi", "user": {"login": "u"}},
             "issue": {"number": 1}
         });
-        assert!(handle(&make_agent(), &serde_json::to_vec(&payload).unwrap()).await.is_none());
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none()
+        );
     }
 }

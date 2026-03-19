@@ -1,3 +1,4 @@
+use crate::prompt_event::UserContentBlock;
 use agent_client_protocol::{
     ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, EmbeddedResourceResource,
     Error, ErrorCode, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptRequest,
@@ -5,7 +6,6 @@ use agent_client_protocol::{
     SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, Usage, UsageUpdate,
 };
-use crate::prompt_event::UserContentBlock;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::time::timeout;
@@ -25,9 +25,8 @@ where
     C: trogon_std::time::GetElapsed,
 {
     // 1. Validate session ID — reject before touching NATS
-    let session_id = AcpSessionId::try_from(&args.session_id).map_err(|_| {
-        Error::new(ErrorCode::InvalidParams.into(), "invalid session id")
-    })?;
+    let session_id = AcpSessionId::try_from(&args.session_id)
+        .map_err(|_| Error::new(ErrorCode::InvalidParams.into(), "invalid session id"))?;
 
     // 2. Convert ACP content blocks to rich UserContentBlocks for the runner
     let content = acp_blocks_to_user_content(&args.prompt);
@@ -37,7 +36,11 @@ where
         .prompt
         .iter()
         .filter_map(|block| {
-            if let ContentBlock::Text(t) = block { Some(t.text.as_str()) } else { None }
+            if let ContentBlock::Text(t) = block {
+                Some(t.text.as_str())
+            } else {
+                None
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -50,15 +53,24 @@ where
     let events_subject =
         agent::prompt_events(bridge.config.acp_prefix(), session_id.as_ref(), &req_id);
 
-    let mut subscriber = bridge.nats.subscribe(events_subject).await.map_err(|e| {
-        Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}"))
-    })?;
+    let mut subscriber = bridge
+        .nats
+        .subscribe(events_subject)
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let session_cancelled_subject =
         agent::session_cancelled(bridge.config.acp_prefix(), session_id.as_ref());
-    let mut cancel_notify = bridge.nats.subscribe(session_cancelled_subject).await.map_err(|e| {
-        Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}"))
-    })?;
+    let mut cancel_notify = bridge
+        .nats
+        .subscribe(session_cancelled_subject)
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("subscribe cancelled: {e}"),
+            )
+        })?;
 
     // 5. Build and publish the prompt payload via NATS Core
     let payload = PromptPayload {
@@ -67,8 +79,8 @@ where
         content,
         user_message,
     };
-    let payload_bytes =
-        serde_json::to_vec(&payload).map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+    let payload_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
 
     let prompt_subject = agent::prompt(bridge.config.acp_prefix(), session_id.as_ref());
     bridge
@@ -177,8 +189,10 @@ where
                         StopReason::EndTurn
                     }
                 };
-                let total = accumulated_input + accumulated_output
-                    + accumulated_cache_creation + accumulated_cache_read;
+                let total = accumulated_input
+                    + accumulated_output
+                    + accumulated_cache_creation
+                    + accumulated_cache_read;
                 let usage = Usage::new(total, accumulated_input, accumulated_output)
                     .cached_read_tokens(accumulated_cache_read)
                     .cached_write_tokens(accumulated_cache_creation);
@@ -195,18 +209,18 @@ where
                 tool_name_cache.insert(id.clone(), name.clone());
 
                 // TodoWrite → emit Plan update instead of a tool_call notification
-                if name == "TodoWrite" {
-                    if let Some(entries) = todo_write_to_plan_entries(&input) {
-                        todo_write_ids.insert(id);
-                        let notification = SessionNotification::new(
-                            args.session_id.clone(),
-                            SessionUpdate::Plan(Plan::new(entries)),
-                        );
-                        if bridge.notification_sender.send(notification).await.is_err() {
-                            warn!("notification receiver dropped; continuing prompt");
-                        }
-                        continue;
+                if name == "TodoWrite"
+                    && let Some(entries) = todo_write_to_plan_entries(&input)
+                {
+                    todo_write_ids.insert(id);
+                    let notification = SessionNotification::new(
+                        args.session_id.clone(),
+                        SessionUpdate::Plan(Plan::new(entries)),
+                    );
+                    if bridge.notification_sender.send(notification).await.is_err() {
+                        warn!("notification receiver dropped; continuing prompt");
                     }
+                    continue;
                 }
 
                 let tool_call = ToolCall::new(id, name.clone())
@@ -221,7 +235,12 @@ where
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
-            PromptEvent::ToolCallFinished { id, output, exit_code, signal } => {
+            PromptEvent::ToolCallFinished {
+                id,
+                output,
+                exit_code,
+                signal,
+            } => {
                 // TodoWrite finished — Plan was already sent, skip the tool_call_update
                 if todo_write_ids.contains(&id) {
                     continue;
@@ -253,7 +272,12 @@ where
                     args.session_id.clone(),
                     SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.clone())),
                 );
-                if bridge.notification_sender.send(mode_notification).await.is_err() {
+                if bridge
+                    .notification_sender
+                    .send(mode_notification)
+                    .await
+                    .is_err()
+                {
                     warn!("notification receiver dropped; continuing prompt");
                 }
                 let config_options = build_plan_mode_config_options(&mode, &model);
@@ -261,19 +285,33 @@ where
                     args.session_id.clone(),
                     SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
                 );
-                if bridge.notification_sender.send(config_notification).await.is_err() {
+                if bridge
+                    .notification_sender
+                    .send(config_notification)
+                    .await
+                    .is_err()
+                {
                     warn!("notification receiver dropped; continuing prompt");
                 }
             }
             PromptEvent::SystemStatus { message } => {
                 tracing::info!(message = %message, "agent system status");
             }
-            PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window } => {
+            PromptEvent::UsageUpdate {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+                context_window,
+            } => {
                 accumulated_input += input_tokens as u64;
                 accumulated_output += output_tokens as u64;
                 accumulated_cache_creation += cache_creation_tokens as u64;
                 accumulated_cache_read += cache_read_tokens as u64;
-                let used = accumulated_input + accumulated_output + accumulated_cache_read + accumulated_cache_creation;
+                let used = accumulated_input
+                    + accumulated_output
+                    + accumulated_cache_read
+                    + accumulated_cache_creation;
                 let size = context_window.unwrap_or(200_000u64);
                 let update = UsageUpdate::new(used, size);
                 let notification = SessionNotification::new(
@@ -288,22 +326,13 @@ where
     }
 }
 
-/// Convert ACP `ContentBlock`s to `UserContentBlock`s for transport over NATS.
-///
-/// Follows the same logic as `promptToClaude()` in the TypeScript reference:
-/// - Text → plain text
-/// - ResourceLink → `[@name](uri)` formatted link
-/// - Resource (text) → inline [@name](uri) link + `<context ref="uri">\n{text}\n</context>` appended at the end
-/// - Resource (blob) → skipped
-/// - Image (base64) → image block
-/// - Image (http/https url) → native URL image block; other URL schemes → `![image](url)` text link
-
 /// Format a URI as an inline reference link, matching TS `formatUriAsLink`.
 /// For file:// and zed:// URIs, extracts the last path segment as the display name.
 /// For other URIs, uses the full URI as-is.
 fn format_uri_as_link(uri: &str) -> String {
     if uri.starts_with("file://") || uri.starts_with("zed://") {
-        let name = uri.trim_end_matches('/')
+        let name = uri
+            .trim_end_matches('/')
             .rsplit('/')
             .next()
             .filter(|s| !s.is_empty())
@@ -314,6 +343,15 @@ fn format_uri_as_link(uri: &str) -> String {
     }
 }
 
+/// Convert ACP `ContentBlock`s to `UserContentBlock`s for transport over NATS.
+///
+/// Follows the same logic as `promptToClaude()` in the TypeScript reference:
+/// - Text → plain text
+/// - ResourceLink → `[@name](uri)` formatted link
+/// - Resource (text) → inline [@name](uri) link + `<context ref="uri">\n{text}\n</context>` appended at the end
+/// - Resource (blob) → skipped
+/// - Image (base64) → image block
+/// - Image (http/https url) → native URL image block; other URL schemes → `![image](url)` text link
 fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     let mut content: Vec<UserContentBlock> = Vec::new();
     let mut context_parts: Vec<UserContentBlock> = Vec::new();
@@ -388,7 +426,10 @@ fn make_claude_code_meta(tool_name: &str) -> agent_client_protocol::Meta {
         serde_json::Value::String(tool_name.to_string()),
     );
     let mut meta = serde_json::Map::new();
-    meta.insert("claudeCode".to_string(), serde_json::Value::Object(claude_code));
+    meta.insert(
+        "claudeCode".to_string(),
+        serde_json::Value::Object(claude_code),
+    );
     meta
 }
 
@@ -415,7 +456,11 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
             Some(PlanEntry::new(content, priority, status))
         })
         .collect();
-    if entries.is_empty() { None } else { Some(entries) }
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
 }
 
 /// Rewrite `/mcp:server:command args` → `/server:command (MCP) args`
@@ -423,7 +468,8 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
 fn rewrite_mcp_slash_command(text: &str) -> String {
     // Match /mcp:server:command with optional trailing args
     if let Some(rest) = text.strip_prefix("/mcp:") {
-        let (server_cmd, args) = rest.split_once(char::is_whitespace)
+        let (server_cmd, args) = rest
+            .split_once(char::is_whitespace)
             .map(|(sc, a)| (sc, Some(a)))
             .unwrap_or((rest, None));
         if let Some((server, command)) = server_cmd.split_once(':') {
@@ -509,7 +555,10 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("bypassPermissions");
-        assert!(!has_bypass, "bypassPermissions should not appear in EnterPlanMode config options");
+        assert!(
+            !has_bypass,
+            "bypassPermissions should not appear in EnterPlanMode config options"
+        );
     }
 
     #[test]
@@ -525,7 +574,11 @@ mod tests {
     fn config_options_model_includes_all_three_models() {
         let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
         let json = serde_json::to_string(&opts[1]).unwrap();
-        for expected in &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"] {
+        for expected in &[
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ] {
             assert!(json.contains(expected), "missing model option: {expected}");
         }
     }
@@ -536,7 +589,10 @@ mod tests {
     fn make_claude_code_meta_has_tool_name() {
         let meta = make_claude_code_meta("EnterPlanMode");
         let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
-        assert_eq!(cc.get("toolName").unwrap().as_str().unwrap(), "EnterPlanMode");
+        assert_eq!(
+            cc.get("toolName").unwrap().as_str().unwrap(),
+            "EnterPlanMode"
+        );
     }
 
     // ── rewrite_mcp_slash_command ─────────────────────────────────────────────
@@ -608,15 +664,18 @@ mod tests {
         let blocks = vec![ContentBlock::Text(TextContent::new("hello world"))];
         let result = acp_blocks_to_user_content(&blocks);
         assert_eq!(result.len(), 1);
-        assert!(matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "hello world"));
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "hello world")
+        );
     }
 
     #[test]
     fn resource_link_block_converts_to_resource_link() {
         use agent_client_protocol::{ContentBlock, ResourceLink};
-        let blocks = vec![ContentBlock::ResourceLink(
-            ResourceLink::new("my-file.rs", "file:///src/my-file.rs"),
-        )];
+        let blocks = vec![ContentBlock::ResourceLink(ResourceLink::new(
+            "my-file.rs",
+            "file:///src/my-file.rs",
+        ))];
         let result = acp_blocks_to_user_content(&blocks);
         assert_eq!(result.len(), 1);
         assert!(
@@ -628,9 +687,10 @@ mod tests {
     #[test]
     fn image_block_with_data_converts_to_image() {
         use agent_client_protocol::{ContentBlock, ImageContent};
-        let blocks = vec![ContentBlock::Image(
-            ImageContent::new("base64data==", "image/png"),
-        )];
+        let blocks = vec![ContentBlock::Image(ImageContent::new(
+            "base64data==",
+            "image/png",
+        ))];
         let result = acp_blocks_to_user_content(&blocks);
         assert_eq!(result.len(), 1);
         assert!(
@@ -676,19 +736,26 @@ mod tests {
         let blocks = vec![
             ContentBlock::Text(TextContent::new("before")),
             ContentBlock::Resource(EmbeddedResource::new(
-                EmbeddedResourceResource::TextResourceContents(
-                    TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
-                ),
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "fn main() {}",
+                    "file:///src/main.rs",
+                )),
             )),
             ContentBlock::Text(TextContent::new("after")),
         ];
         let result = acp_blocks_to_user_content(&blocks);
         // Expect: "before", inline file link, "after", context block (at end)
         assert_eq!(result.len(), 4, "expected 4 blocks, got: {result:?}");
-        assert!(matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "before"));
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "before")
+        );
         // inline reference link for the resource
-        assert!(matches!(&result[1], crate::prompt_event::UserContentBlock::Text { text } if text.contains("file:///src/main.rs")));
-        assert!(matches!(&result[2], crate::prompt_event::UserContentBlock::Text { text } if text == "after"));
+        assert!(
+            matches!(&result[1], crate::prompt_event::UserContentBlock::Text { text } if text.contains("file:///src/main.rs"))
+        );
+        assert!(
+            matches!(&result[2], crate::prompt_event::UserContentBlock::Text { text } if text == "after")
+        );
         // context block appended at end
         assert!(
             matches!(&result[3], crate::prompt_event::UserContentBlock::Context { uri, text }
@@ -699,12 +766,13 @@ mod tests {
     #[test]
     fn embedded_resource_blob_is_skipped() {
         use agent_client_protocol::{
-            ContentBlock, EmbeddedResource, EmbeddedResourceResource, BlobResourceContents,
+            BlobResourceContents, ContentBlock, EmbeddedResource, EmbeddedResourceResource,
         };
         let blocks = vec![ContentBlock::Resource(EmbeddedResource::new(
-            EmbeddedResourceResource::BlobResourceContents(
-                BlobResourceContents::new("binarydata==", "file:///image.bin"),
-            ),
+            EmbeddedResourceResource::BlobResourceContents(BlobResourceContents::new(
+                "binarydata==",
+                "file:///image.bin",
+            )),
         ))];
         let result = acp_blocks_to_user_content(&blocks);
         assert!(result.is_empty(), "blob resources must be skipped");
@@ -713,7 +781,10 @@ mod tests {
     #[test]
     fn audio_block_is_skipped() {
         use agent_client_protocol::{AudioContent, ContentBlock};
-        let blocks = vec![ContentBlock::Audio(AudioContent::new("audiodata==", "audio/mp3"))];
+        let blocks = vec![ContentBlock::Audio(AudioContent::new(
+            "audiodata==",
+            "audio/mp3",
+        ))];
         let result = acp_blocks_to_user_content(&blocks);
         assert!(result.is_empty(), "audio blocks must be skipped");
     }
@@ -727,14 +798,16 @@ mod tests {
         // Two embedded text resources followed by a text block
         let blocks = vec![
             ContentBlock::Resource(EmbeddedResource::new(
-                EmbeddedResourceResource::TextResourceContents(
-                    TextResourceContents::new("content A", "file:///a.rs"),
-                ),
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "content A",
+                    "file:///a.rs",
+                )),
             )),
             ContentBlock::Resource(EmbeddedResource::new(
-                EmbeddedResourceResource::TextResourceContents(
-                    TextResourceContents::new("content B", "file:///b.rs"),
-                ),
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "content B",
+                    "file:///b.rs",
+                )),
             )),
             ContentBlock::Text(TextContent::new("user message")),
         ];
@@ -742,8 +815,14 @@ mod tests {
         // 2 inline links + 1 text + 2 context blocks = 5
         assert_eq!(result.len(), 5);
         // Last two must be Context blocks
-        assert!(matches!(&result[3], crate::prompt_event::UserContentBlock::Context { .. }));
-        assert!(matches!(&result[4], crate::prompt_event::UserContentBlock::Context { .. }));
+        assert!(matches!(
+            &result[3],
+            crate::prompt_event::UserContentBlock::Context { .. }
+        ));
+        assert!(matches!(
+            &result[4],
+            crate::prompt_event::UserContentBlock::Context { .. }
+        ));
     }
 
     // ── todo_write_to_plan_entries ────────────────────────────────────────────

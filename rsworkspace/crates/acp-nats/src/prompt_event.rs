@@ -107,7 +107,9 @@ mod tests {
 
     #[test]
     fn prompt_event_text_delta_tag() {
-        let e = PromptEvent::TextDelta { text: "hi".to_string() };
+        let e = PromptEvent::TextDelta {
+            text: "hi".to_string(),
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "text_delta");
         assert_eq!(v["text"], "hi");
@@ -115,7 +117,9 @@ mod tests {
 
     #[test]
     fn prompt_event_done_tag() {
-        let e = PromptEvent::Done { stop_reason: "end_turn".to_string() };
+        let e = PromptEvent::Done {
+            stop_reason: "end_turn".to_string(),
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "done");
         assert_eq!(v["stop_reason"], "end_turn");
@@ -123,7 +127,9 @@ mod tests {
 
     #[test]
     fn prompt_event_error_tag() {
-        let e = PromptEvent::Error { message: "oops".to_string() };
+        let e = PromptEvent::Error {
+            message: "oops".to_string(),
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "error");
         assert_eq!(v["message"], "oops");
@@ -131,7 +137,13 @@ mod tests {
 
     #[test]
     fn prompt_event_usage_update_tag() {
-        let e = PromptEvent::UsageUpdate { input_tokens: 100, output_tokens: 50, cache_creation_tokens: 0, cache_read_tokens: 0, context_window: None };
+        let e = PromptEvent::UsageUpdate {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: None,
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "usage_update");
         assert_eq!(v["input_tokens"], 100);
@@ -140,7 +152,9 @@ mod tests {
 
     #[test]
     fn prompt_event_roundtrip_done() {
-        let e = PromptEvent::Done { stop_reason: "end_turn".to_string() };
+        let e = PromptEvent::Done {
+            stop_reason: "end_turn".to_string(),
+        };
         let json = serde_json::to_string(&e).unwrap();
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(e2, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"));
@@ -148,14 +162,18 @@ mod tests {
 
     #[test]
     fn prompt_event_system_status_tag() {
-        let e = PromptEvent::SystemStatus { message: "rate_limit_warning".to_string() };
+        let e = PromptEvent::SystemStatus {
+            message: "rate_limit_warning".to_string(),
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "system_status");
         assert_eq!(v["message"], "rate_limit_warning");
         // Roundtrip
         let json = serde_json::to_string(&e).unwrap();
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning"));
+        assert!(
+            matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning")
+        );
     }
 
     #[test]
