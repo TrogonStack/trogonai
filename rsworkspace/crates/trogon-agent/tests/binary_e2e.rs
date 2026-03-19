@@ -115,12 +115,19 @@ async fn binary_agent_starts_and_stays_alive_with_valid_config() {
     child.kill().await.ok();
 }
 
-/// The agent binary exits non-zero when the required JetStream streams
-/// (GITHUB, LINEAR) do not exist on the NATS server.
+/// The agent binary creates missing JetStream streams on startup and stays alive.
+/// The runner calls `ensure_stream` idempotently, so no pre-existing streams
+/// are required — the agent bootstraps them itself.
 #[tokio::test]
-async fn binary_agent_exits_nonzero_when_streams_missing() {
+async fn binary_agent_creates_missing_streams_and_stays_alive() {
     let (_nats_container, nats_port) = start_nats().await;
-    // Intentionally do NOT create the GITHUB / LINEAR streams.
+
+    // Warm up JetStream by connecting before spawning the binary, ensuring
+    // the NATS server is fully ready to accept JetStream operations.
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .expect("Failed to connect to NATS for warm-up");
+    drop(nats);
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_agent"))
         .env("NATS_URL", format!("localhost:{nats_port}"))
@@ -132,14 +139,17 @@ async fn binary_agent_exits_nonzero_when_streams_missing() {
         .spawn()
         .expect("Failed to spawn agent binary");
 
-    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
-        .await
-        .expect("Agent binary did not exit within 10 s when streams are missing")
-        .expect("Failed to wait for agent process");
+    // Give the binary time to connect and create the missing streams.
+    tokio::time::sleep(Duration::from_millis(800)).await;
 
+    let exit = child
+        .try_wait()
+        .expect("Failed to poll agent process status");
     assert!(
-        !status.success(),
-        "Agent binary must exit non-zero when JetStream streams are missing; got {:?}",
-        status
+        exit.is_none(),
+        "Agent binary crashed during startup (streams should be created, not required); exit: {:?}",
+        exit
     );
+
+    child.kill().await.ok();
 }
