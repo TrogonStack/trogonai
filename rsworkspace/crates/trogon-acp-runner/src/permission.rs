@@ -71,3 +71,107 @@ impl PermissionChecker for ChannelPermissionChecker {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_agent::agent_loop::PermissionChecker;
+
+    fn make_checker(tx: PermissionTx, allowed_tools: Vec<String>) -> ChannelPermissionChecker {
+        ChannelPermissionChecker {
+            session_id: "sess-1".to_string(),
+            tx,
+            allowed_tools,
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_allows_tool_in_allowed_list() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec!["Bash".to_string()]);
+        let result = checker
+            .check("sess-1", "tc-1", "Bash", &serde_json::Value::Null)
+            .await;
+        assert!(result, "Bash should be auto-allowed");
+    }
+
+    #[tokio::test]
+    async fn auto_allows_is_case_sensitive() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec!["Bash".to_string()]);
+        // Lowercase "bash" is NOT the same as "Bash" — channel will be used
+        let (tx2, mut rx2) = mpsc::channel(1);
+        let checker2 = make_checker(tx2, vec!["Bash".to_string()]);
+        // Respond with false from a separate task so we don't deadlock
+        tokio::spawn(async move {
+            if let Some(req) = rx2.recv().await {
+                let _ = req.response_tx.send(false);
+            }
+        });
+        let result = checker2
+            .check("sess-1", "tc-1", "bash", &serde_json::Value::Null)
+            .await;
+        assert!(!result, "lowercase bash must not match Bash in allowed list");
+        drop(checker);
+    }
+
+    #[tokio::test]
+    async fn channel_allow_returns_true() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec![]);
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(true);
+            }
+        });
+        let result = checker
+            .check("sess-1", "tc-2", "Edit", &serde_json::Value::Null)
+            .await;
+        assert!(result, "channel returned allow");
+    }
+
+    #[tokio::test]
+    async fn channel_deny_returns_false() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec![]);
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(false);
+            }
+        });
+        let result = checker
+            .check("sess-1", "tc-3", "Write", &serde_json::Value::Null)
+            .await;
+        assert!(!result, "channel returned deny");
+    }
+
+    #[tokio::test]
+    async fn closed_channel_returns_false() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx); // close the receiver
+        let checker = make_checker(tx, vec![]);
+        let result = checker
+            .check("sess-1", "tc-4", "Read", &serde_json::Value::Null)
+            .await;
+        assert!(!result, "closed channel should default to deny");
+    }
+
+    #[tokio::test]
+    async fn permission_req_carries_correct_fields() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec![]);
+        let input = serde_json::json!({"path": "/tmp/x"});
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                assert_eq!(req.session_id, "sess-1");
+                assert_eq!(req.tool_call_id, "tc-99");
+                assert_eq!(req.tool_name, "Read");
+                assert_eq!(req.tool_input, serde_json::json!({"path": "/tmp/x"}));
+                let _ = req.response_tx.send(true);
+            }
+        });
+        let _ = checker
+            .check("sess-1", "tc-99", "Read", &input)
+            .await;
+    }
+}

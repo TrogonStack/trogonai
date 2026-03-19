@@ -1,13 +1,17 @@
 use super::Bridge;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
+use agent_client_protocol::{
+    CancelNotification, Error, ErrorCode, PromptResponse, Result, StopReason,
+};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
 
-/// Publishes the cancel notification to the backend via NATS (fire-and-forget).
-/// The publish failure is logged and recorded as a metric but does not propagate
-/// to the caller, so the client always receives `Ok(())`.
+/// Handles cancel notification requests.
+///
+/// Validates the session ID and publishes the cancellation to the backend (fire-and-forget).
+/// The backend owns session state and will respond to the in-flight prompt with `stopReason: cancelled`.
+/// Publish failure is logged and recorded in metrics but does not propagate to the caller.
 #[instrument(
     name = "acp.session.cancel",
     skip(bridge, args),
@@ -25,9 +29,7 @@ pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushCl
         bridge
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
-        bridge
-            .metrics
-            .record_error("session_validate", "invalid_session_id");
+        bridge.metrics.record_error("cancel", "invalid_session_id");
         Error::new(
             ErrorCode::InvalidParams.into(),
             format!("Invalid session ID: {}", e),
@@ -46,7 +48,7 @@ pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushCl
     )
     .await;
 
-    if let Err(error) = publish_result {
+    if let Err(error) = &publish_result {
         warn!(
             session_id = %args.session_id,
             error = %error,
@@ -68,8 +70,20 @@ pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushCl
     }
 
     bridge
-        .metrics
-        .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), true);
+        .cancelled_sessions
+        .mark_cancelled(args.session_id.clone(), &bridge.clock);
+    bridge
+        .pending_session_prompt_responses
+        .cancel_waiter_for_session(
+            &args.session_id,
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+        );
+
+    bridge.metrics.record_request(
+        "cancel",
+        bridge.clock.elapsed(start).as_secs_f64(),
+        publish_result.is_ok(),
+    );
 
     Ok(())
 }
@@ -78,7 +92,7 @@ pub async fn handle<N: RequestClient + PublishClient + SubscribeClient + FlushCl
 mod tests {
     use super::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
+    use agent_client_protocol::{Agent, CancelNotification, ErrorCode, SessionId, StopReason};
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
@@ -87,6 +101,7 @@ mod tests {
     };
     use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
+    use trogon_std::time::MockClock;
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
@@ -127,6 +142,22 @@ mod tests {
         (mock, bridge, exporter, provider)
     }
 
+    fn mock_bridge_with_clock() -> (
+        AdvancedMockNatsClient,
+        MockClock,
+        Bridge<AdvancedMockNatsClient, MockClock>,
+    ) {
+        let mock = AdvancedMockNatsClient::new();
+        let clock = MockClock::new();
+        let bridge = Bridge::new(
+            mock.clone(),
+            clock.clone(),
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("acp"),
+        );
+        (mock, clock, bridge)
+    }
+
     fn has_request_metric(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
         method: &str,
@@ -136,7 +167,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -170,7 +201,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors.total")
+            .find(|m| m.name() == "acp.errors")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -246,11 +277,11 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "cancel", false),
-            "expected acp.request.count with method=cancel, success=false on validation failure"
+            "expected acp.requests with method=cancel, success=false on validation failure"
         );
         assert!(
-            has_error_metric(&finished_metrics, "session_validate", "invalid_session_id"),
-            "expected acp.errors.total with operation=session_validate, reason=invalid_session_id"
+            has_error_metric(&finished_metrics, "cancel", "invalid_session_id"),
+            "expected acp.errors with operation=cancel, reason=invalid_session_id"
         );
         provider.shutdown().unwrap();
     }
@@ -265,7 +296,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "cancel", true),
-            "expected acp.request.count with method=cancel, success=true"
+            "expected acp.requests with method=cancel, success=true"
         );
         provider.shutdown().unwrap();
     }
@@ -281,11 +312,11 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_error_metric(&finished_metrics, "cancel", "cancel_publish_failed"),
-            "expected acp.errors.total with operation=cancel, reason=cancel_publish_failed"
+            "expected acp.errors with operation=cancel, reason=cancel_publish_failed"
         );
         assert!(
-            has_request_metric(&finished_metrics, "cancel", true),
-            "publish failure is fire-and-forget; caller still gets Ok, so success=true"
+            has_request_metric(&finished_metrics, "cancel", false),
+            "request metric records publish outcome; success=false when publish fails"
         );
         provider.shutdown().unwrap();
     }
@@ -299,7 +330,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -318,7 +349,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.errors.total")
+            .f64_histogram("acp.errors")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -330,5 +361,103 @@ mod tests {
             "cancel_publish_failed"
         ));
         provider.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_marks_session_as_cancelled() {
+        let (_mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id = "cancel-session-001";
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_id.into(), &bridge.clock)
+                .is_none()
+        );
+
+        let notification = CancelNotification::new(session_id);
+        bridge.cancel(notification).await.unwrap();
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_id.into(), &bridge.clock)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_resolves_pending_prompt_waiter_with_cancelled() {
+        let (_mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id: SessionId = "cancel-session-002".into();
+
+        let (rx, _guard, _token) = bridge
+            .pending_session_prompt_responses
+            .register_waiter(session_id.clone())
+            .unwrap();
+
+        let notification = CancelNotification::new(session_id.clone());
+        bridge.cancel(notification).await.unwrap();
+
+        let response = rx
+            .await
+            .expect("Should receive cancelled response")
+            .expect("Prompt waiter should receive success response");
+        assert_eq!(response.stop_reason, StopReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancel_publishes_to_nats() {
+        let (mock, _clock, bridge) = mock_bridge_with_clock();
+        let session_id = "cancel-session-003";
+
+        let notification = CancelNotification::new(session_id);
+        bridge.cancel(notification).await.unwrap();
+
+        let published = mock.published_messages();
+        assert!(
+            published.iter().any(|s| s.contains("session.cancel")),
+            "Expected cancel publish, got: {:?}",
+            published
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_session_evicts_expired_on_mark() {
+        let (_mock, clock, bridge) = mock_bridge_with_clock();
+
+        let session_old: SessionId = "old-session".into();
+        let session_new: SessionId = "new-session".into();
+
+        bridge
+            .cancelled_sessions
+            .mark_cancelled(session_old.clone(), &bridge.clock);
+
+        clock.advance(Duration::from_secs(301));
+
+        for idx in 0..15 {
+            let filler_session: SessionId = format!("filler-{idx}").into();
+            bridge
+                .cancelled_sessions
+                .mark_cancelled(filler_session, &bridge.clock);
+        }
+
+        bridge
+            .cancelled_sessions
+            .mark_cancelled(session_new.clone(), &bridge.clock);
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_old, &bridge.clock)
+                .is_none()
+        );
+
+        assert!(
+            bridge
+                .cancelled_sessions
+                .take_if_cancelled(&session_new, &bridge.clock)
+                .is_some()
+        );
     }
 }

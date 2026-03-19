@@ -102,7 +102,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .any(|sm| {
                 sm.metrics().any(|metric| {
-                    if metric.name() != "acp.request.count" {
+                    if metric.name() != "acp.requests" {
                         return false;
                     }
                     let data = metric.data();
@@ -126,7 +126,7 @@ mod tests {
             });
         assert!(
             found,
-            "expected acp.request.count datapoint with method=authenticate, success={}",
+            "expected acp.requests datapoint with method=authenticate, success={}",
             expected_success
         );
     }
@@ -189,12 +189,11 @@ mod tests {
     #[tokio::test]
     async fn authenticate_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
-        let expected = AuthenticateResponse::default();
+        let expected = AuthenticateResponse::new();
         set_json_response(&mock, "acp.agent.authenticate", &expected);
 
-        let request = AuthenticateRequest::new("test");
+        let request = AuthenticateRequest::new("api-key");
         let result = bridge.authenticate(request).await;
-
         assert!(result.is_ok());
     }
 

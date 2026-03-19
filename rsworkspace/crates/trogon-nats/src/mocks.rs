@@ -1,5 +1,8 @@
 use crate::client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use async_nats::subject::ToSubject;
+use futures::StreamExt;
+use futures::channel::mpsc;
+use futures::stream::BoxStream;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
@@ -17,12 +20,12 @@ impl std::error::Error for MockError {}
 pub struct MockNatsClient {
     published: Arc<Mutex<Vec<PublishedMessage>>>,
     subscribed_subjects: Arc<Mutex<Vec<String>>>,
+    subscribe_stream: Arc<Mutex<Option<mpsc::UnboundedReceiver<async_nats::Message>>>>,
 }
 
 #[derive(Clone, Debug)]
 struct PublishedMessage {
     subject: String,
-    #[allow(dead_code)]
     payload: bytes::Bytes,
 }
 
@@ -31,7 +34,17 @@ impl MockNatsClient {
         Self {
             published: Arc::new(Mutex::new(Vec::new())),
             subscribed_subjects: Arc::new(Mutex::new(Vec::new())),
+            subscribe_stream: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Sets up a channel for the next `subscribe()` call.
+    /// Returns a sender — push messages into it to feed the subscription.
+    /// Drop the sender to close the stream, ending the subscriber loop.
+    pub fn inject_messages(&self) -> mpsc::UnboundedSender<async_nats::Message> {
+        let (tx, rx) = mpsc::unbounded();
+        *self.subscribe_stream.lock().unwrap() = Some(rx);
+        tx
     }
 
     pub fn published_messages(&self) -> Vec<String> {
@@ -40,6 +53,15 @@ impl MockNatsClient {
             .unwrap()
             .iter()
             .map(|m| m.subject.clone())
+            .collect()
+    }
+
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.payload.clone())
             .collect()
     }
 
@@ -62,6 +84,8 @@ pub struct AdvancedMockNatsClient {
     /// Number of publishes to fail before succeeding. fail_next_publish() sets this to 1.
     /// Use fail_publish_count(n) to fail n times (e.g. 4 for standard retry: 1 + 3 retries).
     publish_fail_count: Arc<Mutex<u32>>,
+    /// Number of flushes to fail before succeeding. fail_next_flush() sets this to 1.
+    flush_fail_count: Arc<Mutex<u32>>,
 }
 
 impl std::fmt::Debug for AdvancedMockNatsClient {
@@ -77,6 +101,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
             )
             .field("should_fail_request", &self.should_fail_request)
             .field("publish_fail_count", &self.publish_fail_count)
+            .field("flush_fail_count", &self.flush_fail_count)
             .finish()
     }
 }
@@ -88,7 +113,12 @@ impl AdvancedMockNatsClient {
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
             publish_fail_count: Arc::new(Mutex::new(0)),
+            flush_fail_count: Arc::new(Mutex::new(0)),
         }
+    }
+
+    pub fn fail_next_flush(&self) {
+        *self.flush_fail_count.lock().unwrap() = 1;
     }
 
     pub fn fail_next_publish(&self) {
@@ -115,12 +145,20 @@ impl AdvancedMockNatsClient {
         self.base.published_messages()
     }
 
+    pub fn published_payloads(&self) -> Vec<bytes::Bytes> {
+        self.base.published_payloads()
+    }
+
     pub fn subscribed_to(&self) -> Vec<String> {
         self.base.subscribed_to()
     }
 
     pub fn clear_responses(&self) {
         self.request_responses.lock().unwrap().clear();
+    }
+
+    pub fn inject_messages(&self) -> futures::channel::mpsc::UnboundedSender<async_nats::Message> {
+        self.base.inject_messages()
     }
 }
 
@@ -132,16 +170,21 @@ impl Default for AdvancedMockNatsClient {
 
 impl SubscribeClient for MockNatsClient {
     type SubscribeError = MockError;
+    type Subscription = BoxStream<'static, async_nats::Message>;
 
     async fn subscribe<S: ToSubject + Send>(
         &self,
         subject: S,
-    ) -> Result<async_nats::Subscriber, MockError> {
+    ) -> Result<Self::Subscription, MockError> {
         self.subscribed_subjects
             .lock()
             .unwrap()
             .push(subject.to_subject().to_string());
-        Err(MockError("mock: subscribe not implemented".to_string()))
+
+        match self.subscribe_stream.lock().unwrap().take() {
+            Some(rx) => Ok(rx.boxed()),
+            None => Err(MockError("mock: subscribe not implemented".to_string())),
+        }
     }
 }
 
@@ -185,11 +228,12 @@ impl FlushClient for MockNatsClient {
 
 impl SubscribeClient for AdvancedMockNatsClient {
     type SubscribeError = MockError;
+    type Subscription = BoxStream<'static, async_nats::Message>;
 
     async fn subscribe<S: ToSubject + Send>(
         &self,
         subject: S,
-    ) -> Result<async_nats::Subscriber, MockError> {
+    ) -> Result<Self::Subscription, MockError> {
         self.base.subscribe(subject).await
     }
 }
@@ -260,6 +304,18 @@ impl FlushClient for AdvancedMockNatsClient {
     type FlushError = MockError;
 
     async fn flush(&self) -> Result<(), MockError> {
+        let should_fail = {
+            let mut count = self.flush_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated flush failure".to_string()));
+        }
         self.base.flush().await
     }
 }
@@ -286,6 +342,7 @@ mod tests {
             )
             .await;
         assert_eq!(mock.published_messages(), vec!["foo"]);
+        assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("bar")]);
     }
 
     #[tokio::test]
@@ -335,6 +392,7 @@ mod tests {
             .await;
         assert!(second.is_ok());
         assert_eq!(mock.published_messages(), vec!["foo"]);
+        assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("y")]);
     }
 
     #[tokio::test]

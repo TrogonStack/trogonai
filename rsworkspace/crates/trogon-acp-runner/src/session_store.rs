@@ -154,3 +154,149 @@ fn days_in_month(y: u64, m: u64) -> u64 {
         _ => 30,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_leap ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_leap_returns_true_for_divisible_by_4() {
+        assert!(is_leap(2024));
+    }
+
+    #[test]
+    fn is_leap_returns_false_for_century_non_400() {
+        assert!(!is_leap(1900));
+        assert!(!is_leap(2100));
+    }
+
+    #[test]
+    fn is_leap_returns_true_for_400_multiple() {
+        assert!(is_leap(2000));
+        assert!(is_leap(2400));
+    }
+
+    #[test]
+    fn is_leap_returns_false_for_regular_year() {
+        assert!(!is_leap(2023));
+        assert!(!is_leap(2025));
+    }
+
+    // ── days_in_month ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn days_in_month_january_is_31() {
+        assert_eq!(days_in_month(2024, 1), 31);
+    }
+
+    #[test]
+    fn days_in_month_april_is_30() {
+        assert_eq!(days_in_month(2024, 4), 30);
+    }
+
+    #[test]
+    fn days_in_month_feb_leap_year_is_29() {
+        assert_eq!(days_in_month(2024, 2), 29);
+    }
+
+    #[test]
+    fn days_in_month_feb_non_leap_year_is_28() {
+        assert_eq!(days_in_month(2023, 2), 28);
+    }
+
+    #[test]
+    fn days_in_month_december_is_31() {
+        assert_eq!(days_in_month(2024, 12), 31);
+    }
+
+    // ── epoch_to_parts ────────────────────────────────────────────────────────
+
+    #[test]
+    fn epoch_to_parts_unix_epoch_zero() {
+        // 0 seconds = 1970-01-01 00:00:00 UTC
+        assert_eq!(epoch_to_parts(0), (1970, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn epoch_to_parts_known_timestamp() {
+        // 2024-01-01T00:00:00Z = 1704067200
+        assert_eq!(epoch_to_parts(1_704_067_200), (2024, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn epoch_to_parts_known_timestamp_with_time() {
+        // 2024-03-19T12:34:56Z = 1710851696
+        let (y, mo, d, h, min, s) = epoch_to_parts(1_710_851_696);
+        assert_eq!(y, 2024);
+        assert_eq!(mo, 3);
+        assert_eq!(d, 19);
+        assert_eq!(h, 12);
+        assert_eq!(min, 34);
+        assert_eq!(s, 56);
+    }
+
+    #[test]
+    fn epoch_to_parts_end_of_1970() {
+        // 1970-12-31T23:59:59Z
+        let (y, mo, d, h, min, s) = epoch_to_parts(365 * 86400 - 1);
+        assert_eq!(y, 1970);
+        assert_eq!(mo, 12);
+        assert_eq!(d, 31);
+        assert_eq!(h, 23);
+        assert_eq!(min, 59);
+        assert_eq!(s, 59);
+    }
+
+    // ── now_iso8601 ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn now_iso8601_has_correct_format() {
+        let ts = now_iso8601();
+        // Must match YYYY-MM-DDTHH:MM:SSZ
+        assert_eq!(ts.len(), 20, "unexpected length: {ts}");
+        assert!(ts.ends_with('Z'), "must end with Z: {ts}");
+        assert_eq!(&ts[4..5], "-", "separator after year: {ts}");
+        assert_eq!(&ts[7..8], "-", "separator after month: {ts}");
+        assert_eq!(&ts[10..11], "T", "T separator: {ts}");
+        assert_eq!(&ts[13..14], ":", "colon after hour: {ts}");
+        assert_eq!(&ts[16..17], ":", "colon after minute: {ts}");
+    }
+
+    #[test]
+    fn now_iso8601_year_is_plausible() {
+        let ts = now_iso8601();
+        let year: u32 = ts[..4].parse().expect("year must be numeric");
+        assert!(year >= 2024, "year {year} seems too early");
+        assert!(year < 2100, "year {year} seems too far in the future");
+    }
+
+    // ── SessionState serde ────────────────────────────────────────────────────
+
+    #[test]
+    fn session_state_default_roundtrip() {
+        let state = SessionState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.mode, "");
+        assert!(back.messages.is_empty());
+    }
+
+    #[test]
+    fn session_state_optional_fields_omitted_from_json() {
+        let state = SessionState { model: None, ..Default::default() };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(!json.contains("\"model\""), "None model must be omitted: {json}");
+    }
+
+    #[test]
+    fn session_state_model_present_when_set() {
+        let state = SessionState {
+            model: Some("claude-opus-4-6".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
+    }
+}

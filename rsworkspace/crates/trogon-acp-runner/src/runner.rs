@@ -729,6 +729,119 @@ mod tests {
         assert!(json.contains("\"claude-opus-4-6\""), "model missing");
     }
 
+    // ── context_window_tokens ─────────────────────────────────────────────────
+
+    #[test]
+    fn context_window_tokens_opus_returns_200k() {
+        assert_eq!(context_window_tokens("claude-opus-4-6"), 200_000);
+    }
+
+    #[test]
+    fn context_window_tokens_sonnet_returns_200k() {
+        assert_eq!(context_window_tokens("claude-sonnet-4-6"), 200_000);
+    }
+
+    #[test]
+    fn context_window_tokens_haiku_returns_200k() {
+        assert_eq!(context_window_tokens("claude-haiku-4-5-20251001"), 200_000);
+    }
+
+    #[test]
+    fn context_window_tokens_unknown_model_returns_200k() {
+        assert_eq!(context_window_tokens("unknown-model-x"), 200_000);
+    }
+
+    // ── user_message_from_payload ─────────────────────────────────────────────
+
+    #[test]
+    fn user_message_from_payload_fallback_to_user_message_when_content_empty() {
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![],
+            user_message: "hello fallback".to_string(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content.len(), 1);
+        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "hello fallback"));
+    }
+
+    #[test]
+    fn user_message_from_payload_text_block() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![UserContentBlock::Text { text: "hi".to_string() }],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert_eq!(msg.role, "user");
+        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "hi"));
+    }
+
+    #[test]
+    fn user_message_from_payload_image_base64_block() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![UserContentBlock::Image {
+                data: "abc123".to_string(),
+                mime_type: "image/png".to_string(),
+            }],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert!(matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Base64 { data, media_type } } if data == "abc123" && media_type == "image/png"));
+    }
+
+    #[test]
+    fn user_message_from_payload_image_url_block() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![UserContentBlock::ImageUrl { url: "https://example.com/img.png".to_string() }],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert!(matches!(&msg.content[0], ContentBlock::Image { source: ImageSource::Url { url } } if url == "https://example.com/img.png"));
+    }
+
+    #[test]
+    fn user_message_from_payload_resource_link_block() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![UserContentBlock::ResourceLink {
+                uri: "file:///foo.rs".to_string(),
+                name: "foo.rs".to_string(),
+            }],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "[@foo.rs](file:///foo.rs)"));
+    }
+
+    #[test]
+    fn user_message_from_payload_context_block() {
+        use acp_nats::prompt_event::UserContentBlock;
+        let payload = PromptPayload {
+            req_id: "r1".to_string(),
+            session_id: "s1".to_string(),
+            content: vec![UserContentBlock::Context {
+                uri: "file:///bar.txt".to_string(),
+                text: "content here".to_string(),
+            }],
+            user_message: String::new(),
+        };
+        let msg = user_message_from_payload(&payload);
+        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text.contains("<context ref=\"file:///bar.txt\">") && text.contains("content here")));
+    }
+
     // ── truncate_title ────────────────────────────────────────────────────────
 
     #[test]

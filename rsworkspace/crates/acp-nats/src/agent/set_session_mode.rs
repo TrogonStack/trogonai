@@ -164,7 +164,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -193,11 +193,14 @@ mod tests {
     async fn set_session_mode_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = SetSessionModeResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.set_mode", &expected);
+        set_json_response(
+            &mock,
+            "acp.session-mode-001.agent.session.set_mode",
+            &expected,
+        );
 
-        let request = SetSessionModeRequest::new("s1", "mode-1");
+        let request = SetSessionModeRequest::new("session-mode-001", "auto");
         let result = bridge.set_session_mode(request).await;
-
         assert!(result.is_ok());
     }
 
@@ -250,7 +253,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "set_session_mode", true),
-            "expected acp.request.count with method=set_session_mode, success=true"
+            "expected acp.requests with method=set_session_mode, success=true"
         );
         provider.shutdown().unwrap();
     }
@@ -268,7 +271,7 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
             has_request_metric(&finished_metrics, "set_session_mode", false),
-            "expected acp.request.count with method=set_session_mode, success=false"
+            "expected acp.requests with method=set_session_mode, success=false"
         );
         provider.shutdown().unwrap();
     }
@@ -282,7 +285,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);

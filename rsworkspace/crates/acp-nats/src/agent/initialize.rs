@@ -109,7 +109,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .any(|sm| {
                 sm.metrics().any(|metric| {
-                    if metric.name() != "acp.request.count" {
+                    if metric.name() != "acp.requests" {
                         return false;
                     }
                     let data = metric.data();
@@ -133,7 +133,7 @@ mod tests {
             });
         assert!(
             found,
-            "expected acp.request.count datapoint with method=initialize, success={}",
+            "expected acp.requests datapoint with method=initialize, success={}",
             expected_success
         );
     }
@@ -318,5 +318,22 @@ mod tests {
         let err = map_initialize_error(NatsError::Other("misc failure".into()));
         assert!(err.to_string().contains("Initialize request failed"));
         assert_eq!(err.code, ErrorCode::InternalError);
+    }
+
+    #[tokio::test]
+    async fn handlers_use_custom_prefix() {
+        let mock = AdvancedMockNatsClient::new();
+        let bridge = Bridge::new(
+            mock.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("myorg.prod"),
+        );
+        let expected = InitializeResponse::new(ProtocolVersion::LATEST);
+        set_json_response(&mock, "myorg.prod.agent.initialize", &expected);
+
+        let request = InitializeRequest::new(ProtocolVersion::LATEST);
+        let result = bridge.initialize(request).await;
+        assert!(result.is_ok());
     }
 }
