@@ -10,11 +10,12 @@ use std::time::Duration;
 use std::collections::HashSet;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, AGENT_UNAVAILABLE};
+use acp_nats::prompt_event::PromptEvent;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
     Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, ProtocolVersion, SessionId, SetSessionModeRequest,
-    SetSessionModeResponse,
+    NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, SessionId,
+    SessionUpdate, SetSessionModeRequest, SetSessionModeResponse,
 };
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -55,6 +56,34 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
         config,
         tx,
     )
+}
+
+/// Like `make_bridge` but keeps the notification receiver alive so tests can
+/// assert on the `SessionNotification`s produced during a prompt.
+fn make_bridge_with_rx(
+    nats: async_nats::Client,
+    prefix: &str,
+) -> (
+    Bridge<async_nats::Client, SystemClock>,
+    tokio::sync::mpsc::Receiver<agent_client_protocol::SessionNotification>,
+) {
+    let config = Config::new(
+        AcpPrefix::new(prefix).unwrap(),
+        NatsConfig {
+            servers: vec!["unused".to_string()],
+            auth: NatsAuth::None,
+        },
+    )
+    .with_operation_timeout(Duration::from_millis(500));
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+    let bridge = Bridge::new(
+        nats,
+        SystemClock,
+        &opentelemetry::global::meter("acp-nats-integration-test"),
+        config,
+        tx,
+    );
+    (bridge, rx)
 }
 
 // ── initialize ────────────────────────────────────────────────────────────────
@@ -537,4 +566,173 @@ async fn concurrent_requests_dont_mix_replies() {
 
     // All 5 should have received distinct session IDs — no reply cross-mixing.
     assert_eq!(session_ids.len(), 5, "all 5 concurrent sessions should have distinct IDs");
+}
+
+// ── prompt / ModeChanged ──────────────────────────────────────────────────────
+
+/// A mock runner subscribes to prompt messages, extracts the `req_id` from the
+/// payload, then publishes `ModeChanged` + `Done` back on the events subject.
+/// The bridge must forward `CurrentModeUpdate` then `ConfigOptionUpdate`
+/// to the notification channel.
+#[tokio::test]
+async fn mode_changed_event_produces_current_mode_and_config_option_notifications() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut notification_rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let session_id = "sess-mode-test";
+
+    // Mock runner: subscribe to any prompt on this session, reply with events.
+    let mut prompt_sub = nats
+        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = prompt_sub.next().await {
+            let payload: acp_nats::prompt_event::PromptPayload =
+                serde_json::from_slice(&msg.payload).expect("valid prompt payload");
+            let req_id = payload.req_id;
+            let events_subject =
+                format!("acp.{}.agent.prompt.events.{}", session_id, req_id);
+
+            let mode_changed = PromptEvent::ModeChanged {
+                mode: "plan".to_string(),
+                model: "claude-opus-4-6".to_string(),
+            };
+            let done = PromptEvent::Done { stop_reason: "end_turn".to_string() };
+            nats2
+                .publish(events_subject.clone(), serde_json::to_vec(&mode_changed).unwrap().into())
+                .await
+                .unwrap();
+            nats2
+                .publish(events_subject, serde_json::to_vec(&done).unwrap().into())
+                .await
+                .unwrap();
+        }
+    });
+
+    // Drive the prompt to completion.
+    bridge
+        .prompt(PromptRequest::new(session_id, vec![]))
+        .await
+        .expect("prompt must succeed");
+
+    // Collect all notifications (non-blocking drain — prompt already returned).
+    let mut updates = Vec::new();
+    while let Ok(n) = notification_rx.try_recv() {
+        updates.push(n.update);
+    }
+
+    let has_mode = updates.iter().any(|u| matches!(u, SessionUpdate::CurrentModeUpdate(_)));
+    let has_config = updates.iter().any(|u| matches!(u, SessionUpdate::ConfigOptionUpdate(_)));
+
+    assert!(has_mode, "expected CurrentModeUpdate in notifications, got: {updates:?}");
+    assert!(has_config, "expected ConfigOptionUpdate in notifications, got: {updates:?}");
+
+    // CurrentModeUpdate must appear before ConfigOptionUpdate.
+    let mode_pos = updates
+        .iter()
+        .position(|u| matches!(u, SessionUpdate::CurrentModeUpdate(_)))
+        .unwrap();
+    let config_pos = updates
+        .iter()
+        .position(|u| matches!(u, SessionUpdate::ConfigOptionUpdate(_)))
+        .unwrap();
+    assert!(mode_pos < config_pos, "CurrentModeUpdate must come before ConfigOptionUpdate");
+}
+
+/// Verify that the `CurrentModeUpdate` carries the correct mode value.
+#[tokio::test]
+async fn mode_changed_current_mode_update_carries_plan_mode() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut notification_rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let session_id = "sess-mode-value";
+
+    let mut prompt_sub = nats
+        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = prompt_sub.next().await {
+            let payload: acp_nats::prompt_event::PromptPayload =
+                serde_json::from_slice(&msg.payload).expect("valid prompt payload");
+            let events_subject =
+                format!("acp.{}.agent.prompt.events.{}", session_id, payload.req_id);
+            for event in [
+                PromptEvent::ModeChanged { mode: "plan".to_string(), model: "claude-sonnet-4-6".to_string() },
+                PromptEvent::Done { stop_reason: "end_turn".to_string() },
+            ] {
+                nats2
+                    .publish(events_subject.clone(), serde_json::to_vec(&event).unwrap().into())
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    bridge.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
+
+    let mut updates = Vec::new();
+    while let Ok(n) = notification_rx.try_recv() {
+        updates.push(n.update);
+    }
+
+    let mode_update = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::CurrentModeUpdate(m) = u { Some(m) } else { None }
+        })
+        .expect("must have CurrentModeUpdate");
+
+    assert_eq!(mode_update.current_mode_id.0.as_ref(), "plan");
+}
+
+/// Without a `ModeChanged` event (plain `Done` response) no mode/config
+/// notifications must be sent.
+#[tokio::test]
+async fn no_mode_notifications_when_runner_does_not_emit_mode_changed() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut notification_rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let session_id = "sess-no-mode";
+
+    let mut prompt_sub = nats
+        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = prompt_sub.next().await {
+            let payload: acp_nats::prompt_event::PromptPayload =
+                serde_json::from_slice(&msg.payload).expect("valid prompt payload");
+            let events_subject =
+                format!("acp.{}.agent.prompt.events.{}", session_id, payload.req_id);
+            let done = PromptEvent::Done { stop_reason: "end_turn".to_string() };
+            nats2
+                .publish(events_subject, serde_json::to_vec(&done).unwrap().into())
+                .await
+                .unwrap();
+        }
+    });
+
+    bridge.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
+
+    let mut updates = Vec::new();
+    while let Ok(n) = notification_rx.try_recv() {
+        updates.push(n.update);
+    }
+
+    assert!(
+        !updates.iter().any(|u| matches!(u, SessionUpdate::CurrentModeUpdate(_))),
+        "must NOT have CurrentModeUpdate without ModeChanged event",
+    );
+    assert!(
+        !updates.iter().any(|u| matches!(u, SessionUpdate::ConfigOptionUpdate(_))),
+        "must NOT have ConfigOptionUpdate without ModeChanged event",
+    );
 }

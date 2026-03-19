@@ -472,8 +472,8 @@ mod tests {
     fn config_options_has_mode_and_model_entries() {
         let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
         assert_eq!(opts.len(), 2);
-        assert_eq!(opts[0].id.as_ref(), "mode");
-        assert_eq!(opts[1].id.as_ref(), "model");
+        assert_eq!(opts[0].id.0.as_ref(), "mode");
+        assert_eq!(opts[1].id.0.as_ref(), "model");
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
         let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
         let mode_opt = &opts[0];
         if let SessionConfigKind::Select(sel) = &mode_opt.kind {
-            assert_eq!(sel.current_value.as_ref(), "plan");
+            assert_eq!(sel.current_value.0.as_ref(), "plan");
         } else {
             panic!("mode option is not a Select");
         }
@@ -494,7 +494,7 @@ mod tests {
         let opts = build_plan_mode_config_options("plan", "claude-haiku-4-5-20251001");
         let model_opt = &opts[1];
         if let SessionConfigKind::Select(sel) = &model_opt.kind {
-            assert_eq!(sel.current_value.as_ref(), "claude-haiku-4-5-20251001");
+            assert_eq!(sel.current_value.0.as_ref(), "claude-haiku-4-5-20251001");
         } else {
             panic!("model option is not a Select");
         }
@@ -563,6 +563,187 @@ mod tests {
     fn rewrite_mcp_slash_command_plain_text_passthrough() {
         let out = rewrite_mcp_slash_command("hello world");
         assert_eq!(out, "hello world");
+    }
+
+    // ── format_uri_as_link ────────────────────────────────────────────────────
+
+    #[test]
+    fn format_uri_file_scheme_uses_last_segment() {
+        let link = format_uri_as_link("file:///home/user/project/src/main.rs");
+        assert_eq!(link, "[@main.rs](file:///home/user/project/src/main.rs)");
+    }
+
+    #[test]
+    fn format_uri_zed_scheme_uses_last_segment() {
+        let link = format_uri_as_link("zed://buffer/42");
+        assert_eq!(link, "[@42](zed://buffer/42)");
+    }
+
+    #[test]
+    fn format_uri_https_passes_through() {
+        let uri = "https://example.com/some/path";
+        let link = format_uri_as_link(uri);
+        assert_eq!(link, uri);
+    }
+
+    #[test]
+    fn format_uri_plain_text_passes_through() {
+        let uri = "just some text";
+        let link = format_uri_as_link(uri);
+        assert_eq!(link, uri);
+    }
+
+    #[test]
+    fn format_uri_file_with_trailing_slash_ignores_it() {
+        // Trailing slash should not produce an empty display name.
+        let link = format_uri_as_link("file:///home/user/project/");
+        assert!(link.contains("[@project]"), "got: {link}");
+    }
+
+    // ── acp_blocks_to_user_content ────────────────────────────────────────────
+
+    #[test]
+    fn text_block_converts_to_text() {
+        use agent_client_protocol::{ContentBlock, TextContent};
+        let blocks = vec![ContentBlock::Text(TextContent::new("hello world"))];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "hello world"));
+    }
+
+    #[test]
+    fn resource_link_block_converts_to_resource_link() {
+        use agent_client_protocol::{ContentBlock, ResourceLink};
+        let blocks = vec![ContentBlock::ResourceLink(
+            ResourceLink::new("my-file.rs", "file:///src/my-file.rs"),
+        )];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::ResourceLink { uri, name }
+                if uri == "file:///src/my-file.rs" && name == "my-file.rs"),
+        );
+    }
+
+    #[test]
+    fn image_block_with_data_converts_to_image() {
+        use agent_client_protocol::{ContentBlock, ImageContent};
+        let blocks = vec![ContentBlock::Image(
+            ImageContent::new("base64data==", "image/png"),
+        )];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::Image { data, mime_type }
+                if data == "base64data==" && mime_type == "image/png"),
+        );
+    }
+
+    #[test]
+    fn image_block_with_https_uri_converts_to_image_url() {
+        use agent_client_protocol::{ContentBlock, ImageContent};
+        let blocks = vec![ContentBlock::Image(
+            ImageContent::new("", "image/jpeg").uri("https://example.com/photo.jpg".to_string()),
+        )];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::ImageUrl { url }
+                if url == "https://example.com/photo.jpg"),
+        );
+    }
+
+    #[test]
+    fn image_block_with_non_http_uri_becomes_text_link() {
+        use agent_client_protocol::{ContentBlock, ImageContent};
+        let blocks = vec![ContentBlock::Image(
+            ImageContent::new("", "image/jpeg").uri("data:image/jpeg;base64,abc".to_string()),
+        )];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text }
+                if text.starts_with("![image](")),
+        );
+    }
+
+    #[test]
+    fn embedded_resource_text_produces_link_plus_context_at_end() {
+        use agent_client_protocol::{
+            ContentBlock, EmbeddedResource, EmbeddedResourceResource, TextContent,
+            TextResourceContents,
+        };
+        let blocks = vec![
+            ContentBlock::Text(TextContent::new("before")),
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
+                ),
+            )),
+            ContentBlock::Text(TextContent::new("after")),
+        ];
+        let result = acp_blocks_to_user_content(&blocks);
+        // Expect: "before", inline file link, "after", context block (at end)
+        assert_eq!(result.len(), 4, "expected 4 blocks, got: {result:?}");
+        assert!(matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text } if text == "before"));
+        // inline reference link for the resource
+        assert!(matches!(&result[1], crate::prompt_event::UserContentBlock::Text { text } if text.contains("file:///src/main.rs")));
+        assert!(matches!(&result[2], crate::prompt_event::UserContentBlock::Text { text } if text == "after"));
+        // context block appended at end
+        assert!(
+            matches!(&result[3], crate::prompt_event::UserContentBlock::Context { uri, text }
+                if uri == "file:///src/main.rs" && text == "fn main() {}"),
+        );
+    }
+
+    #[test]
+    fn embedded_resource_blob_is_skipped() {
+        use agent_client_protocol::{
+            ContentBlock, EmbeddedResource, EmbeddedResourceResource, BlobResourceContents,
+        };
+        let blocks = vec![ContentBlock::Resource(EmbeddedResource::new(
+            EmbeddedResourceResource::BlobResourceContents(
+                BlobResourceContents::new("binarydata==", "file:///image.bin"),
+            ),
+        ))];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert!(result.is_empty(), "blob resources must be skipped");
+    }
+
+    #[test]
+    fn audio_block_is_skipped() {
+        use agent_client_protocol::{AudioContent, ContentBlock};
+        let blocks = vec![ContentBlock::Audio(AudioContent::new("audiodata==", "audio/mp3"))];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert!(result.is_empty(), "audio blocks must be skipped");
+    }
+
+    #[test]
+    fn context_blocks_always_appended_after_main_content() {
+        use agent_client_protocol::{
+            ContentBlock, EmbeddedResource, EmbeddedResourceResource, TextContent,
+            TextResourceContents,
+        };
+        // Two embedded text resources followed by a text block
+        let blocks = vec![
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new("content A", "file:///a.rs"),
+                ),
+            )),
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new("content B", "file:///b.rs"),
+                ),
+            )),
+            ContentBlock::Text(TextContent::new("user message")),
+        ];
+        let result = acp_blocks_to_user_content(&blocks);
+        // 2 inline links + 1 text + 2 context blocks = 5
+        assert_eq!(result.len(), 5);
+        // Last two must be Context blocks
+        assert!(matches!(&result[3], crate::prompt_event::UserContentBlock::Context { .. }));
+        assert!(matches!(&result[4], crate::prompt_event::UserContentBlock::Context { .. }));
     }
 
     // ── todo_write_to_plan_entries ────────────────────────────────────────────

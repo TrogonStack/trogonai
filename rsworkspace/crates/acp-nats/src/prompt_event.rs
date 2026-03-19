@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn prompt_event_usage_update_tag() {
-        let e = PromptEvent::UsageUpdate { input_tokens: 100, output_tokens: 50, cache_creation_tokens: 0, cache_read_tokens: 0 };
+        let e = PromptEvent::UsageUpdate { input_tokens: 100, output_tokens: 50, cache_creation_tokens: 0, cache_read_tokens: 0, context_window: None };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "usage_update");
         assert_eq!(v["input_tokens"], 100);
