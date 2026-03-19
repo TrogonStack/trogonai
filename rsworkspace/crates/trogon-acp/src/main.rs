@@ -385,3 +385,52 @@ async fn handle_permission_request(
 
     let _ = req.response_tx.send(allowed);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Serialize env-var tests — they mutate global process state.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn allow_bypass_false_when_sudo_uid_set() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_USER") };
+        unsafe { std::env::set_var("SUDO_UID", "1000") };
+        let result = allow_bypass();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        assert!(!result, "allow_bypass must return false when SUDO_UID is set");
+    }
+
+    #[test]
+    fn allow_bypass_false_when_sudo_user_set() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::set_var("SUDO_USER", "jorge") };
+        let result = allow_bypass();
+        unsafe { std::env::remove_var("SUDO_USER") };
+        assert!(!result, "allow_bypass must return false when SUDO_USER is set");
+    }
+
+    #[test]
+    fn allow_bypass_true_when_no_sudo_vars_and_not_root() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::remove_var("SUDO_USER") };
+        // Skip if actually running as root (uid 0)
+        let running_as_root = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("Uid:\t"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .map(|uid| uid == "0")
+            })
+            .unwrap_or(false);
+        if running_as_root {
+            return;
+        }
+        assert!(allow_bypass(), "allow_bypass must return true for a normal (non-root) user");
+    }
+}

@@ -100,8 +100,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         http_client,
         proxy_url: cfg.proxy_url.clone(),
         anthropic_token: cfg.anthropic_token.clone(),
+        anthropic_base_url: None,
+        anthropic_extra_headers: vec![],
         model: cfg.model.clone(),
         max_iterations: cfg.max_iterations,
+        thinking_budget: None,
         tool_context: tool_ctx,
         memory_owner: cfg.memory_owner.clone(),
         memory_repo: cfg.memory_repo.clone(),
@@ -110,6 +113,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         mcp_dispatch,
         split_client,
         tenant_id: cfg.tenant_id.clone(),
+        permission_checker: None,
     });
 
     let store = Arc::new(

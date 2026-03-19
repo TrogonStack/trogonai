@@ -438,8 +438,11 @@ pub async fn run_automation(
                 http_client: agent.http_client.clone(),
                 proxy_url: agent.proxy_url.clone(),
                 anthropic_token: agent.anthropic_token.clone(),
+                anthropic_base_url: agent.anthropic_base_url.clone(),
+                anthropic_extra_headers: agent.anthropic_extra_headers.clone(),
                 model: automation.model.clone().unwrap_or_else(|| agent.model.clone()),
                 max_iterations: agent.max_iterations,
+                thinking_budget: agent.thinking_budget,
                 tool_context: Arc::clone(&agent.tool_context),
                 memory_owner: agent.memory_owner.clone(),
                 memory_repo: agent.memory_repo.clone(),
@@ -448,6 +451,7 @@ pub async fn run_automation(
                 mcp_dispatch: merged_dispatch,
                 split_client: agent.split_client.clone(),
                 tenant_id: agent.tenant_id.clone(),
+                permission_checker: agent.permission_checker.clone(),
             };
             &merged
         };

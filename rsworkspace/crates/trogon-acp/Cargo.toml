@@ -26,6 +26,10 @@ trogon-nats       = { path = "../trogon-nats" }
 trogon-std        = { path = "../trogon-std" }
 uuid              = { version = "1", features = ["v4"] }
 
+[dev-dependencies]
+trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+
 [[bin]]
 name = "trogon-acp"
 path = "src/main.rs"

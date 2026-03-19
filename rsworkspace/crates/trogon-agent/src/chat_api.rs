@@ -287,8 +287,11 @@ async fn send_message(
             http_client: state.agent.http_client.clone(),
             proxy_url: state.agent.proxy_url.clone(),
             anthropic_token: state.agent.anthropic_token.clone(),
+            anthropic_base_url: state.agent.anthropic_base_url.clone(),
+            anthropic_extra_headers: state.agent.anthropic_extra_headers.clone(),
             model: effective_model,
             max_iterations: state.agent.max_iterations,
+            thinking_budget: state.agent.thinking_budget,
             tool_context: Arc::clone(&state.agent.tool_context),
             memory_owner: state.agent.memory_owner.clone(),
             memory_repo: state.agent.memory_repo.clone(),
@@ -297,6 +300,7 @@ async fn send_message(
             mcp_dispatch: state.agent.mcp_dispatch.clone(),
             split_client: state.agent.split_client.clone(),
             tenant_id: state.agent.tenant_id.clone(),
+            permission_checker: state.agent.permission_checker.clone(),
         };
         &temp_agent
     };

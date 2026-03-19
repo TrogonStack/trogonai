@@ -22,3 +22,6 @@ trogon-agent  = { path = "../trogon-agent" }
 trogon-mcp    = { path = "../trogon-mcp" }
 trogon-nats   = { path = "../trogon-nats" }
 trogon-std    = { path = "../trogon-std" }
+
+[dev-dependencies]
+testcontainers-modules = { version = "0.8", features = ["nats"] }
