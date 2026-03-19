@@ -12,7 +12,7 @@ impl Metrics {
     pub fn new(meter: &Meter) -> Self {
         Self {
             requests_total: meter
-                .u64_counter("acp.request.count")
+                .u64_counter("acp.requests")
                 .with_description("Total number of ACP requests")
                 .build(),
             request_duration: meter
@@ -21,7 +21,7 @@ impl Metrics {
                 .with_unit("s")
                 .build(),
             errors_total: meter
-                .u64_counter("acp.errors.total")
+                .u64_counter("acp.errors")
                 .with_description("Total number of errors by operation and reason")
                 .build(),
         }

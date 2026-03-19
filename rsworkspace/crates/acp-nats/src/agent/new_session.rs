@@ -172,7 +172,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors.total")
+            .find(|m| m.name() == "acp.errors")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -215,7 +215,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.request.count")
+            .find(|m| m.name() == "acp.requests")
             .and_then(|metric| {
                 let data = metric.data();
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
@@ -421,7 +421,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.errors.total")
+            .f64_histogram("acp.errors")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
@@ -440,7 +440,7 @@ mod tests {
         let provider = SdkMeterProvider::builder().with_reader(reader).build();
         let meter = provider.meter("test");
         let histogram = meter
-            .f64_histogram("acp.request.count")
+            .f64_histogram("acp.requests")
             .with_description("test")
             .build();
         histogram.record(1.0, &[]);
