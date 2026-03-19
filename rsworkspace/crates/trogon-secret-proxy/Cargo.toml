@@ -1,0 +1,34 @@
+[package]
+name = "trogon-secret-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-nats = "0.45.0"
+axum = "0.8"
+bytes = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.49.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trogon-nats = { path = "../trogon-nats" }
+trogon-std = { path = "../trogon-std" }
+trogon-vault = { path = "../trogon-vault", features = ["hashicorp-vault"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+httpmock = "0.7"
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+
+[[bin]]
+name = "proxy"
+path = "src/bin/proxy.rs"
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
