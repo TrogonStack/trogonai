@@ -210,6 +210,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancel_also_publishes_session_cancelled_broadcast() {
+        let (mock, bridge) = mock_bridge();
+
+        let _ = bridge.cancel(CancelNotification::new("s1")).await;
+
+        let published = mock.published_messages();
+        assert!(
+            published.contains(&"acp.s1.agent.session.cancelled".to_string()),
+            "expected publish to acp.s1.agent.session.cancelled (prompt broadcast), got: {:?}",
+            published
+        );
+    }
+
+    #[tokio::test]
     async fn cancel_validates_session_id() {
         let (_mock, bridge) = mock_bridge();
         let err = bridge

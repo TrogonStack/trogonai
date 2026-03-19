@@ -1078,3 +1078,46 @@ async fn cancel_while_prompt_running_returns_cancelled() {
         "cancel signal must return Cancelled, got: {:?}", resp.stop_reason,
     );
 }
+
+/// End-to-end: `bridge.cancel()` itself (not a direct NATS publish) stops
+/// a concurrently running `bridge.prompt()`.  This covers the full path:
+/// `cancel handler` → publishes `session_cancelled` broadcast → prompt
+/// `cancel_notify` select arm fires → returns `Cancelled`.
+#[tokio::test]
+async fn bridge_cancel_stops_running_prompt_end_to_end() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+
+    let session_id = "sess-cancel-e2e";
+
+    // Mock runner: subscribe so the bridge can publish the prompt, but never
+    // send events back.  The prompt will wait until cancelled.
+    let mut prompt_sub = nats
+        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .await
+        .unwrap();
+    tokio::spawn(async move { let _ = prompt_sub.next().await; });
+
+    // Two bridge instances sharing the same NATS connection.
+    // bridge_prompt drives the prompt; bridge_cancel fires the cancel.
+    // Bridge is !Send so we use tokio::join! instead of tokio::spawn.
+    let bridge_prompt = make_bridge(nats.clone(), "acp");
+    let bridge_cancel = make_bridge(nats.clone(), "acp");
+
+    let (prompt_result, cancel_result) = tokio::join!(
+        bridge_prompt.prompt(PromptRequest::new(session_id, vec![])),
+        async {
+            // Wait until the prompt is in-flight before cancelling.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            bridge_cancel.cancel(CancelNotification::new(session_id)).await
+        },
+    );
+
+    assert!(cancel_result.is_ok(), "cancel must succeed: {:?}", cancel_result);
+    let resp = prompt_result.expect("prompt must complete (not time out)");
+    assert!(
+        matches!(resp.stop_reason, StopReason::Cancelled),
+        "bridge.cancel() must stop the prompt with Cancelled, got: {:?}",
+        resp.stop_reason,
+    );
+}
