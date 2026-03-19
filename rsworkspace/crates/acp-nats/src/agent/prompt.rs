@@ -461,3 +461,152 @@ fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigO
             .category(SessionConfigOptionCategory::Model),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── build_plan_mode_config_options ────────────────────────────────────────
+
+    #[test]
+    fn config_options_has_mode_and_model_entries() {
+        let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
+        assert_eq!(opts.len(), 2);
+        assert_eq!(opts[0].id.as_ref(), "mode");
+        assert_eq!(opts[1].id.as_ref(), "model");
+    }
+
+    #[test]
+    fn config_options_mode_current_value_reflects_argument() {
+        use agent_client_protocol::SessionConfigKind;
+        let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
+        let mode_opt = &opts[0];
+        if let SessionConfigKind::Select(sel) = &mode_opt.kind {
+            assert_eq!(sel.current_value.as_ref(), "plan");
+        } else {
+            panic!("mode option is not a Select");
+        }
+    }
+
+    #[test]
+    fn config_options_model_current_value_reflects_argument() {
+        use agent_client_protocol::SessionConfigKind;
+        let opts = build_plan_mode_config_options("plan", "claude-haiku-4-5-20251001");
+        let model_opt = &opts[1];
+        if let SessionConfigKind::Select(sel) = &model_opt.kind {
+            assert_eq!(sel.current_value.as_ref(), "claude-haiku-4-5-20251001");
+        } else {
+            panic!("model option is not a Select");
+        }
+    }
+
+    #[test]
+    fn config_options_mode_does_not_include_bypass_permissions() {
+        let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
+        // bypassPermissions must NOT appear — EnterPlanMode never sets bypass
+        let mode_opt = opts[0].clone();
+        let has_bypass = serde_json::to_value(&mode_opt)
+            .unwrap()
+            .to_string()
+            .contains("bypassPermissions");
+        assert!(!has_bypass, "bypassPermissions should not appear in EnterPlanMode config options");
+    }
+
+    #[test]
+    fn config_options_mode_includes_standard_modes() {
+        let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
+        let json = serde_json::to_string(&opts[0]).unwrap();
+        for expected in &["default", "acceptEdits", "plan", "dontAsk"] {
+            assert!(json.contains(expected), "missing mode option: {expected}");
+        }
+    }
+
+    #[test]
+    fn config_options_model_includes_all_three_models() {
+        let opts = build_plan_mode_config_options("plan", "claude-opus-4-6");
+        let json = serde_json::to_string(&opts[1]).unwrap();
+        for expected in &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"] {
+            assert!(json.contains(expected), "missing model option: {expected}");
+        }
+    }
+
+    // ── make_claude_code_meta ─────────────────────────────────────────────────
+
+    #[test]
+    fn make_claude_code_meta_has_tool_name() {
+        let meta = make_claude_code_meta("EnterPlanMode");
+        let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
+        assert_eq!(cc.get("toolName").unwrap().as_str().unwrap(), "EnterPlanMode");
+    }
+
+    // ── rewrite_mcp_slash_command ─────────────────────────────────────────────
+
+    #[test]
+    fn rewrite_mcp_slash_command_with_args() {
+        let out = rewrite_mcp_slash_command("/mcp:myserver:mytool some args");
+        assert_eq!(out, "/myserver:mytool (MCP) some args");
+    }
+
+    #[test]
+    fn rewrite_mcp_slash_command_without_args() {
+        let out = rewrite_mcp_slash_command("/mcp:myserver:mytool");
+        assert_eq!(out, "/myserver:mytool (MCP)");
+    }
+
+    #[test]
+    fn rewrite_mcp_slash_command_non_mcp_passthrough() {
+        let out = rewrite_mcp_slash_command("/compact");
+        assert_eq!(out, "/compact");
+    }
+
+    #[test]
+    fn rewrite_mcp_slash_command_plain_text_passthrough() {
+        let out = rewrite_mcp_slash_command("hello world");
+        assert_eq!(out, "hello world");
+    }
+
+    // ── todo_write_to_plan_entries ────────────────────────────────────────────
+
+    #[test]
+    fn todo_write_to_plan_entries_maps_statuses() {
+        let input = serde_json::json!({
+            "todos": [
+                { "content": "Do A", "status": "pending",     "priority": "high" },
+                { "content": "Do B", "status": "in_progress", "priority": "medium" },
+                { "content": "Do C", "status": "completed",   "priority": "low" },
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert!(matches!(entries[0].status, PlanEntryStatus::Pending));
+        assert!(matches!(entries[1].status, PlanEntryStatus::InProgress));
+        assert!(matches!(entries[2].status, PlanEntryStatus::Completed));
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_maps_priorities() {
+        let input = serde_json::json!({
+            "todos": [
+                { "content": "A", "status": "pending", "priority": "high" },
+                { "content": "B", "status": "pending", "priority": "medium" },
+                { "content": "C", "status": "pending", "priority": "low" },
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert!(matches!(entries[0].priority, PlanEntryPriority::High));
+        assert!(matches!(entries[1].priority, PlanEntryPriority::Medium));
+        assert!(matches!(entries[2].priority, PlanEntryPriority::Low));
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_returns_none_for_empty_todos() {
+        let input = serde_json::json!({ "todos": [] });
+        assert!(todo_write_to_plan_entries(&input).is_none());
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_returns_none_without_todos_key() {
+        let input = serde_json::json!({});
+        assert!(todo_write_to_plan_entries(&input).is_none());
+    }
+}

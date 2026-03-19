@@ -82,6 +82,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_enter_plan_mode_returns_success() {
+        let ctx = ToolContext {
+            http_client: reqwest::Client::new(),
+            proxy_url: "http://localhost:8080".to_string(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        };
+        let result = dispatch_tool(&ctx, "EnterPlanMode", &json!({})).await;
+        // Must NOT be an error string
+        assert!(!result.starts_with("Unknown tool:"), "got: {result}");
+        assert!(!result.starts_with("Tool error:"), "got: {result}");
+        assert!(result.contains("plan"), "got: {result}");
+    }
+
+    #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = ToolContext {
             http_client: reqwest::Client::new(),
@@ -300,5 +316,15 @@ mod catalog_tests {
     #[test]
     fn all_tool_defs_has_fifteen_entries() {
         assert_eq!(all_tool_defs().len(), 15);
+    }
+
+    #[test]
+    fn enter_plan_mode_tool_def_has_empty_schema() {
+        let defs = all_tool_defs();
+        let def = defs.iter().find(|t| t.name == "EnterPlanMode").unwrap();
+        // Input schema must be an object (no required properties)
+        assert_eq!(def.input_schema["type"], "object");
+        // Description must mention plan mode
+        assert!(def.description.to_lowercase().contains("plan"));
     }
 }

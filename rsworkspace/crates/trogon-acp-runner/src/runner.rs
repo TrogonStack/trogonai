@@ -674,3 +674,87 @@ fn truncate_title(text: &str) -> String {
         format!("{}…", &trimmed[..255])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acp_nats::prompt_event::PromptEvent;
+
+    // ── EnterPlanMode detection logic ─────────────────────────────────────────
+
+    /// Verifies that the tool_name_by_id map pattern used in the event loop
+    /// correctly identifies EnterPlanMode tool calls by id→name lookup.
+    #[test]
+    fn enter_plan_mode_detected_via_name_cache() {
+        let mut tool_name_by_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        // Simulate ToolCallStarted for EnterPlanMode
+        let id = "tool-abc-123".to_string();
+        tool_name_by_id.insert(id.clone(), "EnterPlanMode".to_string());
+
+        let is_enter_plan = tool_name_by_id
+            .get(&id)
+            .map(|n| n == "EnterPlanMode")
+            .unwrap_or(false);
+        assert!(is_enter_plan);
+    }
+
+    #[test]
+    fn other_tools_not_detected_as_enter_plan_mode() {
+        let mut tool_name_by_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        tool_name_by_id.insert("id-1".to_string(), "get_pr_diff".to_string());
+        tool_name_by_id.insert("id-2".to_string(), "TodoWrite".to_string());
+
+        for id in &["id-1", "id-2"] {
+            let is_enter_plan = tool_name_by_id
+                .get(*id)
+                .map(|n| n == "EnterPlanMode")
+                .unwrap_or(false);
+            assert!(!is_enter_plan, "tool {id} must not be detected as EnterPlanMode");
+        }
+    }
+
+    #[test]
+    fn mode_changed_event_serializes_correctly() {
+        let event = PromptEvent::ModeChanged {
+            mode: "plan".to_string(),
+            model: "claude-opus-4-6".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"mode_changed\""), "type tag missing");
+        assert!(json.contains("\"plan\""), "mode missing");
+        assert!(json.contains("\"claude-opus-4-6\""), "model missing");
+    }
+
+    // ── truncate_title ────────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_title_collapses_whitespace() {
+        let out = truncate_title("  hello   world  ");
+        assert_eq!(out, "hello world");
+    }
+
+    #[test]
+    fn truncate_title_replaces_newlines() {
+        let out = truncate_title("line1\nline2\r\nline3");
+        assert_eq!(out, "line1 line2 line3");
+    }
+
+    #[test]
+    fn truncate_title_truncates_at_256() {
+        let long = "a".repeat(300);
+        let out = truncate_title(&long);
+        // Truncated result ends with ellipsis and is 256 chars (255 + "…")
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 256);
+    }
+
+    #[test]
+    fn truncate_title_short_text_unchanged() {
+        let out = truncate_title("short");
+        assert_eq!(out, "short");
+    }
+}

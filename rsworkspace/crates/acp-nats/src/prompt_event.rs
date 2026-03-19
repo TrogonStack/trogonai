@@ -157,4 +157,38 @@ mod tests {
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning"));
     }
+
+    #[test]
+    fn prompt_event_mode_changed_tag() {
+        let e = PromptEvent::ModeChanged {
+            mode: "plan".to_string(),
+            model: "claude-opus-4-6".to_string(),
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "mode_changed");
+        assert_eq!(v["mode"], "plan");
+        assert_eq!(v["model"], "claude-opus-4-6");
+    }
+
+    #[test]
+    fn prompt_event_mode_changed_roundtrip() {
+        let e = PromptEvent::ModeChanged {
+            mode: "plan".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        let e2: PromptEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(e2, PromptEvent::ModeChanged { ref mode, ref model }
+                if mode == "plan" && model == "claude-sonnet-4-6")
+        );
+    }
+
+    #[test]
+    fn prompt_event_mode_changed_deserialize_from_wire() {
+        // Verify the exact wire format the runner publishes can be decoded by the bridge
+        let wire = r#"{"type":"mode_changed","mode":"plan","model":"claude-opus-4-6"}"#;
+        let e: PromptEvent = serde_json::from_str(wire).unwrap();
+        assert!(matches!(e, PromptEvent::ModeChanged { ref mode, .. } if mode == "plan"));
+    }
 }
