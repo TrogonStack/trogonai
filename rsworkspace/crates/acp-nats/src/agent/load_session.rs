@@ -60,10 +60,7 @@ fn map_load_session_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<
-    N: RequestClient + PublishClient + FlushClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: LoadSessionRequest,
 ) -> Result<LoadSessionResponse> {

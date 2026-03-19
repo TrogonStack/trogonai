@@ -72,10 +72,7 @@ fn map_new_session_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), session_id = tracing::field::Empty)
 )]
-pub async fn handle<
-    N: RequestClient + PublishClient + FlushClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: NewSessionRequest,
 ) -> Result<NewSessionResponse> {

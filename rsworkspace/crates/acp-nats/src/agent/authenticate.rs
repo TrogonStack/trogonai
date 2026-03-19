@@ -51,10 +51,7 @@ fn map_authenticate_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(method_id = %args.method_id)
 )]
-pub async fn handle<
-    N: RequestClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: AuthenticateRequest,
 ) -> Result<AuthenticateResponse> {

@@ -48,10 +48,7 @@ fn map_initialize_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(protocol_version = ?args.protocol_version)
 )]
-pub async fn handle<
-    N: RequestClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: InitializeRequest,
 ) -> Result<InitializeResponse> {

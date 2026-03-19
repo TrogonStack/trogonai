@@ -54,10 +54,7 @@ fn map_set_session_mode_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(session_id = %args.session_id, mode_id = %args.mode_id)
 )]
-pub async fn handle<
-    N: RequestClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: SetSessionModeRequest,
 ) -> Result<SetSessionModeResponse> {

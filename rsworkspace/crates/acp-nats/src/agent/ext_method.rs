@@ -52,10 +52,7 @@ fn map_ext_method_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(method = %args.method)
 )]
-pub async fn handle<
-    N: RequestClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ExtRequest,
 ) -> Result<ExtResponse> {

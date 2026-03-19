@@ -15,10 +15,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(method = %args.method)
 )]
-pub async fn handle<
-    N: PublishClient + FlushClient,
-    C: GetElapsed,
->(
+pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ExtNotification,
 ) -> Result<()> {
