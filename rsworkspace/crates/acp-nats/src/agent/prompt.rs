@@ -26,7 +26,7 @@ where
 {
     // 1. Validate session ID — reject before touching NATS
     let session_id = AcpSessionId::try_from(&args.session_id)
-        .map_err(|_| Error::new(ErrorCode::InvalidParams.into(), "invalid session id"))?;
+        .map_err(|_| Error::new(ErrorCode::InvalidParams.into(), "Invalid session ID"))?;
 
     // 2. Convert ACP content blocks to rich UserContentBlocks for the runner
     let content = acp_blocks_to_user_content(&args.prompt);
