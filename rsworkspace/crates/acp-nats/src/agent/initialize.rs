@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{Error, ErrorCode, InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -49,7 +49,7 @@ fn map_initialize_error(e: NatsError) -> Error {
     fields(protocol_version = ?args.protocol_version)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: RequestClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

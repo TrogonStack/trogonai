@@ -3,7 +3,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
-    RetryPolicy, SubscribeClient, agent,
+    RetryPolicy, agent,
 };
 use crate::session_id::AcpSessionId;
 use crate::telemetry::metrics::Metrics;
@@ -61,7 +61,7 @@ fn map_load_session_error(e: NatsError) -> Error {
     fields(session_id = %args.session_id)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: RequestClient + PublishClient + FlushClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

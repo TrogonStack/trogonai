@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, agent};
 use agent_client_protocol::{Error, ErrorCode, ExtNotification, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
@@ -16,7 +16,7 @@ use trogon_std::time::GetElapsed;
     fields(method = %args.method)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + FlushClient + SubscribeClient,
+    N: PublishClient + FlushClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

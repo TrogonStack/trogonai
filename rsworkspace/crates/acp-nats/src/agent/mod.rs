@@ -22,7 +22,10 @@ use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use trogon_std::time::GetElapsed;
 
-pub struct Bridge<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> {
+/// A bag of stateful clients used to route ACP protocol messages over NATS.
+/// No trait bounds are placed on the struct — each handler and impl block
+/// declares only the traits it actually requires.
+pub struct Bridge<N, C: GetElapsed> {
     pub(crate) nats: N,
     pub(crate) clock: C,
     pub(crate) config: Config,
@@ -34,7 +37,7 @@ pub struct Bridge<N: RequestClient + PublishClient + SubscribeClient + FlushClie
     pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
 }
 
-impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Bridge<N, C> {
+impl<N, C: GetElapsed> Bridge<N, C> {
     pub fn new(
         nats: N,
         clock: C,

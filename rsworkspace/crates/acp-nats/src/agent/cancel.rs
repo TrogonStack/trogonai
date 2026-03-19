@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
@@ -16,7 +16,7 @@ use trogon_std::time::GetElapsed;
     fields(session_id = %args.session_id)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: PublishClient + FlushClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

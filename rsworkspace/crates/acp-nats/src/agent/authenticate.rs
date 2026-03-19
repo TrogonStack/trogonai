@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -52,7 +52,7 @@ fn map_authenticate_error(e: NatsError) -> Error {
     fields(method_id = %args.method_id)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: RequestClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

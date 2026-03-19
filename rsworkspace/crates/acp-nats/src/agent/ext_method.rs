@@ -1,7 +1,7 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -53,7 +53,7 @@ fn map_ext_method_error(e: NatsError) -> Error {
     fields(method = %args.method)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + FlushClient + SubscribeClient,
+    N: RequestClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,

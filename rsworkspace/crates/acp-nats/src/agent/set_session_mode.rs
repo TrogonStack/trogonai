@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, SetSessionModeRequest, SetSessionModeResponse,
@@ -55,7 +55,7 @@ fn map_set_session_mode_error(e: NatsError) -> Error {
     fields(session_id = %args.session_id, mode_id = %args.mode_id)
 )]
 pub async fn handle<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: RequestClient,
     C: GetElapsed,
 >(
     bridge: &Bridge<N, C>,
