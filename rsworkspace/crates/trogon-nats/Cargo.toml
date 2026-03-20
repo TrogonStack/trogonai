@@ -19,6 +19,7 @@ tracing-opentelemetry = "0.32.1"
 trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
 
