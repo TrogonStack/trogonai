@@ -34,8 +34,6 @@ fn make_agent(base_url: &str) -> AgentLoop {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test-tenant".to_string(),
         permission_checker: None,
     }
 }
@@ -502,7 +500,6 @@ struct DenyAll;
 impl PermissionChecker for DenyAll {
     fn check<'a>(
         &'a self,
-        _session_id: &'a str,
         _tool_call_id: &'a str,
         _tool_name: &'a str,
         _tool_input: &'a serde_json::Value,
@@ -649,8 +646,6 @@ async fn run_with_extra_headers_and_tools() {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
         permission_checker: None,
     };
 
@@ -692,8 +687,6 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
         permission_checker: None,
     };
 
@@ -789,8 +782,6 @@ async fn run_chat_streaming_comprehensive() {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
         permission_checker: None,
     };
 
@@ -907,8 +898,6 @@ async fn run_chat_streaming_permission_denied() {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
         permission_checker: Some(Arc::new(DenyAll)),
     };
 
@@ -967,8 +956,6 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "test".to_string(),
         permission_checker: None,
     };
 
