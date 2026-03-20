@@ -27,6 +27,26 @@ pub mod agent {
         format!("{}.{}.agent.session.set_mode", prefix, session_id)
     }
 
+    pub fn session_set_model(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.set_model", prefix, session_id)
+    }
+
+    pub fn session_set_config_option(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.set_config_option", prefix, session_id)
+    }
+
+    pub fn session_list(prefix: &str) -> String {
+        format!("{}.agent.session.list", prefix)
+    }
+
+    pub fn session_fork(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.fork", prefix, session_id)
+    }
+
+    pub fn session_resume(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.resume", prefix, session_id)
+    }
+
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
@@ -127,6 +147,43 @@ mod tests {
         assert_eq!(
             agent::session_set_mode("acp", "s1"),
             "acp.s1.agent.session.set_mode"
+        );
+    }
+
+    #[test]
+    fn session_set_model_subject() {
+        assert_eq!(
+            agent::session_set_model("acp", "s1"),
+            "acp.s1.agent.session.set_model"
+        );
+    }
+
+    #[test]
+    fn session_set_config_option_subject() {
+        assert_eq!(
+            agent::session_set_config_option("acp", "s1"),
+            "acp.s1.agent.session.set_config_option"
+        );
+    }
+
+    #[test]
+    fn session_list_subject() {
+        assert_eq!(agent::session_list("acp"), "acp.agent.session.list");
+    }
+
+    #[test]
+    fn session_fork_subject() {
+        assert_eq!(
+            agent::session_fork("acp", "s1"),
+            "acp.s1.agent.session.fork"
+        );
+    }
+
+    #[test]
+    fn session_resume_subject() {
+        assert_eq!(
+            agent::session_resume("acp", "s1"),
+            "acp.s1.agent.session.resume"
         );
     }
 
