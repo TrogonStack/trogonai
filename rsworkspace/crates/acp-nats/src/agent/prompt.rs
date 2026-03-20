@@ -148,7 +148,186 @@ where
         result.is_ok(),
     );
 
-    result
+/// Format a URI as an inline reference link, matching TS `formatUriAsLink`.
+/// For file:// and zed:// URIs, extracts the last path segment as the display name.
+/// For other URIs, uses the full URI as-is.
+fn format_uri_as_link(uri: &str) -> String {
+    if uri.starts_with("file://") || uri.starts_with("zed://") {
+        let name = uri
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(uri);
+        format!("[@{name}]({uri})")
+    } else {
+        uri.to_string()
+    }
+}
+
+/// Convert ACP `ContentBlock`s to `UserContentBlock`s for transport over NATS.
+///
+/// Follows the same logic as `promptToClaude()` in the TypeScript reference:
+/// - Text → plain text
+/// - ResourceLink → `[@name](uri)` formatted link
+/// - Resource (text) → inline [@name](uri) link + `<context ref="uri">\n{text}\n</context>` appended at the end
+/// - Resource (blob) → skipped
+/// - Image (base64) → image block
+/// - Image (http/https url) → native URL image block; other URL schemes → `![image](url)` text link
+fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
+    let mut content: Vec<UserContentBlock> = Vec::new();
+    let mut context_parts: Vec<UserContentBlock> = Vec::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(t) => {
+                let text = rewrite_mcp_slash_command(&t.text);
+                content.push(UserContentBlock::Text { text });
+            }
+            ContentBlock::Image(img) => {
+                if !img.data.is_empty() {
+                    content.push(UserContentBlock::Image {
+                        data: img.data.clone(),
+                        mime_type: img.mime_type.clone(),
+                    });
+                } else if let Some(uri) = &img.uri {
+                    if uri.starts_with("http://") || uri.starts_with("https://") {
+                        content.push(UserContentBlock::ImageUrl { url: uri.clone() });
+                    } else {
+                        content.push(UserContentBlock::Text {
+                            text: format!("![image]({uri})"),
+                        });
+                    }
+                }
+            }
+            ContentBlock::ResourceLink(r) => {
+                content.push(UserContentBlock::ResourceLink {
+                    uri: r.uri.clone(),
+                    name: r.name.clone(),
+                });
+            }
+            ContentBlock::Resource(r) => {
+                match &r.resource {
+                    EmbeddedResourceResource::TextResourceContents(t) => {
+                        // Inline reference link (position marker in the message body)
+                        content.push(UserContentBlock::Text {
+                            text: format_uri_as_link(&t.uri),
+                        });
+                        context_parts.push(UserContentBlock::Context {
+                            uri: t.uri.clone(),
+                            text: t.text.clone(),
+                        });
+                    }
+                    EmbeddedResourceResource::BlobResourceContents(_) => {
+                        // Binary blobs can't be sent to text/image models — skip
+                    }
+                    _ => {
+                        // Future resource types — skip
+                    }
+                }
+            }
+            ContentBlock::Audio(_) => {
+                // Audio not supported — skip
+            }
+            _ => {
+                // Future content block types — skip
+            }
+        }
+    }
+
+    // Append context blocks at the end, matching the TS behaviour
+    content.extend(context_parts);
+    content
+}
+
+/// Build `_meta: { claudeCode: { toolName: "..." } }` for tool_call / tool_call_update.
+fn make_claude_code_meta(tool_name: &str) -> agent_client_protocol::Meta {
+    let mut claude_code = serde_json::Map::new();
+    claude_code.insert(
+        "toolName".to_string(),
+        serde_json::Value::String(tool_name.to_string()),
+    );
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "claudeCode".to_string(),
+        serde_json::Value::Object(claude_code),
+    );
+    meta
+}
+
+/// Convert a `TodoWrite` `input` JSON value to ACP `PlanEntry` list.
+///
+/// Expected input shape: `{ "todos": [{ "content": "...", "status": "pending"|"in_progress"|"completed", "priority": "high"|"medium"|"low" }] }`
+/// Returns `None` if the todos array is missing or empty.
+fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
+    let todos = input.get("todos")?.as_array()?;
+    let entries: Vec<PlanEntry> = todos
+        .iter()
+        .filter_map(|todo| {
+            let content = todo.get("content")?.as_str()?.to_string();
+            let status = match todo.get("status").and_then(|v| v.as_str()) {
+                Some("in_progress") => PlanEntryStatus::InProgress,
+                Some("completed") => PlanEntryStatus::Completed,
+                _ => PlanEntryStatus::Pending,
+            };
+            let priority = match todo.get("priority").and_then(|v| v.as_str()) {
+                Some("medium") => PlanEntryPriority::Medium,
+                Some("low") => PlanEntryPriority::Low,
+                _ => PlanEntryPriority::High,
+            };
+            Some(PlanEntry::new(content, priority, status))
+        })
+        .collect();
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+/// Rewrite `/mcp:server:command args` → `/server:command (MCP) args`
+/// to match Claude Code's internal slash command naming convention.
+fn rewrite_mcp_slash_command(text: &str) -> String {
+    // Match /mcp:server:command with optional trailing args
+    if let Some(rest) = text.strip_prefix("/mcp:") {
+        let (server_cmd, args) = rest
+            .split_once(char::is_whitespace)
+            .map(|(sc, a)| (sc, Some(a)))
+            .unwrap_or((rest, None));
+        if let Some((server, command)) = server_cmd.split_once(':') {
+            let rewritten = match args {
+                Some(a) => format!("/{server}:{command} (MCP) {a}"),
+                None => format!("/{server}:{command} (MCP)"),
+            };
+            return rewritten;
+        }
+    }
+    text.to_string()
+}
+
+/// Build `SessionConfigOption` list for the `ConfigOptionUpdate` sent after `EnterPlanMode`.
+///
+/// Mirrors `TrogonAcpAgent::build_config_options` from `trogon-acp`.  Duplicated here because
+/// `acp-nats` cannot depend on the higher-level `trogon-acp` crate.  The `bypassPermissions`
+/// mode is intentionally omitted — `EnterPlanMode` only ever sets mode to `"plan"`.
+fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {
+    let mode_options = vec![
+        SessionConfigSelectOption::new("default", "Default"),
+        SessionConfigSelectOption::new("acceptEdits", "Accept Edits"),
+        SessionConfigSelectOption::new("plan", "Plan Mode"),
+        SessionConfigSelectOption::new("dontAsk", "Don't Ask"),
+    ];
+    let model_options = vec![
+        SessionConfigSelectOption::new("claude-opus-4-6", "Claude Opus 4"),
+        SessionConfigSelectOption::new("claude-sonnet-4-6", "Claude Sonnet 4"),
+        SessionConfigSelectOption::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+    ];
+    vec![
+        SessionConfigOption::select("mode", "Mode", mode.to_string(), mode_options)
+            .category(SessionConfigOptionCategory::Mode),
+        SessionConfigOption::select("model", "Model", model.to_string(), model_options)
+            .category(SessionConfigOptionCategory::Model),
+    ]
 }
 
 #[cfg(test)]
