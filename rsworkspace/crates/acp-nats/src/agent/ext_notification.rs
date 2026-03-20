@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, agent};
 use agent_client_protocol::{Error, ErrorCode, ExtNotification, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
@@ -15,7 +15,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(method = %args.method)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ExtNotification,
 ) -> Result<()> {
@@ -95,6 +95,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }
@@ -118,6 +119,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }

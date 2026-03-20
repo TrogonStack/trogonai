@@ -82,7 +82,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     .map_err(map_load_session_error);
 
     if result.is_ok() {
-        bridge.spawn_session_ready(&args.session_id);
+        bridge.schedule_session_ready(args.session_id.clone());
     }
 
     bridge.metrics.record_request(
@@ -147,7 +147,7 @@ mod tests {
     ) {
         assert!(
             has_session_ready_error_metric(finished_metrics),
-            "expected acp.errors datapoint with operation=session_ready, reason=session_ready_publish_failed"
+            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
         );
     }
 
@@ -190,7 +190,7 @@ mod tests {
     ) {
         assert!(
             has_load_session_metric(finished_metrics, expected_success),
-            "expected acp.requests datapoint with method=load_session, success={}",
+            "expected acp.request.count datapoint with method=load_session, success={}",
             expected_success
         );
     }
@@ -214,6 +214,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -228,6 +229,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }
@@ -250,24 +252,14 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_forwards_request_and_returns_response() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mock = AdvancedMockNatsClient::new();
-                let bridge = Bridge::new(
-                    mock.clone(),
-                    trogon_std::time::MockClock::new(),
-                    &opentelemetry::global::meter("acp-nats-test"),
-                    Config::for_test("acp"),
-                );
-                let expected = LoadSessionResponse::new();
-                set_json_response(&mock, "acp.session-load-001.agent.session.load", &expected);
+        let (mock, bridge) = mock_bridge();
+        let expected = LoadSessionResponse::new();
+        set_json_response(&mock, "acp.s1.agent.session.load", &expected);
 
-                let request = LoadSessionRequest::new("session-load-001", "/tmp");
-                let result = bridge.load_session(request).await;
-                assert!(result.is_ok());
-            })
-            .await;
+        let request = LoadSessionRequest::new("s1", ".");
+        let result = bridge.load_session(request).await;
+
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
