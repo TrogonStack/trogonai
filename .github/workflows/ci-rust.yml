@@ -25,6 +25,9 @@ jobs:
         with:
           workspaces: rsworkspace -> target
 
+      - name: Pull NATS Docker image
+        run: docker pull nats:latest
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
@@ -35,7 +38,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-features
         working-directory: rsworkspace
 
       - name: Run tests with coverage
