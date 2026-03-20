@@ -15,10 +15,11 @@ use std::time::Duration;
 use acp_nats::prompt_event::PromptEvent;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
-    Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, SessionId,
-    SessionUpdate, SetSessionModeRequest, SetSessionModeResponse, StopReason, ToolCallStatus,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ContentBlock, ErrorCode,
+    ImageContent, Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
+    SessionId, SessionUpdate, SetSessionModeRequest, SetSessionModeResponse, StopReason,
+    ToolCallStatus,
 };
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -1478,4 +1479,111 @@ async fn prompt_invalid_session_id_returns_error() {
         err.to_string().contains("Invalid session ID"),
         "expected Invalid session ID error, got: {err}"
     );
+}
+
+// ── notification receiver dropped (warn! branches) ────────────────────────────
+
+/// When the notification receiver is dropped before the prompt runs, every
+/// `notification_sender.send(…)` call returns `Err`. The handler must NOT
+/// abort — it logs a warning and continues until `Done`.
+///
+/// This test covers every `is_err()` warn branch in `handle()`:
+///   TextDelta, ThinkingDelta, ToolCallStarted (normal), TodoWrite ToolCallStarted,
+///   ToolCallFinished, ModeChanged (×2), UsageUpdate, SystemStatus.
+#[tokio::test]
+async fn notification_receiver_dropped_prompt_still_completes() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    // make_bridge drops the rx immediately → all sends fail
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-rx-dropped",
+        vec![
+            PromptEvent::TextDelta {
+                text: "hello".to_string(),
+            },
+            PromptEvent::ThinkingDelta {
+                text: "thinking...".to_string(),
+            },
+            PromptEvent::ToolCallStarted {
+                id: "call-normal".to_string(),
+                name: "bash".to_string(),
+                input: serde_json::json!({"command": "ls"}),
+            },
+            PromptEvent::ToolCallStarted {
+                id: "call-todo".to_string(),
+                name: "TodoWrite".to_string(),
+                input: serde_json::json!({
+                    "todos": [{ "content": "task", "status": "pending", "priority": "high" }]
+                }),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "call-normal".to_string(),
+                output: "output".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::ModeChanged {
+                mode: "plan".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+            },
+            PromptEvent::SystemStatus {
+                message: "rate_limit_warning".to_string(),
+            },
+            PromptEvent::UsageUpdate {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                context_window: Some(200_000),
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-rx-dropped", vec![]))
+        .await
+        .expect("prompt must complete even with dropped notification receiver");
+    assert!(
+        matches!(resp.stop_reason, StopReason::EndTurn),
+        "expected EndTurn, got: {:?}",
+        resp.stop_reason
+    );
+}
+
+/// Sending a prompt with only Image blocks exercises the `else { None }` branch
+/// in the `user_message` filter_map (non-Text blocks are skipped).
+#[tokio::test]
+async fn prompt_with_image_only_blocks_produces_empty_user_message() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-img-only",
+        vec![PromptEvent::Done {
+            stop_reason: "end_turn".to_string(),
+        }],
+    )
+    .await;
+
+    // Only an Image block — no Text → user_message will be "" (else { None } path)
+    let blocks = vec![ContentBlock::Image(ImageContent::new(
+        "base64data==",
+        "image/png",
+    ))];
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-img-only", blocks))
+        .await
+        .expect("prompt with image-only blocks must succeed");
+    assert!(matches!(resp.stop_reason, StopReason::EndTurn));
 }

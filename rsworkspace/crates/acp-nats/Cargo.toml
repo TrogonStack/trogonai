@@ -33,6 +33,7 @@ trogon-nats = { path = "../trogon-nats" }
 trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
+futures = "0.3"
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "testing"] }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { version = "1.50.0", features = ["test-util"] }

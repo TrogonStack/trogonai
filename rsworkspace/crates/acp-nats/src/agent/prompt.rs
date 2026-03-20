@@ -179,60 +179,43 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
     let mut context_parts: Vec<UserContentBlock> = Vec::new();
 
     for block in blocks {
-        match block {
-            ContentBlock::Text(t) => {
-                let text = rewrite_mcp_slash_command(&t.text);
-                content.push(UserContentBlock::Text { text });
-            }
-            ContentBlock::Image(img) => {
-                if !img.data.is_empty() {
-                    content.push(UserContentBlock::Image {
-                        data: img.data.clone(),
-                        mime_type: img.mime_type.clone(),
+        if let ContentBlock::Text(t) = block {
+            let text = rewrite_mcp_slash_command(&t.text);
+            content.push(UserContentBlock::Text { text });
+        } else if let ContentBlock::Image(img) = block {
+            if !img.data.is_empty() {
+                content.push(UserContentBlock::Image {
+                    data: img.data.clone(),
+                    mime_type: img.mime_type.clone(),
+                });
+            } else if let Some(uri) = &img.uri {
+                if uri.starts_with("http://") || uri.starts_with("https://") {
+                    content.push(UserContentBlock::ImageUrl { url: uri.clone() });
+                } else {
+                    content.push(UserContentBlock::Text {
+                        text: format!("![image]({uri})"),
                     });
-                } else if let Some(uri) = &img.uri {
-                    if uri.starts_with("http://") || uri.starts_with("https://") {
-                        content.push(UserContentBlock::ImageUrl { url: uri.clone() });
-                    } else {
-                        content.push(UserContentBlock::Text {
-                            text: format!("![image]({uri})"),
-                        });
-                    }
                 }
             }
-            ContentBlock::ResourceLink(r) => {
-                content.push(UserContentBlock::ResourceLink {
-                    uri: r.uri.clone(),
-                    name: r.name.clone(),
+        } else if let ContentBlock::ResourceLink(r) = block {
+            content.push(UserContentBlock::ResourceLink {
+                uri: r.uri.clone(),
+                name: r.name.clone(),
+            });
+        } else if let ContentBlock::Resource(r) = block {
+            if let EmbeddedResourceResource::TextResourceContents(t) = &r.resource {
+                // Inline reference link (position marker in the message body)
+                content.push(UserContentBlock::Text {
+                    text: format_uri_as_link(&t.uri),
+                });
+                context_parts.push(UserContentBlock::Context {
+                    uri: t.uri.clone(),
+                    text: t.text.clone(),
                 });
             }
-            ContentBlock::Resource(r) => {
-                match &r.resource {
-                    EmbeddedResourceResource::TextResourceContents(t) => {
-                        // Inline reference link (position marker in the message body)
-                        content.push(UserContentBlock::Text {
-                            text: format_uri_as_link(&t.uri),
-                        });
-                        context_parts.push(UserContentBlock::Context {
-                            uri: t.uri.clone(),
-                            text: t.text.clone(),
-                        });
-                    }
-                    EmbeddedResourceResource::BlobResourceContents(_) => {
-                        // Binary blobs can't be sent to text/image models — skip
-                    }
-                    _ => {
-                        // Future resource types — skip
-                    }
-                }
-            }
-            ContentBlock::Audio(_) => {
-                // Audio not supported — skip
-            }
-            _ => {
-                // Future content block types — skip
-            }
+            // BlobResourceContents and future resource types are silently skipped
         }
+        // Audio and future content block types are silently skipped
     }
 
     // Append context blocks at the end, matching the TS behaviour
