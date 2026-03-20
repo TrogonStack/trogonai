@@ -62,7 +62,9 @@ impl trogon_nats::client::SubscribeClient for MultiStreamMock {
     ) -> Result<Self::Subscription, Self::SubscribeError> {
         match self.streams.lock().unwrap().pop_front() {
             Some(rx) => Ok(Box::pin(rx) as BoxStream<'static, async_nats::Message>),
-            None => Err(MockErr("mock: no stream available for subscribe".to_string())),
+            None => Err(MockErr(
+                "mock: no stream available for subscribe".to_string(),
+            )),
         }
     }
 }
@@ -198,7 +200,10 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
             tokio::task::yield_now().await;
 
             let result = handle.await.unwrap();
-            assert!(result.is_err(), "expected Err from timeout, got: {result:?}");
+            assert!(
+                result.is_err(),
+                "expected Err from timeout, got: {result:?}"
+            );
             assert!(
                 result.unwrap_err().to_string().contains("timed out"),
                 "expected 'timed out' in error message"
