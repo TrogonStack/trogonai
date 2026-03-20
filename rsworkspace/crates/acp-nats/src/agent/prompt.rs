@@ -727,7 +727,10 @@ mod tests {
         // No base64 data AND no URI — should produce no output block
         let blocks = vec![ContentBlock::Image(ImageContent::new("", "image/png"))];
         let result = acp_blocks_to_user_content(&blocks);
-        assert!(result.is_empty(), "image with no data and no URI should be skipped");
+        assert!(
+            result.is_empty(),
+            "image with no data and no URI should be skipped"
+        );
     }
 
     #[test]
