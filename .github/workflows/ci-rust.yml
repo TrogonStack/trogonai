@@ -38,10 +38,6 @@ jobs:
         run: cargo clippy --all-targets --all-features
         working-directory: rsworkspace
 
-      - name: Build
-        run: cargo build --release
-        working-directory: rsworkspace
-
       - name: Run tests with coverage
         run: cargo cov --cobertura --output-path coverage.xml
         working-directory: rsworkspace
