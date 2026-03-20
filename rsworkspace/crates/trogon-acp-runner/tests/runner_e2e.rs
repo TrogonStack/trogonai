@@ -16,9 +16,9 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::RwLock;
+use trogon_acp_runner::Runner;
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
-use trogon_acp_runner::Runner;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
