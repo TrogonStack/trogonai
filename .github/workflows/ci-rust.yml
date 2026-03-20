@@ -59,6 +59,8 @@ jobs:
       - name: Run tests with coverage
         run: cargo cov --cobertura --output-path coverage.xml
         working-directory: rsworkspace
+        env:
+          RUSTC_BOOTSTRAP: "1"
 
       - name: Coverage report and gate
         uses: insightsengineering/coverage-action@v3
