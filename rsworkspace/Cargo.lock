@@ -10,6 +10,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "bytes",
+ "futures",
  "futures-util",
  "opentelemetry",
  "opentelemetry_sdk",

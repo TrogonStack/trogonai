@@ -357,60 +357,43 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
     let mut context_parts: Vec<UserContentBlock> = Vec::new();
 
     for block in blocks {
-        match block {
-            ContentBlock::Text(t) => {
-                let text = rewrite_mcp_slash_command(&t.text);
-                content.push(UserContentBlock::Text { text });
-            }
-            ContentBlock::Image(img) => {
-                if !img.data.is_empty() {
-                    content.push(UserContentBlock::Image {
-                        data: img.data.clone(),
-                        mime_type: img.mime_type.clone(),
+        if let ContentBlock::Text(t) = block {
+            let text = rewrite_mcp_slash_command(&t.text);
+            content.push(UserContentBlock::Text { text });
+        } else if let ContentBlock::Image(img) = block {
+            if !img.data.is_empty() {
+                content.push(UserContentBlock::Image {
+                    data: img.data.clone(),
+                    mime_type: img.mime_type.clone(),
+                });
+            } else if let Some(uri) = &img.uri {
+                if uri.starts_with("http://") || uri.starts_with("https://") {
+                    content.push(UserContentBlock::ImageUrl { url: uri.clone() });
+                } else {
+                    content.push(UserContentBlock::Text {
+                        text: format!("![image]({uri})"),
                     });
-                } else if let Some(uri) = &img.uri {
-                    if uri.starts_with("http://") || uri.starts_with("https://") {
-                        content.push(UserContentBlock::ImageUrl { url: uri.clone() });
-                    } else {
-                        content.push(UserContentBlock::Text {
-                            text: format!("![image]({uri})"),
-                        });
-                    }
                 }
             }
-            ContentBlock::ResourceLink(r) => {
-                content.push(UserContentBlock::ResourceLink {
-                    uri: r.uri.clone(),
-                    name: r.name.clone(),
+        } else if let ContentBlock::ResourceLink(r) = block {
+            content.push(UserContentBlock::ResourceLink {
+                uri: r.uri.clone(),
+                name: r.name.clone(),
+            });
+        } else if let ContentBlock::Resource(r) = block {
+            if let EmbeddedResourceResource::TextResourceContents(t) = &r.resource {
+                // Inline reference link (position marker in the message body)
+                content.push(UserContentBlock::Text {
+                    text: format_uri_as_link(&t.uri),
+                });
+                context_parts.push(UserContentBlock::Context {
+                    uri: t.uri.clone(),
+                    text: t.text.clone(),
                 });
             }
-            ContentBlock::Resource(r) => {
-                match &r.resource {
-                    EmbeddedResourceResource::TextResourceContents(t) => {
-                        // Inline reference link (position marker in the message body)
-                        content.push(UserContentBlock::Text {
-                            text: format_uri_as_link(&t.uri),
-                        });
-                        context_parts.push(UserContentBlock::Context {
-                            uri: t.uri.clone(),
-                            text: t.text.clone(),
-                        });
-                    }
-                    EmbeddedResourceResource::BlobResourceContents(_) => {
-                        // Binary blobs can't be sent to text/image models — skip
-                    }
-                    _ => {
-                        // Future resource types — skip
-                    }
-                }
-            }
-            ContentBlock::Audio(_) => {
-                // Audio not supported — skip
-            }
-            _ => {
-                // Future content block types — skip
-            }
+            // BlobResourceContents and future resource types are silently skipped
         }
+        // Audio and future content block types are silently skipped
     }
 
     // Append context blocks at the end, matching the TS behaviour
@@ -527,11 +510,13 @@ mod tests {
         use agent_client_protocol::SessionConfigKind;
         let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
         let mode_opt = &opts[0];
-        if let SessionConfigKind::Select(sel) = &mode_opt.kind {
-            assert_eq!(sel.current_value.0.as_ref(), "plan");
-        } else {
-            panic!("mode option is not a Select");
-        }
+        assert!(
+            matches!(
+                &mode_opt.kind,
+                SessionConfigKind::Select(sel) if sel.current_value.0.as_ref() == "plan"
+            ),
+            "mode current_value should be 'plan'"
+        );
     }
 
     #[test]
@@ -539,11 +524,13 @@ mod tests {
         use agent_client_protocol::SessionConfigKind;
         let opts = build_plan_mode_config_options("plan", "claude-haiku-4-5-20251001");
         let model_opt = &opts[1];
-        if let SessionConfigKind::Select(sel) = &model_opt.kind {
-            assert_eq!(sel.current_value.0.as_ref(), "claude-haiku-4-5-20251001");
-        } else {
-            panic!("model option is not a Select");
-        }
+        assert!(
+            matches!(
+                &model_opt.kind,
+                SessionConfigKind::Select(sel) if sel.current_value.0.as_ref() == "claude-haiku-4-5-20251001"
+            ),
+            "model current_value should be 'claude-haiku-4-5-20251001'"
+        );
     }
 
     #[test]
@@ -619,6 +606,13 @@ mod tests {
     fn rewrite_mcp_slash_command_plain_text_passthrough() {
         let out = rewrite_mcp_slash_command("hello world");
         assert_eq!(out, "hello world");
+    }
+
+    #[test]
+    fn rewrite_mcp_slash_command_no_command_part_passthrough() {
+        // /mcp:server has no ':command' segment — not a valid MCP slash command
+        let out = rewrite_mcp_slash_command("/mcp:server_only");
+        assert_eq!(out, "/mcp:server_only");
     }
 
     // ── format_uri_as_link ────────────────────────────────────────────────────
@@ -725,6 +719,15 @@ mod tests {
             matches!(&result[0], crate::prompt_event::UserContentBlock::Text { text }
                 if text.starts_with("![image](")),
         );
+    }
+
+    #[test]
+    fn image_block_with_empty_data_and_no_uri_is_skipped() {
+        use agent_client_protocol::{ContentBlock, ImageContent};
+        // No base64 data AND no URI — should produce no output block
+        let blocks = vec![ContentBlock::Image(ImageContent::new("", "image/png"))];
+        let result = acp_blocks_to_user_content(&blocks);
+        assert!(result.is_empty(), "image with no data and no URI should be skipped");
     }
 
     #[test]
