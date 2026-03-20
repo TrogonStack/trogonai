@@ -80,8 +80,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         )
     })?;
     let nats = bridge.nats();
-    let subject =
-        agent::session_set_config_option(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = agent::session_set_config_option(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<
         N,
@@ -144,8 +143,7 @@ mod tests {
             &expected,
         );
 
-        let request =
-            SetSessionConfigOptionRequest::new("session-cfg-001", "thinking", "enabled");
+        let request = SetSessionConfigOptionRequest::new("session-cfg-001", "thinking", "enabled");
         let result = bridge.set_session_config_option(request).await;
         assert!(result.is_ok());
     }
@@ -164,10 +162,7 @@ mod tests {
     #[tokio::test]
     async fn set_session_config_option_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response(
-            "acp.s1.agent.session.set_config_option",
-            "not json".into(),
-        );
+        mock.set_response("acp.s1.agent.session.set_config_option", "not json".into());
 
         let request = SetSessionConfigOptionRequest::new("s1", "cfg", "val");
         let err = bridge.set_session_config_option(request).await.unwrap_err();
@@ -214,8 +209,7 @@ mod tests {
 
     #[test]
     fn map_error_deserialize() {
-        let serde_err =
-            serde_json::from_str::<SetSessionConfigOptionResponse>("[]").unwrap_err();
+        let serde_err = serde_json::from_str::<SetSessionConfigOptionResponse>("[]").unwrap_err();
         let err = map_set_session_config_option_error(NatsError::Deserialize(serde_err));
         assert!(err.to_string().contains("Invalid response from agent"));
         assert_eq!(err.code, ErrorCode::InternalError);
@@ -224,9 +218,10 @@ mod tests {
     #[test]
     fn map_error_other() {
         let err = map_set_session_config_option_error(NatsError::Other("misc failure".into()));
-        assert!(err
-            .to_string()
-            .contains("Set session config option request failed"));
+        assert!(
+            err.to_string()
+                .contains("Set session config option request failed")
+        );
         assert_eq!(err.code, ErrorCode::InternalError);
     }
 

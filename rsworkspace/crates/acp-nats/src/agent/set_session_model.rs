@@ -97,7 +97,9 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{Agent, ErrorCode, SetSessionModelRequest, SetSessionModelResponse};
+    use agent_client_protocol::{
+        Agent, ErrorCode, SetSessionModelRequest, SetSessionModelResponse,
+    };
     use trogon_nats::{AdvancedMockNatsClient, NatsError};
 
     fn mock_bridge() -> (

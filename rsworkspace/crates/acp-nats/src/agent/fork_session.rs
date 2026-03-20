@@ -72,15 +72,14 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
     let nats = bridge.nats();
     let subject = agent::session_fork(bridge.config.acp_prefix(), session_id.as_str());
 
-    let result =
-        nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
-            nats,
-            &subject,
-            &args,
-            bridge.config.operation_timeout,
-        )
-        .await
-        .map_err(map_fork_session_error);
+    let result = nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
+        nats,
+        &subject,
+        &args,
+        bridge.config.operation_timeout,
+    )
+    .await
+    .map_err(map_fork_session_error);
 
     bridge.metrics.record_request(
         "fork_session",

@@ -3,7 +3,7 @@ use crate::error::AGENT_UNAVAILABLE;
 use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
-    Error, ErrorCode, ResumeSessionRequest, ResumeSessionResponse, Result,
+    Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -74,15 +74,14 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
     let nats = bridge.nats();
     let subject = agent::session_resume(bridge.config.acp_prefix(), session_id.as_str());
 
-    let result =
-        nats::request_with_timeout::<N, ResumeSessionRequest, ResumeSessionResponse>(
-            nats,
-            &subject,
-            &args,
-            bridge.config.operation_timeout,
-        )
-        .await
-        .map_err(map_resume_session_error);
+    let result = nats::request_with_timeout::<N, ResumeSessionRequest, ResumeSessionResponse>(
+        nats,
+        &subject,
+        &args,
+        bridge.config.operation_timeout,
+    )
+    .await
+    .map_err(map_resume_session_error);
 
     bridge.metrics.record_request(
         "resume_session",

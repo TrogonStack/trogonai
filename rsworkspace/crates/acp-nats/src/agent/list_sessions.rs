@@ -58,15 +58,14 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
     let nats = bridge.nats();
     let subject = agent::session_list(bridge.config.acp_prefix());
 
-    let result =
-        nats::request_with_timeout::<N, ListSessionsRequest, ListSessionsResponse>(
-            nats,
-            &subject,
-            &args,
-            bridge.config.operation_timeout,
-        )
-        .await
-        .map_err(map_list_sessions_error);
+    let result = nats::request_with_timeout::<N, ListSessionsRequest, ListSessionsResponse>(
+        nats,
+        &subject,
+        &args,
+        bridge.config.operation_timeout,
+    )
+    .await
+    .map_err(map_list_sessions_error);
 
     bridge.metrics.record_request(
         "list_sessions",
