@@ -3951,6 +3951,7 @@ dependencies = [
  "opentelemetry",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-opentelemetry",

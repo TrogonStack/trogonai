@@ -2,11 +2,16 @@ mod authenticate;
 mod cancel;
 mod ext_method;
 mod ext_notification;
+mod fork_session;
 mod initialize;
+mod list_sessions;
 mod load_session;
 mod new_session;
 mod prompt;
+mod resume_session;
+mod set_session_config_option;
 mod set_session_mode;
+mod set_session_model;
 
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
@@ -14,9 +19,12 @@ use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
-    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    Result, SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
+    ResumeSessionRequest, ResumeSessionResponse, Result, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -85,6 +93,32 @@ impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetEla
         args: SetSessionModeRequest,
     ) -> Result<SetSessionModeResponse> {
         set_session_mode::handle(self, args).await
+    }
+
+    async fn set_session_model(
+        &self,
+        args: SetSessionModelRequest,
+    ) -> Result<SetSessionModelResponse> {
+        set_session_model::handle(self, args).await
+    }
+
+    async fn set_session_config_option(
+        &self,
+        args: SetSessionConfigOptionRequest,
+    ) -> Result<SetSessionConfigOptionResponse> {
+        set_session_config_option::handle(self, args).await
+    }
+
+    async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
+        list_sessions::handle(self, args).await
+    }
+
+    async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
+        fork_session::handle(self, args).await
+    }
+
+    async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
+        resume_session::handle(self, args).await
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
