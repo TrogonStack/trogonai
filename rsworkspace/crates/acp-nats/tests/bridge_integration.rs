@@ -1576,9 +1576,9 @@ async fn prompt_with_text_block_populates_user_message() {
     )
     .await;
 
-    let blocks = vec![ContentBlock::Text(
-        agent_client_protocol::TextContent::new("hello world"),
-    )];
+    let blocks = vec![ContentBlock::Text(agent_client_protocol::TextContent::new(
+        "hello world",
+    ))];
     let resp = bridge
         .prompt(PromptRequest::new("sess-text-block", blocks))
         .await
