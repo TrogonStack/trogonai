@@ -1469,9 +1469,11 @@ mod tests {
     /// tokenized-match loop (score > 0 for a matching token).
     #[test]
     fn resolve_model_tokenized_updates_best() {
-        // "haiku" token → score 1 for haiku model, 0 for others → best is set
-        let result = TestAgent::resolve_model("haiku 4");
-        assert_eq!(result, Some("claude-haiku-4-5-20251001"));
+        // "opus latest" fails steps 1-3 (not a substring of any model id/name),
+        // then reaches step 4: token "opus" matches "claude-opus-4-6" with score 1,
+        // triggering best_score/best assignment on lines 352-353.
+        let result = TestAgent::resolve_model("opus latest");
+        assert_eq!(result, Some("claude-opus-4-6"));
     }
 
     // ── Integration tests (require Docker) ────────────────────────────────────
@@ -2537,6 +2539,57 @@ mod tests {
             agent
                 .replay_history(&SessionId::from("dropped-user-result"), &state)
                 .await;
+        }
+
+        /// Covers line 296: closing `}` of the `if let ToolResult` block when the
+        /// notification send succeeds (sender is alive, tool is not a TodoWrite).
+        #[tokio::test(flavor = "current_thread")]
+        async fn replay_history_tool_result_notified_successfully() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+            let (_c, nats, js) = start_nats().await;
+            let (agent, mut rx) = make_agent(nats, &js).await;
+
+            let state = SessionState {
+                messages: vec![
+                    AgentMsg {
+                        role: "assistant".to_string(),
+                        content: vec![AgentCb::ToolUse {
+                            id: "tu-bash".to_string(),
+                            name: "Bash".to_string(), // not TodoWrite → not skipped
+                            input: serde_json::json!({"command": "echo hi"}),
+                        }],
+                    },
+                    AgentMsg {
+                        role: "user".to_string(),
+                        content: vec![AgentCb::ToolResult {
+                            tool_use_id: "tu-bash".to_string(),
+                            content: "hi\n".to_string(),
+                        }],
+                    },
+                ],
+                ..Default::default()
+            };
+            agent
+                .replay_history(&SessionId::from("bash-result"), &state)
+                .await;
+
+            // First notification: ToolCall(InProgress) from the assistant ToolUse block
+            let first = rx.try_recv().expect("expected ToolCall notification");
+            assert!(
+                matches!(first.update, SessionUpdate::ToolCall(_)),
+                "expected ToolCall, got {:?}",
+                first.update
+            );
+            // Second notification: ToolCallUpdate(Completed) from the user ToolResult block
+            // — this is the path that exercises line 296 (closing `}` after successful send)
+            let second = rx.try_recv().expect("expected ToolCallUpdate notification");
+            assert!(
+                matches!(second.update, SessionUpdate::ToolCallUpdate(_)),
+                "expected ToolCallUpdate, got {:?}",
+                second.update
+            );
+            // No further notifications
+            assert!(rx.try_recv().is_err(), "unexpected extra notification");
         }
 
         /// Covers line 299: `_ => {}` for messages whose role is neither
