@@ -111,4 +111,14 @@ mod tests {
         let dir = platform_log_dir(ServiceName::AcpNatsWs).unwrap();
         assert!(dir.ends_with(ServiceName::AcpNatsWs.as_str()));
     }
+
+    #[test]
+    fn force_flush_noop_when_provider_not_set() {
+        force_flush();
+    }
+
+    #[test]
+    fn shutdown_noop_when_provider_not_set() {
+        shutdown();
+    }
 }
