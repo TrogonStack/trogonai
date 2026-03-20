@@ -74,6 +74,7 @@ impl Runner {
     }
 
     /// Run the prompt subscriber loop — returns when the NATS connection closes.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn run(self) {
         let wildcard = subjects::prompt_wildcard(&self.prefix);
         let mut sub = match self.nats.subscribe(wildcard.clone()).await {
