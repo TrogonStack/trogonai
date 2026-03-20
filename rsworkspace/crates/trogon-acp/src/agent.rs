@@ -392,11 +392,33 @@ where
         let empty: Vec<u8> = vec![];
         let _ = self.nats.publish(cancelled_subject, empty.into()).await;
         if let Err(e) = self.store.delete(session_id).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id, error = %e, "Failed to delete session on close");
-            }
+            Self::warn_delete_session_failed(session_id, &e);
         }
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn warn_delete_session_failed(session_id: &str, e: &impl std::fmt::Display) {
+        warn!(session_id, error = %e, "Failed to delete session on close");
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn warn_init_session_kv_failed(session_id: &str, e: &impl std::fmt::Display) {
+        warn!(session_id = %session_id, error = %e, "Failed to initialise session KV");
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn warn_save_session_mode_failed(session_id: &str, e: &impl std::fmt::Display) {
+        warn!(session_id, error = %e, "Failed to save session mode");
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn warn_save_session_model_failed(session_id: &str, e: &impl std::fmt::Display) {
+        warn!(session_id, error = %e, "Failed to save session model");
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn warn_save_forked_session_failed(session_id: &str, e: &impl std::fmt::Display) {
+        warn!(session_id = %session_id, error = %e, "Failed to save forked session");
     }
 }
 
@@ -547,10 +569,7 @@ where
             ..Default::default()
         };
         if let Err(e) = self.store.save(&session_id, &state).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id = %session_id, error = %e, "Failed to initialise session KV");
-            }
+            Self::warn_init_session_kv_failed(&session_id, &e);
         }
 
         let sid = SessionId::from(session_id.clone());
@@ -646,10 +665,7 @@ where
         )?;
         state.mode = mode_id.clone();
         if let Err(e) = self.store.save(&session_id, &state).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id, error = %e, "Failed to save session mode");
-            }
+            Self::warn_save_session_mode_failed(&session_id, &e);
         }
 
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
@@ -713,10 +729,7 @@ where
             }
             state.mode = value.clone();
             if let Err(e) = self.store.save(&session_id, &state).await {
-                #[cfg_attr(coverage, coverage(off))]
-                {
-                    warn!(session_id, error = %e, "Failed to save session mode");
-                }
+                Self::warn_save_session_mode_failed(&session_id, &e);
             }
             let notification = SessionNotification::new(
                 args.session_id.clone(),
@@ -735,10 +748,7 @@ where
             )?;
             state.model = Some(resolved.to_string());
             if let Err(e) = self.store.save(&session_id, &state).await {
-                #[cfg_attr(coverage, coverage(off))]
-                {
-                    warn!(session_id, error = %e, "Failed to save session model");
-                }
+                Self::warn_save_session_model_failed(&session_id, &e);
             }
         }
 
@@ -782,10 +792,7 @@ where
         )?;
         state.model = Some(model.clone());
         if let Err(e) = self.store.save(&session_id, &state).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id, error = %e, "Failed to save session model");
-            }
+            Self::warn_save_session_model_failed(&session_id, &e);
         }
 
         let current_mode = if state.mode.is_empty() {
@@ -915,10 +922,7 @@ where
             allowed_tools: src_state.allowed_tools.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id = %new_id, error = %e, "Failed to save forked session");
-            }
+            Self::warn_save_forked_session_failed(&new_id, &e);
         }
 
         let sid = SessionId::from(new_id.clone());
@@ -1116,15 +1120,12 @@ fn days_in_month(y: u64, m: u64) -> u64 {
 }
 
 /// Returns `true` if the current process is running as root or under sudo.
+#[cfg_attr(coverage, coverage(off))]
 fn is_running_as_root() -> bool {
     if std::env::var("SUDO_UID").is_ok() || std::env::var("SUDO_USER").is_ok() {
-        #[cfg_attr(coverage, coverage(off))]
-        {
-            return true;
-        }
+        return true;
     }
     #[cfg(target_os = "linux")]
-    #[cfg_attr(coverage, coverage(off))]
     {
         if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
             for line in status.lines() {
