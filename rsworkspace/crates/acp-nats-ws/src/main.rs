@@ -319,4 +319,67 @@ mod tests {
 
         conn_thread.join().unwrap();
     }
+
+    /// Sends a binary frame with invalid UTF-8 bytes — exercises the `Err(e) => warn!` path
+    /// in run_recv_pump (connection.rs lines 161-166). The pump logs a warning and continues;
+    /// the connection must not panic or crash.
+    #[tokio::test]
+    async fn test_recv_pump_drops_non_utf8_frame_and_continues() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+        let _injector = nats_mock.inject_messages();
+
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+
+        let nats_mock_clone = nats_mock.clone();
+        let conn_thread = std::thread::Builder::new()
+            .name(THREAD_NAME.into())
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .unwrap();
+
+        let state = UpgradeState {
+            conn_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        };
+
+        let app = axum::Router::new()
+            .route("/ws", axum::routing::get(upgrade::handle))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let ws_url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(ws_url).await.unwrap();
+
+        // Invalid UTF-8 sequence — exercises the warn path in run_recv_pump
+        let invalid_utf8: Vec<u8> = vec![0xFF, 0xFE, 0x80, 0x00];
+        ws_stream
+            .send(Message::Binary(invalid_utf8.into()))
+            .await
+            .unwrap();
+
+        // Pump continues; give it a moment then shut down cleanly
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        shutdown_tx.send(true).unwrap();
+
+        let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+        conn_thread.join().unwrap();
+    }
 }
