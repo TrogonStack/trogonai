@@ -15,13 +15,12 @@ use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{
-    ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, client,
-    parse_client_subject,
+    ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject,
 };
 use agent_client_protocol::{Client, ErrorCode};
 use async_nats::Message;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures_util::StreamExt;
 use std::cell::Cell;
 use std::rc::Rc;
 use tracing::{Span, error, info, instrument, warn};
@@ -68,7 +67,7 @@ pub async fn run<
     bridge: Rc<Bridge<N, C>>,
     serializer: S,
 ) {
-    let wildcard = client::wildcards::all(bridge.config.acp_prefix());
+    let wildcard = format!("{}.*.client.>", bridge.config.acp_prefix());
     info!("Starting client proxy - subscribing to {}", wildcard);
 
     let mut subscriber = match nats.subscribe(wildcard).await {
@@ -161,7 +160,7 @@ async fn process_message<
 
 struct DispatchContext<'a, N, Cl, C, S>
 where
-    N: RequestClient + PublishClient + FlushClient,
+    N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     C: GetElapsed + 'static,
 {
     nats: &'a N,
@@ -442,6 +441,7 @@ mod tests {
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         ))
     }
 
@@ -453,6 +453,7 @@ mod tests {
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         ))
     }
 
@@ -465,6 +466,7 @@ mod tests {
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp").with_operation_timeout(operation_timeout),
+            tokio::sync::mpsc::channel(1).0,
         ))
     }
 

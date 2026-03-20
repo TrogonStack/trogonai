@@ -1,7 +1,7 @@
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, nats};
-use agent_client_protocol::AgentSideConnection;
+use agent_client_protocol::{AgentSideConnection, Client, SessionNotification};
 use async_nats::Client as NatsAsyncClient;
 use std::rc::Rc;
 use tracing::{error, info};
@@ -54,11 +54,14 @@ async fn run_bridge(
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
     let meter = acp_telemetry::meter("acp-io-bridge-nats");
+    let (notification_tx, mut notification_rx) =
+        tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
         SystemClock,
         &meter,
         config.clone(),
+        notification_tx,
     ));
 
     let (connection, io_task) = AgentSideConnection::new(bridge.clone(), stdout, stdin, |fut| {
@@ -66,6 +69,19 @@ async fn run_bridge(
     });
 
     let connection = Rc::new(connection);
+
+    let connection_for_notif = connection.clone();
+    tokio::task::spawn_local(async move {
+        while let Some(notif) = notification_rx.recv().await {
+            if connection_for_notif
+                .session_notification(notif)
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
 
     let client_connection = connection.clone();
     let bridge_for_client = bridge.clone();

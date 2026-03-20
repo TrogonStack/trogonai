@@ -20,13 +20,16 @@ const ENV_PROMPT_TIMEOUT_SECS: &str = "ACP_PROMPT_TIMEOUT_SECS";
 const ENV_CONNECT_TIMEOUT_SECS: &str = "ACP_NATS_CONNECT_TIMEOUT_SECS";
 
 /// Above this value, prompt timeout errors are rendered in seconds instead of milliseconds.
+#[allow(dead_code)]
 pub(crate) const PROMPT_TIMEOUT_MESSAGE_SECS_THRESHOLD: Duration = Duration::from_secs(60);
 /// Suppresses duplicate timeout-related warnings for a short late-response window.
+#[allow(dead_code)]
 pub(crate) const PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW: Duration = Duration::from_secs(5);
 /// Delay before publishing `session.ready` after successful `new_session`/`load_session`.
 ///
 /// The transport returns handler values before the response is fully written to the client.
 /// This safety margin preserves expected client-observed ordering.
+#[allow(dead_code)]
 pub(crate) const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]

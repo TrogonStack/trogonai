@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{FlushClient, PublishClient, RequestClient};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{PromptResponse, SessionId};
@@ -11,7 +11,10 @@ use trogon_std::time::GetElapsed;
     skip(payload, bridge),
     fields(session_id = %session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<
+    N: RequestClient + PublishClient + FlushClient + SubscribeClient,
+    C: GetElapsed,
+>(
     session_id: &str,
     payload: &[u8],
     reply: Option<&str>,
@@ -120,6 +123,7 @@ mod tests {
             MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         )
     }
 

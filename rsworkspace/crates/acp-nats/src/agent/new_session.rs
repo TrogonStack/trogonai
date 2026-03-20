@@ -1,10 +1,31 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
-use agent_client_protocol::{Error, ErrorCode, NewSessionRequest, NewSessionResponse, Result};
+use crate::nats::{
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    RetryPolicy, agent,
+};
+use crate::telemetry::metrics::Metrics;
+use agent_client_protocol::{
+    Error, ErrorCode, NewSessionRequest, NewSessionResponse, Result, SessionId,
+};
+use std::time::Duration;
 use tracing::{Span, info, instrument, warn};
 use trogon_nats::NatsError;
 use trogon_std::time::GetElapsed;
+
+/// Delay before publishing `session.ready` to NATS.
+///
+/// The `Agent` trait returns the response value *before* the transport layer
+/// serializes and writes it to the client. Without a delay the spawned task
+/// could publish `session.ready` to NATS before the client has received the
+/// `session/new` response, violating the ordering guarantee documented on
+/// [`ExtSessionReady`].
+///
+/// A post-send callback from the transport would be the ideal fix, but the
+/// external `agent_client_protocol` crate does not expose one. This constant
+/// delay provides a practical safety margin (serialization + write is typically
+/// sub-millisecond).
+const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
 fn map_new_session_error(e: NatsError) -> Error {
     match &e {
@@ -75,8 +96,14 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         Span::current().record("session_id", response.session_id.to_string().as_str());
         info!(session_id = %response.session_id, "Session created");
 
-        bridge.metrics.record_session_created();
-        bridge.spawn_session_ready(&response.session_id);
+        let nats = bridge.nats.clone();
+        let prefix = bridge.config.acp_prefix.clone();
+        let session_id = response.session_id.clone();
+        let metrics = bridge.metrics.clone();
+        // TODO: track the JoinHandle so we can drain in-flight publishes on graceful shutdown.
+        tokio::spawn(async move {
+            publish_session_ready(&nats, prefix.as_str(), &session_id, &metrics).await;
+        });
     }
 
     bridge.metrics.record_request(
@@ -86,6 +113,36 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     );
 
     result
+}
+
+async fn publish_session_ready<N: PublishClient + FlushClient>(
+    nats: &N,
+    prefix: &str,
+    session_id: &SessionId,
+    metrics: &Metrics,
+) {
+    tokio::time::sleep(SESSION_READY_DELAY).await;
+
+    let subject = agent::ext_session_ready(prefix, &session_id.to_string());
+    info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
+
+    let message = ExtSessionReady::new(session_id.clone());
+
+    let options = PublishOptions::builder()
+        .publish_retry_policy(RetryPolicy::standard())
+        .flush_policy(FlushPolicy::standard())
+        .build();
+
+    if let Err(e) = nats::publish(nats, &subject, &message, options).await {
+        warn!(
+            error = %e,
+            session_id = %session_id,
+            "Failed to publish session.ready"
+        );
+        metrics.record_error("session_ready", "session_ready_publish_failed");
+    } else {
+        info!(session_id = %session_id, "Published session.ready");
+    }
 }
 
 #[cfg(test)]
@@ -143,7 +200,7 @@ mod tests {
     ) {
         assert!(
             has_session_ready_error_metric(finished_metrics),
-            "expected acp.errors datapoint with operation=session_ready, reason=session_ready_publish_failed"
+            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
         );
     }
 
@@ -186,7 +243,7 @@ mod tests {
     ) {
         assert!(
             has_new_session_metric(finished_metrics, expected_success),
-            "expected acp.requests datapoint with method=new_session, success={}",
+            "expected acp.request.count datapoint with method=new_session, success={}",
             expected_success
         );
     }
@@ -210,6 +267,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -224,6 +282,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }
@@ -239,61 +298,17 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_forwards_request_and_returns_response() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mock = AdvancedMockNatsClient::new();
-                let bridge = Bridge::new(
-                    mock.clone(),
-                    trogon_std::time::MockClock::new(),
-                    &opentelemetry::global::meter("acp-nats-test"),
-                    Config::for_test("acp"),
-                );
-                let expected = NewSessionResponse::new("session-001");
-                set_json_response(&mock, "acp.agent.session.new", &expected);
-
-                let request = NewSessionRequest::new("/tmp");
-                let result = bridge.new_session(request).await;
-
-                assert!(result.is_ok());
-                let response = result.unwrap();
-                assert_eq!(response.session_id.to_string(), "session-001");
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn session_ready_publish_tasks_are_tracked_and_awaited() {
-        let mock = AdvancedMockNatsClient::new();
-        let expected = NewSessionResponse::new("session-ready-track");
+        let (mock, bridge) = mock_bridge();
+        let session_id = SessionId::from("test-session-1");
+        let expected = NewSessionResponse::new(session_id.clone());
         set_json_response(&mock, "acp.agent.session.new", &expected);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Bridge::new(
-                    mock.clone(),
-                    trogon_std::time::MockClock::new(),
-                    &opentelemetry::global::meter("acp-nats-test"),
-                    Config::for_test("acp"),
-                );
-                let request = NewSessionRequest::new("/tmp");
-                let result = bridge.new_session(request).await;
-                assert!(result.is_ok());
+        let request = NewSessionRequest::new(".");
+        let result = bridge.new_session(request).await;
 
-                assert!(
-                    bridge.has_pending_session_ready_tasks(),
-                    "session.ready task should be tracked"
-                );
-
-                bridge.await_session_ready_tasks().await;
-
-                assert!(
-                    !bridge.has_pending_session_ready_tasks(),
-                    "session.ready tasks should be fully awaited and cleared"
-                );
-            })
-            .await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.session_id, session_id);
     }
 
     #[tokio::test]

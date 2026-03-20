@@ -1,5 +1,5 @@
 use acp_nats::{StdJsonSerialize, agent::Bridge, client};
-use agent_client_protocol::AgentSideConnection;
+use agent_client_protocol::{AgentSideConnection, Client, SessionNotification};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -34,11 +34,14 @@ pub async fn handle<N>(
     let outgoing = async_compat::Compat::new(agent_write);
 
     let meter = acp_telemetry::meter("acp-nats-ws");
+    let (notification_tx, mut notification_rx) =
+        tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
         SystemClock,
         &meter,
         config,
+        notification_tx,
     ));
 
     let (connection, io_task) =
@@ -47,6 +50,19 @@ pub async fn handle<N>(
         });
 
     let connection = Rc::new(connection);
+
+    let connection_for_notif = connection.clone();
+    tokio::task::spawn_local(async move {
+        while let Some(notif) = notification_rx.recv().await {
+            if connection_for_notif
+                .session_notification(notif)
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
 
     let recv_pump = tokio::task::spawn_local(run_recv_pump(ws_receiver, ws_recv_write));
     let send_pump = tokio::task::spawn_local(run_send_pump(ws_sender, ws_send_read));

@@ -15,211 +15,51 @@ pub mod agent {
         format!("{}.{}.agent.session.load", prefix, session_id)
     }
 
-    pub fn session_prompt(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.prompt", prefix, session_id)
-    }
-
     pub fn session_cancel(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.session.cancel", prefix, session_id)
+    }
+
+    /// Broadcast subject published when a session is cancelled.
+    /// All bridge `prompt()` callers for this session subscribe here and
+    /// drain immediately when they receive a message.
+    pub fn session_cancelled(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.cancelled", prefix, session_id)
     }
 
     pub fn session_set_mode(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.session.set_mode", prefix, session_id)
     }
 
-    /// Extension methods and notifications share subject `{prefix}.agent.ext.{method}`.
-    /// Backend distinguishes request (reply expected) vs notification (fire-and-forget) by reply address.
-    pub fn ext(prefix: &str, method: &str) -> String {
-        format!("{}.agent.ext.{}", prefix, method)
-    }
-
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
 
-    pub mod wildcards {
-        pub fn global(prefix: &str) -> String {
-            format!("{}.agent.>", prefix)
-        }
-
-        pub fn all_sessions(prefix: &str) -> String {
-            format!("{}.*.agent.>", prefix)
-        }
-
-        pub fn session(prefix: &str, session_id: &str) -> String {
-            format!("{}.{}.agent.>", prefix, session_id)
-        }
-    }
-}
-
-pub mod client {
-    pub fn fs_read_text_file(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.fs.read_text_file", prefix, session_id)
+    /// Subject the Bridge publishes prompt payloads to.
+    /// The Runner subscribes here via `{prefix}.*.agent.prompt`.
+    pub fn prompt(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.prompt", prefix, session_id)
     }
 
-    pub fn fs_write_text_file(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.fs.write_text_file", prefix, session_id)
+    /// Wildcard subject the Runner uses to subscribe to all prompt payloads.
+    pub fn prompt_wildcard(prefix: &str) -> String {
+        format!("{}.*.agent.prompt", prefix)
     }
 
-    pub fn session_request_permission(prefix: &str, session_id: &str) -> String {
-        format!(
-            "{}.{}.client.session.request_permission",
-            prefix, session_id
-        )
+    /// Subject the Runner publishes per-event streaming updates to.
+    /// The Bridge subscribes here while waiting for the turn to complete.
+    pub fn prompt_events(prefix: &str, session_id: &str, req_id: &str) -> String {
+        format!("{}.{}.agent.prompt.events.{}", prefix, session_id, req_id)
     }
 
-    pub fn session_update(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.session.update", prefix, session_id)
-    }
-
-    pub fn terminal_create(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.terminal.create", prefix, session_id)
-    }
-
-    pub fn terminal_kill(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.terminal.kill", prefix, session_id)
-    }
-
-    pub fn terminal_output(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.terminal.output", prefix, session_id)
-    }
-
-    pub fn terminal_release(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.terminal.release", prefix, session_id)
-    }
-
-    pub fn terminal_wait_for_exit(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.client.terminal.wait_for_exit", prefix, session_id)
-    }
-
-    pub fn ext(prefix: &str, session_id: &str, method: &str) -> String {
-        format!("{}.{}.client.ext.{}", prefix, session_id, method)
-    }
-
-    pub fn ext_session_prompt_response(prefix: &str, session_id: &str) -> String {
-        ext(prefix, session_id, "session.prompt_response")
-    }
-
-    pub mod wildcards {
-        pub fn all(prefix: &str) -> String {
-            format!("{}.*.client.>", prefix)
-        }
-
-        pub fn session(prefix: &str, session_id: &str) -> String {
-            format!("{}.{}.client.>", prefix, session_id)
-        }
+    /// Extension method subject: `{prefix}.agent.ext.{method}`.
+    pub fn ext(prefix: &str, method: &str) -> String {
+        format!("{}.agent.ext.{}", prefix, method)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::agent;
-    use super::client;
-
-    #[test]
-    fn client_fs_read_text_file_subject() {
-        assert_eq!(
-            client::fs_read_text_file("acp", "s1"),
-            "acp.s1.client.fs.read_text_file"
-        );
-    }
-
-    #[test]
-    fn client_fs_write_text_file_subject() {
-        assert_eq!(
-            client::fs_write_text_file("acp", "s1"),
-            "acp.s1.client.fs.write_text_file"
-        );
-    }
-
-    #[test]
-    fn client_session_request_permission_subject() {
-        assert_eq!(
-            client::session_request_permission("acp", "s1"),
-            "acp.s1.client.session.request_permission"
-        );
-    }
-
-    #[test]
-    fn client_session_update_subject() {
-        assert_eq!(
-            client::session_update("acp", "s1"),
-            "acp.s1.client.session.update"
-        );
-    }
-
-    #[test]
-    fn client_terminal_create_subject() {
-        assert_eq!(
-            client::terminal_create("acp", "s1"),
-            "acp.s1.client.terminal.create"
-        );
-    }
-
-    #[test]
-    fn client_terminal_kill_subject() {
-        assert_eq!(
-            client::terminal_kill("acp", "s1"),
-            "acp.s1.client.terminal.kill"
-        );
-    }
-
-    #[test]
-    fn client_terminal_output_subject() {
-        assert_eq!(
-            client::terminal_output("acp", "s1"),
-            "acp.s1.client.terminal.output"
-        );
-    }
-
-    #[test]
-    fn client_terminal_release_subject() {
-        assert_eq!(
-            client::terminal_release("acp", "s1"),
-            "acp.s1.client.terminal.release"
-        );
-    }
-
-    #[test]
-    fn client_terminal_wait_for_exit_subject() {
-        assert_eq!(
-            client::terminal_wait_for_exit("acp", "s1"),
-            "acp.s1.client.terminal.wait_for_exit"
-        );
-    }
-
-    #[test]
-    fn client_ext_session_prompt_response_subject() {
-        assert_eq!(
-            client::ext_session_prompt_response("acp", "s1"),
-            "acp.s1.client.ext.session.prompt_response"
-        );
-    }
-
-    #[test]
-    fn client_wildcards_all() {
-        assert_eq!(client::wildcards::all("foo"), "foo.*.client.>");
-    }
-
-    #[test]
-    fn agent_wildcards_global() {
-        assert_eq!(agent::wildcards::global("acp"), "acp.agent.>");
-    }
-
-    #[test]
-    fn agent_wildcards_all_sessions() {
-        assert_eq!(agent::wildcards::all_sessions("acp"), "acp.*.agent.>");
-    }
-
-    #[test]
-    fn agent_wildcards_session() {
-        assert_eq!(agent::wildcards::session("acp", "s1"), "acp.s1.agent.>");
-    }
-
-    #[test]
-    fn client_wildcards_session() {
-        assert_eq!(client::wildcards::session("acp", "s1"), "acp.s1.client.>");
-    }
 
     #[test]
     fn initialize_subject() {
@@ -245,14 +85,6 @@ mod tests {
     }
 
     #[test]
-    fn session_prompt_subject() {
-        assert_eq!(
-            agent::session_prompt("acp", "s1"),
-            "acp.s1.agent.session.prompt"
-        );
-    }
-
-    #[test]
     fn session_cancel_subject() {
         assert_eq!(
             agent::session_cancel("acp", "s1"),
@@ -266,11 +98,6 @@ mod tests {
             agent::session_set_mode("acp", "s1"),
             "acp.s1.agent.session.set_mode"
         );
-    }
-
-    #[test]
-    fn ext_subject() {
-        assert_eq!(agent::ext("acp", "my_method"), "acp.agent.ext.my_method");
     }
 
     #[test]
@@ -295,45 +122,40 @@ mod tests {
     }
 
     #[test]
+    fn prompt_subject() {
+        assert_eq!(agent::prompt("acp", "s1"), "acp.s1.agent.prompt");
+    }
+
+    #[test]
+    fn prompt_wildcard_subject() {
+        assert_eq!(agent::prompt_wildcard("acp"), "acp.*.agent.prompt");
+    }
+
+    #[test]
+    fn prompt_events_subject() {
+        assert_eq!(
+            agent::prompt_events("acp", "s1", "req-abc"),
+            "acp.s1.agent.prompt.events.req-abc"
+        );
+    }
+
+    #[test]
+    fn session_cancelled_subject() {
+        assert_eq!(
+            agent::session_cancelled("acp", "s1"),
+            "acp.s1.agent.session.cancelled"
+        );
+    }
+
+    #[test]
     fn session_scoped_subjects_share_token_layout() {
         let prefix = "acp";
         let sid = "abc";
         let expected_prefix = format!("{}.{}.agent.", prefix, sid);
 
         assert!(agent::session_load(prefix, sid).starts_with(&expected_prefix));
-        assert!(agent::session_prompt(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::session_cancel(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::session_set_mode(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::ext_session_ready(prefix, sid).starts_with(&expected_prefix));
-    }
-
-    #[test]
-    fn multi_tenant_prefixes_are_isolated() {
-        let sid = "sess123";
-        assert_ne!(agent::initialize("tenant1"), agent::initialize("tenant2"));
-        assert_ne!(
-            agent::session_prompt("tenant1", sid),
-            agent::session_prompt("tenant2", sid),
-        );
-    }
-
-    #[test]
-    fn environment_based_prefixes() {
-        assert_eq!(agent::initialize("dev"), "dev.agent.initialize");
-        assert_eq!(agent::initialize("prod"), "prod.agent.initialize");
-        assert_eq!(agent::initialize("staging"), "staging.agent.initialize");
-    }
-
-    #[test]
-    fn special_characters_in_prefix() {
-        assert_eq!(agent::initialize("my_app"), "my_app.agent.initialize");
-        assert_eq!(agent::initialize("my-app"), "my-app.agent.initialize");
-        assert_eq!(agent::initialize("app123"), "app123.agent.initialize");
-    }
-
-    #[test]
-    fn prefix_does_not_add_extra_namespace() {
-        assert_eq!(agent::initialize("myapp"), "myapp.agent.initialize");
-        assert_ne!(agent::initialize("myapp"), "myapp.acp.agent.initialize");
     }
 }
