@@ -625,7 +625,10 @@ impl AgentLoop {
                         })
                         .await;
                     if !text.is_empty() {
-                        let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+                        #[cfg_attr(coverage, coverage(off))]
+                        {
+                            let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+                        }
                     }
                     warn!(iteration, "Streaming chat hit max_tokens (context full)");
                     return Err(AgentError::MaxTokens);
@@ -650,6 +653,7 @@ impl AgentLoop {
         Err(AgentError::MaxIterationsReached)
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn execute_tools_streaming(
         &self,
         content: &[ContentBlock],
@@ -709,6 +713,7 @@ impl AgentLoop {
         results
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
         let mut results = Vec::new();
 

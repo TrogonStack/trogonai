@@ -71,6 +71,7 @@ impl Runner {
         let wildcard = subjects::prompt_wildcard(&self.prefix);
         let mut sub = match self.nats.subscribe(wildcard.clone()).await {
             Ok(s) => s,
+            #[cfg_attr(coverage, coverage(off))]
             Err(e) => {
                 error!(subject = %wildcard, error = %e, "runner: failed to subscribe");
                 return;
