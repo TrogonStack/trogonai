@@ -380,17 +380,17 @@ fn acp_blocks_to_user_content(blocks: &[ContentBlock]) -> Vec<UserContentBlock> 
                 uri: r.uri.clone(),
                 name: r.name.clone(),
             });
-        } else if let ContentBlock::Resource(r) = block {
-            if let EmbeddedResourceResource::TextResourceContents(t) = &r.resource {
-                // Inline reference link (position marker in the message body)
-                content.push(UserContentBlock::Text {
-                    text: format_uri_as_link(&t.uri),
-                });
-                context_parts.push(UserContentBlock::Context {
-                    uri: t.uri.clone(),
-                    text: t.text.clone(),
-                });
-            }
+        } else if let ContentBlock::Resource(r) = block
+            && let EmbeddedResourceResource::TextResourceContents(t) = &r.resource
+        {
+            // Inline reference link (position marker in the message body)
+            content.push(UserContentBlock::Text {
+                text: format_uri_as_link(&t.uri),
+            });
+            context_parts.push(UserContentBlock::Context {
+                uri: t.uri.clone(),
+                text: t.text.clone(),
+            });
             // BlobResourceContents and future resource types are silently skipped
         }
         // Audio and future content block types are silently skipped
