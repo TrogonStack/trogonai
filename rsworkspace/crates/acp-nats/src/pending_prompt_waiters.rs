@@ -376,6 +376,18 @@ mod tests {
     }
 
     #[test]
+    fn register_waiter_returns_err_when_session_already_active() {
+        let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
+        let session_id = SessionId::from("s1");
+
+        let (_rx, _guard, _token) = waiters.register_waiter(session_id.clone()).unwrap();
+        assert!(
+            waiters.register_waiter(session_id).is_err(),
+            "second register for same session must return Err"
+        );
+    }
+
+    #[test]
     fn cancel_waiter_for_session_returns_false_when_no_waiter() {
         let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
         let session_id = SessionId::from("s1");
