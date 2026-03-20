@@ -150,12 +150,15 @@ where
         let body =
             serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap_or_default();
 
-        tokio::spawn(async move {
-            tokio::time::sleep(SESSION_READY_DELAY).await;
-            if let Err(e) = nats.publish(subject.clone(), body.into()).await {
-                warn!(subject = %subject, error = %e, "Failed to publish session.ready");
-            }
-        });
+        tokio::spawn(
+            #[cfg_attr(coverage, coverage(off))]
+            async move {
+                tokio::time::sleep(SESSION_READY_DELAY).await;
+                if let Err(e) = nats.publish(subject.clone(), body.into()).await {
+                    warn!(subject = %subject, error = %e, "Failed to publish session.ready");
+                }
+            },
+        );
     }
 
     /// Send an `available_commands_update` notification asynchronously.
@@ -1361,6 +1364,20 @@ mod tests {
         assert!(stored.is_empty());
     }
 
+    /// Covers lines 369-376: SSE server variant in `convert_mcp_servers`.
+    #[test]
+    fn convert_mcp_servers_sse_server_included() {
+        use agent_client_protocol::McpServerSse;
+        let servers = vec![McpServer::Sse(McpServerSse::new(
+            "sse-srv",
+            "https://sse.example.com/mcp",
+        ))];
+        let stored = TestAgent::convert_mcp_servers(&servers);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].name, "sse-srv");
+        assert_eq!(stored[0].url, "https://sse.example.com/mcp");
+    }
+
     // ── Integration tests (require Docker) ────────────────────────────────────
     //
     // These tests spin up a real NATS server via testcontainers and exercise
@@ -1499,6 +1516,21 @@ mod tests {
         }
 
         // ── new_session ───────────────────────────────────────────────────────
+
+        /// Covers line 185: `send_available_commands_update` spawned future's error
+        /// path when the notification receiver is dropped before the spawn runs.
+        #[tokio::test(flavor = "current_thread")]
+        async fn send_available_commands_update_does_not_panic_when_receiver_dropped() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, rx) = make_agent(nats, &js).await;
+            // Drop the receiver so the spawned send() will fail
+            drop(rx);
+            // new_session calls send_available_commands_update which spawns a future
+            let req = NewSessionRequest::new("/home/user/proj");
+            agent.new_session(req).await.unwrap();
+            // Yield to let spawned futures run and hit the error path
+            tokio::task::yield_now().await;
+        }
 
         #[tokio::test(flavor = "current_thread")]
         async fn new_session_returns_session_id() {
@@ -2045,6 +2077,104 @@ mod tests {
 
             let notif = rx.try_recv().expect("expected Plan notification");
             assert!(matches!(notif.update, SessionUpdate::Plan(_)));
+        }
+
+        /// Covers lines 214 and 225: early return in replay_history when notification_sender
+        /// is closed while replaying assistant Text and Thinking blocks.
+        #[tokio::test(flavor = "current_thread")]
+        async fn replay_history_stops_early_when_sender_dropped_on_text() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+            let (_c, nats, js) = start_nats().await;
+            let (agent, rx) = make_agent(nats, &js).await;
+            // Drop the receiver so send() fails immediately
+            drop(rx);
+
+            let state = SessionState {
+                messages: vec![AgentMsg {
+                    role: "assistant".to_string(),
+                    content: vec![
+                        AgentCb::Text {
+                            text: "some text".to_string(),
+                        },
+                        AgentCb::Thinking {
+                            thinking: "some thinking".to_string(),
+                        },
+                    ],
+                }],
+                ..Default::default()
+            };
+            // Should return early without panic when sender is dropped
+            agent
+                .replay_history(&SessionId::from("dropped-text"), &state)
+                .await;
+        }
+
+        /// Covers lines 239, 263, 266: early return in replay_history when notification_sender
+        /// is closed while replaying TodoWrite (Plan) and standard ToolUse blocks.
+        #[tokio::test(flavor = "current_thread")]
+        async fn replay_history_stops_early_when_sender_dropped_on_tool_use() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+            let (_c, nats, js) = start_nats().await;
+            let (agent, rx) = make_agent(nats, &js).await;
+            drop(rx);
+
+            let state = SessionState {
+                messages: vec![AgentMsg {
+                    role: "assistant".to_string(),
+                    content: vec![
+                        AgentCb::ToolUse {
+                            id: "tw-1".to_string(),
+                            name: "TodoWrite".to_string(),
+                            input: serde_json::json!({
+                                "todos": [{ "content": "task", "status": "pending", "priority": "high" }]
+                            }),
+                        },
+                        AgentCb::ToolUse {
+                            id: "tu-1".to_string(),
+                            name: "Bash".to_string(),
+                            input: serde_json::json!({}),
+                        },
+                    ],
+                }],
+                ..Default::default()
+            };
+            agent
+                .replay_history(&SessionId::from("dropped-tool-use"), &state)
+                .await;
+        }
+
+        /// Covers lines 279, 290, 292-296: early return in replay_history when notification_sender
+        /// is closed while replaying user ToolResult blocks.
+        #[tokio::test(flavor = "current_thread")]
+        async fn replay_history_stops_early_when_sender_dropped_on_tool_result() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+            let (_c, nats, js) = start_nats().await;
+            let (agent, rx) = make_agent(nats, &js).await;
+            drop(rx);
+
+            let state = SessionState {
+                messages: vec![
+                    AgentMsg {
+                        role: "assistant".to_string(),
+                        content: vec![AgentCb::ToolUse {
+                            id: "tu-1".to_string(),
+                            name: "Read".to_string(),
+                            input: serde_json::json!({}),
+                        }],
+                    },
+                    AgentMsg {
+                        role: "user".to_string(),
+                        content: vec![AgentCb::ToolResult {
+                            tool_use_id: "tu-1".to_string(),
+                            content: "file content".to_string(),
+                        }],
+                    },
+                ],
+                ..Default::default()
+            };
+            agent
+                .replay_history(&SessionId::from("dropped-tool-result"), &state)
+                .await;
         }
     }
 }

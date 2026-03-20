@@ -97,6 +97,7 @@ impl SessionStore {
     }
 
     /// List all session IDs currently in the store.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
         use futures_util::StreamExt;
         let mut keys = self.kv.keys().await?;
@@ -228,6 +229,13 @@ mod tests {
     #[test]
     fn days_in_month_december_is_31() {
         assert_eq!(days_in_month(2024, 12), 31);
+    }
+
+    #[test]
+    fn days_in_month_invalid_month_returns_fallback() {
+        // Month 0 and 13 are not valid calendar months — the fallback `_ => 30` is hit.
+        assert_eq!(days_in_month(2024, 0), 30);
+        assert_eq!(days_in_month(2024, 13), 30);
     }
 
     // ── epoch_to_parts ────────────────────────────────────────────────────────

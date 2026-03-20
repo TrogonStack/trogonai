@@ -158,6 +158,7 @@ mod tests {
         assert!(!result, "closed channel should default to deny");
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn permission_req_carries_correct_fields() {
         let (tx, mut rx) = mpsc::channel(1);
@@ -173,5 +174,22 @@ mod tests {
             }
         });
         let _ = checker.check("tc-99", "Read", &input).await;
+    }
+
+    /// Covers line 68: `_ => false` when response_tx is dropped without sending,
+    /// causing resp_rx to return an error immediately.
+    #[tokio::test]
+    async fn dropped_response_tx_returns_false() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = make_checker(tx, vec![]);
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                drop(req.response_tx); // drop without sending — triggers Err on resp_rx
+            }
+        });
+        let result = checker
+            .check("tc-x", "Read", &serde_json::Value::Null)
+            .await;
+        assert!(!result, "dropped response_tx should return false");
     }
 }

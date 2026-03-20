@@ -894,6 +894,221 @@ mod tests {
         assert!(cached_tools.is_empty());
     }
 
+    fn make_test_agent() -> AgentLoop {
+        use crate::tools::ToolContext;
+        let http_client = reqwest::Client::new();
+        let tool_context = Arc::new(ToolContext {
+            http_client: http_client.clone(),
+            proxy_url: "http://unused:9999".to_string(),
+        });
+        AgentLoop {
+            http_client,
+            proxy_url: "http://unused:9999".to_string(),
+            anthropic_token: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 1,
+            thinking_budget: None,
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+        }
+    }
+
+    /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
+    /// when content contains a ToolUse block with no matching MCP dispatch entry.
+    #[tokio::test]
+    async fn execute_tools_streaming_with_tool_use_uses_dispatch_tool() {
+        let agent = make_test_agent();
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Unknown tool"));
+    }
+
+    /// Covers line 737: closing `}` of the if-let in execute_tools
+    /// when content contains a ToolUse block with no matching MCP dispatch entry.
+    #[tokio::test]
+    async fn execute_tools_with_tool_use_uses_dispatch_tool() {
+        let agent = make_test_agent();
+        let content = vec![ContentBlock::ToolUse {
+            id: "t2".to_string(),
+            name: "my_tool".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Unknown tool"));
+    }
+
+    /// Covers lines 685-686 (MCP Ok arm) in execute_tools_streaming.
+    #[tokio::test]
+    async fn execute_tools_streaming_mcp_ok_covers_ok_arm() {
+        use httpmock::prelude::*;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST).path("/mcp");
+                then.status(200).body(
+                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"mcp ok"}],"isError":false}}"#,
+                );
+            })
+            .await;
+        let http = reqwest::Client::new();
+        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mut agent = make_test_agent();
+        agent.mcp_dispatch = vec![("srv__tool".to_string(), "tool".to_string(), client)];
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "m1".to_string(),
+            name: "srv__tool".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results[0].content, "mcp ok");
+    }
+
+    /// Covers line 687 (MCP Err arm) in execute_tools_streaming.
+    #[tokio::test]
+    async fn execute_tools_streaming_mcp_err_covers_err_arm() {
+        use httpmock::prelude::*;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST).path("/mcp");
+                then.status(200).body(
+                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"tool failed"}],"isError":true}}"#,
+                );
+            })
+            .await;
+        let http = reqwest::Client::new();
+        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mut agent = make_test_agent();
+        agent.mcp_dispatch = vec![("srv__tool2".to_string(), "tool2".to_string(), client)];
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "m2".to_string(),
+            name: "srv__tool2".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert!(results[0].content.contains("Tool error"));
+    }
+
+    /// Covers lines 725-726 (MCP Ok arm) in execute_tools.
+    #[tokio::test]
+    async fn execute_tools_mcp_ok_covers_ok_arm() {
+        use httpmock::prelude::*;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST).path("/mcp");
+                then.status(200).body(
+                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"sync ok"}],"isError":false}}"#,
+                );
+            })
+            .await;
+        let http = reqwest::Client::new();
+        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mut agent = make_test_agent();
+        agent.mcp_dispatch = vec![("s__t".to_string(), "t".to_string(), client)];
+        let content = vec![ContentBlock::ToolUse {
+            id: "m3".to_string(),
+            name: "s__t".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results[0].content, "sync ok");
+    }
+
+    /// Covers line 727 (MCP Err arm) in execute_tools.
+    #[tokio::test]
+    async fn execute_tools_mcp_err_covers_err_arm() {
+        use httpmock::prelude::*;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST).path("/mcp");
+                then.status(200).body(
+                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"sync fail"}],"isError":true}}"#,
+                );
+            })
+            .await;
+        let http = reqwest::Client::new();
+        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mut agent = make_test_agent();
+        agent.mcp_dispatch = vec![("s__t2".to_string(), "t2".to_string(), client)];
+        let content = vec![ContentBlock::ToolUse {
+            id: "m4".to_string(),
+            name: "s__t2".to_string(),
+            input: serde_json::json!({}),
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert!(results[0].content.contains("Tool error"));
+    }
+
+    /// Covers line 629: TextDelta emitted in the max_tokens path when text is non-empty.
+    #[tokio::test]
+    async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
+        use httpmock::prelude::*;
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST);
+                then.status(200).body(
+                    r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":10,"output_tokens":5}}"#,
+                );
+            })
+            .await;
+        let http = reqwest::Client::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let tool_context = Arc::new(crate::tools::ToolContext {
+            http_client: http.clone(),
+            proxy_url: server.url(""),
+        });
+        let agent = AgentLoop {
+            http_client: http,
+            proxy_url: server.url(""),
+            anthropic_token: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 1,
+            thinking_budget: None,
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+        };
+        let result = agent
+            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx)
+            .await;
+        assert!(result.is_err());
+        let mut events = vec![];
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "partial")),
+            "expected TextDelta with 'partial' text, got: {events:?}"
+        );
+    }
+
     /// When `system_prompt` is `None`, the `"system"` key is absent from the
     /// serialized body (thanks to `skip_serializing_if = "Option::is_none"`).
     #[test]
