@@ -104,8 +104,6 @@ async fn main() -> anyhow::Result<()> {
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
-        tenant_id: "default".to_string(),
         permission_checker: None,
         thinking_budget: None,
     };

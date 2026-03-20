@@ -3926,7 +3926,6 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-mcp",
- "trogon-splitio",
  "trogon-std",
 ]
 
@@ -3955,21 +3954,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-splitio"
-version = "0.1.0"
-dependencies = [
- "axum",
- "httpmock",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
  "trogon-std",
 ]
 

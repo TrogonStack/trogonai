@@ -22,7 +22,6 @@ use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 pub trait PermissionChecker: Send + Sync {
     fn check<'a>(
         &'a self,
-        session_id: &'a str,
         tool_call_id: &'a str,
         tool_name: &'a str,
         tool_input: &'a serde_json::Value,
@@ -267,28 +266,11 @@ pub struct AgentLoop {
     pub mcp_tool_defs: Vec<ToolDef>,
     /// Dispatch map for MCP tools: prefixed_name → (client, original_tool_name).
     pub mcp_dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
-    /// Split.io client for feature flag evaluation.
-    /// `None` when `SPLIT_EVALUATOR_URL` is not configured — all flags default
-    /// to `true` (fail-open).
-    pub split_client: Option<trogon_splitio::SplitClient>,
-    /// Tenant identifier used as the Split.io user key for flag evaluation.
-    pub tenant_id: String,
     /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
 }
 
 impl AgentLoop {
-    /// Check whether a feature flag is enabled for this agent's tenant.
-    ///
-    /// Returns `true` when Split.io is not configured (`split_client` is
-    /// `None`) — fail-open ensures all handlers run by default.
-    pub async fn is_flag_enabled(&self, flag: &dyn trogon_splitio::flags::FeatureFlag) -> bool {
-        match &self.split_client {
-            Some(client) => client.is_enabled(&self.tenant_id, flag, None).await,
-            None => true,
-        }
-    }
-
     /// Build the Anthropic messages API URL, respecting the gateway override.
     fn messages_url(&self) -> String {
         if let Some(ref base) = self.anthropic_base_url {
@@ -689,7 +671,7 @@ impl AgentLoop {
 
                 // Ask permission before executing (if a checker is installed)
                 let allowed = match &self.permission_checker {
-                    Some(checker) => checker.check(&self.tenant_id, id, name, input).await,
+                    Some(checker) => checker.check(id, name, input).await,
                     None => true,
                 };
 
@@ -934,109 +916,4 @@ mod tests {
         );
     }
 
-    // ── is_flag_enabled ───────────────────────────────────────────────────────
-
-    fn make_test_agent(split_client: Option<trogon_splitio::SplitClient>) -> AgentLoop {
-        use crate::tools::ToolContext;
-        use std::sync::Arc;
-        let http = reqwest::Client::new();
-        AgentLoop {
-            http_client: http.clone(),
-            proxy_url: "http://127.0.0.1:1".to_string(),
-            anthropic_token: String::new(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            model: "test".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context: Arc::new(ToolContext {
-                http_client: http,
-                proxy_url: "http://127.0.0.1:1".to_string(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client,
-            tenant_id: "test-tenant".to_string(),
-            permission_checker: None,
-        }
-    }
-
-    /// When `split_client` is `None`, `is_flag_enabled` returns `true` for any flag
-    /// Minimal test flag — just needs to satisfy `FeatureFlag` for the generic tests below.
-    struct TestFlag(&'static str);
-    impl trogon_splitio::flags::FeatureFlag for TestFlag {
-        fn name(&self) -> &'static str {
-            self.0
-        }
-    }
-
-    /// (fail-open: no Split.io configured → all handlers run).
-    #[tokio::test]
-    async fn is_flag_enabled_returns_true_when_no_split_client() {
-        let agent = make_test_agent(None);
-        assert!(agent.is_flag_enabled(&TestFlag("any_flag")).await);
-    }
-
-    /// When `split_client` is configured and the mock evaluator returns `"on"`,
-    /// `is_flag_enabled` returns `true`.
-    #[tokio::test]
-    async fn is_flag_enabled_returns_true_when_evaluator_says_on() {
-        use trogon_splitio::mock::MockEvaluator;
-
-        let mock = MockEvaluator::new().with_flag("test_flag", "on");
-        let (addr, _h) = mock.serve().await;
-        let client = trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
-            evaluator_url: format!("http://{addr}"),
-            auth_token: "tok".to_string(),
-        });
-        let agent = make_test_agent(Some(client));
-        assert!(agent.is_flag_enabled(&TestFlag("test_flag")).await);
-    }
-
-    /// When `split_client` is configured and the mock evaluator returns `"off"`,
-    /// `is_flag_enabled` returns `false`.
-    #[tokio::test]
-    async fn is_flag_enabled_returns_false_when_evaluator_says_off() {
-        use trogon_splitio::mock::MockEvaluator;
-
-        let mock = MockEvaluator::new().with_flag("test_flag", "off");
-        let (addr, _h) = mock.serve().await;
-        let client = trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
-            evaluator_url: format!("http://{addr}"),
-            auth_token: "tok".to_string(),
-        });
-        let agent = make_test_agent(Some(client));
-        assert!(!agent.is_flag_enabled(&TestFlag("test_flag")).await);
-    }
-
-    /// When the evaluator is unreachable, `is_flag_enabled` returns `false`
-    /// (SplitClient returns "control" on error → not "on" → false).
-    #[tokio::test]
-    async fn is_flag_enabled_returns_false_when_evaluator_unreachable() {
-        let client = trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
-            evaluator_url: "http://127.0.0.1:1".to_string(),
-            auth_token: "tok".to_string(),
-        });
-        let agent = make_test_agent(Some(client));
-        assert!(!agent.is_flag_enabled(&TestFlag("any_flag")).await);
-    }
-
-    /// `tenant_id` is used as the Split.io user key.
-    #[tokio::test]
-    async fn is_flag_enabled_uses_tenant_id_as_key() {
-        use trogon_splitio::mock::MockEvaluator;
-
-        let mock = MockEvaluator::new().with_flag("test_flag", "on");
-        let (addr, _h) = mock.serve().await;
-        let client = trogon_splitio::SplitClient::new(trogon_splitio::SplitConfig {
-            evaluator_url: format!("http://{addr}"),
-            auth_token: "tok".to_string(),
-        });
-        let mut agent = make_test_agent(Some(client));
-        agent.tenant_id = "acme-corp".to_string();
-        assert!(agent.is_flag_enabled(&TestFlag("test_flag")).await);
-    }
 }

@@ -34,7 +34,6 @@ pub struct ChannelPermissionChecker {
 impl PermissionChecker for ChannelPermissionChecker {
     fn check<'a>(
         &'a self,
-        _session_id: &'a str,
         tool_call_id: &'a str,
         tool_name: &'a str,
         tool_input: &'a Value,
@@ -90,7 +89,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         let checker = make_checker(tx, vec!["Bash".to_string()]);
         let result = checker
-            .check("sess-1", "tc-1", "Bash", &serde_json::Value::Null)
+            .check("tc-1", "Bash", &serde_json::Value::Null)
             .await;
         assert!(result, "Bash should be auto-allowed");
     }
@@ -109,7 +108,7 @@ mod tests {
             }
         });
         let result = checker2
-            .check("sess-1", "tc-1", "bash", &serde_json::Value::Null)
+            .check("tc-1", "bash", &serde_json::Value::Null)
             .await;
         assert!(
             !result,
@@ -128,7 +127,7 @@ mod tests {
             }
         });
         let result = checker
-            .check("sess-1", "tc-2", "Edit", &serde_json::Value::Null)
+            .check("tc-2", "Edit", &serde_json::Value::Null)
             .await;
         assert!(result, "channel returned allow");
     }
@@ -143,7 +142,7 @@ mod tests {
             }
         });
         let result = checker
-            .check("sess-1", "tc-3", "Write", &serde_json::Value::Null)
+            .check("tc-3", "Write", &serde_json::Value::Null)
             .await;
         assert!(!result, "channel returned deny");
     }
@@ -154,7 +153,7 @@ mod tests {
         drop(rx); // close the receiver
         let checker = make_checker(tx, vec![]);
         let result = checker
-            .check("sess-1", "tc-4", "Read", &serde_json::Value::Null)
+            .check("tc-4", "Read", &serde_json::Value::Null)
             .await;
         assert!(!result, "closed channel should default to deny");
     }
@@ -173,6 +172,6 @@ mod tests {
                 let _ = req.response_tx.send(true);
             }
         });
-        let _ = checker.check("sess-1", "tc-99", "Read", &input).await;
+        let _ = checker.check("tc-99", "Read", &input).await;
     }
 }
