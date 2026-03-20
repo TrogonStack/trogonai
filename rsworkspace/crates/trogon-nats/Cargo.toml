@@ -20,6 +20,7 @@ trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
 tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
 
 [features]
