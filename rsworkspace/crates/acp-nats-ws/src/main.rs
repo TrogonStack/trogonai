@@ -252,4 +252,152 @@ mod tests {
 
         conn_thread.join().unwrap();
     }
+
+    /// Sends a Binary message — exercises the `Message::Binary(b)` arm in run_recv_pump.
+    /// The ACP protocol layer sees the binary bytes as an invalid JSON line and closes
+    /// the io_task cleanly (Ok path — EOF after the pump exits).
+    #[tokio::test]
+    async fn test_recv_pump_handles_binary_message() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+        let _injector = nats_mock.inject_messages();
+
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+
+        let nats_mock_clone = nats_mock.clone();
+        let conn_thread = std::thread::Builder::new()
+            .name(THREAD_NAME.into())
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .unwrap();
+
+        let state = UpgradeState {
+            conn_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        };
+
+        let app = axum::Router::new()
+            .route("/ws", axum::routing::get(upgrade::handle))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let ws_url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(ws_url).await.unwrap();
+
+        // Send a binary frame — exercises Message::Binary arm in run_recv_pump
+        ws_stream
+            .send(Message::Binary(b"binary payload".to_vec().into()))
+            .await
+            .unwrap();
+
+        // Give the pump time to process it, then shut down
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        shutdown_tx.send(true).unwrap();
+
+        let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+        conn_thread.join().unwrap();
+    }
+
+    /// Sends a Close frame — exercises the `Message::Close(_) => break` arm.
+    /// After the recv pump exits, the io_task sees EOF and the connection closes.
+    #[tokio::test]
+    async fn test_recv_pump_handles_close_frame() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+        let _injector = nats_mock.inject_messages();
+
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+
+        let nats_mock_clone = nats_mock.clone();
+        let conn_thread = std::thread::Builder::new()
+            .name(THREAD_NAME.into())
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .unwrap();
+
+        let state = UpgradeState {
+            conn_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        };
+
+        let app = axum::Router::new()
+            .route("/ws", axum::routing::get(upgrade::handle))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let ws_url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(ws_url).await.unwrap();
+
+        // Close the client side — server recv pump sees Message::Close and breaks
+        ws_stream.close(None).await.unwrap();
+
+        // Server should close its end too; wait briefly then clean up
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        shutdown_tx.send(true).unwrap();
+
+        let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+        conn_thread.join().unwrap();
+    }
+
+    /// process_connections drains when the channel sender is dropped.
+    #[tokio::test]
+    async fn test_process_connections_drains_when_channel_closed() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+
+        let conn_thread = std::thread::Builder::new()
+            .name(THREAD_NAME.into())
+            .spawn(move || run_connection_thread(conn_rx, nats_mock, config))
+            .unwrap();
+
+        // Dropping conn_tx closes the channel → process_connections loop exits → thread drains
+        drop(conn_tx);
+
+        let result = tokio::task::spawn_blocking(move || conn_thread.join())
+            .await
+            .unwrap();
+        assert!(result.is_ok(), "connection thread should exit cleanly");
+    }
 }

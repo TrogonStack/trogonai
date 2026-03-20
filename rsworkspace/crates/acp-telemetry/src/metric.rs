@@ -42,3 +42,24 @@ pub(crate) fn shutdown() {
         eprintln!("Failed to shutdown meter provider: {e}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn force_flush_noop_when_provider_not_set() {
+        // METER_PROVIDER never set in this test context → no-op, must not panic
+        force_flush();
+    }
+
+    #[test]
+    fn shutdown_noop_when_provider_not_set() {
+        shutdown();
+    }
+
+    #[test]
+    fn metric_export_interval_is_30s() {
+        assert_eq!(METRIC_EXPORT_INTERVAL.as_secs(), 30);
+    }
+}

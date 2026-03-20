@@ -372,16 +372,19 @@ impl std::error::Error for NatsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "test-support")]
     use serde::{Deserialize, Serialize};
 
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
+    #[cfg(feature = "test-support")]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
+    #[cfg(feature = "test-support")]
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
@@ -417,6 +420,12 @@ mod tests {
     fn test_flush_policy_standard() {
         let policy = FlushPolicy::standard();
         assert_eq!(policy.retry_policy.max_retries, 3);
+    }
+
+    #[test]
+    fn test_flush_policy_default() {
+        let policy = FlushPolicy::default();
+        assert_eq!(policy.retry_policy.max_retries, 0);
     }
 
     #[test]

@@ -32,3 +32,18 @@ pub(crate) fn shutdown() {
         eprintln!("Failed to shutdown tracer provider: {e}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn force_flush_noop_when_provider_not_set() {
+        force_flush();
+    }
+
+    #[test]
+    fn shutdown_noop_when_provider_not_set() {
+        shutdown();
+    }
+}

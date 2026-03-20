@@ -4,7 +4,9 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use trogon_std::dirs::{HomeDir, StateDir, SystemDirs};
+#[cfg(target_os = "macos")]
+use trogon_std::dirs::HomeDir;
+use trogon_std::dirs::{StateDir, SystemDirs};
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::CreateDirAll;
 
