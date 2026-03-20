@@ -229,4 +229,26 @@ mod tests {
         ));
         assert!(std::error::Error::source(&err).is_some());
     }
+
+    #[test]
+    fn connect_error_display_connection_failed() {
+        let nats_err = async_nats::error::Error::new(async_nats::ConnectErrorKind::Io);
+        let err = ConnectError::ConnectionFailed {
+            servers: vec!["nats://127.0.0.1:4222".to_string()],
+            error: nats_err,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Failed to connect to NATS servers"));
+        assert!(msg.contains("4222"));
+    }
+
+    #[test]
+    fn connect_error_source_connection_failed() {
+        let nats_err = async_nats::error::Error::new(async_nats::ConnectErrorKind::Io);
+        let err = ConnectError::ConnectionFailed {
+            servers: vec!["nats://127.0.0.1:4222".to_string()],
+            error: nats_err,
+        };
+        assert!(std::error::Error::source(&err).is_some());
+    }
 }

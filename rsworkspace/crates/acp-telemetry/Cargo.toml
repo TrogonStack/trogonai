@@ -11,7 +11,7 @@ opentelemetry = "0.31.0"
 opentelemetry-appender-tracing = "0.31.1"
 opentelemetry-otlp = { version = "0.31.1", features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "logs", "metrics"] }
-tokio = { version = "1.50.0", features = ["signal"] }
+tokio = { version = "1.50.0", features = ["macros", "signal"] }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
