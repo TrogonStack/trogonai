@@ -18,4 +18,5 @@ trogon-splitio = { path = "../trogon-splitio" }
 trogon-std     = { path = "../trogon-std" }
 
 [dev-dependencies]
+httpmock       = "0.7"
 trogon-splitio = { path = "../trogon-splitio" }

@@ -3988,6 +3988,7 @@ dependencies = [
  "async-nats 0.45.0",
  "bytes",
  "futures-util",
+ "httpmock",
  "reqwest",
  "serde",
  "serde_json",
@@ -4004,6 +4005,7 @@ dependencies = [
 name = "trogon-agent-core"
 version = "0.1.0"
 dependencies = [
+ "httpmock",
  "reqwest",
  "serde",
  "serde_json",
