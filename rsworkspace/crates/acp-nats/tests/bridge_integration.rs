@@ -1558,6 +1558,80 @@ async fn notification_receiver_dropped_prompt_still_completes() {
     );
 }
 
+/// Sending a prompt with a Text block exercises the `Some(t.text.as_str())`
+/// branch in the `user_message` filter_map (line 40 in prompt.rs).
+#[tokio::test]
+async fn prompt_with_text_block_populates_user_message() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-text-block",
+        vec![PromptEvent::Done {
+            stop_reason: "end_turn".to_string(),
+        }],
+    )
+    .await;
+
+    let blocks = vec![ContentBlock::Text(
+        agent_client_protocol::TextContent::new("hello world"),
+    )];
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-text-block", blocks))
+        .await
+        .expect("prompt with text block must succeed");
+    assert!(matches!(resp.stop_reason, StopReason::EndTurn));
+}
+
+/// When `ToolCallFinished` arrives for an ID that was never seen in
+/// `ToolCallStarted`, the `tool_name_cache` lookup returns `None` and the
+/// update is returned without meta (the `else update` branch, line 260).
+#[tokio::test]
+async fn tool_call_finished_without_prior_started_omits_meta() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-tc-no-start",
+        vec![
+            PromptEvent::ToolCallFinished {
+                id: "unknown-call".to_string(),
+                output: "output".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-tc-no-start", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let update = updates.iter().find_map(|u| {
+        if let SessionUpdate::ToolCallUpdate(u) = u {
+            Some(u)
+        } else {
+            None
+        }
+    });
+    assert!(
+        update.is_some(),
+        "expected ToolCallUpdate for unknown id, got: {updates:?}"
+    );
+}
+
 /// Sending a prompt with only Image blocks exercises the `else { None }` branch
 /// in the `user_message` filter_map (non-Text blocks are skipped).
 #[tokio::test]
