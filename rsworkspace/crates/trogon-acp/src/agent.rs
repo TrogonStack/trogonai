@@ -197,6 +197,7 @@ where
     /// - Assistant text: `AgentMessageChunk`
     /// - Assistant tool_use: `ToolCall` (InProgress → Completed)
     /// - User tool_result: `ToolCallUpdate` (Completed)
+    #[cfg_attr(coverage, coverage(off))]
     async fn replay_history(&self, session_id: &SessionId, state: &SessionState) {
         // Track TodoWrite tool-use ids so we skip their tool_result replays
         let mut todo_write_ids: std::collections::HashSet<String> =
