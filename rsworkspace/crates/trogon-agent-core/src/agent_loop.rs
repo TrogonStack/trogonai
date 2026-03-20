@@ -800,6 +800,7 @@ mod tests {
                 .to_string()
                 .contains("pause")
         );
+        assert!(AgentError::MaxTokens.to_string().contains("max_tokens"));
     }
 
     #[test]
@@ -905,12 +906,9 @@ mod tests {
     /// When the tool list is empty no panic occurs and no cache_control is set.
     #[test]
     fn run_empty_tool_list_does_not_panic() {
-        use serde_json::json;
-
-        let mut cached_tools: Vec<crate::tools::ToolDef> = vec![];
-        if let Some(last) = cached_tools.last_mut() {
-            last.cache_control = Some(json!({"type": "ephemeral"}));
-        }
+        let cached_tools: Vec<crate::tools::ToolDef> = vec![];
+        // last_mut() returns None on an empty vec — no panic, no cache_control set.
+        assert!(cached_tools.last().is_none());
         assert!(cached_tools.is_empty());
     }
 

@@ -6,8 +6,10 @@
 use std::sync::Arc;
 
 use httpmock::prelude::*;
-use trogon_agent_core::agent_loop::{AgentError, AgentEvent, AgentLoop, Message};
-use trogon_agent_core::tools::ToolContext;
+use trogon_agent_core::agent_loop::{
+    AgentError, AgentEvent, AgentLoop, Message, PermissionChecker,
+};
+use trogon_agent_core::tools::{ToolContext, tool_def};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -454,6 +456,485 @@ async fn run_chat_streaming_emits_tool_call_events() {
         "expected final TextDelta after tool"
     );
 }
+
+// ── Additional helpers ────────────────────────────────────────────────────────
+
+fn unknown_stop_body() -> String {
+    serde_json::json!({
+        "stop_reason": "pause",
+        "content": [{"type": "text", "text": "partial"}]
+    })
+    .to_string()
+}
+
+fn thinking_end_turn_body(thought: &str, text: &str) -> String {
+    serde_json::json!({
+        "stop_reason": "end_turn",
+        "content": [
+            {"type": "thinking", "thinking": thought},
+            {"type": "text", "text": text}
+        ],
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
+    })
+    .to_string()
+}
+
+fn max_tokens_with_thinking_body() -> String {
+    serde_json::json!({
+        "stop_reason": "max_tokens",
+        "content": [
+            {"type": "thinking", "thinking": "partial thoughts"},
+            {"type": "text", "text": "partial answer"}
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 4096}
+    })
+    .to_string()
+}
+
+/// A `PermissionChecker` that always denies tool execution.
+struct DenyAll;
+
+impl PermissionChecker for DenyAll {
+    fn check<'a>(
+        &'a self,
+        _session_id: &'a str,
+        _tool_call_id: &'a str,
+        _tool_name: &'a str,
+        _tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        Box::pin(async { false })
+    }
+}
+
+// ── UnexpectedStopReason ──────────────────────────────────────────────────────
+
+/// `run()` returns `Err(UnexpectedStopReason)` for an unknown stop_reason.
+/// Covers the `other =>` branch in the main loop.
+#[tokio::test]
+async fn run_unexpected_stop_reason() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(unknown_stop_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent.run(vec![Message::user_text("hi")], &[], None).await;
+
+    assert!(matches!(result, Err(AgentError::UnexpectedStopReason(_))));
+}
+
+/// `run_chat()` returns `Err(UnexpectedStopReason)` for an unknown stop_reason.
+#[tokio::test]
+async fn run_chat_unexpected_stop_reason() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(unknown_stop_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run_chat(vec![Message::user_text("hi")], &[], None)
+        .await;
+
+    assert!(matches!(result, Err(AgentError::UnexpectedStopReason(_))));
+}
+
+/// `run_chat_streaming()` returns `Err(UnexpectedStopReason)` for an unknown stop_reason.
+#[tokio::test]
+async fn run_chat_streaming_unexpected_stop_reason() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(unknown_stop_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, _rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
+        .await;
+
+    assert!(matches!(result, Err(AgentError::UnexpectedStopReason(_))));
+}
+
+// ── MaxIterationsReached in run_chat / run_chat_streaming ─────────────────────
+
+/// `run_chat()` returns `Err(MaxIterationsReached)` when always getting tool_use.
+#[tokio::test]
+async fn run_chat_max_iterations_reached() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.max_iterations = 2;
+
+    let result = agent
+        .run_chat(vec![Message::user_text("hi")], &[], None)
+        .await;
+
+    assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
+}
+
+/// `run_chat_streaming()` returns `Err(MaxIterationsReached)` when always getting tool_use.
+#[tokio::test]
+async fn run_chat_streaming_max_iterations_reached() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.max_iterations = 2;
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
+        .await;
+
+    assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
+}
+
+// ── extra_headers / non-empty tools / system_prompt ──────────────────────────
+
+/// `run()` forwards extra headers and marks the last tool with `cache_control`.
+/// Covers: loop over `anthropic_extra_headers`, `cached_tools.last_mut()`.
+#[tokio::test]
+async fn run_with_extra_headers_and_tools() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("ok"));
+    });
+
+    let http = reqwest::Client::new();
+    let tools = vec![tool_def("t", "d", serde_json::json!({"type": "object"}))];
+    let agent = AgentLoop {
+        http_client: http.clone(),
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext {
+            http_client: http,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
+        permission_checker: None,
+    };
+
+    let result = agent
+        .run(vec![Message::user_text("hi")], &tools, None)
+        .await;
+    assert_eq!(result.unwrap(), "ok");
+}
+
+/// `run_chat()` with system prompt, non-empty tools, and extra headers.
+/// Covers: system block construction, cache_control marking, header loop.
+#[tokio::test]
+async fn run_chat_with_system_prompt_tools_and_extra_headers() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("chat ok"));
+    });
+
+    let http = reqwest::Client::new();
+    let tools = vec![tool_def("t", "d", serde_json::json!({"type": "object"}))];
+    let agent = AgentLoop {
+        http_client: http.clone(),
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext {
+            http_client: http,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
+        permission_checker: None,
+    };
+
+    let (text, msgs) = agent
+        .run_chat(
+            vec![Message::user_text("hi")],
+            &tools,
+            Some("You are helpful."),
+        )
+        .await
+        .unwrap();
+    assert_eq!(text, "chat ok");
+    assert!(msgs.last().unwrap().role == "assistant");
+}
+
+// ── Thinking content blocks ───────────────────────────────────────────────────
+
+/// `run()` ignores non-Text blocks (Thinking) when collecting the response text.
+/// Covers the `else { None }` branch in the filter_map inside `end_turn`.
+#[tokio::test]
+async fn run_with_thinking_block_in_end_turn() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(thinking_end_turn_body("my thoughts", "final answer"));
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent.run(vec![Message::user_text("hi")], &[], None).await;
+
+    assert_eq!(result.unwrap(), "final answer");
+}
+
+/// `run_chat()` ignores non-Text blocks when collecting the response text.
+/// Covers the `else { None }` branch in the filter_map inside `end_turn` of `run_chat`.
+#[tokio::test]
+async fn run_chat_with_thinking_block_in_end_turn() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(thinking_end_turn_body("chain of thought", "chat answer"));
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (text, _msgs) = agent
+        .run_chat(vec![Message::user_text("hi")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "chat answer");
+}
+
+// ── run_chat_streaming comprehensive coverage ─────────────────────────────────
+
+/// `run_chat_streaming()` with thinking_budget, system_prompt, non-empty tools,
+/// extra_headers, and a Thinking block in the response.
+/// Covers: cache_control marking, system block construction, thinking_budget branch,
+/// extra_headers loop, ThinkingDelta emission, and the None branch in filter_map.
+#[tokio::test]
+async fn run_chat_streaming_comprehensive() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(thinking_end_turn_body(
+                "internal reasoning",
+                "streamed reply",
+            ));
+    });
+
+    let http = reqwest::Client::new();
+    let tools = vec![tool_def("t", "d", serde_json::json!({"type": "object"}))];
+    let agent = AgentLoop {
+        http_client: http.clone(),
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: Some(1000), // enables the thinking branch
+        tool_context: Arc::new(ToolContext {
+            http_client: http,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
+        permission_checker: None,
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let result = agent
+        .run_chat_streaming(
+            vec![Message::user_text("think hard")],
+            &tools,
+            Some("You reason carefully."),
+            tx,
+        )
+        .await;
+
+    assert!(result.is_ok());
+
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::ThinkingDelta { text } if text.contains("internal reasoning"))
+        ),
+        "expected ThinkingDelta event"
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("streamed reply"))
+        ),
+        "expected TextDelta event"
+    );
+}
+
+/// `run_chat_streaming()` with a Thinking block in the max_tokens response.
+/// Covers: the None branch in the filter_map inside the `max_tokens` handler.
+#[tokio::test]
+async fn run_chat_streaming_max_tokens_with_thinking_block() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(max_tokens_with_thinking_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
+        .await;
+
+    assert!(matches!(result, Err(AgentError::MaxTokens)));
+
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
+        "expected UsageSummary on max_tokens"
+    );
+    // partial answer text is non-empty → TextDelta should also be emitted
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("partial answer"))
+        ),
+        "expected TextDelta with partial text"
+    );
+}
+
+// ── permission_checker ────────────────────────────────────────────────────────
+
+/// When a `permission_checker` denies the tool, `execute_tools_streaming` returns
+/// a "Permission denied" message instead of executing the tool.
+/// Covers the `Some(checker)` match arm and the `!allowed` branch.
+#[tokio::test]
+async fn run_chat_streaming_permission_denied() {
+    let server = MockServer::start();
+    // First call returns tool_use; second (with tool_result) returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("done"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let http = reqwest::Client::new();
+    let agent = AgentLoop {
+        http_client: http.clone(),
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![],
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext {
+            http_client: http,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
+        permission_checker: Some(Arc::new(DenyAll)),
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx)
+        .await;
+
+    assert!(result.is_ok(), "should succeed after permission denial");
+
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+
+    // ToolCallFinished should carry the denial message
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolCallFinished { output, .. } if output.contains("Permission denied")
+        )),
+        "expected ToolCallFinished with denial message"
+    );
+}
+
+// ── proxy URL (else branch of messages_url) ───────────────────────────────────
 
 /// When `anthropic_base_url` is `None`, `messages_url()` builds the URL as
 /// `{proxy_url}/anthropic/v1/messages`. Covers the else branch of `messages_url`.
