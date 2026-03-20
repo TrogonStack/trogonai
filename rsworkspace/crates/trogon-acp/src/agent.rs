@@ -9,7 +9,7 @@ use std::time::Duration;
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
     AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate, ContentBlock, ContentChunk,
-    CurrentModeUpdate, Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
+    CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
     ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, ModelInfo, NewSessionRequest, NewSessionResponse, Plan, PlanEntry,
@@ -19,8 +19,8 @@ use agent_client_protocol::{
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
     SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields,
+    SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallContent,
+    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
@@ -35,6 +35,36 @@ use trogon_std::time::GetElapsed;
 const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
 /// Hardcoded available Claude models exposed by this agent.
+/// Built-in Claude Code slash commands sent in `available_commands_update`.
+///
+/// Mirrors `getAvailableSlashCommands` in the TS reference (unsupported ones
+/// excluded: cost, keybindings-help, login, logout, output-style:new,
+/// release-notes, todos).
+const BUILTIN_SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("bug", "Submit feedback about Claude"),
+    (
+        "clear",
+        "Clear conversation history and free context window",
+    ),
+    (
+        "compact",
+        "Compact conversation with optional focus instructions",
+    ),
+    ("config", "Open config panel"),
+    (
+        "doctor",
+        "Check the health of your Claude Code installation",
+    ),
+    ("help", "Get help with using Claude Code"),
+    ("init", "Initialize Claude Code in a new project"),
+    ("memory", "Edit CLAUDE.md memory files"),
+    ("model", "Set the AI model to use"),
+    ("pr_comments", "Get comments on a GitHub pull request"),
+    ("review", "Review a pull request"),
+    ("status", "View account and system status"),
+    ("vim", "Toggle vim mode"),
+];
+
 const AVAILABLE_MODELS: &[(&str, &str)] = &[
     ("claude-opus-4-6", "Claude Opus 4"),
     ("claude-sonnet-4-6", "Claude Sonnet 4"),
@@ -162,22 +192,26 @@ where
     }
 
     /// Send an `available_commands_update` notification asynchronously.
-    /// Builds one slash command entry per MCP server (e.g. `"myserver:"`).
+    ///
+    /// Sends the built-in Claude Code slash commands followed by one entry per
+    /// configured MCP server (e.g. `"myserver:"`), matching the TS implementation
+    /// which calls `query.supportedCommands()` and filters the result.
     #[cfg_attr(coverage, coverage(off))]
     async fn send_available_commands_update(
         &self,
         session_id: &SessionId,
         mcp_servers: &[trogon_acp_runner::StoredMcpServer],
     ) {
-        let commands: Vec<AvailableCommand> = mcp_servers
+        let mut commands: Vec<AvailableCommand> = BUILTIN_SLASH_COMMANDS
             .iter()
-            .map(|s| {
-                AvailableCommand::new(
-                    format!("{}:", s.name),
-                    format!("Commands provided by MCP server '{}'", s.name),
-                )
-            })
+            .map(|(name, desc)| AvailableCommand::new(*name, *desc))
             .collect();
+        for s in mcp_servers {
+            commands.push(AvailableCommand::new(
+                format!("{}:", s.name),
+                format!("Commands provided by MCP server '{}'", s.name),
+            ));
+        }
         let notification = SessionNotification::new(
             session_id.clone(),
             SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
@@ -204,6 +238,9 @@ where
             std::collections::HashSet::new();
         // Track Bash tool-use ids for terminal streaming replay
         let mut bash_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // id → (name, input) for content/diff/location reconstruction on ToolResult
+        let mut tool_replay_cache: std::collections::HashMap<String, (String, serde_json::Value)> =
+            std::collections::HashMap::new();
         let supports_terminal = self.bridge.supports_terminal_output();
 
         for msg in &state.messages {
@@ -259,6 +296,9 @@ where
                                     "claudeCode".to_string(),
                                     serde_json::Value::Object(cc),
                                 );
+                                // Cache (name, input) for ToolResult content reconstruction
+                                tool_replay_cache.insert(id.clone(), (name.clone(), input.clone()));
+
                                 if name == "Bash" && supports_terminal {
                                     bash_tool_ids.insert(id.clone());
                                     let mut terminal_info = serde_json::Map::new();
@@ -271,8 +311,12 @@ where
                                         serde_json::Value::Object(terminal_info),
                                     );
                                 }
+                                let kind = replay_tool_kind_for(name);
+                                let locations = replay_tool_locations(name, input);
                                 let tool_call = ToolCall::new(id.clone(), name.clone())
                                     .status(ToolCallStatus::InProgress)
+                                    .kind(kind)
+                                    .locations(locations)
                                     .raw_input(input.clone())
                                     .meta(meta);
                                 let n = SessionNotification::new(
@@ -358,8 +402,16 @@ where
                                 }
                                 continue;
                             }
+                            let (replay_name, replay_input) = tool_replay_cache
+                                .get(tool_use_id)
+                                .map(|(n, i)| (n.as_str(), Some(i)))
+                                .unwrap_or(("", None));
+                            let (acp_content, locations) =
+                                replay_tool_result_content(replay_name, replay_input, content);
                             let fields = ToolCallUpdateFields::new()
                                 .status(ToolCallStatus::Completed)
+                                .content(acp_content)
+                                .locations(locations)
                                 .raw_output(serde_json::Value::String(content.clone()));
                             let update = ToolCallUpdate::new(tool_use_id.clone(), fields);
                             let n = SessionNotification::new(
@@ -1133,6 +1185,128 @@ fn replay_todo_write_to_plan(input: &serde_json::Value) -> Option<Vec<PlanEntry>
 }
 
 /// Sanitize a session title: collapse whitespace, trim, truncate to 256 chars.
+/// Map a tool name to the matching ACP `ToolKind` for session history replay.
+fn replay_tool_kind_for(name: &str) -> ToolKind {
+    match name {
+        "Read" | "LS" => ToolKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ToolKind::Edit,
+        "Bash" => ToolKind::Execute,
+        "Glob" | "Grep" => ToolKind::Search,
+        "WebSearch" | "WebFetch" => ToolKind::Fetch,
+        "Think" => ToolKind::Think,
+        "ExitPlanMode" | "EnterPlanMode" => ToolKind::SwitchMode,
+        _ => ToolKind::Other,
+    }
+}
+
+/// Extract file-path `ToolCallLocation`s from a tool's input for history replay.
+fn replay_tool_locations(name: &str, input: &serde_json::Value) -> Vec<ToolCallLocation> {
+    let key = match name {
+        "Read" | "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "file_path",
+        "Glob" | "Grep" => "path",
+        _ => return vec![],
+    };
+    if let Some(p) = input.get(key).and_then(|v| v.as_str()) {
+        vec![ToolCallLocation::new(p)]
+    } else {
+        vec![]
+    }
+}
+
+/// Build the `content` and `locations` for a replayed `ToolResult` notification.
+///
+/// Mirrors `tool_result_content` in `acp-nats/prompt.rs` but operates on
+/// replayed history where status is always `Completed`.
+fn replay_tool_result_content(
+    tool_name: &str,
+    input: Option<&serde_json::Value>,
+    output: &str,
+) -> (Vec<ToolCallContent>, Vec<ToolCallLocation>) {
+    match tool_name {
+        "Edit" | "MultiEdit" => {
+            let Some(inp) = input else {
+                return (vec![], vec![]);
+            };
+            let file_path = inp.get("file_path").and_then(|v| v.as_str());
+            let Some(file_path) = file_path else {
+                return (vec![], vec![]);
+            };
+            let pairs: Vec<(Option<&str>, &str)> = if tool_name == "MultiEdit" {
+                inp.get("edits")
+                    .and_then(|v| v.as_array())
+                    .map(|edits| {
+                        edits
+                            .iter()
+                            .filter_map(|e| {
+                                let new = e.get("new_string")?.as_str()?;
+                                let old = e.get("old_string").and_then(|v| v.as_str());
+                                Some((old, new))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                let new = inp.get("new_string").and_then(|v| v.as_str());
+                let old = inp.get("old_string").and_then(|v| v.as_str());
+                if let Some(new) = new {
+                    vec![(old, new)]
+                } else {
+                    vec![]
+                }
+            };
+            if pairs.is_empty() {
+                return (vec![], vec![]);
+            }
+            let content = pairs
+                .into_iter()
+                .map(|(old, new)| {
+                    ToolCallContent::Diff(
+                        Diff::new(file_path, new).old_text(old.map(str::to_string)),
+                    )
+                })
+                .collect();
+            (content, vec![ToolCallLocation::new(file_path)])
+        }
+        "Write" | "NotebookEdit" => {
+            let Some(inp) = input else {
+                return (vec![], vec![]);
+            };
+            let file_path = inp.get("file_path").and_then(|v| v.as_str());
+            let new_content = inp.get("content").and_then(|v| v.as_str());
+            let (Some(file_path), Some(new_content)) = (file_path, new_content) else {
+                return (vec![], vec![]);
+            };
+            (
+                vec![ToolCallContent::Diff(Diff::new(file_path, new_content))],
+                vec![ToolCallLocation::new(file_path)],
+            )
+        }
+        "Read" => {
+            if output.trim().is_empty() {
+                return (vec![], vec![]);
+            }
+            let mut fence = "```".to_string();
+            for line in output.lines().filter(|l| l.starts_with("```")) {
+                while line.len() >= fence.len() {
+                    fence.push('`');
+                }
+            }
+            let fenced = format!(
+                "{fence}\n{}{}\n{fence}",
+                output,
+                if output.ends_with('\n') { "" } else { "\n" }
+            );
+            (
+                vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(
+                    fenced,
+                )))],
+                vec![],
+            )
+        }
+        _ => (vec![], vec![]),
+    }
+}
+
 fn sanitize_title(text: &str) -> String {
     let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= 256 {
