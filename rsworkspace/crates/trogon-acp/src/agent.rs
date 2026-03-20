@@ -202,6 +202,9 @@ where
         // Track TodoWrite tool-use ids so we skip their tool_result replays
         let mut todo_write_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // Track Bash tool-use ids for terminal streaming replay
+        let mut bash_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let supports_terminal = self.bridge.supports_terminal_output();
 
         for msg in &state.messages {
             match msg.role.as_str() {
@@ -246,16 +249,28 @@ where
                                     continue;
                                 }
                                 // Standard tool — show as InProgress then Completed
-                                let mut meta = serde_json::Map::new();
                                 let mut cc = serde_json::Map::new();
                                 cc.insert(
                                     "toolName".to_string(),
                                     serde_json::Value::String(name.clone()),
                                 );
+                                let mut meta = serde_json::Map::new();
                                 meta.insert(
                                     "claudeCode".to_string(),
                                     serde_json::Value::Object(cc),
                                 );
+                                if name == "Bash" && supports_terminal {
+                                    bash_tool_ids.insert(id.clone());
+                                    let mut terminal_info = serde_json::Map::new();
+                                    terminal_info.insert(
+                                        "terminal_id".to_string(),
+                                        serde_json::Value::String(id.clone()),
+                                    );
+                                    meta.insert(
+                                        "terminal_info".to_string(),
+                                        serde_json::Value::Object(terminal_info),
+                                    );
+                                }
                                 let tool_call = ToolCall::new(id.clone(), name.clone())
                                     .status(ToolCallStatus::InProgress)
                                     .raw_input(input.clone())
@@ -281,6 +296,66 @@ where
                         {
                             // Skip result for TodoWrite — Plan was already replayed
                             if todo_write_ids.contains(tool_use_id) {
+                                continue;
+                            }
+                            // Bash with terminal streaming: emit terminal_output then terminal_exit
+                            if bash_tool_ids.contains(tool_use_id) {
+                                let mut terminal_output_map = serde_json::Map::new();
+                                terminal_output_map.insert(
+                                    "terminal_id".to_string(),
+                                    serde_json::Value::String(tool_use_id.clone()),
+                                );
+                                terminal_output_map.insert(
+                                    "data".to_string(),
+                                    serde_json::Value::String(content.clone()),
+                                );
+                                let mut output_meta = serde_json::Map::new();
+                                output_meta.insert(
+                                    "terminal_output".to_string(),
+                                    serde_json::Value::Object(terminal_output_map),
+                                );
+                                let output_update = ToolCallUpdate::new(
+                                    tool_use_id.clone(),
+                                    ToolCallUpdateFields::new(),
+                                )
+                                .meta(output_meta);
+                                let n = SessionNotification::new(
+                                    session_id.clone(),
+                                    SessionUpdate::ToolCallUpdate(output_update),
+                                );
+                                if self.notification_sender.send(n).await.is_err() {
+                                    return;
+                                }
+
+                                let mut terminal_exit_map = serde_json::Map::new();
+                                terminal_exit_map.insert(
+                                    "terminal_id".to_string(),
+                                    serde_json::Value::String(tool_use_id.clone()),
+                                );
+                                terminal_exit_map.insert(
+                                    "exit_code".to_string(),
+                                    serde_json::Value::Number(serde_json::Number::from(0)),
+                                );
+                                terminal_exit_map
+                                    .insert("signal".to_string(), serde_json::Value::Null);
+                                let mut exit_meta = serde_json::Map::new();
+                                exit_meta.insert(
+                                    "terminal_exit".to_string(),
+                                    serde_json::Value::Object(terminal_exit_map),
+                                );
+                                let exit_fields = ToolCallUpdateFields::new()
+                                    .status(ToolCallStatus::Completed)
+                                    .raw_output(serde_json::Value::String(content.clone()));
+                                let exit_update =
+                                    ToolCallUpdate::new(tool_use_id.clone(), exit_fields)
+                                        .meta(exit_meta);
+                                let n = SessionNotification::new(
+                                    session_id.clone(),
+                                    SessionUpdate::ToolCallUpdate(exit_update),
+                                );
+                                if self.notification_sender.send(n).await.is_err() {
+                                    return;
+                                }
                                 continue;
                             }
                             let fields = ToolCallUpdateFields::new()
@@ -445,6 +520,15 @@ where
             .map(|c| c.name.as_str())
             .unwrap_or("unknown");
         info!(client = %client, "ACP initialize");
+
+        let terminal_output = args
+            .client_capabilities
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("terminal_output"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        self.bridge.set_terminal_output_cap(terminal_output);
 
         let mut caps_meta = serde_json::Map::new();
         // Advertise `close` capability — not yet a first-class field in the Rust SDK

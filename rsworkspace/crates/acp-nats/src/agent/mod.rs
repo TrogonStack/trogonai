@@ -27,6 +27,7 @@ use agent_client_protocol::{
     SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 use trogon_std::time::GetElapsed;
 
@@ -43,6 +44,10 @@ pub struct Bridge<N, C: GetElapsed> {
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
     /// Waiter registry for correlating async prompt request/response over NATS.
     pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
+    /// Whether the ACP client advertises `_meta.terminal_output` capability.
+    /// When `true`, Bash tool notifications include terminal_info / terminal_output /
+    /// terminal_exit metadata so clients like Zed can render streaming terminal output.
+    pub(crate) terminal_output_cap: AtomicBool,
 }
 
 impl<N, C: GetElapsed> Bridge<N, C> {
@@ -60,11 +65,23 @@ impl<N, C: GetElapsed> Bridge<N, C> {
             metrics: Metrics::new(meter),
             notification_sender,
             pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
+            terminal_output_cap: AtomicBool::new(false),
         }
     }
 
     pub(crate) fn nats(&self) -> &N {
         &self.nats
+    }
+
+    /// Returns `true` if the connected ACP client supports terminal output metadata.
+    pub fn supports_terminal_output(&self) -> bool {
+        self.terminal_output_cap.load(Ordering::Relaxed)
+    }
+
+    /// Record that the ACP client supports (or does not support) terminal output metadata.
+    /// Called from `initialize::handle` and from `TrogonAcpAgent::initialize`.
+    pub fn set_terminal_output_cap(&self, supported: bool) {
+        self.terminal_output_cap.store(supported, Ordering::Relaxed);
     }
 }
 

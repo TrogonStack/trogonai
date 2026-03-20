@@ -115,6 +115,8 @@ where
     // ids of TodoWrite calls — emitted as Plan updates, no ToolCallUpdate on finish
     let mut todo_write_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    let supports_terminal = bridge.supports_terminal_output();
+
     loop {
         let msg = tokio::select! {
             result = timeout(op_timeout, subscriber.next()) => {
@@ -223,10 +225,15 @@ where
                     continue;
                 }
 
+                let meta = if name == "Bash" && supports_terminal {
+                    make_meta_with_terminal_info(&name, &id)
+                } else {
+                    make_claude_code_meta(&name)
+                };
                 let tool_call = ToolCall::new(id, name.clone())
                     .status(ToolCallStatus::InProgress)
                     .raw_input(input)
-                    .meta(make_claude_code_meta(&name));
+                    .meta(meta);
                 let notification = SessionNotification::new(
                     args.session_id.clone(),
                     SessionUpdate::ToolCall(tool_call),
@@ -245,6 +252,73 @@ where
                 if todo_write_ids.contains(&id) {
                     continue;
                 }
+
+                let is_bash = tool_name_cache.get(&id).is_some_and(|n| n == "Bash");
+
+                // When terminal_output is supported, emit two separate tool_call_update
+                // notifications for Bash tools — matching Zed's codex-acp lifecycle:
+                //   1. terminal_output  → streams the captured stdout/stderr
+                //   2. terminal_exit    → final status with exit code / signal
+                if is_bash && supports_terminal {
+                    // 1. terminal_output notification
+                    let output_meta = make_meta_with_terminal_output(
+                        tool_name_cache
+                            .get(&id)
+                            .map(String::as_str)
+                            .unwrap_or("Bash"),
+                        &id,
+                        &output,
+                    );
+                    let output_fields = ToolCallUpdateFields::new();
+                    let output_update =
+                        ToolCallUpdate::new(id.clone(), output_fields).meta(output_meta);
+                    let output_notification = SessionNotification::new(
+                        args.session_id.clone(),
+                        SessionUpdate::ToolCallUpdate(output_update),
+                    );
+                    if bridge
+                        .notification_sender
+                        .send(output_notification)
+                        .await
+                        .is_err()
+                    {
+                        warn!("notification receiver dropped; continuing prompt");
+                    }
+
+                    // 2. terminal_exit notification (also carries final status + raw_output)
+                    let status = if exit_code.map(|c| c != 0).unwrap_or(false) || signal.is_some() {
+                        ToolCallStatus::Failed
+                    } else {
+                        ToolCallStatus::Completed
+                    };
+                    let exit_meta = make_meta_with_terminal_exit(
+                        tool_name_cache
+                            .get(&id)
+                            .map(String::as_str)
+                            .unwrap_or("Bash"),
+                        &id,
+                        exit_code,
+                        signal.as_deref(),
+                    );
+                    let exit_fields = ToolCallUpdateFields::new()
+                        .status(status)
+                        .raw_output(serde_json::Value::String(output));
+                    let exit_update = ToolCallUpdate::new(id.clone(), exit_fields).meta(exit_meta);
+                    let exit_notification = SessionNotification::new(
+                        args.session_id.clone(),
+                        SessionUpdate::ToolCallUpdate(exit_update),
+                    );
+                    if bridge
+                        .notification_sender
+                        .send(exit_notification)
+                        .await
+                        .is_err()
+                    {
+                        warn!("notification receiver dropped; continuing prompt");
+                    }
+                    continue;
+                }
+
                 let status = if exit_code.map(|c| c != 0).unwrap_or(false) || signal.is_some() {
                     ToolCallStatus::Failed
                 } else {
@@ -412,6 +486,78 @@ fn make_claude_code_meta(tool_name: &str) -> agent_client_protocol::Meta {
     meta.insert(
         "claudeCode".to_string(),
         serde_json::Value::Object(claude_code),
+    );
+    meta
+}
+
+/// Build `_meta: { claudeCode: { toolName }, terminal_info: { terminal_id } }`.
+/// Sent on the initial `tool_call` notification for Bash when client supports terminal output.
+fn make_meta_with_terminal_info(tool_name: &str, terminal_id: &str) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_info = serde_json::Map::new();
+    terminal_info.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    meta.insert(
+        "terminal_info".to_string(),
+        serde_json::Value::Object(terminal_info),
+    );
+    meta
+}
+
+/// Build `_meta: { claudeCode: { toolName }, terminal_output: { terminal_id, data } }`.
+/// Sent as the first `tool_call_update` for a finished Bash call when client supports terminal output.
+fn make_meta_with_terminal_output(
+    tool_name: &str,
+    terminal_id: &str,
+    data: &str,
+) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_output = serde_json::Map::new();
+    terminal_output.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    terminal_output.insert(
+        "data".to_string(),
+        serde_json::Value::String(data.to_string()),
+    );
+    meta.insert(
+        "terminal_output".to_string(),
+        serde_json::Value::Object(terminal_output),
+    );
+    meta
+}
+
+/// Build `_meta: { claudeCode: { toolName }, terminal_exit: { terminal_id, exit_code, signal } }`.
+/// Sent as the final `tool_call_update` for a finished Bash call when client supports terminal output.
+fn make_meta_with_terminal_exit(
+    tool_name: &str,
+    terminal_id: &str,
+    exit_code: Option<i32>,
+    signal: Option<&str>,
+) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_exit = serde_json::Map::new();
+    terminal_exit.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    terminal_exit.insert(
+        "exit_code".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(exit_code.unwrap_or(0))),
+    );
+    terminal_exit.insert(
+        "signal".to_string(),
+        match signal {
+            Some(s) => serde_json::Value::String(s.to_string()),
+            None => serde_json::Value::Null,
+        },
+    );
+    meta.insert(
+        "terminal_exit".to_string(),
+        serde_json::Value::Object(terminal_exit),
     );
     meta
 }
