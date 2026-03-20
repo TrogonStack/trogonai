@@ -238,6 +238,78 @@ fn make_claude_code_meta(tool_name: &str) -> agent_client_protocol::Meta {
     meta
 }
 
+/// Build `_meta: { claudeCode: { toolName }, terminal_info: { terminal_id } }`.
+/// Sent on the initial `tool_call` notification for Bash when client supports terminal output.
+fn make_meta_with_terminal_info(tool_name: &str, terminal_id: &str) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_info = serde_json::Map::new();
+    terminal_info.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    meta.insert(
+        "terminal_info".to_string(),
+        serde_json::Value::Object(terminal_info),
+    );
+    meta
+}
+
+/// Build `_meta: { claudeCode: { toolName }, terminal_output: { terminal_id, data } }`.
+/// Sent as the first `tool_call_update` for a finished Bash call when client supports terminal output.
+fn make_meta_with_terminal_output(
+    tool_name: &str,
+    terminal_id: &str,
+    data: &str,
+) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_output = serde_json::Map::new();
+    terminal_output.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    terminal_output.insert(
+        "data".to_string(),
+        serde_json::Value::String(data.to_string()),
+    );
+    meta.insert(
+        "terminal_output".to_string(),
+        serde_json::Value::Object(terminal_output),
+    );
+    meta
+}
+
+/// Build `_meta: { claudeCode: { toolName }, terminal_exit: { terminal_id, exit_code, signal } }`.
+/// Sent as the final `tool_call_update` for a finished Bash call when client supports terminal output.
+fn make_meta_with_terminal_exit(
+    tool_name: &str,
+    terminal_id: &str,
+    exit_code: Option<i32>,
+    signal: Option<&str>,
+) -> agent_client_protocol::Meta {
+    let mut meta = make_claude_code_meta(tool_name);
+    let mut terminal_exit = serde_json::Map::new();
+    terminal_exit.insert(
+        "terminal_id".to_string(),
+        serde_json::Value::String(terminal_id.to_string()),
+    );
+    terminal_exit.insert(
+        "exit_code".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(exit_code.unwrap_or(0))),
+    );
+    terminal_exit.insert(
+        "signal".to_string(),
+        match signal {
+            Some(s) => serde_json::Value::String(s.to_string()),
+            None => serde_json::Value::Null,
+        },
+    );
+    meta.insert(
+        "terminal_exit".to_string(),
+        serde_json::Value::Object(terminal_exit),
+    );
+    meta
+}
+
 /// Convert a `TodoWrite` `input` JSON value to ACP `PlanEntry` list.
 ///
 /// Expected input shape: `{ "todos": [{ "content": "...", "status": "pending"|"in_progress"|"completed", "priority": "high"|"medium"|"low" }] }`

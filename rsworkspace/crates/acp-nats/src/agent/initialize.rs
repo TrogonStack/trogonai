@@ -22,7 +22,17 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         .map(|c| c.name.as_str())
         .unwrap_or("unknown");
 
-    info!(client = %client_name, "Initialize request");
+    // Capture whether the client supports terminal_output metadata before forwarding.
+    let terminal_output = args
+        .client_capabilities
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("terminal_output"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    bridge.set_terminal_output_cap(terminal_output);
+
+    info!(client = %client_name, terminal_output = terminal_output, "Initialize request");
 
     let nats = bridge.nats();
     let subject = agent::initialize(bridge.config.acp_prefix());
