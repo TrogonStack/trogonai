@@ -138,7 +138,7 @@ async fn start_proxy_and_worker(
 }
 
 fn agent_config(nats_port: u16, proxy_url: String, split_url: Option<String>) -> AgentConfig {
-    agent_config_with_memory(nats_port, proxy_url, split_url, None, None)
+    agent_config_with_memory(nats_port, proxy_url, split_url, None, None, "")
 }
 
 fn agent_config_with_memory(
@@ -147,6 +147,7 @@ fn agent_config_with_memory(
     split_url: Option<String>,
     memory_owner: Option<String>,
     memory_repo: Option<String>,
+    github_token: &str,
 ) -> AgentConfig {
     AgentConfig {
         nats: NatsConfig::new(
@@ -155,7 +156,7 @@ fn agent_config_with_memory(
         ),
         proxy_url,
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
-        github_token: String::new(),
+        github_token: github_token.to_string(),
         linear_token: String::new(),
         slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
@@ -744,6 +745,7 @@ async fn memory_fetch_skipped_when_flag_is_off() {
         Some(evaluator_url),
         Some("test-org".to_string()),
         Some("test-repo".to_string()),
+        "",
     );
     tokio::spawn(async move {
         run(cfg).await.ok();
@@ -817,6 +819,13 @@ async fn memory_content_included_when_flag_is_on() {
         )
         .await
         .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test0001").unwrap(),
+            "fake-github-token",
+        )
+        .await
+        .unwrap();
 
     let proxy_port = start_proxy_and_worker(
         &nats,
@@ -835,6 +844,7 @@ async fn memory_content_included_when_flag_is_on() {
         Some(evaluator_url),
         Some("test-org".to_string()),
         Some("test-repo".to_string()),
+        "tok_github_prod_test0001",
     );
     tokio::spawn(async move {
         run(cfg).await.ok();
@@ -1061,20 +1071,128 @@ flag_tests! {
     }),
 }
 
-flag_tests! {
-    off: incidentio_handler_skipped_when_flag_is_off,
-    on:  incidentio_handler_runs_when_flag_is_on,
-    flag: "agent_incidentio_handler_enabled",
-    stream: "INCIDENTIO",
-    stream_subjects: "incidentio.>",
-    subject: "incidentio.incident.created",
-    payload: serde_json::json!({
+#[tokio::test]
+async fn incidentio_handler_skipped_when_flag_is_off() {
+    let (_nats_container, nats_port) = start_nats().await;
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_incidentio_handler_enabled", "off");
+    let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
+    let evaluator_url = format!("http://{evaluator_addr}");
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}"#);
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+    let vault = Arc::new(MemoryVault::new());
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    let proxy_port = start_proxy_and_worker(
+        &nats,
+        Arc::clone(&js),
+        mock_server.base_url(),
+        Arc::clone(&vault),
+        "incidentio-off-worker",
+    )
+    .await;
+
+    let mut cfg = agent_config(
+        nats_port,
+        format!("http://127.0.0.1:{proxy_port}"),
+        Some(evaluator_url),
+    );
+    cfg.incidentio_stream_name = Some("INCIDENTIO".to_string());
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    publish_event(nats_port, "INCIDENTIO", "incidentio.>", "incidentio.incident.created", serde_json::json!({
         "event_type": "incident.created",
-        "incident": {
-            "id": "inc-123",
-            "name": "API latency spike",
-            "status": "triage",
-            "severity": { "name": "P1" }
-        }
-    }),
+        "incident": { "id": "inc-123", "name": "API latency spike", "status": "triage", "severity": { "name": "P1" } }
+    })).await;
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must not be called when agent_incidentio_handler_enabled = 'off'",
+    );
+}
+
+#[tokio::test]
+async fn incidentio_handler_runs_when_flag_is_on() {
+    let (_nats_container, nats_port) = start_nats().await;
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_incidentio_handler_enabled", "on");
+    let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
+    let evaluator_url = format!("http://{evaluator_addr}");
+
+    let mock_server = MockServer::start_async().await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"handled"}]}"#);
+        })
+        .await;
+
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
+    let js = Arc::new(jetstream::new(nats.clone()));
+    let vault = Arc::new(MemoryVault::new());
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    let proxy_port = start_proxy_and_worker(
+        &nats,
+        Arc::clone(&js),
+        mock_server.base_url(),
+        Arc::clone(&vault),
+        "incidentio-on-worker",
+    )
+    .await;
+
+    let mut cfg = agent_config(
+        nats_port,
+        format!("http://127.0.0.1:{proxy_port}"),
+        Some(evaluator_url),
+    );
+    cfg.incidentio_stream_name = Some("INCIDENTIO".to_string());
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    publish_event(nats_port, "INCIDENTIO", "incidentio.>", "incidentio.incident.created", serde_json::json!({
+        "event_type": "incident.created",
+        "incident": { "id": "inc-123", "name": "API latency spike", "status": "triage", "severity": { "name": "P1" } }
+    })).await;
+
+    let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(
+        hit,
+        "Anthropic must be called when agent_incidentio_handler_enabled = 'on'"
+    );
+    anthropic_mock.assert_async().await;
 }
