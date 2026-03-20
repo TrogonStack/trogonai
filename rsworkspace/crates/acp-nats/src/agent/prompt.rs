@@ -310,6 +310,141 @@ fn make_meta_with_terminal_exit(
     meta
 }
 
+/// Map a Claude Code tool name to the matching ACP `ToolKind`.
+fn tool_kind_for(name: &str) -> ToolKind {
+    match name {
+        "Read" | "LS" => ToolKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ToolKind::Edit,
+        "Bash" => ToolKind::Execute,
+        "Glob" | "Grep" => ToolKind::Search,
+        "WebSearch" | "WebFetch" => ToolKind::Fetch,
+        "Think" => ToolKind::Think,
+        "ExitPlanMode" | "EnterPlanMode" => ToolKind::SwitchMode,
+        _ => ToolKind::Other,
+    }
+}
+
+/// Extract a `ToolCallLocation` list from a tool's input JSON.
+///
+/// For file-oriented tools (Read, Edit, Write, …) we surface the file path so
+/// that Zed can follow the agent while it works.
+fn tool_locations_from_input(name: &str, input: &serde_json::Value) -> Vec<ToolCallLocation> {
+    let path_key = match name {
+        "Read" | "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "file_path",
+        "Glob" | "Grep" => "path",
+        _ => return vec![],
+    };
+    if let Some(p) = input.get(path_key).and_then(|v| v.as_str()) {
+        vec![ToolCallLocation::new(p)]
+    } else {
+        vec![]
+    }
+}
+
+/// Build the `content` and `locations` for a `tool_call_update` notification.
+///
+/// Returns structured diff content for Edit/Write tools and a plain-text
+/// content block (wrapped in a fenced code block) for Read.  All other tools
+/// return empty vecs so the raw_output string remains the only result visible
+/// in clients that don't speak ACP content blocks.
+fn tool_result_content(
+    tool_name: &str,
+    input: Option<&serde_json::Value>,
+    output: &str,
+    status: ToolCallStatus,
+) -> (Vec<ToolCallContent>, Vec<ToolCallLocation>) {
+    match tool_name {
+        "Edit" | "MultiEdit" => {
+            let Some(inp) = input else {
+                return (vec![], vec![]);
+            };
+            // Edit: { file_path, old_string, new_string }
+            // MultiEdit: { file_path, edits: [{ old_string, new_string }] }
+            let file_path = inp.get("file_path").and_then(|v| v.as_str());
+            let Some(file_path) = file_path else {
+                return (vec![], vec![]);
+            };
+            // Collect (old, new) pairs
+            let pairs: Vec<(Option<&str>, &str)> = if tool_name == "MultiEdit" {
+                inp.get("edits")
+                    .and_then(|v| v.as_array())
+                    .map(|edits| {
+                        edits
+                            .iter()
+                            .filter_map(|e| {
+                                let new = e.get("new_string")?.as_str()?;
+                                let old = e.get("old_string").and_then(|v| v.as_str());
+                                Some((old, new))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                let new = inp.get("new_string").and_then(|v| v.as_str());
+                let old = inp.get("old_string").and_then(|v| v.as_str());
+                if let Some(new) = new {
+                    vec![(old, new)]
+                } else {
+                    vec![]
+                }
+            };
+            if pairs.is_empty() {
+                return (vec![], vec![]);
+            }
+            let content = pairs
+                .into_iter()
+                .map(|(old, new)| {
+                    ToolCallContent::Diff(
+                        Diff::new(file_path, new).old_text(old.map(str::to_string)),
+                    )
+                })
+                .collect();
+            let locations = vec![ToolCallLocation::new(file_path)];
+            (content, locations)
+        }
+        "Write" | "NotebookEdit" => {
+            let Some(inp) = input else {
+                return (vec![], vec![]);
+            };
+            let file_path = inp.get("file_path").and_then(|v| v.as_str());
+            let new_content = inp.get("content").and_then(|v| v.as_str());
+            let (Some(file_path), Some(new_content)) = (file_path, new_content) else {
+                return (vec![], vec![]);
+            };
+            let content = vec![ToolCallContent::Diff(Diff::new(file_path, new_content))];
+            let locations = vec![ToolCallLocation::new(file_path)];
+            (content, locations)
+        }
+        "Read" => {
+            if output.trim().is_empty() || status == ToolCallStatus::Failed {
+                return (vec![], vec![]);
+            }
+            let fenced = markdown_fence(output);
+            let content = vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(
+                fenced,
+            )))];
+            (content, vec![])
+        }
+        _ => (vec![], vec![]),
+    }
+}
+
+/// Wrap text in a fenced code block, extending the fence if the text itself
+/// contains triple backticks (matching `markdownEscape` in the TS code).
+fn markdown_fence(text: &str) -> String {
+    let mut fence = "```".to_string();
+    for cap in text.lines().filter(|l| l.starts_with("```")) {
+        while cap.len() >= fence.len() {
+            fence.push('`');
+        }
+    }
+    format!(
+        "{fence}\n{}{}\n{fence}",
+        text,
+        if text.ends_with('\n') { "" } else { "\n" }
+    )
+}
+
 /// Convert a `TodoWrite` `input` JSON value to ACP `PlanEntry` list.
 ///
 /// Expected input shape: `{ "todos": [{ "content": "...", "status": "pending"|"in_progress"|"completed", "priority": "high"|"medium"|"low" }] }`
