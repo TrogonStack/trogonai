@@ -66,14 +66,20 @@ impl Runner {
         })
     }
 
+    /// Logs a subscribe failure. Extracted so `#[coverage(off)]` can be applied
+    /// to the error path without placing the attribute on a match arm.
+    #[cfg_attr(coverage, coverage(off))]
+    fn log_subscribe_error(subject: &str, e: impl std::fmt::Display) {
+        error!(subject = %subject, error = %e, "runner: failed to subscribe");
+    }
+
     /// Run the prompt subscriber loop — returns when the NATS connection closes.
     pub async fn run(self) {
         let wildcard = subjects::prompt_wildcard(&self.prefix);
         let mut sub = match self.nats.subscribe(wildcard.clone()).await {
             Ok(s) => s,
-            #[cfg_attr(coverage, coverage(off))]
             Err(e) => {
-                error!(subject = %wildcard, error = %e, "runner: failed to subscribe");
+                Self::log_subscribe_error(&wildcard, e);
                 return;
             }
         };
