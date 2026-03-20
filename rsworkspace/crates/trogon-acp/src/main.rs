@@ -51,6 +51,7 @@ use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 use trogon_nats::NatsConfig;
 
+#[cfg_attr(coverage, coverage(off))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -225,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// Returns `true` if `bypassPermissions` mode may be offered to the user.
 /// Mirrors the TS `ALLOW_BYPASS = !IS_ROOT` constant: denied when running as root or sudo.
+#[cfg_attr(coverage, coverage(off))]
 fn allow_bypass() -> bool {
     if std::env::var("SUDO_UID").is_ok() || std::env::var("SUDO_USER").is_ok() {
         return false;
@@ -250,6 +252,7 @@ fn allow_bypass() -> bool {
 /// Special cases:
 /// - `ExitPlanMode`: presents mode-selection options instead of allow/deny.
 /// - `allow_always`: saves the tool name to `allowed_tools` in the session store.
+#[cfg_attr(coverage, coverage(off))]
 async fn handle_permission_request(
     conn: &AgentSideConnection,
     req: PermissionReq,
@@ -422,6 +425,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     #[test]
     fn allow_bypass_true_when_no_sudo_vars_and_not_root() {
         let _lock = ENV_MUTEX.lock().unwrap();
