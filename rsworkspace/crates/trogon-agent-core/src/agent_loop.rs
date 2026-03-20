@@ -624,12 +624,7 @@ impl AgentLoop {
                             cache_read_tokens: total_cache_read,
                         })
                         .await;
-                    if !text.is_empty() {
-                        #[cfg_attr(coverage, coverage(off))]
-                        {
-                            let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
-                        }
-                    }
+                    Self::emit_partial_text(&event_tx, text).await;
                     warn!(iteration, "Streaming chat hit max_tokens (context full)");
                     return Err(AgentError::MaxTokens);
                 }
@@ -651,6 +646,16 @@ impl AgentLoop {
             "Streaming chat reached max iterations"
         );
         Err(AgentError::MaxIterationsReached)
+    }
+
+    /// Sends a [`AgentEvent::TextDelta`] when `text` is non-empty.
+    /// Extracted to allow `#[coverage(off)]` — the closing `}` of an async
+    /// `if` block is an LLVM coverage artifact in state-machine code.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn emit_partial_text(event_tx: &tokio::sync::mpsc::Sender<AgentEvent>, text: String) {
+        if !text.is_empty() {
+            let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
+        }
     }
 
     #[cfg_attr(coverage, coverage(off))]
