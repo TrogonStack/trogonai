@@ -62,6 +62,23 @@ fn make_agent(base_url: &str) -> AgentLoop {
     }
 }
 
+fn tool_use_body() -> String {
+    serde_json::json!({
+        "stop_reason": "tool_use",
+        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
+    })
+    .to_string()
+}
+
+fn max_tokens_body() -> String {
+    serde_json::json!({
+        "stop_reason": "max_tokens",
+        "content": [{"type": "text", "text": "partial"}],
+        "usage": {"input_tokens": 10, "output_tokens": 4096}
+    })
+    .to_string()
+}
+
 fn end_turn_body(text: &str) -> String {
     serde_json::json!({
         "stop_reason": "end_turn",
@@ -420,6 +437,223 @@ async fn runner_skips_invalid_prompt_payload() {
                 done.is_some(),
                 "expected Done event after skipping bad payload"
             );
+        })
+        .await;
+}
+
+// ── Runner::run — error stop reasons ─────────────────────────────────────────
+
+/// When Anthropic returns `max_tokens`, the runner publishes `Done { stop_reason: "max_tokens" }`.
+#[tokio::test]
+async fn runner_publishes_done_max_tokens() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(max_tokens_body());
+    });
+
+    let prefix = "test-maxtok";
+    let session_id = "sess-maxtok-1";
+    let req_id = "req-maxtok-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "fill the context".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "max_tokens"),
+            );
+            assert!(done.is_some(), "expected Done(max_tokens) event");
+        })
+        .await;
+}
+
+/// When `max_iterations` is exhausted (model always returns `tool_use`),
+/// the runner publishes `Done { stop_reason: "max_turn_requests" }`.
+#[tokio::test]
+async fn runner_publishes_done_max_turn_requests() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-maxiter";
+    let session_id = "sess-maxiter-1";
+    let req_id = "req-maxiter-1";
+
+    let mut agent = make_agent(&server.base_url());
+    agent.max_iterations = 1; // exhaust after one tool_use → MaxIterationsReached
+
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "loop forever".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "max_turn_requests")
+            });
+            assert!(done.is_some(), "expected Done(max_turn_requests) event");
+        })
+        .await;
+}
+
+/// When the model requests a tool call, the runner publishes `ToolCallStarted`
+/// and `ToolCallFinished` events before the final `Done`.
+#[tokio::test]
+async fn runner_publishes_tool_call_events() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has "tool_result" in body) → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-toolcall";
+    let session_id = "sess-toolcall-1";
+    let req_id = "req-toolcall-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "use a tool".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "unknown_tool")),
+                "expected ToolCallStarted event"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, PromptEvent::ToolCallFinished { .. })),
+                "expected ToolCallFinished event"
+            );
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+            });
+            assert!(done.is_some(), "expected Done(end_turn) after tool call");
         })
         .await;
 }

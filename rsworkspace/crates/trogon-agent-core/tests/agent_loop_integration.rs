@@ -331,3 +331,166 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
         "expected UsageSummary event on max_tokens"
     );
 }
+
+// ── tool_use paths ────────────────────────────────────────────────────────────
+//
+// The trick: the second Anthropic call will contain "tool_result" in its body
+// (the agent appends the tool result before retrying). Register the end_turn
+// mock first with a body_contains filter so it only matches the second call;
+// the catch-all tool_use mock is registered second and matches the first call.
+
+/// `run()` processes a tool call and continues to `end_turn` on the next iteration.
+/// Covers `execute_tools` and the `tool_use` branch of the main loop.
+#[tokio::test]
+async fn run_tool_use_then_end_turn() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run(vec![Message::user_text("use a tool")], &[], None)
+        .await;
+
+    assert_eq!(result.unwrap(), "Done after tool");
+}
+
+/// `run_chat()` processes a tool call and appends it to the message history.
+/// Covers the `tool_use` branch of `run_chat`.
+#[tokio::test]
+async fn run_chat_tool_use_then_end_turn() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Chat done after tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (text, msgs) = agent
+        .run_chat(vec![Message::user_text("hi")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "Chat done after tool");
+    // History: user → assistant(tool_use) → user(tool_result) → assistant(text)
+    assert!(
+        msgs.len() >= 4,
+        "expected at least 4 messages, got {}",
+        msgs.len()
+    );
+}
+
+/// `run_chat_streaming()` emits `ToolCallStarted` and `ToolCallFinished` events
+/// when the model requests a tool call. Covers `execute_tools_streaming`.
+#[tokio::test]
+async fn run_chat_streaming_emits_tool_call_events() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx)
+        .await;
+
+    assert!(result.is_ok(), "run_chat_streaming must succeed");
+
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::ToolCallStarted { name, .. } if name == "unknown_tool")
+        ),
+        "expected ToolCallStarted event"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })),
+        "expected ToolCallFinished event"
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("Done after tool"))
+        ),
+        "expected final TextDelta after tool"
+    );
+}
+
+/// When `anthropic_base_url` is `None`, `messages_url()` builds the URL as
+/// `{proxy_url}/anthropic/v1/messages`. Covers the else branch of `messages_url`.
+#[tokio::test]
+async fn run_uses_proxy_url_when_no_anthropic_base_url() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/anthropic/v1/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("via proxy"));
+    });
+
+    let http = reqwest::Client::new();
+    let agent = AgentLoop {
+        http_client: http.clone(),
+        proxy_url: server.base_url(), // proxy_url points to mock
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: None, // <── use proxy path
+        anthropic_extra_headers: vec![],
+        model: "test".to_string(),
+        max_iterations: 1,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext {
+            http_client: http,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
+        permission_checker: None,
+    };
+
+    let result = agent.run(vec![Message::user_text("hi")], &[], None).await;
+    assert_eq!(result.unwrap(), "via proxy");
+}
