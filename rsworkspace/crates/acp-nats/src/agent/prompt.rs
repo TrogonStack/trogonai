@@ -1,199 +1,147 @@
-use super::Bridge;
-use crate::config::PROMPT_TIMEOUT_MESSAGE_SECS_THRESHOLD;
-use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
-use crate::pending_prompt_waiters::PromptToken;
+use agent_client_protocol::{
+    Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason,
+};
+use bytes::Bytes;
+use futures::StreamExt;
+use tokio::time::timeout;
+use tracing::{instrument, warn};
+use trogon_std::JsonSerialize;
+
+use crate::agent::Bridge;
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::ErrorCode;
-use agent_client_protocol::{Error, PromptRequest, PromptResponse, Result};
-use std::fmt::Display;
-use tracing::{info, instrument, warn};
-use trogon_std::time::GetElapsed;
 
-fn backpressure_rejected_error<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
-) -> Error {
-    bridge
-        .metrics
-        .record_error("prompt", "backpressure_rejected");
-    Error::new(
-        ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-        "Agent overloaded; retry with backoff",
-    )
-}
-
-fn invalid_session_id_error<
-    N: RequestClient + PublishClient + FlushClient,
-    C: GetElapsed,
-    E: Display,
->(
-    bridge: &Bridge<N, C>,
-    error: E,
-) -> Error {
-    bridge.metrics.record_error("prompt", "invalid_session_id");
-    Error::new(
-        ErrorCode::InvalidParams.into(),
-        format!("Invalid session ID: {}", error),
-    )
-}
-
-fn duplicate_waiter_error<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
-    session_id: &agent_client_protocol::SessionId,
-) -> Error {
-    bridge
-        .metrics
-        .record_error("prompt", "duplicate_prompt_waiter");
-    Error::new(
-        ErrorCode::InvalidParams.into(),
-        format!("Duplicate prompt request for session {}", session_id),
-    )
-}
-
-fn add_prompt_id_to_request(args: &PromptRequest, prompt_token: PromptToken) -> PromptRequest {
-    let mut meta = args
-        .meta
-        .as_ref()
-        .cloned()
-        .unwrap_or_else(serde_json::Map::new);
-    meta.insert("prompt_id".to_string(), serde_json::json!(prompt_token.0));
-    args.clone().meta(meta)
-}
+pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
 #[instrument(
     name = "acp.session.prompt",
-    skip(bridge, args),
+    skip(bridge, args, serializer),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N, C, S>(
     bridge: &Bridge<N, C>,
     args: PromptRequest,
-) -> Result<PromptResponse> {
+    serializer: &S,
+) -> agent_client_protocol::Result<PromptResponse>
+where
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: trogon_std::time::GetElapsed,
+    S: JsonSerialize,
+{
     let start = bridge.clock.now();
 
-    info!(session_id = %args.session_id, "Prompt request");
+    let session_id = AcpSessionId::try_from(&args.session_id).map_err(|_| {
+        bridge.metrics.record_error("prompt", "invalid_session_id");
+        Error::new(ErrorCode::InvalidParams.into(), "Invalid session ID")
+    })?;
 
-    let result = async {
-        let _slot_guard = match bridge.prompt_slot_counter.try_acquire() {
-            Some(slot_guard) => slot_guard,
-            None => return Err(backpressure_rejected_error(bridge)),
-        };
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let sid = session_id.as_ref();
+    let prefix = bridge.config.acp_prefix();
 
-        let session_id = match AcpSessionId::try_from(&args.session_id) {
-            Ok(session_id) => session_id,
-            Err(error) => return Err(invalid_session_id_error(bridge, error)),
-        };
+    // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
+    let mut notifications_sub = bridge
+        .nats
+        .subscribe(agent::session_update(prefix, sid, &req_id))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
-        if bridge
-            .cancelled_sessions
-            .take_if_cancelled(&args.session_id, &bridge.clock)
-            .is_some()
-        {
-            info!(session_id = %args.session_id, "Prompt pre-flight: session already cancelled");
-            return Ok(PromptResponse::new(
-                agent_client_protocol::StopReason::Cancelled,
-            ));
-        }
+    let mut response_sub = bridge
+        .nats
+        .subscribe(agent::ext_session_prompt_response(prefix, sid, &req_id))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
-        let nats = bridge.nats();
-        let subject = agent::session_prompt(bridge.config.acp_prefix(), session_id.as_str());
-
-        let (rx, _waiter_guard, prompt_token) = match bridge
-            .pending_session_prompt_responses
-            .register_waiter(args.session_id.clone())
-        {
-            Ok(waiter) => waiter,
-            Err(()) => return Err(duplicate_waiter_error(bridge, &args.session_id)),
-        };
-
-        let request_with_token = add_prompt_id_to_request(&args, prompt_token);
-
-        let publish_options = nats::PublishOptions::builder()
-            .flush_policy(nats::FlushPolicy::no_retries())
-            .build();
-
-        if let Err(e) = nats::publish(nats, &subject, &request_with_token, publish_options).await {
-            bridge
-                .metrics
-                .record_error("prompt", "prompt_publish_failed");
-            warn!(session_id = %args.session_id, error = %e, "Failed to publish prompt request");
-            return Err(Error::new(
+    let mut cancel_sub = bridge
+        .nats
+        .subscribe(agent::session_cancelled(prefix, sid))
+        .await
+        .map_err(|e| {
+            Error::new(
                 ErrorCode::InternalError.into(),
-                format!("Failed to publish prompt request: {}", e),
-            ));
-        }
+                format!("subscribe cancelled: {e}"),
+            )
+        })?;
 
-        let timeout_result = tokio::time::timeout(bridge.config.prompt_timeout(), rx).await;
+    let payload_bytes = serializer
+        .to_vec(&args)
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
-        let result = match timeout_result {
-            Ok(wait_result) => match wait_result {
-                Ok(response_result) => match response_result {
-                    Ok(response) => Ok(response),
-                    Err(err_msg) => {
-                        warn!(
-                            session_id = %args.session_id,
-                            error = %err_msg,
-                            "Prompt response payload parse error"
-                        );
-                        bridge
-                            .metrics
-                            .record_error("prompt", "prompt_response_parse_failed");
-                        Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            format!("Prompt response parse failed: {}", err_msg),
-                        ))
-                    }
-                },
-                Err(_) => {
-                    warn!(
-                        session_id = %args.session_id,
-                        "Prompt response channel closed unexpectedly"
-                    );
-                    bridge
-                        .metrics
-                        .record_error("prompt", "prompt_channel_closed");
-                    Err(Error::new(
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
+
+    let prompt_subject = agent::session_prompt(prefix, sid);
+    bridge
+        .nats
+        .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("publish: {e}")))?;
+
+    bridge
+        .nats
+        .flush()
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("flush: {e}")))?;
+
+    let op_timeout = bridge.config.prompt_timeout();
+
+    let result = loop {
+        tokio::select! {
+            notif = notifications_sub.next() => {
+                let Some(msg) = notif else {
+                    bridge.metrics.record_error("prompt", "notification_stream_closed");
+                    break Err(Error::new(
                         ErrorCode::InternalError.into(),
-                        "Prompt response channel closed unexpectedly",
-                    ))
-                }
-            },
-            Err(_) => {
-                warn!(session_id = %args.session_id, "Prompt request timed out");
-                bridge.metrics.record_error("prompt", "prompt_timeout");
-                bridge
-                    .pending_session_prompt_responses
-                    .mark_prompt_waiter_timed_out(
-                        args.session_id.clone(),
-                        prompt_token,
-                        &bridge.clock,
-                    );
-
-                let timeout = bridge.config.prompt_timeout();
-                let timeout_msg = if timeout >= PROMPT_TIMEOUT_MESSAGE_SECS_THRESHOLD {
-                    format!(
-                        "Prompt request timed out after {:.3}s",
-                        timeout.as_secs_f64()
-                    )
-                } else {
-                    format!("Prompt request timed out after {}ms", timeout.as_millis())
+                        "notification stream closed unexpectedly",
+                    ));
                 };
-
-                Err(Error::new(ErrorCode::InternalError.into(), timeout_msg))
+                let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!(error = %e, "bad notification payload; skipping");
+                        continue;
+                    }
+                };
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
             }
-        };
-
-        if let Ok(ref response) = result {
-            info!(
-                session_id = %args.session_id,
-                stop_reason = ?response.stop_reason,
-                "Prompt completed"
-            );
+            resp = timeout(op_timeout, response_sub.next()) => {
+                match resp {
+                    Ok(Some(msg)) => {
+                        match serde_json::from_slice::<PromptResponse>(&msg.payload) {
+                            Ok(response) => break Ok(response),
+                            Err(e) => {
+                                bridge.metrics.record_error("prompt", "bad_response_payload");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    format!("bad response payload: {e}"),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        bridge.metrics.record_error("prompt", "response_stream_closed");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "response stream closed unexpectedly",
+                        ));
+                    }
+                    Err(_elapsed) => {
+                        bridge.metrics.record_error("prompt", "prompt_timeout");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt timed out waiting for runner",
+                        ));
+                    }
+                }
+            }
+            _ = cancel_sub.next() => {
+                break Ok(PromptResponse::new(StopReason::Cancelled));
+            }
         }
+    };
 
-        result
-    }
-    .await;
     bridge.metrics.record_request(
         "prompt",
         bridge.clock.elapsed(start).as_secs_f64(),
@@ -207,575 +155,250 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 mod tests {
     use super::*;
     use crate::config::Config;
-    use agent_client_protocol::{
-        Agent, ErrorCode, PromptRequest, PromptResponse, SessionId, StopReason,
-    };
-    use opentelemetry::Value;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-    use opentelemetry_sdk::metrics::{
-        PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
-    };
-    use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
+
+    fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
+        async_nats::Message {
+            subject: "test".into(),
+            reply: None,
+            payload: bytes::Bytes::from(payload.to_vec()),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload.len(),
+        }
+    }
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
         Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
     ) {
         let mock = AdvancedMockNatsClient::new();
-        let config = Config::for_test("acp").with_prompt_timeout(Duration::from_millis(100));
+        let (notification_tx, _notification_rx) =
+            tokio::sync::mpsc::channel::<SessionNotification>(64);
         let bridge = Bridge::new(
             mock.clone(),
             trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            config,
+            &opentelemetry::global::meter("prompt-test"),
+            Config::for_test("acp"),
+            notification_tx,
         );
         (mock, bridge)
     }
 
-    fn mock_bridge_with_metrics() -> (
-        AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
-        InMemoryMetricExporter,
-        SdkMeterProvider,
-    ) {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("acp-nats-test");
-        let config = Config::for_test("acp").with_prompt_timeout(Duration::from_millis(100));
-
-        let mock = AdvancedMockNatsClient::new();
-        let bridge = Bridge::new(mock.clone(), trogon_std::time::SystemClock, &meter, config);
-        (mock, bridge, exporter, provider)
-    }
-
-    fn has_request_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-        method: &str,
-        expected_success: bool,
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.requests")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut method_ok = false;
-                            let mut success_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "method" {
-                                    method_ok = attr.value.as_str() == method;
-                                } else if attr.key.as_str() == "success" {
-                                    success_ok = attr.value == Value::from(expected_success);
-                                }
-                            }
-                            method_ok && success_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
-    }
-
-    fn has_error_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-        operation: &str,
-        reason: &str,
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut operation_ok = false;
-                            let mut reason_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "operation" {
-                                    operation_ok = attr.value.as_str() == operation;
-                                } else if attr.key.as_str() == "reason" {
-                                    reason_ok = attr.value.as_str() == reason;
-                                }
-                            }
-                            operation_ok && reason_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
+    #[tokio::test]
+    async fn prompt_returns_error_when_subscribe_fails() {
+        let (_mock, bridge) = mock_bridge();
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn prompt_validates_session_id() {
+    async fn prompt_rejects_invalid_session_id() {
         let (_mock, bridge) = mock_bridge();
-        let err = bridge
-            .prompt(PromptRequest::new("invalid.session", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("Invalid session ID"));
-        assert_eq!(err.code, ErrorCode::InvalidParams);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_rejects_when_backpressure_limit_reached() {
-        let mock = AdvancedMockNatsClient::new();
-        let config = Config::for_test("acp")
-            .with_prompt_timeout(Duration::from_millis(100))
-            .with_max_concurrent_client_tasks(1);
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            config,
-        );
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt1 = std::sync::Arc::clone(&bridge);
-        let bridge_prompt2 = std::sync::Arc::clone(&bridge);
-        let bridge_resolve = std::sync::Arc::clone(&bridge);
-
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle1 = local.spawn_local(async move {
-                    bridge_prompt1
-                        .prompt(PromptRequest::new("s1", vec![]))
-                        .await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-
-                let err = bridge_prompt2
-                    .prompt(PromptRequest::new("s2", vec![]))
-                    .await
-                    .unwrap_err();
-                assert!(
-                    err.to_string().contains("overloaded"),
-                    "expected overloaded message, got: {}",
-                    err
-                );
-                assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
-
-                bridge_resolve
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        PromptToken(0),
-                        Ok(PromptResponse::new(StopReason::EndTurn)),
-                    );
-                let result = handle1.await.unwrap();
-                assert!(result.is_ok());
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn prompt_rejects_duplicate_waiter_for_same_session() {
-        let (_mock, bridge) = mock_bridge();
-        let (_rx, _guard, _) = bridge
-            .pending_session_prompt_responses
-            .register_waiter(agent_client_protocol::SessionId::from("s1"))
-            .unwrap();
-
-        let err = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("Duplicate prompt request"));
+        let err = handle(
+            &bridge,
+            PromptRequest::new("invalid.session.id", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
     #[tokio::test]
-    async fn prompt_returns_cancelled_for_pre_cancelled_session() {
-        let (_mock, bridge) = mock_bridge();
-        bridge
-            .cancelled_sessions
-            .mark_cancelled(SessionId::from("s1"), &bridge.clock);
+    async fn prompt_returns_done_response_from_runner() {
+        let (mock, bridge) = mock_bridge();
 
-        let response = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
-            .await
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        let response = PromptResponse::new(StopReason::EndTurn);
+        resp_tx
+            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
             .unwrap();
-        assert_eq!(response.stop_reason, StopReason::Cancelled);
-    }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_waiter_guard_cleans_up_on_cancellation() {
-        let (_mock, bridge) = mock_bridge();
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_spawn = std::sync::Arc::clone(&bridge);
-        let bridge_after = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle = local.spawn_local(async move {
-                    bridge_spawn.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                handle.abort();
-                let _ = handle.await;
-                let (rx, _guard, token) = bridge_after
-                    .pending_session_prompt_responses
-                    .register_waiter(SessionId::from("s1"))
-                    .expect("waiter should be free after cancelled prompt dropped guard");
-                bridge_after
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        token,
-                        Ok(PromptResponse::new(StopReason::EndTurn)),
-                    );
-                let result = rx.await.unwrap().unwrap();
-                assert_eq!(result.stop_reason, StopReason::EndTurn);
-            })
-            .await;
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
     }
 
     #[tokio::test]
-    async fn prompt_returns_error_when_response_times_out() {
-        let (_mock, bridge) = mock_bridge();
+    async fn prompt_returns_cancelled_on_cancel_signal() {
+        let (mock, bridge) = mock_bridge();
 
-        let err = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(err.code, ErrorCode::InternalError);
+        let _notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        let cancel_tx = mock.inject_messages();
+
+        cancel_tx.unbounded_send(make_nats_msg(b"")).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_on_bad_response_payload() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        resp_tx.unbounded_send(make_nats_msg(b"not json")).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_response_stream_closes() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        drop(resp_tx);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_second_subscribe_fails() {
+        let (mock, bridge) = mock_bridge();
+        let _notif_tx = mock.inject_messages();
+        // No second stream — second subscribe fails
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_third_subscribe_fails() {
+        let (mock, bridge) = mock_bridge();
+        let _notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        // No third stream — third subscribe fails
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_serialize_fails() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::FailNextSerialize::new(1),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_publish_fails() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+        mock.fail_next_publish();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_flush_fails() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+        mock.fail_next_flush();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn prompt_publishes_to_correct_subject() {
         let (mock, bridge) = mock_bridge();
 
-        let _ = bridge.prompt(PromptRequest::new("s1", vec![])).await;
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
 
-        let published = mock.published_messages();
-        assert!(
-            published.contains(&"acp.s1.agent.session.prompt".to_string()),
-            "expected publish to acp.s1.agent.session.prompt, got: {:?}",
-            published
-        );
-    }
-
-    #[tokio::test]
-    async fn prompt_resolves_waiter_with_response() {
-        let (_mock, bridge) = mock_bridge();
-        let (rx, _guard, token) = bridge
-            .pending_session_prompt_responses
-            .register_waiter(agent_client_protocol::SessionId::from("s1"))
+        let response = PromptResponse::new(StopReason::EndTurn);
+        resp_tx
+            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
             .unwrap();
 
-        bridge.pending_session_prompt_responses.resolve_waiter(
-            &agent_client_protocol::SessionId::from("s1"),
-            token,
-            Ok(PromptResponse::new(StopReason::EndTurn)),
-        );
+        let _ = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
 
-        let result = rx.await.unwrap().unwrap();
-        assert_eq!(result.stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_records_metrics_on_success() {
-        let (_mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt = std::sync::Arc::clone(&bridge);
-        let bridge_resolve = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let prompt_handle = local.spawn_local(async move {
-                    bridge_prompt.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                bridge_resolve
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        PromptToken(0),
-                        Ok(PromptResponse::new(StopReason::EndTurn)),
-                    );
-                let result = prompt_handle.await.unwrap();
-                assert!(result.is_ok());
-                assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
-            })
-            .await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        let subjects = mock.published_messages();
         assert!(
-            has_request_metric(&finished_metrics, "prompt", true),
-            "expected acp.requests with method=prompt, success=true"
+            subjects.iter().any(|s| s == "acp.s1.agent.session.prompt"),
+            "expected publish to acp.s1.agent.session.prompt, got: {:?}",
+            subjects
         );
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_records_error_metric_on_backpressure_reject() {
-        let (mock, _bridge, exporter, provider) = mock_bridge_with_metrics();
-        let config = Config::for_test("acp")
-            .with_prompt_timeout(Duration::from_millis(100))
-            .with_max_concurrent_client_tasks(1);
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &provider.meter("acp-nats-test"),
-            config,
-        );
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt1 = std::sync::Arc::clone(&bridge);
-        let bridge_prompt2 = std::sync::Arc::clone(&bridge);
-        let bridge_resolve = std::sync::Arc::clone(&bridge);
-
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle1 = local.spawn_local(async move {
-                    bridge_prompt1
-                        .prompt(PromptRequest::new("s1", vec![]))
-                        .await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-
-                let _ = bridge_prompt2
-                    .prompt(PromptRequest::new("s2", vec![]))
-                    .await;
-
-                bridge_resolve
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        PromptToken(0),
-                        Ok(PromptResponse::new(StopReason::EndTurn)),
-                    );
-                let result = handle1.await.unwrap();
-                assert!(result.is_ok());
-            })
-            .await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_error_metric(&finished_metrics, "prompt", "backpressure_rejected"),
-            "expected acp.errors with operation=prompt, reason=backpressure_rejected"
-        );
-        assert!(
-            has_request_metric(&finished_metrics, "prompt", false),
-            "backpressure rejects are failed prompt requests and must increment acp.requests"
-        );
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test]
-    async fn prompt_records_error_metric_on_invalid_session_id() {
-        let (_mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-
-        let _ = bridge
-            .prompt(PromptRequest::new("invalid.session", vec![]))
-            .await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_request_metric(&finished_metrics, "prompt", false),
-            "expected acp.requests with method=prompt, success=false"
-        );
-        assert!(
-            has_error_metric(&finished_metrics, "prompt", "invalid_session_id"),
-            "expected acp.errors with operation=prompt, reason=invalid_session_id"
-        );
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test]
-    async fn prompt_records_error_metric_on_publish_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_publish_count(1);
-
-        let _ = bridge.prompt(PromptRequest::new("s1", vec![])).await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_error_metric(&finished_metrics, "prompt", "prompt_publish_failed"),
-            "expected acp.errors with operation=prompt, reason=prompt_publish_failed"
-        );
-        assert!(
-            has_request_metric(&finished_metrics, "prompt", false),
-            "request metric records publish outcome; success=false when publish fails"
-        );
-        provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn has_request_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.requests")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_request_metric(&finished_metrics, "prompt", true));
-        provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn has_error_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.errors")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_error_metric(
-            &finished_metrics,
-            "prompt",
-            "prompt_publish_failed"
-        ));
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_returns_error_when_response_parse_fails() {
-        let (_mock, bridge) = mock_bridge();
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt = std::sync::Arc::clone(&bridge);
-        let bridge_resolve = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let prompt_handle = local.spawn_local(async move {
-                    bridge_prompt.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                bridge_resolve
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        PromptToken(0),
-                        Err("parse error".to_string()),
-                    );
-                let result = prompt_handle.await.unwrap();
-                let err = result.unwrap_err();
-                assert!(err.to_string().contains("parse failed"));
-                assert_eq!(err.code, ErrorCode::InternalError);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_returns_error_when_channel_closed() {
-        let (_mock, bridge) = mock_bridge();
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt = std::sync::Arc::clone(&bridge);
-        let bridge_remove = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let prompt_handle = local.spawn_local(async move {
-                    bridge_prompt.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                bridge_remove
-                    .pending_session_prompt_responses
-                    .remove_waiter_for_test(&SessionId::from("s1"));
-                let result = prompt_handle.await.unwrap();
-                let err = result.unwrap_err();
-                assert!(err.to_string().contains("channel closed"));
-                assert_eq!(err.code, ErrorCode::InternalError);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_success_logs_completion() {
-        let (_mock, bridge) = mock_bridge();
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt = std::sync::Arc::clone(&bridge);
-        let bridge_resolve = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let prompt_handle = local.spawn_local(async move {
-                    bridge_prompt.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                bridge_resolve
-                    .pending_session_prompt_responses
-                    .resolve_waiter(
-                        &SessionId::from("s1"),
-                        PromptToken(0),
-                        Ok(PromptResponse::new(StopReason::EndTurn)),
-                    );
-                let result = prompt_handle.await.unwrap();
-                assert!(result.is_ok());
-                assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn prompt_timeout_message_uses_milliseconds_when_under_60s() {
-        let (_mock, bridge) = mock_bridge();
-        let err = bridge
-            .prompt(PromptRequest::new("s1", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("ms"));
-        assert!(!err.to_string().contains("s."));
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn prompt_timeout_message_uses_seconds_when_60s_or_more() {
-        let (mock, _) = mock_bridge();
-        let config = Config::for_test("acp").with_prompt_timeout(Duration::from_secs(60));
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            config,
-        );
-        let bridge = std::sync::Arc::new(bridge);
-        let bridge_prompt = std::sync::Arc::clone(&bridge);
-        let local = tokio::task::LocalSet::new();
-        let err = local
-            .run_until(async {
-                let handle = local.spawn_local(async move {
-                    bridge_prompt.prompt(PromptRequest::new("s1", vec![])).await
-                });
-                tokio::time::advance(Duration::from_secs(61)).await;
-                handle.await.unwrap().unwrap_err()
-            })
-            .await;
-        assert!(err.to_string().contains("s"));
-        assert!(err.to_string().contains("60"));
     }
 }

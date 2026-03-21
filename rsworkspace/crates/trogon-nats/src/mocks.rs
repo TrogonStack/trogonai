@@ -20,7 +20,8 @@ impl std::error::Error for MockError {}
 pub struct MockNatsClient {
     published: Arc<Mutex<Vec<PublishedMessage>>>,
     subscribed_subjects: Arc<Mutex<Vec<String>>>,
-    subscribe_stream: Arc<Mutex<Option<mpsc::UnboundedReceiver<async_nats::Message>>>>,
+    subscribe_streams:
+        Arc<Mutex<std::collections::VecDeque<mpsc::UnboundedReceiver<async_nats::Message>>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -34,16 +35,13 @@ impl MockNatsClient {
         Self {
             published: Arc::new(Mutex::new(Vec::new())),
             subscribed_subjects: Arc::new(Mutex::new(Vec::new())),
-            subscribe_stream: Arc::new(Mutex::new(None)),
+            subscribe_streams: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         }
     }
 
-    /// Sets up a channel for the next `subscribe()` call.
-    /// Returns a sender — push messages into it to feed the subscription.
-    /// Drop the sender to close the stream, ending the subscriber loop.
     pub fn inject_messages(&self) -> mpsc::UnboundedSender<async_nats::Message> {
         let (tx, rx) = mpsc::unbounded();
-        *self.subscribe_stream.lock().unwrap() = Some(rx);
+        self.subscribe_streams.lock().unwrap().push_back(rx);
         tx
     }
 
@@ -81,10 +79,8 @@ pub struct AdvancedMockNatsClient {
     base: MockNatsClient,
     request_responses: Arc<Mutex<std::collections::HashMap<String, bytes::Bytes>>>,
     should_fail_request: Arc<Mutex<bool>>,
-    /// Number of publishes to fail before succeeding. fail_next_publish() sets this to 1.
-    /// Use fail_publish_count(n) to fail n times (e.g. 4 for standard retry: 1 + 3 retries).
+    should_hang_request: Arc<Mutex<bool>>,
     publish_fail_count: Arc<Mutex<u32>>,
-    /// Number of flushes to fail before succeeding. fail_next_flush() sets this to 1.
     flush_fail_count: Arc<Mutex<u32>>,
 }
 
@@ -100,6 +96,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
                 ),
             )
             .field("should_fail_request", &self.should_fail_request)
+            .field("should_hang_request", &self.should_hang_request)
             .field("publish_fail_count", &self.publish_fail_count)
             .field("flush_fail_count", &self.flush_fail_count)
             .finish()
@@ -112,6 +109,7 @@ impl AdvancedMockNatsClient {
             base: MockNatsClient::new(),
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
+            should_hang_request: Arc::new(Mutex::new(false)),
             publish_fail_count: Arc::new(Mutex::new(0)),
             flush_fail_count: Arc::new(Mutex::new(0)),
         }
@@ -139,6 +137,10 @@ impl AdvancedMockNatsClient {
 
     pub fn fail_next_request(&self) {
         *self.should_fail_request.lock().unwrap() = true;
+    }
+
+    pub fn hang_next_request(&self) {
+        *self.should_hang_request.lock().unwrap() = true;
     }
 
     pub fn published_messages(&self) -> Vec<String> {
@@ -181,7 +183,7 @@ impl SubscribeClient for MockNatsClient {
             .unwrap()
             .push(subject.to_subject().to_string());
 
-        match self.subscribe_stream.lock().unwrap().take() {
+        match self.subscribe_streams.lock().unwrap().pop_front() {
             Some(rx) => Ok(rx.boxed()),
             None => Err(MockError("mock: subscribe not implemented".to_string())),
         }
@@ -248,6 +250,11 @@ impl RequestClient for AdvancedMockNatsClient {
         _payload: bytes::Bytes,
     ) -> Result<async_nats::Message, MockError> {
         let subject = subject.to_subject().to_string();
+        let should_hang = *self.should_hang_request.lock().unwrap();
+        if should_hang {
+            *self.should_hang_request.lock().unwrap() = false;
+            std::future::pending::<()>().await;
+        }
         let should_fail = *self.should_fail_request.lock().unwrap();
         if should_fail {
             *self.should_fail_request.lock().unwrap() = false;
