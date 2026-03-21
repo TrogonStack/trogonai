@@ -4,6 +4,7 @@
 //!
 //! | Concern | Trait(s) | Production | Test |
 //! |---------|----------|------------|------|
+//! | CLI args | [`ParseArgs`] | `CliArgs`** | `FixedArgs`* |
 //! | JSON serialization | [`JsonSerialize`] | [`StdJsonSerialize`] | `FailNextSerialize`* |
 //! | Directories | [`HomeDir`], [`ConfigDir`], [`CacheDir`], [`DataDir`], [`DataLocalDir`], [`StateDir`] | [`SystemDirs`] | `FixedDirs`* |
 //! | Env vars | [`ReadEnv`] | [`SystemEnv`] | `InMemoryEnv`* |
@@ -28,12 +29,18 @@
 //! a multi-threaded runtime), wrap the `RefCell`-based types behind
 //! your own `Mutex`, or contribute thread-safe variants.
 
+pub mod args;
 pub mod dirs;
 pub mod env;
 pub mod fs;
 pub mod json;
 pub mod time;
 
+#[cfg(all(feature = "clap", not(coverage)))]
+pub use args::CliArgs;
+#[cfg(any(test, feature = "test-support"))]
+pub use args::FixedArgs;
+pub use args::ParseArgs;
 pub use dirs::{CacheDir, ConfigDir, DataDir, DataLocalDir, HomeDir, StateDir, SystemDirs};
 pub use env::{ReadEnv, SystemEnv};
 pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, WriteFile};

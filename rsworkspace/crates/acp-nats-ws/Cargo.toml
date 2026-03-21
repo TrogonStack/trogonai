@@ -3,6 +3,9 @@ name = "acp-nats-ws"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 acp-nats = { path = "../acp-nats" }
 acp-telemetry = { path = "../acp-telemetry" }

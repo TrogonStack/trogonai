@@ -4,7 +4,9 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use trogon_std::dirs::{HomeDir, StateDir, SystemDirs};
+#[cfg(target_os = "macos")]
+use trogon_std::dirs::HomeDir;
+use trogon_std::dirs::{StateDir, SystemDirs};
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::CreateDirAll;
 
@@ -81,6 +83,7 @@ fn platform_log_dir(service_name: ServiceName) -> Result<PathBuf, Box<dyn std::e
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::KeyValue;
     use trogon_std::env::InMemoryEnv;
     use trogon_std::fs::MemFs;
 
@@ -108,5 +111,16 @@ mod tests {
     fn platform_log_dir_returns_path_ending_with_service_name() {
         let dir = platform_log_dir(ServiceName::AcpNatsWs).unwrap();
         assert!(dir.ends_with(ServiceName::AcpNatsWs.as_str()));
+    }
+
+    #[test]
+    fn init_provider_lifecycle() {
+        let resource = opentelemetry_sdk::Resource::builder()
+            .with_service_name("test-log")
+            .with_attributes(vec![KeyValue::new("test", "true")])
+            .build();
+
+        let provider = init_provider(&resource);
+        assert!(provider.is_ok());
     }
 }
