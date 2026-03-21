@@ -1,7 +1,3 @@
-// Safety: `CancelledSessions` uses `Mutex` for interior mutability so the `Bridge` remains
-// `Send`/`Sync`. The fire-and-forget publish in `spawn_session_ready` uses `tokio::spawn`
-// and captures only cloned, `Send` values — it never touches shared state from the closure.
-
 mod authenticate;
 mod cancel;
 mod ext_method;
@@ -12,94 +8,64 @@ mod new_session;
 mod prompt;
 mod set_session_mode;
 
-use crate::config::{Config, SESSION_READY_DELAY};
-use crate::nats::{self, ExtSessionReady, FlushClient, PublishClient, RequestClient, agent};
+pub use prompt::REQ_ID_HEADER;
+
+use std::time::Duration;
+
+use crate::config::Config;
+use crate::nats::{
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    RetryPolicy, SubscribeClient, agent,
+};
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
-use crate::prompt_slot_counter::PromptSlotCounter;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
     ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    Result, SessionId, SetSessionModeRequest, SetSessionModeResponse,
+    Result, SessionId, SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::cell::RefCell;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use trogon_std::time::GetElapsed;
 
-const CANCELLED_SESSION_TTL: Duration = Duration::from_secs(300);
-const CLEANUP_EVERY: usize = 16;
+/// Delay before publishing `session.ready` to NATS.
+///
+/// The `Agent` trait returns the response value *before* the transport layer
+/// serializes and writes it to the client. Without a delay the spawned task
+/// could publish `session.ready` before the client has received the
+/// `session/new` response, violating the ordering guarantee.
+const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
-pub(crate) struct CancelledSessions<I: Copy> {
-    map: Mutex<HashMap<SessionId, I>>,
-    cleanup_counter: std::sync::atomic::AtomicUsize,
-}
-
-impl<I: Copy> CancelledSessions<I> {
-    pub fn new() -> Self {
-        Self {
-            map: Mutex::new(HashMap::new()),
-            cleanup_counter: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-
-    pub fn mark_cancelled<C: GetElapsed<Instant = I>>(&self, session_id: SessionId, clock: &C) {
-        let mut map = self.map.lock().unwrap();
-        map.insert(session_id, clock.now());
-        let count = self
-            .cleanup_counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count.is_multiple_of(CLEANUP_EVERY) {
-            map.retain(|_, ts| clock.elapsed(*ts) < CANCELLED_SESSION_TTL);
-        }
-    }
-
-    pub fn take_if_cancelled<C: GetElapsed<Instant = I>>(
-        &self,
-        session_id: &SessionId,
-        clock: &C,
-    ) -> Option<()> {
-        let mut map = self.map.lock().unwrap();
-        let is_valid = map
-            .get(session_id)
-            .is_some_and(|ts| clock.elapsed(*ts) < CANCELLED_SESSION_TTL);
-
-        if is_valid {
-            map.remove(session_id);
-            Some(())
-        } else {
-            map.remove(session_id);
-            None
-        }
-    }
-}
-
-pub struct Bridge<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> {
+pub struct Bridge<N, C: GetElapsed> {
     pub(crate) nats: N,
     pub(crate) clock: C,
-    pub(crate) metrics: Metrics,
-    pub(crate) cancelled_sessions: CancelledSessions<C::Instant>,
-    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
-    pub(crate) prompt_slot_counter: PromptSlotCounter,
     pub(crate) config: Config,
-    pub(crate) session_ready_publish_tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    pub(crate) metrics: Metrics,
+    pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
+    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
+    pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
 }
 
-impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C> {
-    pub fn new(nats: N, clock: C, meter: &Meter, config: Config) -> Self {
-        let max_concurrent = config.max_concurrent_client_tasks();
+impl<N, C: GetElapsed> Bridge<N, C> {
+    pub fn new(
+        nats: N,
+        clock: C,
+        meter: &Meter,
+        config: Config,
+        notification_sender: mpsc::Sender<SessionNotification>,
+    ) -> Self {
         Self {
             nats,
             clock,
             config,
             metrics: Metrics::new(meter),
-            cancelled_sessions: CancelledSessions::new(),
+            notification_sender,
             pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
-            prompt_slot_counter: PromptSlotCounter::new(max_concurrent),
-            session_ready_publish_tasks: Mutex::new(Vec::new()),
+            background_tasks: RefCell::new(Vec::new()),
         }
     }
 
@@ -107,64 +73,64 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Bridge<N, C>
         &self.nats
     }
 
-    pub(crate) fn register_session_ready_task(&self, task: tokio::task::JoinHandle<()>) {
-        let mut tasks = self.session_ready_publish_tasks.lock().unwrap();
-        tasks.retain(|task| !task.is_finished());
-        tasks.push(task);
+    pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
+        self.background_tasks.borrow_mut().push(task);
     }
 
-    pub fn has_pending_session_ready_tasks(&self) -> bool {
-        let mut tasks = self.session_ready_publish_tasks.lock().unwrap();
-        tasks.retain(|task| !task.is_finished());
-        !tasks.is_empty()
-    }
-
-    pub async fn await_session_ready_tasks(&self) {
-        let tasks = std::mem::take(&mut *self.session_ready_publish_tasks.lock().unwrap());
+    pub async fn drain_background_tasks(&self) {
+        let tasks: Vec<_> = self.background_tasks.borrow_mut().drain(..).collect();
         for task in tasks {
-            if let Err(e) = task.await {
-                warn!(error = %e, "session_ready task panicked");
-            }
+            let _ = task.await;
         }
     }
+}
 
-    pub(crate) fn spawn_session_ready(&self, session_id: &SessionId) {
-        let nats_clone = self.nats.clone();
+impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed> Bridge<N, C> {
+    pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
+        let nats = self.nats.clone();
         let prefix = self.config.acp_prefix().to_string();
-        let session_id = session_id.clone();
         let metrics = self.metrics.clone();
-        let session_ready_task = tokio::spawn(async move {
-            tokio::time::sleep(SESSION_READY_DELAY).await;
-
-            let ready_subject = agent::ext_session_ready(&prefix, &session_id.to_string());
-            info!(session_id = %session_id, subject = %ready_subject, "Publishing session.ready");
-
-            let ready_message = ExtSessionReady::new(session_id.clone());
-
-            let options = nats::PublishOptions::builder()
-                .publish_retry_policy(nats::RetryPolicy::standard())
-                .flush_policy(nats::FlushPolicy::standard())
-                .build();
-
-            if let Err(e) =
-                nats::publish(&nats_clone, &ready_subject, &ready_message, options).await
-            {
-                warn!(
-                    error = %e,
-                    session_id = %session_id,
-                    "Failed to publish session.ready"
-                );
-                metrics.record_error("session_ready", "session_ready_publish_failed");
-            } else {
-                info!(session_id = %session_id, "Published session.ready");
-            }
+        let handle = tokio::spawn(async move {
+            publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
         });
-        self.register_session_ready_task(session_ready_task);
+        self.spawn_background(handle);
+    }
+}
+
+async fn publish_session_ready<N: PublishClient + FlushClient>(
+    nats: &N,
+    prefix: &str,
+    session_id: &SessionId,
+    metrics: &Metrics,
+) {
+    tokio::time::sleep(SESSION_READY_DELAY).await;
+
+    let subject = agent::ext_session_ready(prefix, &session_id.to_string());
+    info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
+
+    let message = ExtSessionReady::new(session_id.clone());
+
+    let options = PublishOptions::builder()
+        .publish_retry_policy(RetryPolicy::standard())
+        .flush_policy(FlushPolicy::standard())
+        .build();
+
+    if let Err(e) = nats::publish(nats, &subject, &message, options).await {
+        warn!(
+            error = %e,
+            session_id = %session_id,
+            "Failed to publish session.ready"
+        );
+        metrics.record_error("session_ready", "session_ready_publish_failed");
+    } else {
+        info!(session_id = %session_id, "Published session.ready");
     }
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Bridge<N, C> {
+impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Agent
+    for Bridge<N, C>
+{
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
     }
@@ -189,7 +155,7 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        prompt::handle(self, args).await
+        prompt::handle(self, args, &trogon_std::StdJsonSerialize).await
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
@@ -206,180 +172,92 @@ impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed> Agent for Br
 }
 
 #[cfg(test)]
-mod send_sync_tests {
+mod tests {
+    use std::sync::Arc;
+
     use super::Bridge;
+    use crate::config::Config;
+    use agent_client_protocol::{
+        Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification,
+        StopReason,
+    };
+    use tokio::sync::mpsc;
     use trogon_nats::AdvancedMockNatsClient;
-    use trogon_std::time::SystemClock;
 
-    #[test]
-    fn bridge_is_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<Bridge<AdvancedMockNatsClient, SystemClock>>();
+    fn mock_bridge() -> (
+        AdvancedMockNatsClient,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+    ) {
+        let mock = AdvancedMockNatsClient::new();
+        let (tx, _rx) = mpsc::channel::<SessionNotification>(64);
+        let bridge = Bridge::new(
+            mock.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("acp-nats-test"),
+            Config::for_test("acp"),
+            tx,
+        );
+        (mock, bridge)
     }
-}
 
-#[cfg(test)]
-mod bridge_session_ready_tests {
-    use super::*;
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_std::time::MockClock;
-
-    fn test_bridge() -> Bridge<AdvancedMockNatsClient, MockClock> {
-        let nats = AdvancedMockNatsClient::new();
-        let clock = MockClock::new();
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        let config = Config::for_test("acp");
-        Bridge::new(nats, clock, &meter, config)
+    fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
+        Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap())
     }
 
     #[tokio::test]
-    async fn register_and_has_pending() {
-        let bridge = test_bridge();
-        assert!(!bridge.has_pending_session_ready_tasks());
-
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(async move {
-            let _ = rx.await;
-        });
-        bridge.register_session_ready_task(task);
-        assert!(bridge.has_pending_session_ready_tasks());
-        tx.send(()).unwrap();
-        bridge.await_session_ready_tasks().await;
+    async fn drain_background_tasks_completes() {
+        let (_mock, bridge) = mock_bridge();
+        bridge.spawn_background(tokio::spawn(async {}));
+        bridge.drain_background_tasks().await;
+        assert!(bridge.background_tasks.borrow().is_empty());
     }
 
     #[tokio::test]
-    async fn register_retains_only_unfinished_tasks() {
-        let bridge = test_bridge();
-        let finished = tokio::spawn(async {});
-        bridge.register_session_ready_task(finished);
-        tokio::task::yield_now().await;
+    async fn prompt_via_agent_trait_returns_done() {
+        let (mock, bridge) = mock_bridge();
 
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let pending = tokio::spawn(async move {
-            let _ = rx.await;
-        });
-        bridge.register_session_ready_task(pending);
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
 
-        {
-            let tasks = bridge.session_ready_publish_tasks.lock().unwrap();
-            assert_eq!(tasks.len(), 1);
-        }
+        let response = PromptResponse::new(StopReason::EndTurn);
+        resp_tx
+            .unbounded_send(async_nats::Message {
+                subject: "test".into(),
+                reply: None,
+                payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
+                headers: None,
+                status: None,
+                description: None,
+                length: 0,
+            })
+            .unwrap();
 
-        tx.send(()).unwrap();
-        bridge.await_session_ready_tasks().await;
+        let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
     }
 
     #[tokio::test]
-    async fn await_session_ready_tasks_drains() {
-        let bridge = test_bridge();
-        let task = tokio::spawn(async {});
-        bridge.register_session_ready_task(task);
-        bridge.await_session_ready_tasks().await;
-        assert!(!bridge.has_pending_session_ready_tasks());
+    async fn ext_method_returns_agent_unavailable_when_nats_fails() {
+        use agent_client_protocol::ErrorCode;
+
+        let (_mock, bridge) = mock_bridge();
+        let err = bridge
+            .ext_method(ExtRequest::new("ext", empty_raw_value()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
     }
 
     #[tokio::test]
-    async fn await_handles_panicking_task() {
-        let bridge = test_bridge();
-        let task = tokio::spawn(async { panic!("intentional") });
-        bridge.register_session_ready_task(task);
-        bridge.await_session_ready_tasks().await;
-        assert!(!bridge.has_pending_session_ready_tasks());
-    }
-
-    #[tokio::test]
-    async fn spawn_session_ready_registers_task() {
-        let bridge = test_bridge();
-        let session_id = SessionId::new("test-session".to_string());
-        bridge.spawn_session_ready(&session_id);
-
-        assert!(bridge.has_pending_session_ready_tasks());
-        bridge.await_session_ready_tasks().await;
-    }
-
-    #[tokio::test]
-    async fn spawn_session_ready_error_path() {
-        let nats = AdvancedMockNatsClient::new();
-        nats.fail_publish_count(4);
-        let clock = MockClock::new();
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        let config = Config::for_test("acp");
-        let bridge = Bridge::new(nats, clock, &meter, config);
-
-        let session_id = SessionId::new("fail-session".to_string());
-        bridge.spawn_session_ready(&session_id);
-        bridge.await_session_ready_tasks().await;
-    }
-
-    #[tokio::test]
-    async fn has_pending_filters_finished_tasks() {
-        let bridge = test_bridge();
-        let task = tokio::spawn(async {});
-        bridge.register_session_ready_task(task);
-        tokio::task::yield_now().await;
-        tokio::task::yield_now().await;
-        assert!(!bridge.has_pending_session_ready_tasks());
-    }
-}
-
-#[cfg(test)]
-mod cancelled_sessions_tests {
-    use super::*;
-    use agent_client_protocol::SessionId;
-    use trogon_std::time::MockClock;
-
-    fn session(id: &str) -> SessionId {
-        SessionId::new(id.to_string())
-    }
-
-    #[test]
-    fn mark_and_take_within_ttl() {
-        let clock = MockClock::new();
-        let cs = CancelledSessions::new();
-        cs.mark_cancelled(session("s1"), &clock);
-        assert!(cs.take_if_cancelled(&session("s1"), &clock).is_some());
-    }
-
-    #[test]
-    fn take_removes_entry() {
-        let clock = MockClock::new();
-        let cs = CancelledSessions::new();
-        cs.mark_cancelled(session("s1"), &clock);
-        cs.take_if_cancelled(&session("s1"), &clock);
-        assert!(cs.take_if_cancelled(&session("s1"), &clock).is_none());
-    }
-
-    #[test]
-    fn take_returns_none_for_unknown_session() {
-        let clock = MockClock::new();
-        let cs = CancelledSessions::new();
-        assert!(cs.take_if_cancelled(&session("nope"), &clock).is_none());
-    }
-
-    #[test]
-    fn expired_entry_returns_none() {
-        let clock = MockClock::new();
-        let cs = CancelledSessions::new();
-        cs.mark_cancelled(session("s1"), &clock);
-        clock.advance(CANCELLED_SESSION_TTL + Duration::from_secs(1));
-        assert!(cs.take_if_cancelled(&session("s1"), &clock).is_none());
-    }
-
-    #[test]
-    fn cleanup_evicts_expired_entries() {
-        let clock = MockClock::new();
-        let cs = CancelledSessions::new();
-
-        cs.mark_cancelled(session("old"), &clock);
-        clock.advance(CANCELLED_SESSION_TTL + Duration::from_secs(1));
-
-        for i in 0..CLEANUP_EVERY {
-            cs.mark_cancelled(session(&format!("s{i}")), &clock);
-        }
-
-        let map = cs.map.lock().unwrap();
-        assert!(!map.contains_key(&session("old")));
+    async fn ext_notification_returns_ok_even_when_publish_fails() {
+        let (_mock, bridge) = mock_bridge();
+        assert!(
+            bridge
+                .ext_notification(ExtNotification::new("ext", empty_raw_value()))
+                .await
+                .is_ok()
+        );
     }
 }
