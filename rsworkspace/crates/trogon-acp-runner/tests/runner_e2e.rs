@@ -906,12 +906,14 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
 
     // Pre-save session state with the MCP server configured
     let session_store = SessionStore::open(&js).await.unwrap();
-    let mut state = SessionState::default();
-    state.mcp_servers = vec![StoredMcpServer {
-        name: "my_srv".to_string(),
-        url: mcp_server.base_url(),
-        headers: vec![],
-    }];
+    let state = SessionState {
+        mcp_servers: vec![StoredMcpServer {
+            name: "my_srv".to_string(),
+            url: mcp_server.base_url(),
+            headers: vec![],
+        }],
+        ..Default::default()
+    };
     session_store.save(session_id, &state).await.unwrap();
 
     let agent = make_agent(&anthropic.base_url());
