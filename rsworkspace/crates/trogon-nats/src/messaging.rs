@@ -372,17 +372,18 @@ impl std::error::Error for NatsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Deserialize, Serialize};
 
     #[cfg(feature = "test-support")]
     use crate::mocks::AdvancedMockNatsClient;
 
-    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[cfg(feature = "test-support")]
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct TestRequest {
         message: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[cfg(feature = "test-support")]
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
     }
@@ -410,6 +411,12 @@ mod tests {
     #[test]
     fn test_flush_policy_no_retries() {
         let policy = FlushPolicy::no_retries();
+        assert_eq!(policy.retry_policy.max_retries, 0);
+    }
+
+    #[test]
+    fn test_flush_policy_default() {
+        let policy = FlushPolicy::default();
         assert_eq!(policy.retry_policy.max_retries, 0);
     }
 
@@ -465,6 +472,18 @@ mod tests {
     fn test_inject_trace_context_does_not_panic() {
         let mut headers = async_nats::HeaderMap::new();
         inject_trace_context(&mut headers);
+    }
+
+    #[test]
+    fn header_map_carrier_set_inserts_value() {
+        use opentelemetry::propagation::Injector;
+        let mut headers = async_nats::HeaderMap::new();
+        let mut carrier = HeaderMapCarrier(&mut headers);
+        carrier.set("x-test-key", "test-value".to_string());
+        assert_eq!(
+            headers.get("x-test-key").map(|v| v.as_str()),
+            Some("test-value")
+        );
     }
 
     #[tokio::test]
@@ -746,6 +765,22 @@ mod tests {
             }
             e => panic!("Expected PublishOperationExhausted error, got: {:?}", e),
         }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_request_with_timeout_returns_timeout_error() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.hang_next_request();
+
+        let req = TestRequest {
+            message: "hello".to_string(),
+        };
+
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&mock, "test.subject", &req, Duration::from_millis(1)).await;
+
+        assert!(matches!(result, Err(NatsError::Timeout { .. })));
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsError;
@@ -51,7 +51,7 @@ fn map_authenticate_error(e: NatsError) -> Error {
     skip(bridge, args),
     fields(method_id = %args.method_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: AuthenticateRequest,
 ) -> Result<AuthenticateResponse> {
@@ -149,6 +149,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -163,6 +164,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }

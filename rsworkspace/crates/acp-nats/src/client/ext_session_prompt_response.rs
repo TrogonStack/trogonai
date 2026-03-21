@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{FlushClient, PublishClient, RequestClient};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
 use crate::wire::decode_notification_params;
@@ -12,7 +12,10 @@ use trogon_std::time::GetElapsed;
     skip(headers, payload, bridge),
     fields(session_id = %session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<
+    N: RequestClient + PublishClient + FlushClient + SubscribeClient,
+    C: GetElapsed,
+>(
     session_id: &str,
     headers: &HeaderMap,
     payload: &[u8],
@@ -122,6 +125,7 @@ mod tests {
             MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         )
     }
 
@@ -137,7 +141,7 @@ mod tests {
         let bridge = make_bridge();
         let session_id: SessionId = "prompt-resp-001".into();
 
-        let (rx, _guard, token) = bridge
+        let (rx, token) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
@@ -166,7 +170,7 @@ mod tests {
         let bridge = make_bridge();
         let session_id: SessionId = "bad-payload-001".into();
 
-        let (rx, _guard, token) = bridge
+        let (rx, token) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
@@ -190,7 +194,7 @@ mod tests {
         let bridge = make_bridge();
         let session_id: SessionId = "no-token-session".into();
 
-        let (rx, _guard, _) = bridge
+        let (rx, _) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
@@ -217,7 +221,7 @@ mod tests {
         let bridge = make_bridge();
         let session_id: SessionId = "valid-session".into();
 
-        let (rx, _guard, token) = bridge
+        let (rx, token) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
@@ -252,7 +256,7 @@ mod tests {
         let bridge = make_bridge();
         let session_id: SessionId = "same-session".into();
 
-        let (_rx1, _guard1, token1) = bridge
+        let (_rx1, token1) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
@@ -263,7 +267,7 @@ mod tests {
         );
         let _ = _rx1.await;
 
-        let (rx2, _guard2, token2) = bridge
+        let (rx2, token2) = bridge
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
