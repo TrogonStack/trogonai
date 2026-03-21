@@ -108,13 +108,13 @@ async fn request_receives_reply() {
     let mut sub = client.subscribe("test.msg.request").await.unwrap();
     let responder = client.clone();
     tokio::spawn(async move {
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                let req: Ping = serde_json::from_slice(&msg.payload).unwrap();
-                let pong = Pong { echoed: req.value };
-                let payload = serde_json::to_vec(&pong).unwrap();
-                responder.publish(reply, payload.into()).await.unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            let req: Ping = serde_json::from_slice(&msg.payload).unwrap();
+            let pong = Pong { echoed: req.value };
+            let payload = serde_json::to_vec(&pong).unwrap();
+            responder.publish(reply, payload.into()).await.unwrap();
         }
     });
 
