@@ -15,11 +15,14 @@ use std::time::Duration;
 use acp_nats::prompt_event::PromptEvent;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ContentBlock, ErrorCode,
-    ImageContent, Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
-    SessionId, SessionUpdate, SetSessionModeRequest, SetSessionModeResponse, StopReason,
-    ToolCallStatus,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ClientCapabilities,
+    ContentBlock, ErrorCode, ForkSessionRequest, ForkSessionResponse, ImageContent,
+    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SessionId, SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    StopReason, ToolCallContent, ToolCallStatus, ToolKind,
 };
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -1660,4 +1663,960 @@ async fn prompt_with_image_only_blocks_produces_empty_user_message() {
         .await
         .expect("prompt with image-only blocks must succeed");
     assert!(matches!(resp.stop_reason, StopReason::EndTurn));
+}
+
+// ── terminal streaming ─────────────────────────────────────────────────────────
+
+/// When `terminal_output_cap` is set, a Bash tool call must produce three
+/// notifications: ToolCall (InProgress + terminal_info meta), then two
+/// ToolCallUpdate notifications (terminal_output, terminal_exit).
+#[tokio::test]
+async fn bash_with_terminal_output_cap_emits_three_notifications() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    // Enable terminal output capability directly — avoids needing a live
+    // initialize round-trip while still exercising the same code path.
+    bridge.set_terminal_output_cap(true);
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-term-bash",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "bash-term-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "echo hello"}),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "bash-term-1".to_string(),
+                output: "hello\n".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-term-bash", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+
+    // 1. ToolCall with terminal_info in meta
+    let tool_call = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCall(tc) = u {
+                Some(tc)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCall notification");
+
+    let meta = tool_call
+        .meta
+        .as_ref()
+        .expect("Bash ToolCall must have meta when terminal_output_cap is set");
+    assert!(
+        meta.contains_key("terminal_info"),
+        "ToolCall meta must contain terminal_info, got: {meta:?}"
+    );
+    let ti = meta["terminal_info"]
+        .as_object()
+        .expect("terminal_info must be an object");
+    assert_eq!(
+        ti.get("terminal_id").and_then(|v| v.as_str()),
+        Some("bash-term-1"),
+        "terminal_id must match tool call id"
+    );
+
+    // 2 & 3. Two ToolCallUpdate notifications: terminal_output then terminal_exit
+    let update_notifications: Vec<_> = updates
+        .iter()
+        .filter_map(|u| {
+            if let SessionUpdate::ToolCallUpdate(u) = u {
+                Some(u)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        update_notifications.len(),
+        2,
+        "expected exactly 2 ToolCallUpdate notifications for terminal streaming, got: {update_notifications:?}"
+    );
+
+    // First: terminal_output
+    let first = &update_notifications[0];
+    let meta0 = first
+        .meta
+        .as_ref()
+        .expect("terminal_output update must have meta");
+    assert!(
+        meta0.contains_key("terminal_output"),
+        "first ToolCallUpdate meta must contain terminal_output, got: {meta0:?}"
+    );
+    let to = meta0["terminal_output"]
+        .as_object()
+        .expect("terminal_output must be an object");
+    assert_eq!(
+        to.get("data").and_then(|v| v.as_str()),
+        Some("hello\n"),
+        "terminal_output.data must equal the tool output"
+    );
+
+    // Second: terminal_exit with Completed status
+    let second = &update_notifications[1];
+    let meta1 = second
+        .meta
+        .as_ref()
+        .expect("terminal_exit update must have meta");
+    assert!(
+        meta1.contains_key("terminal_exit"),
+        "second ToolCallUpdate meta must contain terminal_exit, got: {meta1:?}"
+    );
+    assert!(
+        matches!(second.fields.status, Some(ToolCallStatus::Completed)),
+        "terminal_exit update must carry Completed status, got: {:?}",
+        second.fields.status
+    );
+}
+
+/// Without terminal_output_cap, a Bash tool produces the normal 1 ToolCall + 1 ToolCallUpdate.
+#[tokio::test]
+async fn bash_without_terminal_output_cap_emits_standard_two_notifications() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+    // terminal_output_cap defaults to false — no extra notifications
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-bash-std",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "bash-std-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "ls"}),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "bash-std-1".to_string(),
+                output: "file.txt\n".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-bash-std", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+
+    // Exactly 1 ToolCallUpdate (the standard completion path)
+    let update_count = updates
+        .iter()
+        .filter(|u| matches!(u, SessionUpdate::ToolCallUpdate(_)))
+        .count();
+    assert_eq!(
+        update_count, 1,
+        "without terminal_output_cap, Bash must produce exactly 1 ToolCallUpdate"
+    );
+
+    // The ToolCall notification must NOT have terminal_info
+    let tool_call = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCall(tc) = u {
+                Some(tc)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCall notification");
+    let has_terminal_info = tool_call
+        .meta
+        .as_ref()
+        .is_some_and(|m| m.contains_key("terminal_info"));
+    assert!(
+        !has_terminal_info,
+        "without cap, ToolCall must NOT have terminal_info in meta"
+    );
+}
+
+// ── file locations ─────────────────────────────────────────────────────────────
+
+/// Edit tool started notification must include the file path in locations and kind=Edit.
+#[tokio::test]
+async fn edit_tool_started_includes_file_location_and_kind() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-edit-loc",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "edit-loc-1".to_string(),
+                name: "Edit".to_string(),
+                input: serde_json::json!({
+                    "file_path": "/src/main.rs",
+                    "old_string": "foo",
+                    "new_string": "bar"
+                }),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "edit-loc-1".to_string(),
+                output: "ok".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-edit-loc", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let tool_call = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCall(tc) = u {
+                Some(tc)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCall notification");
+
+    assert!(
+        !tool_call.locations.is_empty(),
+        "Edit tool must include at least one location"
+    );
+    assert_eq!(
+        tool_call.locations[0].path.to_str(),
+        Some("/src/main.rs"),
+        "location path must match file_path input"
+    );
+    assert!(
+        matches!(tool_call.kind, ToolKind::Edit),
+        "Edit tool kind must be Edit, got: {:?}",
+        tool_call.kind
+    );
+}
+
+/// Read tool started notification must include the file path in locations and kind=Read.
+#[tokio::test]
+async fn read_tool_started_includes_file_location_and_kind() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-read-loc",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "read-loc-1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/src/lib.rs"}),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "read-loc-1".to_string(),
+                output: "pub fn foo() {}".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-read-loc", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let tool_call = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCall(tc) = u {
+                Some(tc)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCall notification");
+
+    assert!(
+        !tool_call.locations.is_empty(),
+        "Read tool must include at least one location"
+    );
+    assert_eq!(
+        tool_call.locations[0].path.to_str(),
+        Some("/src/lib.rs"),
+        "location path must match file_path input"
+    );
+    assert!(
+        matches!(tool_call.kind, ToolKind::Read),
+        "Read tool kind must be Read, got: {:?}",
+        tool_call.kind
+    );
+}
+
+// ── edit diffs ─────────────────────────────────────────────────────────────────
+
+/// When Edit tool finishes successfully, the ToolCallUpdate must carry a Diff
+/// content block with the old and new text extracted from the tool input.
+#[tokio::test]
+async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-edit-diff",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "edit-diff-1".to_string(),
+                name: "Edit".to_string(),
+                input: serde_json::json!({
+                    "file_path": "/src/lib.rs",
+                    "old_string": "old code",
+                    "new_string": "new code"
+                }),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "edit-diff-1".to_string(),
+                output: "success".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-edit-diff", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let update = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCallUpdate(u) = u {
+                Some(u)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCallUpdate");
+
+    let content = update
+        .fields
+        .content
+        .as_ref()
+        .expect("Edit tool update must carry content");
+    assert!(
+        !content.is_empty(),
+        "Edit tool must produce at least one content block"
+    );
+
+    let diff = content
+        .iter()
+        .find_map(|c| {
+            if let ToolCallContent::Diff(d) = c {
+                Some(d)
+            } else {
+                None
+            }
+        })
+        .expect("Edit tool content must contain a Diff block");
+
+    assert_eq!(
+        diff.path.to_str(),
+        Some("/src/lib.rs"),
+        "diff path must match file_path"
+    );
+    assert_eq!(diff.new_text, "new code", "diff new_text must match new_string input");
+    assert_eq!(
+        diff.old_text.as_deref(),
+        Some("old code"),
+        "diff old_text must match old_string input"
+    );
+
+    // Also verify locations are set on the ToolCallUpdate
+    let locations = update.fields.locations.as_ref().expect("Edit update must have locations");
+    assert_eq!(
+        locations[0].path.to_str(),
+        Some("/src/lib.rs"),
+        "update location must match file_path"
+    );
+}
+
+/// Read tool finished must wrap the output in a fenced code block.
+#[tokio::test]
+async fn read_tool_finished_wraps_output_in_fenced_code_block() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-read-fence",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "read-fence-1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/src/main.rs"}),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "read-fence-1".to_string(),
+                output: "fn main() {}\n".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-read-fence", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let update = updates
+        .iter()
+        .find_map(|u| {
+            if let SessionUpdate::ToolCallUpdate(u) = u {
+                Some(u)
+            } else {
+                None
+            }
+        })
+        .expect("expected ToolCallUpdate for Read");
+
+    let content = update
+        .fields
+        .content
+        .as_ref()
+        .expect("Read update must carry content");
+    assert!(
+        !content.is_empty(),
+        "Read must produce at least one content block"
+    );
+
+    // The content block must be a text Content (not a Diff)
+    let text_content = content
+        .iter()
+        .find_map(|c| {
+            if let ToolCallContent::Content(ct) = c {
+                if let ContentBlock::Text(t) = &ct.content {
+                    Some(t.text.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .expect("Read content must be a text Content block");
+
+    assert!(
+        text_content.starts_with("```"),
+        "Read output must be wrapped in a fenced code block, got: {text_content:?}"
+    );
+    assert!(
+        text_content.contains("fn main()"),
+        "fenced block must contain the file contents, got: {text_content:?}"
+    );
+}
+
+// ── initialize / terminal_output_cap ──────────────────────────────────────────
+
+/// `initialize` with `_meta.terminal_output: true` in client_capabilities must
+/// flip the bridge's `terminal_output_cap` flag to `true`.
+#[tokio::test]
+async fn initialize_with_terminal_output_meta_sets_bridge_cap() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.initialize").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp =
+                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "terminal_output".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    let caps = ClientCapabilities::new().meta(meta);
+
+    bridge
+        .initialize(
+            InitializeRequest::new(ProtocolVersion::LATEST).client_capabilities(caps),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        bridge.supports_terminal_output(),
+        "bridge must have terminal_output_cap=true after initialize with terminal_output:true in _meta"
+    );
+}
+
+/// `initialize` without `terminal_output` in client_capabilities must leave
+/// the bridge's `terminal_output_cap` flag as `false`.
+#[tokio::test]
+async fn initialize_without_terminal_output_meta_leaves_cap_false() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.initialize").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp =
+                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        .await
+        .unwrap();
+
+    assert!(
+        !bridge.supports_terminal_output(),
+        "bridge must have terminal_output_cap=false when terminal_output is not in _meta"
+    );
+}
+
+// ── fork_session ───────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fork_session_returns_new_session_id() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let forked_id = SessionId::from("forked-sess-1");
+    let mut agent_sub = nats
+        .subscribe("acp.s1.agent.session.fork")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    let resp_id = forked_id.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ForkSessionResponse::new(resp_id)).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .fork_session(ForkSessionRequest::new("s1", "."))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert_eq!(result.unwrap().session_id, forked_id);
+}
+
+#[tokio::test]
+async fn fork_session_uses_session_scoped_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.orig-sess.agent.session.fork")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp =
+                serde_json::to_vec(&ForkSessionResponse::new(SessionId::from("f1"))).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .fork_session(ForkSessionRequest::new("orig-sess", "."))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(subject, "acp.orig-sess.agent.session.fork");
+}
+
+#[tokio::test]
+async fn fork_session_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats, "acp");
+
+    let err = bridge
+        .fork_session(ForkSessionRequest::new("s1", "."))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+}
+
+// ── resume_session ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn resume_session_succeeds() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats
+        .subscribe("acp.s2.agent.session.resume")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .resume_session(ResumeSessionRequest::new("s2", "."))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+#[tokio::test]
+async fn resume_session_uses_session_scoped_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.my-sess.agent.session.resume")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .resume_session(ResumeSessionRequest::new("my-sess", "."))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(subject, "acp.my-sess.agent.session.resume");
+}
+
+#[tokio::test]
+async fn resume_session_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats, "acp");
+
+    let err = bridge
+        .resume_session(ResumeSessionRequest::new("s2", "."))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+}
+
+// ── list_sessions ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_sessions_returns_session_list() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.session.list").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ListSessionsResponse::new(vec![])).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge.list_sessions(ListSessionsRequest::new()).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(result.unwrap().sessions.is_empty());
+}
+
+#[tokio::test]
+async fn list_sessions_uses_global_subject_not_session_scoped() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats.subscribe("acp.agent.session.list").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp = serde_json::to_vec(&ListSessionsResponse::new(vec![])).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge.list_sessions(ListSessionsRequest::new()).await.unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    // list_sessions is NOT session-scoped — no session_id token in subject
+    assert_eq!(subject, "acp.agent.session.list");
+}
+
+#[tokio::test]
+async fn list_sessions_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats, "acp");
+
+    let err = bridge
+        .list_sessions(ListSessionsRequest::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+}
+
+// ── set_session_model ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_model_succeeds() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats
+        .subscribe("acp.s3.agent.session.set_model")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&SetSessionModelResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .set_session_model(SetSessionModelRequest::new("s3", "claude-sonnet-4-6"))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+#[tokio::test]
+async fn set_session_model_uses_session_scoped_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.sess-m.agent.session.set_model")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp = serde_json::to_vec(&SetSessionModelResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .set_session_model(SetSessionModelRequest::new("sess-m", "claude-opus-4-6"))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(subject, "acp.sess-m.agent.session.set_model");
+}
+
+#[tokio::test]
+async fn set_session_model_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats, "acp");
+
+    let err = bridge
+        .set_session_model(SetSessionModelRequest::new("s3", "claude-sonnet-4-6"))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+}
+
+// ── set_session_config_option ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_config_option_succeeds() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats
+        .subscribe("acp.s4.agent.session.set_config_option")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp =
+                serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .set_session_config_option(SetSessionConfigOptionRequest::new("s4", "mode", "plan"))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+#[tokio::test]
+async fn set_session_config_option_uses_session_scoped_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.sess-cfg.agent.session.set_config_option")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp =
+                serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            "sess-cfg",
+            "mode",
+            "plan",
+        ))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(subject, "acp.sess-cfg.agent.session.set_config_option");
+}
+
+#[tokio::test]
+async fn set_session_config_option_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats, "acp");
+
+    let err = bridge
+        .set_session_config_option(SetSessionConfigOptionRequest::new("s4", "mode", "plan"))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }

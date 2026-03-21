@@ -1408,6 +1408,40 @@ mod tests {
     type TestAgent =
         TrogonAcpAgent<trogon_nats::AdvancedMockNatsClient, trogon_std::time::SystemClock>;
 
+    // ── slash commands ────────────────────────────────────────────────────────
+
+    #[test]
+    fn builtin_slash_commands_contains_expected_13_commands() {
+        let names: Vec<&str> = BUILTIN_SLASH_COMMANDS.iter().map(|(n, _)| *n).collect();
+        let expected = [
+            "bug", "clear", "compact", "config", "doctor", "help", "init", "memory", "model",
+            "pr_comments", "review", "status", "vim",
+        ];
+        assert_eq!(
+            names.len(),
+            expected.len(),
+            "expected {} slash commands, got {}: {names:?}",
+            expected.len(),
+            names.len()
+        );
+        for name in &expected {
+            assert!(
+                names.contains(name),
+                "slash command '{name}' missing from BUILTIN_SLASH_COMMANDS"
+            );
+        }
+    }
+
+    #[test]
+    fn builtin_slash_commands_all_have_non_empty_descriptions() {
+        for (name, desc) in BUILTIN_SLASH_COMMANDS {
+            assert!(
+                !desc.is_empty(),
+                "slash command '/{name}' must have a non-empty description"
+            );
+        }
+    }
+
     // ── resolve_model ─────────────────────────────────────────────────────────
 
     #[test]
@@ -1744,10 +1778,10 @@ mod tests {
         use super::super::*;
         use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
         use agent_client_protocol::{
-            Agent, AuthenticateRequest, ExtRequest, ForkSessionRequest, InitializeRequest,
-            ListSessionsRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest,
-            SessionId, SetSessionConfigOptionRequest, SetSessionModeRequest,
-            SetSessionModelRequest,
+            Agent, AuthenticateRequest, ClientCapabilities, ExtRequest, ForkSessionRequest,
+            InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
+            ResumeSessionRequest, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
+            SetSessionModeRequest, SetSessionModelRequest, ToolCallStatus,
         };
         use async_nats::jetstream;
         use std::sync::Arc;
@@ -1856,6 +1890,46 @@ mod tests {
             );
         }
 
+        /// `TrogonAcpAgent::initialize` with `_meta.terminal_output: true` must
+        /// propagate the capability to the inner bridge.
+        #[tokio::test(flavor = "current_thread")]
+        async fn initialize_with_terminal_output_meta_sets_bridge_cap() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let mut meta = serde_json::Map::new();
+            meta.insert(
+                "terminal_output".to_string(),
+                serde_json::Value::Bool(true),
+            );
+            let caps = ClientCapabilities::new().meta(meta);
+            let req =
+                InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)
+                    .client_capabilities(caps);
+            agent.initialize(req).await.unwrap();
+
+            assert!(
+                agent.bridge.supports_terminal_output(),
+                "bridge must have terminal_output_cap=true after TrogonAcpAgent::initialize with terminal_output:true in _meta"
+            );
+        }
+
+        /// Without `terminal_output` in `_meta`, the bridge cap must stay false.
+        #[tokio::test(flavor = "current_thread")]
+        async fn initialize_without_terminal_output_meta_cap_stays_false() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let req =
+                InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST);
+            agent.initialize(req).await.unwrap();
+
+            assert!(
+                !agent.bridge.supports_terminal_output(),
+                "bridge must have terminal_output_cap=false when terminal_output is absent from _meta"
+            );
+        }
+
         // ── ext_notification ──────────────────────────────────────────────────
 
         /// Covers lines 965-967: `ext_notification` always returns Ok(()).
@@ -1909,6 +1983,39 @@ mod tests {
         }
 
         // ── new_session ───────────────────────────────────────────────────────
+
+        /// new_session triggers `send_available_commands_update`, which must include
+        /// all 13 built-in slash commands in the AvailableCommandsUpdate notification.
+        #[tokio::test(flavor = "current_thread")]
+        async fn new_session_sends_available_commands_with_builtin_slash_commands() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, mut rx) = make_agent(nats, &js).await;
+
+            let req = NewSessionRequest::new("/home/user/project");
+            agent.new_session(req).await.unwrap();
+            // Yield to let the spawned send_available_commands_update future run
+            tokio::task::yield_now().await;
+
+            // Collect all notifications and find the AvailableCommandsUpdate
+            let mut cmd_update: Option<AvailableCommandsUpdate> = None;
+            while let Ok(n) = rx.try_recv() {
+                if let SessionUpdate::AvailableCommandsUpdate(acu) = n.update {
+                    cmd_update = Some(acu);
+                    break;
+                }
+            }
+
+            let acu = cmd_update.expect("expected AvailableCommandsUpdate notification");
+            let names: Vec<&str> = acu.available_commands.iter().map(|c| c.name.as_ref()).collect();
+
+            for cmd in &["bug", "clear", "compact", "config", "doctor", "help", "init",
+                         "memory", "model", "pr_comments", "review", "status", "vim"] {
+                assert!(
+                    names.contains(cmd),
+                    "AvailableCommandsUpdate must contain built-in command '/{cmd}', got: {names:?}"
+                );
+            }
+        }
 
         /// Covers line 185: `send_available_commands_update` spawned future's error
         /// path when the notification receiver is dropped before the spawn runs.
@@ -2849,6 +2956,110 @@ mod tests {
             );
             // No further notifications
             assert!(rx.try_recv().is_err(), "unexpected extra notification");
+        }
+
+        /// When `terminal_output_cap` is set, replaying a Bash tool must produce
+        /// THREE notifications: ToolCall (InProgress + terminal_info), then two
+        /// ToolCallUpdate notifications (terminal_output and terminal_exit).
+        #[tokio::test(flavor = "current_thread")]
+        async fn replay_history_bash_with_terminal_cap_emits_three_notifications() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+            let (_c, nats, js) = start_nats().await;
+            let (agent, mut rx) = make_agent(nats, &js).await;
+
+            // Enable terminal output capability before replay
+            agent.bridge.set_terminal_output_cap(true);
+
+            let state = SessionState {
+                messages: vec![
+                    AgentMsg {
+                        role: "assistant".to_string(),
+                        content: vec![AgentCb::ToolUse {
+                            id: "bash-replay-term".to_string(),
+                            name: "Bash".to_string(),
+                            input: serde_json::json!({"command": "echo hello"}),
+                        }],
+                    },
+                    AgentMsg {
+                        role: "user".to_string(),
+                        content: vec![AgentCb::ToolResult {
+                            tool_use_id: "bash-replay-term".to_string(),
+                            content: "hello\n".to_string(),
+                        }],
+                    },
+                ],
+                ..Default::default()
+            };
+            agent
+                .replay_history(&SessionId::from("sess-bash-term-replay"), &state)
+                .await;
+
+            // 1. ToolCall (InProgress) must carry terminal_info in meta
+            let first = rx.try_recv().expect("expected ToolCall notification");
+            match &first.update {
+                SessionUpdate::ToolCall(tc) => {
+                    let meta = tc
+                        .meta
+                        .as_ref()
+                        .expect("Bash ToolCall must have meta when terminal_output_cap is set");
+                    assert!(
+                        meta.contains_key("terminal_info"),
+                        "ToolCall meta must contain terminal_info, got: {meta:?}"
+                    );
+                    let ti = meta["terminal_info"].as_object().unwrap();
+                    assert_eq!(
+                        ti["terminal_id"].as_str().unwrap(),
+                        "bash-replay-term",
+                        "terminal_id must match tool use id"
+                    );
+                }
+                other => panic!("expected ToolCall, got: {other:?}"),
+            }
+
+            // 2. First ToolCallUpdate must carry terminal_output with the content
+            let second = rx.try_recv().expect("expected terminal_output ToolCallUpdate");
+            match &second.update {
+                SessionUpdate::ToolCallUpdate(u) => {
+                    let meta = u
+                        .meta
+                        .as_ref()
+                        .expect("terminal_output update must have meta");
+                    assert!(
+                        meta.contains_key("terminal_output"),
+                        "first update meta must contain terminal_output, got: {meta:?}"
+                    );
+                    let to = meta["terminal_output"].as_object().unwrap();
+                    assert_eq!(
+                        to["data"].as_str().unwrap(),
+                        "hello\n",
+                        "terminal_output.data must equal the tool result content"
+                    );
+                }
+                other => panic!("expected ToolCallUpdate (terminal_output), got: {other:?}"),
+            }
+
+            // 3. Second ToolCallUpdate must carry terminal_exit with Completed status
+            let third = rx.try_recv().expect("expected terminal_exit ToolCallUpdate");
+            match &third.update {
+                SessionUpdate::ToolCallUpdate(u) => {
+                    let meta = u
+                        .meta
+                        .as_ref()
+                        .expect("terminal_exit update must have meta");
+                    assert!(
+                        meta.contains_key("terminal_exit"),
+                        "second update meta must contain terminal_exit, got: {meta:?}"
+                    );
+                    assert!(
+                        matches!(u.fields.status, Some(ToolCallStatus::Completed)),
+                        "terminal_exit update must carry Completed status, got: {:?}",
+                        u.fields.status
+                    );
+                }
+                other => panic!("expected ToolCallUpdate (terminal_exit), got: {other:?}"),
+            }
+
+            assert!(rx.try_recv().is_err(), "no extra notifications expected");
         }
 
         /// Covers line 299: `_ => {}` for messages whose role is neither
