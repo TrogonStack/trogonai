@@ -15,8 +15,8 @@ use httpmock::prelude::*;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
-use tokio::sync::RwLock;
-use trogon_acp_runner::Runner;
+use tokio::sync::{RwLock, mpsc};
+use trogon_acp_runner::{PermissionReq, Runner, SessionState, SessionStore, StoredMcpServer};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
@@ -652,6 +652,472 @@ async fn runner_publishes_tool_call_events() {
                 matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
             });
             assert!(done.is_some(), "expected Done(end_turn) after tool call");
+        })
+        .await;
+}
+
+// ── Permission gate ───────────────────────────────────────────────────────────
+
+/// When `permission_tx` is set and the checker approves the tool call, the
+/// runner executes the tool and publishes ToolCallStarted + Done(end_turn).
+#[tokio::test]
+async fn runner_tool_call_allowed_via_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after approved tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-perm-allow";
+    let session_id = "sess-perm-allow-1";
+    let req_id = "req-perm-allow-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        Some(permission_tx),
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            // Approve every permission request
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "use a tool".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            // ToolCallStarted must appear — permission was checked and approved
+            assert!(
+                events.iter().any(
+                    |e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "unknown_tool")
+                ),
+                "expected ToolCallStarted(unknown_tool) after permission approved; got {events:?}"
+            );
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+            });
+            assert!(done.is_some(), "expected Done(end_turn)");
+        })
+        .await;
+}
+
+/// When `permission_tx` is set and the checker denies the tool call, the
+/// runner still completes (the agent sends the denial as a tool result and
+/// Anthropic returns end_turn).
+#[tokio::test]
+async fn runner_tool_call_denied_via_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result — the denial) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-perm-deny";
+    let session_id = "sess-perm-deny-1";
+    let req_id = "req-perm-deny-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        Some(permission_tx),
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            // Deny every permission request
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(false);
+                }
+            });
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "use a tool".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            // The agent sends a denial tool-result and Anthropic returns end_turn
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+            });
+            assert!(
+                done.is_some(),
+                "expected Done(end_turn) after permission denial; got {events:?}"
+            );
+        })
+        .await;
+}
+
+// ── MCP dispatch ──────────────────────────────────────────────────────────────
+
+/// When a session has `mcp_servers` configured, the runner calls `build_session_mcp`
+/// at prompt time, lists the tools, and dispatches tool calls to the MCP server.
+#[tokio::test]
+async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
+    let (_c, nats, js) = start_nats().await;
+
+    // ── MCP mock server ───────────────────────────────────────────────────────
+    let mcp_server = MockServer::start();
+
+    // initialize
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp"}}}"#);
+    });
+    // tools/list — returns one tool named "my_tool"
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"tools/list\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"my_tool","description":"A test MCP tool","inputSchema":{"type":"object"}}]}}"#);
+    });
+    // tools/call — returns text content
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"tools/call\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"mcp result"}],"isError":false}}"#);
+    });
+
+    // ── Anthropic mock ────────────────────────────────────────────────────────
+    let anthropic = MockServer::start();
+
+    // Second call (has tool_result) → end_turn
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done with MCP result"));
+    });
+    // First call → tool_use with the prefixed name "my_srv__my_tool"
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_mcp_1",
+                        "name": "my_srv__my_tool",
+                        "input": {}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let prefix = "test-mcp";
+    let session_id = "sess-mcp-1";
+    let req_id = "req-mcp-1";
+
+    // Pre-save session state with the MCP server configured
+    let session_store = SessionStore::open(&js).await.unwrap();
+    let mut state = SessionState::default();
+    state.mcp_servers = vec![StoredMcpServer {
+        name: "my_srv".to_string(),
+        url: mcp_server.base_url(),
+        headers: vec![],
+    }];
+    session_store.save(session_id, &state).await.unwrap();
+
+    let agent = make_agent(&anthropic.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "call the MCP tool".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            // The MCP tool must be dispatched (prefixed name = "my_srv__my_tool")
+            assert!(
+                events.iter().any(
+                    |e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "my_srv__my_tool")
+                ),
+                "expected ToolCallStarted(my_srv__my_tool); got {events:?}"
+            );
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+            });
+            assert!(done.is_some(), "expected Done(end_turn) after MCP tool call");
+        })
+        .await;
+}
+
+// ── Cancellation ──────────────────────────────────────────────────────────────
+
+/// Sending a cancel message to `{prefix}.{session_id}.agent.session.cancel` while the
+/// agent is processing a prompt causes the runner to abort and publish
+/// `Done { stop_reason: "cancelled" }`.
+#[tokio::test]
+async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
+    let (_c, nats, js) = start_nats().await;
+
+    // Slow Anthropic mock: 2-second delay gives the cancel message time to arrive.
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .delay(Duration::from_secs(2))
+            .body(end_turn_body("never reached"));
+    });
+
+    let prefix = "test-cancel";
+    let session_id = "sess-cancel-1";
+    let req_id = "req-cancel-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let cancel_subject = subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "do something slow".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            // Give the runner a moment to start processing, then cancel
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let events = collect_until_done(&mut events_sub, 10).await;
+
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "cancelled")
+            });
+            assert!(
+                done.is_some(),
+                "expected Done(cancelled); got {events:?}"
+            );
+        })
+        .await;
+}
+
+// ── Gateway config override ───────────────────────────────────────────────────
+
+/// When `gateway_config` is set on the runner, the agent uses the gateway's
+/// `base_url` and `token` instead of the agent's own values.
+/// Verified by creating a runner whose embedded agent points at a dead endpoint
+/// while gateway_config redirects to a live mock server.
+#[tokio::test]
+async fn runner_uses_gateway_config_base_url_and_token() {
+    let (_c, nats, js) = start_nats().await;
+
+    // Live gateway mock — this is where the request must actually arrive
+    let gateway = MockServer::start();
+    gateway.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("via gateway"));
+    });
+
+    let prefix = "test-gw";
+    let session_id = "sess-gw-1";
+    let req_id = "req-gw-1";
+
+    // Agent points at port 1 (dead) — must be overridden by gateway_config
+    let agent = make_agent("http://127.0.0.1:1");
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let gateway_config = Arc::new(RwLock::new(Some(trogon_acp_runner::GatewayConfig {
+        base_url: gateway.base_url(),
+        token: "gw-token".to_string(),
+        extra_headers: vec![],
+    })));
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        gateway_config,
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "hello via gateway".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 10).await;
+
+            // The TextDelta must contain the response from the gateway mock
+            assert!(
+                events.iter().any(
+                    |e| matches!(e, PromptEvent::TextDelta { text } if text.contains("via gateway"))
+                ),
+                "expected TextDelta with gateway response; got {events:?}"
+            );
+            let done = events.iter().find(|e| {
+                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+            });
+            assert!(done.is_some(), "expected Done(end_turn) via gateway");
         })
         .await;
 }
