@@ -4,6 +4,7 @@ members = ["crates/*"]
 
 [workspace.lints.rust]
 warnings = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 [workspace.lints.clippy]
 all = "deny"

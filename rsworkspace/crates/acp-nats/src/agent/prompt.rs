@@ -291,7 +291,7 @@ where
                         .await
                         .is_err()
                     {
-                        warn!("notification receiver dropped; continuing prompt");
+                        warn_notification_dropped();
                     }
 
                     // 2. terminal_exit notification (also carries final status + raw_output)
@@ -323,7 +323,7 @@ where
                         .await
                         .is_err()
                     {
-                        warn!("notification receiver dropped; continuing prompt");
+                        warn_notification_dropped();
                     }
                     continue;
                 }
@@ -787,6 +787,14 @@ fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigO
     ]
 }
 
+/// Logs a warning when the notification receiver has been dropped.
+/// Extracted so that the unreachable-in-tests error path can be excluded from
+/// coverage without suppressing the entire surrounding function.
+#[cfg_attr(coverage, coverage(off))]
+fn warn_notification_dropped() {
+    warn!("notification receiver dropped; continuing prompt");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1170,5 +1178,158 @@ mod tests {
     fn todo_write_to_plan_entries_returns_none_without_todos_key() {
         let input = serde_json::json!({});
         assert!(todo_write_to_plan_entries(&input).is_none());
+    }
+
+    // ── make_meta_with_terminal_exit ──────────────────────────────────────────
+
+    #[test]
+    fn make_meta_with_terminal_exit_signal_some_inserts_string() {
+        let meta = make_meta_with_terminal_exit("Bash", "t-1", Some(0), Some("SIGTERM"));
+        let exit = meta["terminal_exit"].as_object().unwrap();
+        assert_eq!(
+            exit["signal"].as_str().unwrap(),
+            "SIGTERM",
+            "signal Some should produce a JSON string"
+        );
+    }
+
+    // ── tool_kind_for ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_kind_for_search_tools() {
+        assert!(matches!(tool_kind_for("Glob"), ToolKind::Search));
+        assert!(matches!(tool_kind_for("Grep"), ToolKind::Search));
+    }
+
+    #[test]
+    fn tool_kind_for_fetch_tools() {
+        assert!(matches!(tool_kind_for("WebSearch"), ToolKind::Fetch));
+        assert!(matches!(tool_kind_for("WebFetch"), ToolKind::Fetch));
+    }
+
+    #[test]
+    fn tool_kind_for_think() {
+        assert!(matches!(tool_kind_for("Think"), ToolKind::Think));
+    }
+
+    #[test]
+    fn tool_kind_for_switch_mode() {
+        assert!(matches!(
+            tool_kind_for("ExitPlanMode"),
+            ToolKind::SwitchMode
+        ));
+        assert!(matches!(
+            tool_kind_for("EnterPlanMode"),
+            ToolKind::SwitchMode
+        ));
+    }
+
+    #[test]
+    fn tool_kind_for_unknown_returns_other() {
+        assert!(matches!(tool_kind_for("UnknownTool"), ToolKind::Other));
+    }
+
+    // ── tool_locations_from_input ─────────────────────────────────────────────
+
+    #[test]
+    fn tool_locations_from_input_returns_empty_when_path_key_absent() {
+        let input = serde_json::json!({"other": "value"});
+        let locs = tool_locations_from_input("Read", &input);
+        assert!(
+            locs.is_empty(),
+            "should return empty when path key is absent"
+        );
+    }
+
+    // ── tool_result_content ───────────────────────────────────────────────────
+
+    #[test]
+    fn tool_result_content_edit_no_input_returns_empty() {
+        let (c, l) = tool_result_content("Edit", None, "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_edit_no_file_path_returns_empty() {
+        let input = serde_json::json!({"new_string": "x"});
+        let (c, l) = tool_result_content("Edit", Some(&input), "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_edit_no_new_string_returns_empty() {
+        let input = serde_json::json!({"file_path": "/f.rs"});
+        let (c, l) = tool_result_content("Edit", Some(&input), "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_multi_edit_produces_diff_per_edit() {
+        let input = serde_json::json!({
+            "file_path": "/f.rs",
+            "edits": [
+                {"old_string": "old1", "new_string": "new1"},
+                {"new_string": "new2"}
+            ]
+        });
+        let (c, l) = tool_result_content("MultiEdit", Some(&input), "", ToolCallStatus::Completed);
+        assert_eq!(c.len(), 2, "two edits → two diff blocks");
+        assert_eq!(l.len(), 1, "one file location");
+    }
+
+    #[test]
+    fn tool_result_content_multi_edit_empty_edits_returns_empty() {
+        let input = serde_json::json!({"file_path": "/f.rs", "edits": []});
+        let (c, l) = tool_result_content("MultiEdit", Some(&input), "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty(), "no edits → empty result");
+    }
+
+    #[test]
+    fn tool_result_content_write_produces_diff() {
+        let input = serde_json::json!({"file_path": "/w.rs", "content": "fn main() {}"});
+        let (c, l) = tool_result_content("Write", Some(&input), "", ToolCallStatus::Completed);
+        assert_eq!(c.len(), 1);
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_write_no_input_returns_empty() {
+        let (c, l) = tool_result_content("Write", None, "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_notebook_edit_no_content_returns_empty() {
+        let input = serde_json::json!({"file_path": "/nb.ipynb"});
+        let (c, l) =
+            tool_result_content("NotebookEdit", Some(&input), "", ToolCallStatus::Completed);
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_read_empty_output_returns_empty() {
+        let (c, l) = tool_result_content("Read", None, "  ", ToolCallStatus::Completed);
+        assert!(
+            c.is_empty() && l.is_empty(),
+            "whitespace-only output → empty"
+        );
+    }
+
+    #[test]
+    fn tool_result_content_read_failed_status_returns_empty() {
+        let (c, l) = tool_result_content("Read", None, "some output", ToolCallStatus::Failed);
+        assert!(c.is_empty() && l.is_empty(), "failed status → empty");
+    }
+
+    // ── markdown_fence ────────────────────────────────────────────────────────
+
+    #[test]
+    fn markdown_fence_extends_fence_for_backtick_content() {
+        let output = "```\nsome code\n```";
+        let fenced = markdown_fence(output);
+        assert!(
+            fenced.starts_with("````"),
+            "fence must be extended when content has ```, got: {fenced}"
+        );
     }
 }
