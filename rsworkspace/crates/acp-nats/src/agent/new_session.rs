@@ -75,8 +75,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         Span::current().record("session_id", response.session_id.to_string().as_str());
         info!(session_id = %response.session_id, "Session created");
 
-        bridge.metrics.record_session_created();
-        bridge.spawn_session_ready(&response.session_id);
+        bridge.schedule_session_ready(response.session_id.clone());
     }
 
     bridge.metrics.record_request(
@@ -143,7 +142,7 @@ mod tests {
     ) {
         assert!(
             has_session_ready_error_metric(finished_metrics),
-            "expected acp.errors datapoint with operation=session_ready, reason=session_ready_publish_failed"
+            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
         );
     }
 
@@ -186,7 +185,7 @@ mod tests {
     ) {
         assert!(
             has_new_session_metric(finished_metrics, expected_success),
-            "expected acp.requests datapoint with method=new_session, success={}",
+            "expected acp.request.count datapoint with method=new_session, success={}",
             expected_success
         );
     }
@@ -210,6 +209,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &meter,
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge, exporter, provider)
     }
@@ -224,6 +224,7 @@ mod tests {
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
+            tokio::sync::mpsc::channel(1).0,
         );
         (mock, bridge)
     }
@@ -239,61 +240,17 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_forwards_request_and_returns_response() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mock = AdvancedMockNatsClient::new();
-                let bridge = Bridge::new(
-                    mock.clone(),
-                    trogon_std::time::MockClock::new(),
-                    &opentelemetry::global::meter("acp-nats-test"),
-                    Config::for_test("acp"),
-                );
-                let expected = NewSessionResponse::new("session-001");
-                set_json_response(&mock, "acp.agent.session.new", &expected);
-
-                let request = NewSessionRequest::new("/tmp");
-                let result = bridge.new_session(request).await;
-
-                assert!(result.is_ok());
-                let response = result.unwrap();
-                assert_eq!(response.session_id.to_string(), "session-001");
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn session_ready_publish_tasks_are_tracked_and_awaited() {
-        let mock = AdvancedMockNatsClient::new();
-        let expected = NewSessionResponse::new("session-ready-track");
+        let (mock, bridge) = mock_bridge();
+        let session_id = SessionId::from("test-session-1");
+        let expected = NewSessionResponse::new(session_id.clone());
         set_json_response(&mock, "acp.agent.session.new", &expected);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Bridge::new(
-                    mock.clone(),
-                    trogon_std::time::MockClock::new(),
-                    &opentelemetry::global::meter("acp-nats-test"),
-                    Config::for_test("acp"),
-                );
-                let request = NewSessionRequest::new("/tmp");
-                let result = bridge.new_session(request).await;
-                assert!(result.is_ok());
+        let request = NewSessionRequest::new(".");
+        let result = bridge.new_session(request).await;
 
-                assert!(
-                    bridge.has_pending_session_ready_tasks(),
-                    "session.ready task should be tracked"
-                );
-
-                bridge.await_session_ready_tasks().await;
-
-                assert!(
-                    !bridge.has_pending_session_ready_tasks(),
-                    "session.ready tasks should be fully awaited and cleared"
-                );
-            })
-            .await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.session_id, session_id);
     }
 
     #[tokio::test]
