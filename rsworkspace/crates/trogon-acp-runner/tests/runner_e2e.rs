@@ -667,7 +667,9 @@ async fn runner_tool_call_allowed_via_permission_channel() {
     let server = MockServer::start();
     // Second call (has tool_result) → end_turn
     server.mock(|when, then| {
-        when.method(POST).path("/messages").body_contains("tool_result");
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("Done after approved tool"));
@@ -756,7 +758,9 @@ async fn runner_tool_call_denied_via_permission_channel() {
     let server = MockServer::start();
     // Second call (has tool_result — the denial) → end_turn
     server.mock(|when, then| {
-        when.method(POST).path("/messages").body_contains("tool_result");
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("Done after denied tool"));
@@ -821,9 +825,9 @@ async fn runner_tool_call_denied_via_permission_channel() {
             let events = collect_until_done(&mut events_sub, 15).await;
 
             // The agent sends a denial tool-result and Anthropic returns end_turn
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            );
             assert!(
                 done.is_some(),
                 "expected Done(end_turn) after permission denial; got {events:?}"
@@ -870,7 +874,9 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
 
     // Second call (has tool_result) → end_turn
     anthropic.mock(|when, then| {
-        when.method(POST).path("/messages").body_contains("tool_result");
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("Done with MCP result"));
@@ -1028,13 +1034,10 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
 
             let events = collect_until_done(&mut events_sub, 10).await;
 
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "cancelled")
-            });
-            assert!(
-                done.is_some(),
-                "expected Done(cancelled); got {events:?}"
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "cancelled"),
             );
+            assert!(done.is_some(), "expected Done(cancelled); got {events:?}");
         })
         .await;
 }
@@ -1073,16 +1076,9 @@ async fn runner_uses_gateway_config_base_url_and_token() {
         extra_headers: vec![],
     })));
 
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        gateway_config,
-    )
-    .await
-    .unwrap();
+    let runner = Runner::new(nats.clone(), &js, agent, prefix, None, gateway_config)
+        .await
+        .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
@@ -1114,9 +1110,9 @@ async fn runner_uses_gateway_config_base_url_and_token() {
                 ),
                 "expected TextDelta with gateway response; got {events:?}"
             );
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            );
             assert!(done.is_some(), "expected Done(end_turn) via gateway");
         })
         .await;

@@ -16,13 +16,13 @@ use acp_nats::prompt_event::PromptEvent;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ClientCapabilities,
-    ContentBlock, ErrorCode, ForkSessionRequest, ForkSessionResponse, ImageContent,
-    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
-    NewSessionResponse, PromptRequest, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
-    SessionId, SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
-    StopReason, ToolCallContent, ToolCallStatus, ToolKind,
+    ContentBlock, ErrorCode, ForkSessionRequest, ForkSessionResponse, ImageContent, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
+    ToolCallContent, ToolCallStatus, ToolKind,
 };
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -2073,7 +2073,10 @@ async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
         Some("/src/lib.rs"),
         "diff path must match file_path"
     );
-    assert_eq!(diff.new_text, "new code", "diff new_text must match new_string input");
+    assert_eq!(
+        diff.new_text, "new code",
+        "diff new_text must match new_string input"
+    );
     assert_eq!(
         diff.old_text.as_deref(),
         Some("old code"),
@@ -2081,7 +2084,11 @@ async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
     );
 
     // Also verify locations are set on the ToolCallUpdate
-    let locations = update.fields.locations.as_ref().expect("Edit update must have locations");
+    let locations = update
+        .fields
+        .locations
+        .as_ref()
+        .expect("Edit update must have locations");
     assert_eq!(
         locations[0].path.to_str(),
         Some("/src/lib.rs"),
@@ -2195,16 +2202,11 @@ async fn initialize_with_terminal_output_meta_sets_bridge_cap() {
     });
 
     let mut meta = serde_json::Map::new();
-    meta.insert(
-        "terminal_output".to_string(),
-        serde_json::Value::Bool(true),
-    );
+    meta.insert("terminal_output".to_string(), serde_json::Value::Bool(true));
     let caps = ClientCapabilities::new().meta(meta);
 
     bridge
-        .initialize(
-            InitializeRequest::new(ProtocolVersion::LATEST).client_capabilities(caps),
-        )
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST).client_capabilities(caps))
         .await
         .unwrap();
 
@@ -2254,10 +2256,7 @@ async fn fork_session_returns_new_session_id() {
     let bridge = make_bridge(nats.clone(), "acp");
 
     let forked_id = SessionId::from("forked-sess-1");
-    let mut agent_sub = nats
-        .subscribe("acp.s1.agent.session.fork")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.s1.agent.session.fork").await.unwrap();
     let nats2 = nats.clone();
     let resp_id = forked_id.clone();
     tokio::spawn(async move {
@@ -2272,7 +2271,11 @@ async fn fork_session_returns_new_session_id() {
     let result = bridge
         .fork_session(ForkSessionRequest::new("s1", "."))
         .await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
     assert_eq!(result.unwrap().session_id, forked_id);
 }
 
@@ -2332,10 +2335,7 @@ async fn resume_session_succeeds() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
-    let mut agent_sub = nats
-        .subscribe("acp.s2.agent.session.resume")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.s2.agent.session.resume").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -2349,7 +2349,11 @@ async fn resume_session_succeeds() {
     let result = bridge
         .resume_session(ResumeSessionRequest::new("s2", "."))
         .await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 #[tokio::test]
@@ -2419,7 +2423,11 @@ async fn list_sessions_returns_session_list() {
     });
 
     let result = bridge.list_sessions(ListSessionsRequest::new()).await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
     assert!(result.unwrap().sessions.is_empty());
 }
 
@@ -2442,7 +2450,10 @@ async fn list_sessions_uses_global_subject_not_session_scoped() {
         }
     });
 
-    bridge.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    bridge
+        .list_sessions(ListSessionsRequest::new())
+        .await
+        .unwrap();
 
     let subject = tokio::time::timeout(Duration::from_secs(1), rx)
         .await
@@ -2490,7 +2501,11 @@ async fn set_session_model_succeeds() {
     let result = bridge
         .set_session_model(SetSessionModelRequest::new("s3", "claude-sonnet-4-6"))
         .await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 #[tokio::test]
@@ -2555,8 +2570,7 @@ async fn set_session_config_option_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
+            let resp = serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -2566,7 +2580,11 @@ async fn set_session_config_option_succeeds() {
     let result = bridge
         .set_session_config_option(SetSessionConfigOptionRequest::new("s4", "mode", "plan"))
         .await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 #[tokio::test]
@@ -2584,8 +2602,7 @@ async fn set_session_config_option_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp =
-                serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
+            let resp = serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -2594,9 +2611,7 @@ async fn set_session_config_option_uses_session_scoped_subject() {
 
     bridge
         .set_session_config_option(SetSessionConfigOptionRequest::new(
-            "sess-cfg",
-            "mode",
-            "plan",
+            "sess-cfg", "mode", "plan",
         ))
         .await
         .unwrap();

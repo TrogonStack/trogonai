@@ -1414,8 +1414,19 @@ mod tests {
     fn builtin_slash_commands_contains_expected_13_commands() {
         let names: Vec<&str> = BUILTIN_SLASH_COMMANDS.iter().map(|(n, _)| *n).collect();
         let expected = [
-            "bug", "clear", "compact", "config", "doctor", "help", "init", "memory", "model",
-            "pr_comments", "review", "status", "vim",
+            "bug",
+            "clear",
+            "compact",
+            "config",
+            "doctor",
+            "help",
+            "init",
+            "memory",
+            "model",
+            "pr_comments",
+            "review",
+            "status",
+            "vim",
         ];
         assert_eq!(
             names.len(),
@@ -1898,14 +1909,10 @@ mod tests {
             let (agent, _rx) = make_agent(nats, &js).await;
 
             let mut meta = serde_json::Map::new();
-            meta.insert(
-                "terminal_output".to_string(),
-                serde_json::Value::Bool(true),
-            );
+            meta.insert("terminal_output".to_string(), serde_json::Value::Bool(true));
             let caps = ClientCapabilities::new().meta(meta);
-            let req =
-                InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)
-                    .client_capabilities(caps);
+            let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)
+                .client_capabilities(caps);
             agent.initialize(req).await.unwrap();
 
             assert!(
@@ -1920,8 +1927,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let req =
-                InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST);
+            let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST);
             agent.initialize(req).await.unwrap();
 
             assert!(
@@ -2006,10 +2012,27 @@ mod tests {
             }
 
             let acu = cmd_update.expect("expected AvailableCommandsUpdate notification");
-            let names: Vec<&str> = acu.available_commands.iter().map(|c| c.name.as_ref()).collect();
+            let names: Vec<&str> = acu
+                .available_commands
+                .iter()
+                .map(|c| c.name.as_ref())
+                .collect();
 
-            for cmd in &["bug", "clear", "compact", "config", "doctor", "help", "init",
-                         "memory", "model", "pr_comments", "review", "status", "vim"] {
+            for cmd in &[
+                "bug",
+                "clear",
+                "compact",
+                "config",
+                "doctor",
+                "help",
+                "init",
+                "memory",
+                "model",
+                "pr_comments",
+                "review",
+                "status",
+                "vim",
+            ] {
                 assert!(
                     names.contains(cmd),
                     "AvailableCommandsUpdate must contain built-in command '/{cmd}', got: {names:?}"
@@ -3017,7 +3040,9 @@ mod tests {
             }
 
             // 2. First ToolCallUpdate must carry terminal_output with the content
-            let second = rx.try_recv().expect("expected terminal_output ToolCallUpdate");
+            let second = rx
+                .try_recv()
+                .expect("expected terminal_output ToolCallUpdate");
             match &second.update {
                 SessionUpdate::ToolCallUpdate(u) => {
                     let meta = u
@@ -3039,7 +3064,9 @@ mod tests {
             }
 
             // 3. Second ToolCallUpdate must carry terminal_exit with Completed status
-            let third = rx.try_recv().expect("expected terminal_exit ToolCallUpdate");
+            let third = rx
+                .try_recv()
+                .expect("expected terminal_exit ToolCallUpdate");
             match &third.update {
                 SessionUpdate::ToolCallUpdate(u) => {
                     let meta = u
