@@ -1792,6 +1792,70 @@ async fn bash_with_terminal_output_cap_emits_three_notifications() {
     );
 }
 
+/// When `terminal_output_cap` is set and the Bash tool exits with a non-zero code,
+/// the terminal_exit ToolCallUpdate must carry `Failed` status.
+#[tokio::test]
+async fn bash_with_terminal_output_cap_and_nonzero_exit_emits_failed_status() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+    bridge.set_terminal_output_cap(true);
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-term-fail",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "bash-fail-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "exit 1"}),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "bash-fail-1".to_string(),
+                output: "error\n".to_string(),
+                exit_code: Some(1),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-term-fail", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let exit_update = updates
+        .iter()
+        .filter_map(|u| {
+            if let SessionUpdate::ToolCallUpdate(u) = u {
+                if u.meta
+                    .as_ref()
+                    .is_some_and(|m| m.contains_key("terminal_exit"))
+                {
+                    Some(u)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .next()
+        .expect("expected terminal_exit ToolCallUpdate");
+
+    assert!(
+        matches!(exit_update.fields.status, Some(ToolCallStatus::Failed)),
+        "non-zero exit code must produce Failed status, got: {:?}",
+        exit_update.fields.status
+    );
+}
+
 /// Without terminal_output_cap, a Bash tool produces the normal 1 ToolCall + 1 ToolCallUpdate.
 #[tokio::test]
 async fn bash_without_terminal_output_cap_emits_standard_two_notifications() {

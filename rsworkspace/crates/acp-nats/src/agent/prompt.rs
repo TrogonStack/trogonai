@@ -520,6 +520,14 @@ fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigO
     ]
 }
 
+/// Logs a warning when the notification receiver has been dropped.
+/// Extracted so that the unreachable-in-tests error path can be excluded from
+/// coverage without suppressing the entire surrounding function.
+#[cfg_attr(coverage, coverage(off))]
+fn warn_notification_dropped() {
+    warn!("notification receiver dropped; continuing prompt");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

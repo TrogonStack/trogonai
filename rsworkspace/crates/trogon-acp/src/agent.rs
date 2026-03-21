@@ -1410,6 +1410,7 @@ mod tests {
 
     // ── slash commands ────────────────────────────────────────────────────────
 
+    #[cfg_attr(coverage, coverage(off))]
     #[test]
     fn builtin_slash_commands_contains_expected_13_commands() {
         let names: Vec<&str> = BUILTIN_SLASH_COMMANDS.iter().map(|(n, _)| *n).collect();
@@ -1992,6 +1993,7 @@ mod tests {
 
         /// new_session triggers `send_available_commands_update`, which must include
         /// all 13 built-in slash commands in the AvailableCommandsUpdate notification.
+        #[cfg_attr(coverage, coverage(off))]
         #[tokio::test(flavor = "current_thread")]
         async fn new_session_sends_available_commands_with_builtin_slash_commands() {
             let (_c, nats, js) = start_nats().await;
@@ -2984,6 +2986,7 @@ mod tests {
         /// When `terminal_output_cap` is set, replaying a Bash tool must produce
         /// THREE notifications: ToolCall (InProgress + terminal_info), then two
         /// ToolCallUpdate notifications (terminal_output and terminal_exit).
+        #[cfg_attr(coverage, coverage(off))]
         #[tokio::test(flavor = "current_thread")]
         async fn replay_history_bash_with_terminal_cap_emits_three_notifications() {
             use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
@@ -3114,5 +3117,154 @@ mod tests {
                 "no notifications expected for system role"
             );
         }
+    }
+
+    // ── replay_tool_kind_for ──────────────────────────────────────────────────
+
+    #[test]
+    fn tool_kind_for_name_covers_all_arms() {
+        assert!(matches!(replay_tool_kind_for("Read"), ToolKind::Read));
+        assert!(matches!(replay_tool_kind_for("LS"), ToolKind::Read));
+        assert!(matches!(replay_tool_kind_for("Edit"), ToolKind::Edit));
+        assert!(matches!(replay_tool_kind_for("MultiEdit"), ToolKind::Edit));
+        assert!(matches!(replay_tool_kind_for("Write"), ToolKind::Edit));
+        assert!(matches!(
+            replay_tool_kind_for("NotebookEdit"),
+            ToolKind::Edit
+        ));
+        assert!(matches!(replay_tool_kind_for("Bash"), ToolKind::Execute));
+        assert!(matches!(replay_tool_kind_for("Glob"), ToolKind::Search));
+        assert!(matches!(replay_tool_kind_for("Grep"), ToolKind::Search));
+        assert!(matches!(replay_tool_kind_for("WebSearch"), ToolKind::Fetch));
+        assert!(matches!(replay_tool_kind_for("WebFetch"), ToolKind::Fetch));
+        assert!(matches!(replay_tool_kind_for("Think"), ToolKind::Think));
+        assert!(matches!(
+            replay_tool_kind_for("ExitPlanMode"),
+            ToolKind::SwitchMode
+        ));
+        assert!(matches!(
+            replay_tool_kind_for("EnterPlanMode"),
+            ToolKind::SwitchMode
+        ));
+        assert!(matches!(replay_tool_kind_for("Unknown"), ToolKind::Other));
+    }
+
+    // ── replay_tool_locations ─────────────────────────────────────────────────
+
+    #[test]
+    fn replay_tool_locations_returns_location_when_file_path_present() {
+        let input = serde_json::json!({"file_path": "/src/main.rs"});
+        let locs = replay_tool_locations("Read", &input);
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn replay_tool_locations_returns_location_for_glob_path_key() {
+        let input = serde_json::json!({"path": "/src/"});
+        let locs = replay_tool_locations("Glob", &input);
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn replay_tool_locations_returns_empty_when_key_absent() {
+        let input = serde_json::json!({"other": "value"});
+        let locs = replay_tool_locations("Read", &input);
+        assert!(locs.is_empty());
+    }
+
+    // ── replay_tool_result_content ────────────────────────────────────────────
+
+    #[test]
+    fn replay_tool_result_content_edit_no_input_returns_empty() {
+        let (c, l) = replay_tool_result_content("Edit", None, "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_edit_no_file_path_returns_empty() {
+        let inp = serde_json::json!({"new_string": "x"});
+        let (c, l) = replay_tool_result_content("Edit", Some(&inp), "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_edit_no_new_string_returns_empty() {
+        let inp = serde_json::json!({"file_path": "/f.rs"});
+        let (c, l) = replay_tool_result_content("Edit", Some(&inp), "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_edit_with_diff_produces_content() {
+        let inp = serde_json::json!({
+            "file_path": "/f.rs",
+            "new_string": "new",
+            "old_string": "old"
+        });
+        let (c, l) = replay_tool_result_content("Edit", Some(&inp), "");
+        assert_eq!(c.len(), 1);
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
+    fn replay_tool_result_content_multi_edit_produces_diff_per_edit() {
+        let inp = serde_json::json!({
+            "file_path": "/f.rs",
+            "edits": [
+                {"old_string": "a", "new_string": "b"},
+                {"new_string": "c"}
+            ]
+        });
+        let (c, l) = replay_tool_result_content("MultiEdit", Some(&inp), "");
+        assert_eq!(c.len(), 2);
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
+    fn replay_tool_result_content_multi_edit_empty_edits_returns_empty() {
+        let inp = serde_json::json!({"file_path": "/f.rs", "edits": []});
+        let (c, l) = replay_tool_result_content("MultiEdit", Some(&inp), "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_write_produces_diff() {
+        let inp = serde_json::json!({"file_path": "/w.rs", "content": "fn main() {}"});
+        let (c, l) = replay_tool_result_content("Write", Some(&inp), "");
+        assert_eq!(c.len(), 1);
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
+    fn replay_tool_result_content_write_no_input_returns_empty() {
+        let (c, l) = replay_tool_result_content("Write", None, "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_write_missing_content_returns_empty() {
+        let inp = serde_json::json!({"file_path": "/w.rs"});
+        let (c, l) = replay_tool_result_content("Write", Some(&inp), "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_read_with_output_produces_fenced() {
+        let (c, l) = replay_tool_result_content("Read", None, "fn main() {}");
+        assert_eq!(c.len(), 1);
+        assert!(l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_read_empty_output_returns_empty() {
+        let (c, l) = replay_tool_result_content("Read", None, "");
+        assert!(c.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn replay_tool_result_content_read_backtick_content_extends_fence() {
+        let output = "```\ncode\n```";
+        let (c, _) = replay_tool_result_content("Read", None, output);
+        assert_eq!(c.len(), 1, "fenced content block should be produced");
     }
 }
