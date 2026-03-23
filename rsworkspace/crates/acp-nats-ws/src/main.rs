@@ -160,8 +160,8 @@ async fn process_connections<N>(
 #[cfg(test)]
 mod tests {
     use acp_nats::Config;
-    use acp_nats_ws::{THREAD_NAME, run_connection_thread, upgrade};
     use acp_nats_ws::upgrade::{ConnectionRequest, UpgradeState};
+    use acp_nats_ws::{THREAD_NAME, run_connection_thread, upgrade};
     use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
     use tokio::net::TcpListener;

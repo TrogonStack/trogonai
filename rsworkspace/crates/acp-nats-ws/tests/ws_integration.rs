@@ -49,11 +49,7 @@ fn make_config(nats_port: u16) -> Config {
 /// - the connection thread `JoinHandle` for clean teardown
 async fn start_server(
     nats_port: u16,
-) -> (
-    String,
-    watch::Sender<bool>,
-    std::thread::JoinHandle<()>,
-) {
+) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
     let nats_client = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("connect to NATS");
@@ -104,10 +100,7 @@ async fn ws_initialize_with_real_nats_returns_protocol_version() {
     let agent_nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("agent NATS connect");
-    let mut agent_sub = agent_nats
-        .subscribe("acp.agent.initialize")
-        .await
-        .unwrap();
+    let mut agent_sub = agent_nats.subscribe("acp.agent.initialize").await.unwrap();
     let agent_nats2 = agent_nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -166,10 +159,10 @@ async fn ws_connection_closes_cleanly_on_server_shutdown() {
     let outcome = tokio::time::timeout(Duration::from_secs(5), async move {
         loop {
             match ws.next().await {
-                None => return,                              // stream ended
-                Some(Ok(Message::Close(_))) => return,      // close frame received
-                Some(Ok(_)) => continue,                    // other frames — keep draining
-                Some(Err(_)) => return,                     // connection error is also acceptable
+                None => return,                        // stream ended
+                Some(Ok(Message::Close(_))) => return, // close frame received
+                Some(Ok(_)) => continue,               // other frames — keep draining
+                Some(Err(_)) => return,                // connection error is also acceptable
             }
         }
     })
@@ -193,10 +186,7 @@ async fn multiple_ws_clients_get_independent_responses() {
     let agent_nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("agent NATS connect");
-    let mut agent_sub = agent_nats
-        .subscribe("acp.agent.initialize")
-        .await
-        .unwrap();
+    let mut agent_sub = agent_nats.subscribe("acp.agent.initialize").await.unwrap();
     let agent_nats2 = agent_nats.clone();
     tokio::spawn(async move {
         while let Some(msg) = agent_sub.next().await {
@@ -249,8 +239,16 @@ async fn multiple_ws_clients_get_independent_responses() {
     let val2: serde_json::Value = serde_json::from_str(&text2).unwrap();
 
     // Each client receives a response with its own request id and a protocolVersion.
-    assert_eq!(val1["id"], serde_json::json!(10), "wrong id in ws1 response");
-    assert_eq!(val2["id"], serde_json::json!(20), "wrong id in ws2 response");
+    assert_eq!(
+        val1["id"],
+        serde_json::json!(10),
+        "wrong id in ws1 response"
+    );
+    assert_eq!(
+        val2["id"],
+        serde_json::json!(20),
+        "wrong id in ws2 response"
+    );
     assert!(
         val1["result"]["protocolVersion"].is_number(),
         "ws1 response missing protocolVersion"

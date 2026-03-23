@@ -9,16 +9,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize};
 use acp_nats::client;
+use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize};
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
     KillTerminalCommandResponse, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
-    RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, SessionUpdate, StopReason, TerminalExitStatus, TerminalOutputRequest,
-    TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, SessionUpdate, StopReason, TerminalExitStatus,
+    TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -124,9 +124,7 @@ impl Client for MockClient {
         &self,
         _: ReleaseTerminalRequest,
     ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
-        self.calls
-            .borrow_mut()
-            .push("release_terminal".to_string());
+        self.calls.borrow_mut().push("release_terminal".to_string());
         Ok(ReleaseTerminalResponse::new())
     }
 
@@ -160,10 +158,7 @@ async fn nats_client(port: u16) -> async_nats::Client {
         .expect("Failed to connect to NATS")
 }
 
-fn make_bridge(
-    nats: async_nats::Client,
-    prefix: &str,
-) -> Bridge<async_nats::Client, SystemClock> {
+fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock> {
     let config = Config::new(
         AcpPrefix::new(prefix).unwrap(),
         NatsConfig {
@@ -219,8 +214,7 @@ async fn fs_read_text_file_through_proxy_returns_file_content() {
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response["result"].is_object(),
                 "expected result in reply, got: {}",
@@ -266,15 +260,11 @@ async fn fs_write_text_file_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.sess-1.client.fs.write_text_file",
-                    Bytes::from(payload),
-                )
+                .request("acp.sess-1.client.fs.write_text_file", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response.get("error").is_none(),
                 "expected no error in reply, got: {}",
@@ -325,8 +315,7 @@ async fn request_permission_through_proxy_returns_outcome() {
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response["result"].is_object(),
                 "expected result in reply, got: {}",
@@ -365,8 +354,7 @@ async fn session_update_through_proxy_calls_client() {
             &self,
             _: SessionNotification,
         ) -> agent_client_protocol::Result<()> {
-            self.called
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
 
@@ -394,11 +382,9 @@ async fn session_update_through_proxy_calls_client() {
 
             let notification = SessionNotification::new(
                 "sess-1",
-                SessionUpdate::AgentMessageChunk(
-                    agent_client_protocol::ContentChunk::new(
-                        agent_client_protocol::ContentBlock::from("hello"),
-                    ),
-                ),
+                SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
+                    agent_client_protocol::ContentBlock::from("hello"),
+                )),
             );
             let payload = serde_json::to_vec(&notification).unwrap();
             nats1
@@ -445,15 +431,11 @@ async fn terminal_create_through_proxy_returns_terminal_id() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.sess-1.client.terminal.create",
-                    Bytes::from(payload),
-                )
+                .request("acp.sess-1.client.terminal.create", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response["result"].is_object(),
                 "expected result in reply, got: {}",
@@ -499,15 +481,11 @@ async fn terminal_kill_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.sess-1.client.terminal.kill",
-                    Bytes::from(payload),
-                )
+                .request("acp.sess-1.client.terminal.kill", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response.get("error").is_none(),
                 "expected no error in reply, got: {}",
@@ -553,15 +531,11 @@ async fn terminal_output_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.sess-1.client.terminal.output",
-                    Bytes::from(payload),
-                )
+                .request("acp.sess-1.client.terminal.output", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response.get("error").is_none(),
                 "expected no error in reply, got: {}",
@@ -607,15 +581,11 @@ async fn terminal_release_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.sess-1.client.terminal.release",
-                    Bytes::from(payload),
-                )
+                .request("acp.sess-1.client.terminal.release", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response.get("error").is_none(),
                 "expected no error in reply, got: {}",
@@ -668,8 +638,7 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value =
-                serde_json::from_slice(&reply.payload).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
             assert!(
                 response.get("error").is_none(),
                 "expected no error in reply, got: {}",

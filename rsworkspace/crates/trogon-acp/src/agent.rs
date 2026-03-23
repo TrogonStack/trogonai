@@ -2315,7 +2315,10 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let sid = new_resp.session_id;
 
             // Unknown config IDs are silently ignored and return current state

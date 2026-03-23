@@ -3260,14 +3260,13 @@ async fn ext_method_integration_forwards_request_and_returns_response() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
 
     // Spawn a NATS responder on the global ext subject.
-    let mut agent_sub = nats
-        .subscribe("acp.agent.ext.session_close")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.agent.ext.session_close").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let raw = serde_json::value::RawValue::from_string(r#"{"status":"closed"}"#.to_string()).unwrap();
+            let raw =
+                serde_json::value::RawValue::from_string(r#"{"status":"closed"}"#.to_string())
+                    .unwrap();
             let resp = ExtResponse::new(raw.into());
             let resp_bytes = serde_json::to_vec(&resp).unwrap();
             if let Some(reply) = msg.reply {
@@ -3276,12 +3275,18 @@ async fn ext_method_integration_forwards_request_and_returns_response() {
         }
     });
 
-    let params = serde_json::value::RawValue::from_string(r#"{"sessionId":"sess-ext-1"}"#.to_string()).unwrap();
+    let params =
+        serde_json::value::RawValue::from_string(r#"{"sessionId":"sess-ext-1"}"#.to_string())
+            .unwrap();
     let result = bridge
         .ext_method(ExtRequest::new("session_close", params.into()))
         .await;
 
-    assert!(result.is_ok(), "ext_method must succeed with real responder, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "ext_method must succeed with real responder, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 /// ext_method with no responder returns AgentUnavailable (timeout).
@@ -3299,7 +3304,8 @@ async fn ext_method_integration_timeout_returns_agent_unavailable() {
     assert_eq!(
         err.code,
         agent_client_protocol::ErrorCode::Other(AGENT_UNAVAILABLE),
-        "timeout must return AgentUnavailable, got: {:?}", err
+        "timeout must return AgentUnavailable, got: {:?}",
+        err
     );
 }
 
@@ -3320,7 +3326,8 @@ async fn ext_notification_integration_publishes_to_agent_subject() {
         }
     });
 
-    let params = serde_json::value::RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
+    let params =
+        serde_json::value::RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
     let result = bridge
         .ext_notification(ExtNotification::new("my_notify", params.into()))
         .await;
@@ -3344,5 +3351,8 @@ async fn ext_notification_integration_always_ok_with_no_subscriber() {
     let result = bridge
         .ext_notification(ExtNotification::new("my_notify", params.into()))
         .await;
-    assert!(result.is_ok(), "fire-and-forget: must be Ok even with no subscriber");
+    assert!(
+        result.is_ok(),
+        "fire-and-forget: must be Ok even with no subscriber"
+    );
 }

@@ -783,7 +783,10 @@ mod tests {
     fn markdown_fence_plain_text_uses_triple_backtick() {
         let fenced = markdown_fence("hello world");
         assert!(fenced.starts_with("```\n"), "expected ```, got: {fenced}");
-        assert!(fenced.ends_with("\n```"), "expected trailing ```, got: {fenced}");
+        assert!(
+            fenced.ends_with("\n```"),
+            "expected trailing ```, got: {fenced}"
+        );
         assert!(fenced.contains("hello world"));
     }
 
