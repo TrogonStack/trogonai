@@ -40,6 +40,9 @@ pub mod auth;
 pub mod client;
 pub mod connect;
 pub mod messaging;
+pub mod nats_token;
+pub mod subject_token_violation;
+pub mod token;
 
 #[cfg(feature = "test-support")]
 pub mod mocks;
@@ -53,6 +56,8 @@ pub use messaging::{
     RetryPolicy, headers_with_trace_context, inject_trace_context, publish, request,
     request_with_timeout,
 };
+pub use nats_token::{NatsToken, NatsTokenPolicy};
+pub use subject_token_violation::SubjectTokenViolation;
 
 #[cfg(feature = "test-support")]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};
