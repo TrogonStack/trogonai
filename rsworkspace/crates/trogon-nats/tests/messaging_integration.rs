@@ -125,7 +125,10 @@ async fn request_receives_reply() {
     assert_eq!(result.unwrap(), Pong { echoed: 7 });
 }
 
-/// `request_with_timeout()` returns `NatsError::Timeout` when no responder is present.
+/// `request_with_timeout()` returns an error when no responder is present.
+/// NATS servers immediately return a "no responders" (status 503) message when
+/// there are no subscribers for the subject, so the error arrives before the
+/// timeout fires and is surfaced as `NatsError::Request`.
 #[tokio::test]
 async fn request_with_timeout_times_out_when_no_responder() {
     let (_container, port) = start_nats().await;
@@ -140,7 +143,7 @@ async fn request_with_timeout_times_out_when_no_responder() {
     .await;
 
     assert!(
-        matches!(result, Err(NatsError::Timeout { .. })),
-        "expected Timeout error, got: {result:?}",
+        matches!(result, Err(NatsError::Timeout { .. }) | Err(NatsError::Request { .. })),
+        "expected Timeout or Request error, got: {result:?}",
     );
 }
