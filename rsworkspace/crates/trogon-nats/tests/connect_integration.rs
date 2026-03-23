@@ -69,6 +69,33 @@ async fn connect_with_user_password_succeeds_on_open_server() {
         .expect("open NATS server should accept user/password connections");
 }
 
+/// Covers the `NatsAuth::NKey` arm (lines 101-106).
+///
+/// async_nats sends the NKey challenge-response during the CONNECT handshake.
+/// An open NATS server (no `authorization` config) does not enforce auth and
+/// accepts the connection regardless of which key is presented.
+#[tokio::test]
+async fn connect_with_nkey_auth_on_open_server() {
+    let (_container, port) = start_nats().await;
+
+    // A valid NKey user seed (base32-encoded, 58-char canonical format).
+    // On an open server the key is not validated — the test simply exercises
+    // the `NatsAuth::NKey` branch in `connect()`.
+    let seed = "SUACSSL3UAHUDXKFSNVUZRF5UHPMWZ6BFDTJ7M6USDRCRBZLYKI4LZPFZFR".to_string();
+
+    let config = NatsConfig::new(
+        vec![format!("nats://127.0.0.1:{port}")],
+        NatsAuth::NKey(seed),
+    );
+
+    let result = connect(&config, Duration::from_secs(10)).await;
+    assert!(
+        result.is_ok(),
+        "NKey connect should succeed on an open NATS server: {:?}",
+        result
+    );
+}
+
 /// Covers the `NatsAuth::Credentials` arm — specifically the `InvalidCredentials`
 /// error path (lines 88-100) when the credentials file does not exist.
 /// No Docker required: the error is returned before any network activity.
