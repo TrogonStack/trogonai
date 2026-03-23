@@ -202,6 +202,89 @@ async fn list_ids_excludes_deleted_session() {
     assert!(!ids.contains(&"drop".to_string()));
 }
 
+// ── corrupted data ────────────────────────────────────────────────────────────
+
+/// If the KV bucket contains raw bytes that are not valid JSON for SessionState,
+/// `load()` must return an error (not panic, not silently return default).
+#[tokio::test]
+async fn load_corrupted_json_returns_error() {
+    let (_c, _, js) = setup().await;
+    let store = SessionStore::open(&js).await.unwrap();
+
+    // Write raw invalid JSON directly to the underlying KV bucket.
+    let kv = js
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "ACP_SESSIONS".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    kv.put("sess-corrupt-1", bytes::Bytes::from(b"not valid json at all".to_vec()))
+        .await
+        .unwrap();
+
+    let result = store.load("sess-corrupt-1").await;
+    assert!(
+        result.is_err(),
+        "loading corrupted session data must return an error"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        !err_msg.is_empty(),
+        "error must contain a meaningful message, got empty string"
+    );
+}
+
+/// If the KV bucket contains an empty byte array, `load()` must return an error.
+#[tokio::test]
+async fn load_empty_bytes_returns_error() {
+    let (_c, _, js) = setup().await;
+    let store = SessionStore::open(&js).await.unwrap();
+
+    let kv = js
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "ACP_SESSIONS".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    kv.put("sess-empty-1", bytes::Bytes::new())
+        .await
+        .unwrap();
+
+    let result = store.load("sess-empty-1").await;
+    assert!(
+        result.is_err(),
+        "loading empty session bytes must return an error"
+    );
+}
+
+/// If the KV bucket contains valid JSON but for a completely different type,
+/// `load()` must return an error.
+#[tokio::test]
+async fn load_wrong_json_type_returns_error() {
+    let (_c, _, js) = setup().await;
+    let store = SessionStore::open(&js).await.unwrap();
+
+    let kv = js
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "ACP_SESSIONS".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Valid JSON but not a SessionState object — it's a string
+    kv.put("sess-wrong-1", bytes::Bytes::from(b"\"just a string\"".to_vec()))
+        .await
+        .unwrap();
+
+    let result = store.load("sess-wrong-1").await;
+    assert!(
+        result.is_err(),
+        "loading wrong JSON type must return an error"
+    );
+}
+
 // ── open idempotency ──────────────────────────────────────────────────────────
 
 #[tokio::test]

@@ -1646,3 +1646,164 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
         })
         .await;
 }
+
+// ── Cancel during tool execution ───────────────────────────────────────────────
+
+/// When a cancel message arrives WHILE the runner is executing a tool call
+/// (i.e., waiting for the second Anthropic response after sending tool_result),
+/// the runner should still complete with Done(cancelled) or Done(end_turn).
+///
+/// We simulate this by:
+/// 1. First Anthropic call → tool_use (triggers tool execution)
+/// 2. While waiting for the second Anthropic call, publish cancel message
+/// 3. Second Anthropic call → end_turn (the cancel check is cooperative)
+///
+/// The runner publishes Done with some stop reason (cancelled or end_turn depending on timing).
+#[tokio::test]
+async fn runner_cancel_during_tool_execution_completes() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+
+    // Second call (tool_result arrives) → small delay then end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after tool"))
+            .delay(Duration::from_millis(100));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-cancel-tool";
+    let session_id = "sess-cancel-tool-1";
+    let req_id = "req-cancel-tool-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let cancel_subject = subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "use a tool".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            // Wait for the tool call to start, then send cancel
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            // Should complete with some Done event (cancelled or end_turn depending on timing)
+            let has_done = events.iter().any(|e| matches!(e, PromptEvent::Done { .. }));
+            assert!(
+                has_done,
+                "runner must publish Done after cancel during tool; got: {events:?}"
+            );
+        })
+        .await;
+}
+
+// ── No cancel signal path ──────────────────────────────────────────────────────
+
+/// Verify the runner completes a prompt successfully when no cancel message is sent
+/// (exercises the normal path without cancel race conditions).
+/// This also indirectly documents the handle_prompt happy path
+/// in isolation from concurrent cancel signals.
+#[tokio::test]
+async fn runner_completes_prompt_without_any_cancel_signal() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("completed without cancel"));
+    });
+
+    let prefix = "test-no-cancel";
+    let session_id = "sess-no-cancel-1";
+    let req_id = "req-no-cancel-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![UserContentBlock::Text {
+                    text: "Hello".to_string(),
+                }],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+            let done = events
+                .iter()
+                .find(|e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"));
+            assert!(done.is_some(), "expected Done(end_turn); got: {events:?}");
+        })
+        .await;
+}

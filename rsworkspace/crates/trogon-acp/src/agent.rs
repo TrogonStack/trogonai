@@ -2310,6 +2310,41 @@ mod tests {
             assert_eq!(state.model.as_deref(), Some("claude-opus-4-6"));
         }
 
+        #[tokio::test(flavor = "current_thread")]
+        async fn set_session_config_option_unknown_id_returns_success_with_current_state() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sid = new_resp.session_id;
+
+            // Unknown config IDs are silently ignored and return current state
+            let req = SetSessionConfigOptionRequest::new(sid, "memory_owner", "owner/repo");
+            let result = agent.set_session_config_option(req).await;
+            // Should succeed (silently ignored) and return config options with default state
+            assert!(
+                result.is_ok(),
+                "unknown config_id must return Ok (silently ignored), got: {:?}",
+                result.unwrap_err()
+            );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn set_session_config_option_invalid_session_returns_ok_with_default_state() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            // Nonexistent session gets default state → mode update should succeed
+            // (session store returns default for missing keys)
+            let req = SetSessionConfigOptionRequest::new("nonexistent-session", "mode", "default");
+            let result = agent.set_session_config_option(req).await;
+            assert!(
+                result.is_ok(),
+                "set_session_config_option on nonexistent session should succeed (default state returned), got: {:?}",
+                result
+            );
+        }
+
         // ── set_session_model ──────────────────────────────────────────────────
 
         #[tokio::test(flavor = "current_thread")]

@@ -925,6 +925,101 @@ async fn run_chat_streaming_permission_denied() {
 
 // ── proxy URL (else branch of messages_url) ───────────────────────────────────
 
+/// Anthropic returns 200 OK but the body is not valid JSON.
+/// The agent should return AgentError::Http (reqwest json parse error).
+#[tokio::test]
+async fn run_200_ok_with_invalid_json_body_returns_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body("this is not json at all");
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run(vec![Message::user_text("Say hello")], &[], None)
+        .await;
+
+    assert!(
+        matches!(result, Err(AgentError::Http(_))),
+        "200 OK with invalid JSON must return AgentError::Http, got: {:?}",
+        result
+    );
+}
+
+/// Anthropic returns 200 OK with valid JSON but missing required `stop_reason` field.
+/// The agent should return AgentError::Http (serde deserialization error).
+#[tokio::test]
+async fn run_200_ok_with_missing_stop_reason_returns_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"content": [{"type": "text", "text": "hello"}]}"#);
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run(vec![Message::user_text("Say hello")], &[], None)
+        .await;
+
+    assert!(
+        matches!(result, Err(AgentError::Http(_))),
+        "200 OK missing stop_reason must return AgentError::Http, got: {:?}",
+        result
+    );
+}
+
+/// Anthropic returns 500 with a non-JSON error body.
+/// The agent should return AgentError::Http.
+#[tokio::test]
+async fn run_500_with_plain_text_body_returns_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(500)
+            .header("Content-Type", "text/plain")
+            .body("Internal Server Error");
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run(vec![Message::user_text("Say hello")], &[], None)
+        .await;
+
+    assert!(
+        matches!(result, Err(AgentError::Http(_))),
+        "500 with plain text must return AgentError::Http, got: {:?}",
+        result
+    );
+}
+
+/// Anthropic returns 429 Too Many Requests.
+#[tokio::test]
+async fn run_429_rate_limit_returns_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(429)
+            .header("Content-Type", "application/json")
+            .body(r#"{"error": {"type": "rate_limit_error", "message": "Too many requests"}}"#);
+    });
+
+    let agent = make_agent(&server.base_url());
+    let result = agent
+        .run(vec![Message::user_text("Say hello")], &[], None)
+        .await;
+
+    assert!(
+        matches!(result, Err(AgentError::Http(_))),
+        "429 rate limit must return AgentError::Http, got: {:?}",
+        result
+    );
+}
+
 /// When `anthropic_base_url` is `None`, `messages_url()` builds the URL as
 /// `{proxy_url}/anthropic/v1/messages`. Covers the else branch of `messages_url`.
 #[tokio::test]
