@@ -2,17 +2,18 @@ mod config;
 mod connection;
 mod upgrade;
 
-use acp_nats::nats;
-use acp_telemetry::ServiceName;
-use clap::Parser;
-use std::net::SocketAddr;
 use tokio::sync::{mpsc, watch};
-use tower_http::trace::TraceLayer;
-use tracing::{error, info};
-use trogon_std::env::SystemEnv;
-use trogon_std::fs::SystemFs;
+use tracing::info;
 use upgrade::{ConnectionRequest, UpgradeState};
 
+#[cfg(not(coverage))]
+use {
+    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
+    tower_http::trace::TraceLayer, tracing::error, trogon_std::env::SystemEnv,
+    trogon_std::fs::SystemFs,
+};
+
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = config::Args::parse();
@@ -77,6 +78,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
+
+#[cfg(coverage)]
+fn main() {}
 
 const THREAD_NAME: &str = "acp-ws-local";
 
@@ -247,6 +251,69 @@ mod tests {
 
         // Ensure clean teardown
         let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
+            .await
+            .expect("server task did not shut down");
+
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_while_connection_active() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+
+        let _injector = nats_mock.inject_messages();
+
+        nats_mock.hang_next_request();
+
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+
+        let nats_mock_clone = nats_mock.clone();
+        let conn_thread = std::thread::Builder::new()
+            .name(THREAD_NAME.into())
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .expect("failed to spawn connection thread");
+
+        let state = UpgradeState {
+            conn_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        };
+
+        let app = axum::Router::new()
+            .route("/ws", axum::routing::get(upgrade::handle))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let ws_url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
+
+        let req =
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+        ws_stream.send(Message::Text(req.into())).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        shutdown_tx.send(true).unwrap();
+
+        let _ = tokio::time::timeout(Duration::from_secs(5), server_task)
             .await
             .expect("server task did not shut down");
 
