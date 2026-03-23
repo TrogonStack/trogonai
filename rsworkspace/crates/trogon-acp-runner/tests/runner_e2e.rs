@@ -1119,3 +1119,172 @@ async fn runner_uses_gateway_config_base_url_and_token() {
         })
         .await;
 }
+
+// ── Session queuing ───────────────────────────────────────────────────────────
+
+/// When 3 prompts are sent to the same session_id without waiting for
+/// acknowledgement, the runner must process them in order and all 3 must
+/// complete with a `Done` event.
+#[tokio::test]
+async fn concurrent_prompts_same_session_are_queued_in_order() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("queued reply"));
+    });
+
+    let prefix = "test-queue-same";
+    let session_id = "sess-queue-same-1";
+    let req_ids = ["req-q-1", "req-q-2", "req-q-3"];
+
+    let agent = make_agent(&server.base_url());
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // Subscribe to all 3 event streams BEFORE the runner starts and BEFORE publishing.
+            let mut subs = Vec::new();
+            for req_id in &req_ids {
+                let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+                let sub = nats
+                    .subscribe(events_subject)
+                    .await
+                    .expect("subscribe to events");
+                subs.push(sub);
+            }
+
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            // Publish all 3 prompts rapidly without waiting between them.
+            for req_id in &req_ids {
+                let payload = PromptPayload {
+                    req_id: req_id.to_string(),
+                    session_id: session_id.to_string(),
+                    content: vec![UserContentBlock::Text {
+                        text: format!("prompt {req_id}"),
+                    }],
+                    user_message: String::new(),
+                };
+                nats.publish(
+                    subjects::prompt(prefix, session_id),
+                    Bytes::from(serde_json::to_vec(&payload).unwrap()),
+                )
+                .await
+                .unwrap();
+            }
+
+            // Wait for Done on each subscription in order.
+            for (i, sub) in subs.iter_mut().enumerate() {
+                let events = collect_until_done(sub, 30).await;
+                let done = events
+                    .iter()
+                    .find(|e| matches!(e, PromptEvent::Done { .. }));
+                assert!(
+                    done.is_some(),
+                    "expected Done event for prompt #{i} (req_id={}); got: {events:?}",
+                    req_ids[i]
+                );
+            }
+        })
+        .await;
+}
+
+/// When 2 prompts are sent to DIFFERENT session_ids, both should complete
+/// successfully (they run concurrently, not queued).
+#[tokio::test]
+async fn concurrent_prompts_different_sessions_run_concurrently() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("concurrent reply"));
+    });
+
+    let prefix = "test-queue-diff";
+    let session_a = "sess-conc-a";
+    let session_b = "sess-conc-b";
+    let req_a = "req-conc-a";
+    let req_b = "req-conc-b";
+
+    let agent = make_agent(&server.base_url());
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let events_a = subjects::prompt_events(prefix, session_a, req_a);
+            let events_b = subjects::prompt_events(prefix, session_b, req_b);
+            let mut sub_a = nats.subscribe(events_a).await.expect("subscribe a");
+            let mut sub_b = nats.subscribe(events_b).await.expect("subscribe b");
+
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            // Publish both prompts to different sessions simultaneously.
+            for (session_id, req_id) in [(session_a, req_a), (session_b, req_b)] {
+                let payload = PromptPayload {
+                    req_id: req_id.to_string(),
+                    session_id: session_id.to_string(),
+                    content: vec![UserContentBlock::Text {
+                        text: format!("hello {session_id}"),
+                    }],
+                    user_message: String::new(),
+                };
+                nats.publish(
+                    subjects::prompt(prefix, session_id),
+                    Bytes::from(serde_json::to_vec(&payload).unwrap()),
+                )
+                .await
+                .unwrap();
+            }
+
+            // Both sessions must receive Done.
+            let events_a = collect_until_done(&mut sub_a, 15).await;
+            let done_a = events_a
+                .iter()
+                .find(|e| matches!(e, PromptEvent::Done { .. }));
+            assert!(
+                done_a.is_some(),
+                "expected Done for session_a; got: {events_a:?}"
+            );
+
+            let events_b = collect_until_done(&mut sub_b, 15).await;
+            let done_b = events_b
+                .iter()
+                .find(|e| matches!(e, PromptEvent::Done { .. }));
+            assert!(
+                done_b.is_some(),
+                "expected Done for session_b; got: {events_b:?}"
+            );
+        })
+        .await;
+}

@@ -2715,3 +2715,265 @@ async fn set_session_config_option_timeout_returns_agent_unavailable() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }
+
+// ── SystemStatus / ToolCallStarted meta ──────────────────────────────────────
+
+/// A `SystemStatus` message containing "compact" (but not "complet") is mapped
+/// to an `AgentMessageChunk` with text `"Compacting..."`.
+#[tokio::test]
+async fn system_status_compact_emits_agent_message_chunk() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-sys-compact",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "tc-sys-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            PromptEvent::SystemStatus {
+                message: "compacting memory...".to_string(),
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-sys-compact", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let has_compacting_chunk = updates.iter().any(|u| {
+        if let SessionUpdate::AgentMessageChunk(chunk) = u
+            && let ContentBlock::Text(t) = &chunk.content
+        {
+            return t.text.contains("Compacting...");
+        }
+        false
+    });
+    assert!(
+        has_compacting_chunk,
+        "expected AgentMessageChunk with 'Compacting...' text; got: {updates:?}"
+    );
+}
+
+/// A `SystemStatus` message containing "compact complete" is mapped to an
+/// `AgentMessageChunk` with text `"\n\nCompacting completed."`.
+#[tokio::test]
+async fn system_status_compacting_complete_emits_completed_message() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-sys-complete",
+        vec![
+            PromptEvent::SystemStatus {
+                message: "compact complete".to_string(),
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-sys-complete", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let has_completed_chunk = updates.iter().any(|u| {
+        if let SessionUpdate::AgentMessageChunk(chunk) = u
+            && let ContentBlock::Text(t) = &chunk.content
+        {
+            return t.text.contains("Compacting completed.");
+        }
+        false
+    });
+    assert!(
+        has_completed_chunk,
+        "expected AgentMessageChunk with 'Compacting completed.' text; got: {updates:?}"
+    );
+}
+
+/// A `SystemStatus` message that does not contain "compact" must NOT produce
+/// any `AgentMessageChunk` notification.
+#[tokio::test]
+async fn system_status_non_compact_does_not_emit_agent_message() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-sys-ratelimit",
+        vec![
+            PromptEvent::SystemStatus {
+                message: "rate_limit_warning".to_string(),
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-sys-ratelimit", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    // Filter for any AgentMessageChunk that contains "Compacting"
+    let compacting_chunks: Vec<_> = updates
+        .iter()
+        .filter(|u| {
+            if let SessionUpdate::AgentMessageChunk(chunk) = u
+                && let ContentBlock::Text(t) = &chunk.content
+            {
+                return t.text.contains("Compacting");
+            }
+            false
+        })
+        .collect();
+    assert!(
+        compacting_chunks.is_empty(),
+        "non-compact SystemStatus must not produce an AgentMessageChunk with 'Compacting'; got: {compacting_chunks:?}"
+    );
+}
+
+/// A `ToolCallStarted` with a `parent_tool_use_id` must inject
+/// `meta.claudeCode.parentToolUseId` into the `ToolCall` notification.
+#[tokio::test]
+async fn tool_call_started_with_parent_id_injects_meta() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-parent-meta",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "tc-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: Some("parent-tu-123".to_string()),
+            },
+            PromptEvent::ToolCallFinished {
+                id: "tc-1".to_string(),
+                output: "ok".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-parent-meta", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let tool_call = updates.iter().find_map(|u| {
+        if let SessionUpdate::ToolCall(tc) = u {
+            Some(tc)
+        } else {
+            None
+        }
+    });
+    let tool_call = tool_call.expect("expected at least one ToolCall notification");
+
+    let meta = tool_call
+        .meta
+        .as_ref()
+        .expect("tool_call.meta must be Some");
+    let parent_id = meta
+        .get("claudeCode")
+        .and_then(|cc| cc.get("parentToolUseId"))
+        .and_then(|v| v.as_str());
+
+    assert_eq!(
+        parent_id,
+        Some("parent-tu-123"),
+        "meta.claudeCode.parentToolUseId must equal 'parent-tu-123'; meta: {meta:?}"
+    );
+}
+
+/// A `ToolCallStarted` without a `parent_tool_use_id` must NOT include
+/// `parentToolUseId` inside `meta.claudeCode`.
+#[tokio::test]
+async fn tool_call_started_without_parent_id_no_meta_field() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-no-parent-meta",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "tc-2".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            PromptEvent::ToolCallFinished {
+                id: "tc-2".to_string(),
+                output: "ok".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    bridge
+        .prompt(PromptRequest::new("sess-no-parent-meta", vec![]))
+        .await
+        .unwrap();
+
+    let updates = drain_updates(&mut rx);
+    let tool_call = updates.iter().find_map(|u| {
+        if let SessionUpdate::ToolCall(tc) = u {
+            Some(tc)
+        } else {
+            None
+        }
+    });
+    let tool_call = tool_call.expect("expected at least one ToolCall notification");
+
+    // If claudeCode exists in meta, it must not contain parentToolUseId
+    if let Some(meta) = &tool_call.meta
+        && let Some(cc) = meta.get("claudeCode")
+    {
+        assert!(
+            cc.get("parentToolUseId").is_none(),
+            "parentToolUseId must not appear when parent_tool_use_id is None; meta: {meta:?}"
+        );
+    }
+}
