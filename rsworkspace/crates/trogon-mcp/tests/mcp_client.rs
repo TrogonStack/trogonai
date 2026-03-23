@@ -239,6 +239,65 @@ async fn call_tool_skips_non_text_content_blocks() {
     assert_eq!(output, "only this");
 }
 
+// ── Deserialize errors ────────────────────────────────────────────────────────
+
+/// `list_tools` returns an error when `result` has the wrong JSON shape.
+#[tokio::test]
+async fn list_tools_deserialize_error() {
+    let server = MockServer::start_async().await;
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST);
+        then.status(200)
+            .header("content-type", "application/json")
+            // `result` must be an object with `tools` array, not a plain string.
+            .json_body(json!({"jsonrpc":"2.0","id":1,"result":"unexpected_string"}));
+    });
+
+    let err = client(&server).list_tools().await.unwrap_err();
+    assert!(
+        err.contains("MCP tools/list deserialize error"),
+        "got: {err}"
+    );
+}
+
+/// `call_tool` returns an error when `result` has the wrong JSON shape.
+#[tokio::test]
+async fn call_tool_deserialize_error() {
+    let server = MockServer::start_async().await;
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST);
+        then.status(200)
+            .header("content-type", "application/json")
+            // `result` must be an object with `content` array, not a plain string.
+            .json_body(json!({"jsonrpc":"2.0","id":1,"result":"unexpected_string"}));
+    });
+
+    let err = client(&server)
+        .call_tool("my_tool", &json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("MCP tools/call deserialize error"),
+        "got: {err}"
+    );
+}
+
+/// `rpc()` returns an error when the HTTP body is not valid JSON.
+#[tokio::test]
+async fn rpc_parse_error_on_non_json_response() {
+    let server = MockServer::start_async().await;
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST);
+        then.status(200)
+            .header("content-type", "text/plain")
+            .body("this is not json");
+    });
+
+    // `initialize` uses `rpc()` — the parse error surfaces through it.
+    let err = client(&server).initialize().await.unwrap_err();
+    assert!(err.contains("MCP parse error"), "got: {err}");
+}
+
 // ── Timeout ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
