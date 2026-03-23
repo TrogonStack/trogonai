@@ -778,4 +778,108 @@ mod tests {
             subjects
         );
     }
+
+    #[test]
+    fn markdown_fence_plain_text_uses_triple_backtick() {
+        let fenced = markdown_fence("hello world");
+        assert!(fenced.starts_with("```\n"), "expected ```, got: {fenced}");
+        assert!(fenced.ends_with("\n```"), "expected trailing ```, got: {fenced}");
+        assert!(fenced.contains("hello world"));
+    }
+
+    #[test]
+    fn markdown_fence_text_ending_with_newline_no_triple_newline() {
+        let fenced = markdown_fence("line\n");
+        // The conditional avoids adding an extra '\n' when text already ends with one,
+        // so the result must have exactly one blank line before the fence (not two).
+        assert!(
+            !fenced.contains("\n\n\n```"),
+            "should not triple-newline when text ends with newline, got: {fenced:?}"
+        );
+        assert!(
+            fenced.ends_with("\n```"),
+            "must end with closing fence, got: {fenced:?}"
+        );
+    }
+
+    // ── tool_kind_for (remaining arms) ────────────────────────────────────────
+
+    #[test]
+    fn tool_kind_for_read_tools() {
+        assert!(matches!(tool_kind_for("Read"), ToolKind::Read));
+        assert!(matches!(tool_kind_for("LS"), ToolKind::Read));
+    }
+
+    #[test]
+    fn tool_kind_for_edit_tools() {
+        assert!(matches!(tool_kind_for("Edit"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("MultiEdit"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("Write"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("NotebookEdit"), ToolKind::Edit));
+    }
+
+    #[test]
+    fn tool_kind_for_bash_is_execute() {
+        assert!(matches!(tool_kind_for("Bash"), ToolKind::Execute));
+    }
+
+    // ── tool_locations_from_input (success paths) ─────────────────────────────
+
+    #[test]
+    fn tool_locations_from_input_returns_location_for_file_path_tools() {
+        let input = serde_json::json!({"file_path": "/src/main.rs"});
+        for tool in &["Read", "Edit", "MultiEdit", "Write", "NotebookEdit"] {
+            let locs = tool_locations_from_input(tool, &input);
+            assert_eq!(locs.len(), 1, "expected 1 location for {tool}");
+        }
+    }
+
+    #[test]
+    fn tool_locations_from_input_returns_location_for_glob_and_grep() {
+        let input = serde_json::json!({"path": "/src"});
+        assert_eq!(tool_locations_from_input("Glob", &input).len(), 1);
+        assert_eq!(tool_locations_from_input("Grep", &input).len(), 1);
+    }
+
+    #[test]
+    fn tool_locations_from_input_returns_empty_for_unknown_tool() {
+        let input = serde_json::json!({"file_path": "/src/main.rs"});
+        let locs = tool_locations_from_input("Bash", &input);
+        assert!(locs.is_empty(), "Bash has no location extraction");
+    }
+
+    // ── make_meta_with_terminal_info ──────────────────────────────────────────
+
+    #[test]
+    fn make_meta_with_terminal_info_contains_terminal_id() {
+        let meta = make_meta_with_terminal_info("Bash", "term-42");
+        let info = meta["terminal_info"].as_object().unwrap();
+        assert_eq!(info["terminal_id"].as_str().unwrap(), "term-42");
+        // claudeCode.toolName must also be present
+        let cc = meta["claudeCode"].as_object().unwrap();
+        assert_eq!(cc["toolName"].as_str().unwrap(), "Bash");
+    }
+
+    // ── make_meta_with_terminal_output ────────────────────────────────────────
+
+    #[test]
+    fn make_meta_with_terminal_output_contains_id_and_data() {
+        let meta = make_meta_with_terminal_output("Bash", "term-7", "stdout line\n");
+        let out = meta["terminal_output"].as_object().unwrap();
+        assert_eq!(out["terminal_id"].as_str().unwrap(), "term-7");
+        assert_eq!(out["data"].as_str().unwrap(), "stdout line\n");
+    }
+
+    // ── make_meta_with_terminal_exit (None signal) ────────────────────────────
+
+    #[test]
+    fn make_meta_with_terminal_exit_signal_none_inserts_null() {
+        let meta = make_meta_with_terminal_exit("Bash", "t-1", Some(0), None);
+        let exit = meta["terminal_exit"].as_object().unwrap();
+        assert!(
+            exit["signal"].is_null(),
+            "signal None should produce JSON null, got: {:?}",
+            exit["signal"]
+        );
+    }
 }
