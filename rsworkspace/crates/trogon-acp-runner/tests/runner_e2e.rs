@@ -1288,3 +1288,79 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
         })
         .await;
 }
+
+// ── Context content block ──────────────────────────────────────────────────────
+
+/// Sending a prompt payload with `UserContentBlock::Context` (embedded text
+/// resource) must be processed by the runner without crashing and must
+/// result in a `Done` event.
+#[tokio::test]
+async fn runner_processes_prompt_with_context_content_block() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("handled context block"));
+    });
+
+    let prefix = "test-ctx-block";
+    let session_id = "sess-ctx-1";
+    let req_id = "req-ctx-1";
+
+    let agent = make_agent(&server.base_url());
+    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
+    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+
+    let runner = Runner::new(
+        nats.clone(),
+        &js,
+        agent,
+        prefix,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .await
+    .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(async move { runner.run().await });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let payload = PromptPayload {
+                req_id: req_id.to_string(),
+                session_id: session_id.to_string(),
+                content: vec![
+                    UserContentBlock::Text {
+                        text: "look at this context".to_string(),
+                    },
+                    UserContentBlock::Context {
+                        uri: "file:///project/README.md".to_string(),
+                        text: "# Project README\nThis is the content.".to_string(),
+                    },
+                ],
+                user_message: String::new(),
+            };
+            nats.publish(
+                subjects::prompt(prefix, session_id),
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let events = collect_until_done(&mut events_sub, 15).await;
+
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            );
+            assert!(
+                done.is_some(),
+                "expected Done(end_turn) after Context content block; got: {events:?}"
+            );
+        })
+        .await;
+}

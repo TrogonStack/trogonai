@@ -3052,3 +3052,199 @@ async fn compact_status_with_dropped_receiver_still_completes() {
         .expect("prompt must complete even when compact notification receiver is dropped");
     assert!(matches!(resp.stop_reason, StopReason::EndTurn));
 }
+
+// ── fork_session_integration ──────────────────────────────────────────────────
+
+/// fork_session through the bridge: the bridge publishes to the session-scoped
+/// fork subject and returns a ForkSessionResponse with a new session_id.
+/// Uses `make_bridge_with_rx` so we can capture notifications as well.
+#[tokio::test]
+async fn fork_session_integration_returns_new_session_id() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let forked_id = SessionId::from("forked-integ-1");
+    let mut agent_sub = nats
+        .subscribe("acp.src-sess-1.agent.session.fork")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    let resp_id = forked_id.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ForkSessionResponse::new(resp_id)).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .fork_session(ForkSessionRequest::new("src-sess-1", "."))
+        .await;
+    assert!(
+        result.is_ok(),
+        "fork_session must succeed, got: {:?}",
+        result.unwrap_err()
+    );
+    let resp = result.unwrap();
+    assert_eq!(
+        resp.session_id, forked_id,
+        "fork_session must return the mocked forked session id"
+    );
+    assert_ne!(
+        resp.session_id.to_string(),
+        "src-sess-1",
+        "fork_session must return a new session id, not the source"
+    );
+}
+
+/// fork_session publishes to the session-scoped subject (includes session_id token).
+#[tokio::test]
+async fn fork_session_integration_uses_session_scoped_nats_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.fork-src-2.agent.session.fork")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp = serde_json::to_vec(&ForkSessionResponse::new(SessionId::from("fork-dst-2")))
+                .unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .fork_session(ForkSessionRequest::new("fork-src-2", "."))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(
+        subject, "acp.fork-src-2.agent.session.fork",
+        "fork subject must be session-scoped"
+    );
+}
+
+// ── resume_session_integration ─────────────────────────────────────────────────
+
+/// resume_session through the bridge returns a ResumeSessionResponse.
+/// Uses `make_bridge_with_rx` to keep the notification receiver alive.
+#[tokio::test]
+async fn resume_session_integration_succeeds() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let mut agent_sub = nats
+        .subscribe("acp.resume-sess-1.agent.session.resume")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .resume_session(ResumeSessionRequest::new("resume-sess-1", "."))
+        .await;
+    assert!(
+        result.is_ok(),
+        "resume_session must succeed, got: {:?}",
+        result.unwrap_err()
+    );
+}
+
+/// resume_session publishes to the session-scoped subject.
+#[tokio::test]
+async fn resume_session_integration_uses_session_scoped_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut agent_sub = nats
+        .subscribe("acp.resume-sess-2.agent.session.resume")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    bridge
+        .resume_session(ResumeSessionRequest::new("resume-sess-2", "."))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for subject")
+        .unwrap();
+    assert_eq!(
+        subject, "acp.resume-sess-2.agent.session.resume",
+        "resume subject must be session-scoped"
+    );
+}
+
+// ── prompt with https image URI (ImageUrl path) ───────────────────────────────
+
+/// Sending a prompt with an Image block whose URI is an HTTPS URL must
+/// successfully reach the runner as an `ImageUrl` block (not base64).
+/// The test verifies the prompt completes with EndTurn — the runner sees the
+/// payload with the URL image source.
+#[tokio::test]
+async fn prompt_with_https_image_uri_block_completes_successfully() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-img-url",
+        vec![PromptEvent::Done {
+            stop_reason: "end_turn".to_string(),
+        }],
+    )
+    .await;
+
+    // ContentBlock::Image with an HTTPS URI and empty data → converted to UserContentBlock::ImageUrl
+    let blocks = vec![ContentBlock::Image(
+        agent_client_protocol::ImageContent::new("", "image/jpeg")
+            .uri("https://example.com/photo.jpg".to_string()),
+    )];
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-img-url", blocks))
+        .await
+        .expect("prompt with HTTPS image URI must succeed");
+    assert!(
+        matches!(resp.stop_reason, StopReason::EndTurn),
+        "expected EndTurn, got: {:?}",
+        resp.stop_reason
+    );
+}

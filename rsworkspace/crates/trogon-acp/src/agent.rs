@@ -2517,6 +2517,102 @@ mod tests {
             assert!(resp.models.is_some(), "models must be present on resume");
         }
 
+        /// resume_session must reflect the session's stored mode and model, not defaults.
+        #[tokio::test(flavor = "current_thread")]
+        async fn resume_session_returns_correct_stored_mode_and_model() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/workspace"))
+                .await
+                .unwrap();
+            let sid = new_resp.session_id.clone();
+
+            // Update mode and model in the store before resuming
+            let store = SessionStore::open(&js).await.unwrap();
+            let mut state = store.load(&sid.to_string()).await.unwrap();
+            state.mode = "plan".to_string();
+            state.model = Some("claude-sonnet-4-6".to_string());
+            store.save(&sid.to_string(), &state).await.unwrap();
+
+            let req = ResumeSessionRequest::new(sid.clone(), "/workspace");
+            let resp = agent.resume_session(req).await.unwrap();
+
+            let modes = resp.modes.expect("modes must be present on resume");
+            assert_eq!(
+                modes.current_mode_id.to_string(),
+                "plan",
+                "resume must reflect the stored mode"
+            );
+            let models = resp.models.expect("models must be present on resume");
+            assert_eq!(
+                models.current_model_id.to_string(),
+                "claude-sonnet-4-6",
+                "resume must reflect the stored model"
+            );
+        }
+
+        // ── fork_session — history preservation ────────────────────────────────
+
+        /// fork_session must carry the source session's message history to the
+        /// forked session so the conversation context is preserved.
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_preserves_history() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            // Inject some message history into the source session
+            let store = SessionStore::open(&js).await.unwrap();
+            let mut state = store.load(&src_id.to_string()).await.unwrap();
+            state.messages = vec![
+                AgentMsg {
+                    role: "user".to_string(),
+                    content: vec![AgentCb::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
+                AgentMsg {
+                    role: "assistant".to_string(),
+                    content: vec![AgentCb::Text {
+                        text: "hi there".to_string(),
+                    }],
+                },
+            ];
+            store.save(&src_id.to_string(), &state).await.unwrap();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/forked"))
+                .await
+                .unwrap();
+            let forked_id = fork_resp.session_id.to_string();
+
+            // Load the forked session and verify the history is preserved
+            let forked_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                forked_state.messages.len(),
+                2,
+                "forked session must have the same number of messages as the source; got {}",
+                forked_state.messages.len()
+            );
+            assert_eq!(
+                forked_state.messages[0].role, "user",
+                "first forked message must be the user message"
+            );
+            assert_eq!(
+                forked_state.messages[1].role, "assistant",
+                "second forked message must be the assistant reply"
+            );
+        }
+
         // ── ext_method ─────────────────────────────────────────────────────────
 
         #[tokio::test(flavor = "current_thread")]
