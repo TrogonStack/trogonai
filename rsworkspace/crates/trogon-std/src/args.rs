@@ -3,24 +3,24 @@ pub trait ParseArgs {
     fn parse_args(&self) -> Self::Args;
 }
 
-#[cfg(feature = "clap")]
+#[cfg(all(feature = "clap", not(coverage)))]
 pub struct CliArgs<A: clap::Parser>(std::marker::PhantomData<A>);
 
-#[cfg(feature = "clap")]
+#[cfg(all(feature = "clap", not(coverage)))]
 impl<A: clap::Parser> CliArgs<A> {
     pub fn new() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-#[cfg(feature = "clap")]
+#[cfg(all(feature = "clap", not(coverage)))]
 impl<A: clap::Parser> Default for CliArgs<A> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "clap")]
+#[cfg(all(feature = "clap", not(coverage)))]
 impl<A: clap::Parser> ParseArgs for CliArgs<A> {
     type Args = A;
     fn parse_args(&self) -> A {

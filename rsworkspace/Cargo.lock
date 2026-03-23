@@ -33,10 +33,12 @@ dependencies = [
  "async-compat",
  "async-nats",
  "clap",
+ "futures",
  "opentelemetry",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-nats",
  "trogon-std",
 ]
 
@@ -2625,6 +2627,7 @@ dependencies = [
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "serde",
  "serde_json",
 ]
