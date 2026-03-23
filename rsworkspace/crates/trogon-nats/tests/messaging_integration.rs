@@ -143,7 +143,10 @@ async fn request_with_timeout_times_out_when_no_responder() {
     .await;
 
     assert!(
-        matches!(result, Err(NatsError::Timeout { .. }) | Err(NatsError::Request { .. })),
+        matches!(
+            result,
+            Err(NatsError::Timeout { .. }) | Err(NatsError::Request { .. })
+        ),
         "expected Timeout or Request error, got: {result:?}",
     );
 }
