@@ -2977,3 +2977,78 @@ async fn tool_call_started_without_parent_id_no_meta_field() {
         );
     }
 }
+
+// ── notification receiver dropped — terminal_output_cap paths ─────────────────
+
+/// When `terminal_output_cap` is set and the notification receiver is dropped,
+/// the output and exit terminal notifications both hit `is_err()` branches
+/// (prompt.rs lines 306-307 and 338-339). The prompt must still complete.
+#[tokio::test]
+async fn terminal_cap_with_dropped_receiver_still_completes() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    // make_bridge drops the rx immediately → all sends fail
+    let bridge = make_bridge(nats.clone(), "acp");
+    bridge.set_terminal_output_cap(true);
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-term-dropped",
+        vec![
+            PromptEvent::ToolCallStarted {
+                id: "bash-dropped".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "echo hi"}),
+                parent_tool_use_id: None,
+            },
+            PromptEvent::ToolCallFinished {
+                id: "bash-dropped".to_string(),
+                output: "hi\n".to_string(),
+                exit_code: Some(0),
+                signal: None,
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-term-dropped", vec![]))
+        .await
+        .expect("prompt must complete even when terminal notification receiver is dropped");
+    assert!(matches!(resp.stop_reason, StopReason::EndTurn));
+}
+
+/// When the notification receiver is dropped and a compact SystemStatus arrives,
+/// the `AgentMessageChunk` send hits `is_err()` (prompt.rs line 415).
+/// The prompt must still complete.
+#[tokio::test]
+async fn compact_status_with_dropped_receiver_still_completes() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    mock_runner(
+        nats,
+        "acp",
+        "sess-compact-dropped",
+        vec![
+            PromptEvent::SystemStatus {
+                message: "compacting memory...".to_string(),
+            },
+            PromptEvent::Done {
+                stop_reason: "end_turn".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    let resp = bridge
+        .prompt(PromptRequest::new("sess-compact-dropped", vec![]))
+        .await
+        .expect("prompt must complete even when compact notification receiver is dropped");
+    assert!(matches!(resp.stop_reason, StopReason::EndTurn));
+}
