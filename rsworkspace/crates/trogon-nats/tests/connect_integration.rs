@@ -3,6 +3,7 @@
 use std::time::Duration;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use testcontainers_modules::testcontainers::ImageExt;
 use trogon_nats::auth::{NatsAuth, NatsConfig};
 use trogon_nats::connect::{ConnectError, connect};
 
@@ -111,6 +112,55 @@ async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
     assert!(
         matches!(result, Err(ConnectError::InvalidCredentials(_))),
         "expected InvalidCredentials, got: {:?}",
+        result
+    );
+}
+
+/// Wrong token against an auth-enabled NATS server must return
+/// `ConnectError::AuthorizationViolation` immediately instead of retrying forever.
+#[tokio::test]
+async fn connect_with_wrong_token_returns_authorization_violation() {
+    let container = Nats::default()
+        .with_cmd(["--auth", "correct-token"])
+        .start()
+        .await
+        .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+
+    let config = NatsConfig::new(
+        vec![format!("nats://127.0.0.1:{port}")],
+        NatsAuth::Token("wrong-token".to_string()),
+    );
+
+    let result = connect(&config, Duration::from_secs(10)).await;
+
+    assert!(
+        matches!(result, Err(ConnectError::AuthorizationViolation)),
+        "expected AuthorizationViolation, got: {:?}",
+        result
+    );
+}
+
+/// Correct token must still connect successfully after the fix.
+#[tokio::test]
+async fn connect_with_correct_token_succeeds() {
+    let container = Nats::default()
+        .with_startup_timeout(Duration::from_secs(30))
+        .with_cmd(["--auth", "correct-token"])
+        .start()
+        .await
+        .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+
+    let config = NatsConfig::new(
+        vec![format!("nats://127.0.0.1:{port}")],
+        NatsAuth::Token("correct-token".to_string()),
+    );
+
+    let result = connect(&config, Duration::from_secs(10)).await;
+    assert!(
+        result.is_ok(),
+        "correct token should connect successfully: {:?}",
         result
     );
 }
