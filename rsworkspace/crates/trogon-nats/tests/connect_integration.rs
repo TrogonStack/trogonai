@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ImageExt;
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_nats::auth::{NatsAuth, NatsConfig};
 use trogon_nats::connect::{ConnectError, connect};
 

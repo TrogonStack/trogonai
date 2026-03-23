@@ -219,9 +219,12 @@ async fn load_corrupted_json_returns_error() {
         })
         .await
         .unwrap();
-    kv.put("sess-corrupt-1", bytes::Bytes::from(b"not valid json at all".to_vec()))
-        .await
-        .unwrap();
+    kv.put(
+        "sess-corrupt-1",
+        bytes::Bytes::from(b"not valid json at all".to_vec()),
+    )
+    .await
+    .unwrap();
 
     let result = store.load("sess-corrupt-1").await;
     assert!(
@@ -248,9 +251,7 @@ async fn load_empty_bytes_returns_error() {
         })
         .await
         .unwrap();
-    kv.put("sess-empty-1", bytes::Bytes::new())
-        .await
-        .unwrap();
+    kv.put("sess-empty-1", bytes::Bytes::new()).await.unwrap();
 
     let result = store.load("sess-empty-1").await;
     assert!(
@@ -274,9 +275,12 @@ async fn load_wrong_json_type_returns_error() {
         .await
         .unwrap();
     // Valid JSON but not a SessionState object — it's a string
-    kv.put("sess-wrong-1", bytes::Bytes::from(b"\"just a string\"".to_vec()))
-        .await
-        .unwrap();
+    kv.put(
+        "sess-wrong-1",
+        bytes::Bytes::from(b"\"just a string\"".to_vec()),
+    )
+    .await
+    .unwrap();
 
     let result = store.load("sess-wrong-1").await;
     assert!(
