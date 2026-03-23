@@ -159,11 +159,13 @@ async fn process_connections<N>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use acp_nats::Config;
+    use acp_nats_ws::{THREAD_NAME, run_connection_thread, upgrade};
+    use acp_nats_ws::upgrade::{ConnectionRequest, UpgradeState};
     use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
     use tokio::net::TcpListener;
+    use tokio::sync::{mpsc, watch};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
     use trogon_nats::AdvancedMockNatsClient;

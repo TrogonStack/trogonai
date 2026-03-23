@@ -58,6 +58,7 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tokio-tungstenite 0.29.0",
  "tower-http",
