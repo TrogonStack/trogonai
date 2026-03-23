@@ -94,6 +94,8 @@ pub enum ContentBlock {
         id: String,
         name: String,
         input: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
     },
     /// Result returned to the model after executing a tool.
     ToolResult {
@@ -213,6 +215,8 @@ pub enum AgentEvent {
         id: String,
         name: String,
         input: serde_json::Value,
+        #[allow(dead_code)]
+        parent_tool_use_id: Option<String>,
     },
     /// A tool call completed — emitted immediately after execution.
     ToolCallFinished {
@@ -667,7 +671,13 @@ impl AgentLoop {
         let mut results = Vec::new();
 
         for block in content {
-            if let ContentBlock::ToolUse { id, name, input } = block {
+            if let ContentBlock::ToolUse {
+                id,
+                name,
+                input,
+                parent_tool_use_id,
+            } = block
+            {
                 debug!(tool = %name, "Executing tool (streaming)");
 
                 let _ = event_tx
@@ -675,6 +685,7 @@ impl AgentLoop {
                         id: id.clone(),
                         name: name.clone(),
                         input: input.clone(),
+                        parent_tool_use_id: parent_tool_use_id.clone(),
                     })
                     .await;
 
@@ -723,7 +734,10 @@ impl AgentLoop {
         let mut results = Vec::new();
 
         for block in content {
-            if let ContentBlock::ToolUse { id, name, input } = block {
+            if let ContentBlock::ToolUse {
+                id, name, input, ..
+            } = block
+            {
                 debug!(tool = %name, "Executing tool");
 
                 // Check MCP dispatch first, then fall back to built-in tools.
@@ -940,6 +954,7 @@ mod tests {
             id: "t1".to_string(),
             name: "some_tool".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools_streaming(&content, &tx).await;
         assert_eq!(results.len(), 1);
@@ -955,6 +970,7 @@ mod tests {
             id: "t2".to_string(),
             name: "my_tool".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools(&content).await;
         assert_eq!(results.len(), 1);
@@ -983,6 +999,7 @@ mod tests {
             id: "m1".to_string(),
             name: "srv__tool".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools_streaming(&content, &tx).await;
         assert_eq!(results[0].content, "mcp ok");
@@ -1010,6 +1027,7 @@ mod tests {
             id: "m2".to_string(),
             name: "srv__tool2".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools_streaming(&content, &tx).await;
         assert!(results[0].content.contains("Tool error"));
@@ -1036,6 +1054,7 @@ mod tests {
             id: "m3".to_string(),
             name: "s__t".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools(&content).await;
         assert_eq!(results[0].content, "sync ok");
@@ -1062,6 +1081,7 @@ mod tests {
             id: "m4".to_string(),
             name: "s__t2".to_string(),
             input: serde_json::json!({}),
+            parent_tool_use_id: None,
         }];
         let results = agent.execute_tools(&content).await;
         assert!(results[0].content.contains("Tool error"));

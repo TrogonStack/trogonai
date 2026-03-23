@@ -31,9 +31,13 @@ fn context_window_tokens(_model: &str) -> u64 {
     200_000
 }
 
+/// Per-session pending-prompt queue (payload + events subject).
+type SessionQueue = std::collections::VecDeque<(PromptPayload, String)>;
+
 /// Subscribes to `{prefix}.*.agent.prompt` via NATS Core, runs the agentic loop
 /// for each incoming prompt (with streaming events and cancel support), and publishes
 /// `PromptEvent` messages back to the Bridge.
+#[derive(Clone)]
 pub struct Runner {
     nats: async_nats::Client,
     store: SessionStore,
@@ -44,6 +48,11 @@ pub struct Runner {
     permission_tx: Option<PermissionTx>,
     /// Optional gateway config — when set, overrides proxy_url/anthropic_token on the agent.
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
+    /// Per-session queues of pending (payload, events_subject) pairs.
+    ///
+    /// A session is "running" when its entry exists in the map (even if the deque is empty).
+    /// `None` (missing key) means no task is currently running for that session.
+    session_queues: Arc<std::sync::Mutex<std::collections::HashMap<String, SessionQueue>>>,
 }
 
 impl Runner {
@@ -63,7 +72,34 @@ impl Runner {
             prefix: prefix.into(),
             permission_tx,
             gateway_config,
+            session_queues: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         })
+    }
+
+    /// Drains the per-session queue: processes `first`, then pops and processes
+    /// any items that arrived while `first` was running, then removes the session
+    /// entry to signal "not running".
+    #[cfg_attr(coverage, coverage(off))]
+    async fn drain_session_queue(
+        &self,
+        session_id: String,
+        first: PromptPayload,
+        first_subject: String,
+    ) {
+        self.handle_prompt(first, first_subject).await;
+        loop {
+            let next = {
+                let mut queues = self.session_queues.lock().unwrap();
+                queues.get_mut(&session_id).and_then(|q| q.pop_front())
+            };
+            match next {
+                Some((payload, subject)) => self.handle_prompt(payload, subject).await,
+                None => {
+                    self.session_queues.lock().unwrap().remove(&session_id);
+                    break;
+                }
+            }
+        }
     }
 
     /// Logs a subscribe failure. Extracted so `#[coverage(off)]` can be applied
@@ -99,7 +135,33 @@ impl Runner {
             let events_subject =
                 subjects::prompt_events(&self.prefix, &payload.session_id, &payload.req_id);
 
-            self.handle_prompt(payload, events_subject).await;
+            let session_id = payload.session_id.clone();
+            // Returns `Some((payload, events_subject))` when a new task should be spawned,
+            // or `None` when the prompt was queued behind an already-running task.
+            let spawn_args: Option<(PromptPayload, String)> = {
+                let mut queues = self.session_queues.lock().unwrap();
+                match queues.get_mut(&session_id) {
+                    Some(q) => {
+                        // Already running — enqueue for later
+                        q.push_back((payload, events_subject));
+                        None
+                    }
+                    None => {
+                        // Not running — mark as running with an empty queue and spawn
+                        queues.insert(session_id.clone(), std::collections::VecDeque::new());
+                        Some((payload, events_subject))
+                    }
+                }
+            };
+
+            if let Some((first_payload, first_subject)) = spawn_args {
+                let runner = self.clone();
+                tokio::spawn(async move {
+                    runner
+                        .drain_session_queue(session_id, first_payload, first_subject)
+                        .await;
+                });
+            }
         }
 
         info!("runner: subscription stream ended");
@@ -253,9 +315,9 @@ impl Runner {
                                 AgentEvent::ThinkingDelta { text } => {
                                     PromptEvent::ThinkingDelta { text }
                                 }
-                                AgentEvent::ToolCallStarted { id, name, input } => {
+                                AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
                                     tool_name_by_id.insert(id.clone(), name.clone());
-                                    PromptEvent::ToolCallStarted { id, name, input }
+                                    PromptEvent::ToolCallStarted { id, name, input, parent_tool_use_id }
                                 }
                                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
                                     let is_enter_plan = tool_name_by_id.get(&id)
@@ -497,9 +559,19 @@ impl Runner {
             let prompt_event = match event {
                 AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
                 AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
-                AgentEvent::ToolCallStarted { id, name, input } => {
+                AgentEvent::ToolCallStarted {
+                    id,
+                    name,
+                    input,
+                    parent_tool_use_id,
+                } => {
                     tool_name_by_id.insert(id.clone(), name.clone());
-                    PromptEvent::ToolCallStarted { id, name, input }
+                    PromptEvent::ToolCallStarted {
+                        id,
+                        name,
+                        input,
+                        parent_tool_use_id,
+                    }
                 }
                 AgentEvent::ToolCallFinished {
                     id,
