@@ -16,13 +16,14 @@ use acp_nats::prompt_event::PromptEvent;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ClientCapabilities,
-    ContentBlock, ErrorCode, ForkSessionRequest, ForkSessionResponse, ImageContent, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
-    ToolCallContent, ToolCallStatus, ToolKind,
+    ContentBlock, ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, ImageContent, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, ResumeSessionRequest,
+    ResumeSessionResponse, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCallContent, ToolCallStatus,
+    ToolKind,
 };
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -3247,4 +3248,101 @@ async fn prompt_with_https_image_uri_block_completes_successfully() {
         "expected EndTurn, got: {:?}",
         resp.stop_reason
     );
+}
+
+// ── ext_method integration ────────────────────────────────────────────────────
+
+/// ext_method through the bridge with a real NATS responder returns the response.
+#[tokio::test]
+async fn ext_method_integration_forwards_request_and_returns_response() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    // Spawn a NATS responder on the global ext subject.
+    let mut agent_sub = nats
+        .subscribe("acp.agent.ext.session_close")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let raw = serde_json::value::RawValue::from_string(r#"{"status":"closed"}"#.to_string()).unwrap();
+            let resp = ExtResponse::new(raw.into());
+            let resp_bytes = serde_json::to_vec(&resp).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp_bytes.into()).await.unwrap();
+            }
+        }
+    });
+
+    let params = serde_json::value::RawValue::from_string(r#"{"sessionId":"sess-ext-1"}"#.to_string()).unwrap();
+    let result = bridge
+        .ext_method(ExtRequest::new("session_close", params.into()))
+        .await;
+
+    assert!(result.is_ok(), "ext_method must succeed with real responder, got: {:?}", result.unwrap_err());
+}
+
+/// ext_method with no responder returns AgentUnavailable (timeout).
+#[tokio::test]
+async fn ext_method_integration_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+    // No responder — request will time out.
+    let params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+    let err = bridge
+        .ext_method(ExtRequest::new("session_close", params.into()))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.code,
+        agent_client_protocol::ErrorCode::Other(AGENT_UNAVAILABLE),
+        "timeout must return AgentUnavailable, got: {:?}", err
+    );
+}
+
+// ── ext_notification integration ──────────────────────────────────────────────
+
+/// ext_notification through the bridge publishes to the global ext subject.
+#[tokio::test]
+async fn ext_notification_integration_publishes_to_agent_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut sub = nats.subscribe("acp.agent.ext.my_notify").await.unwrap();
+    tokio::spawn(async move {
+        if let Some(msg) = sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+        }
+    });
+
+    let params = serde_json::value::RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
+    let result = bridge
+        .ext_notification(ExtNotification::new("my_notify", params.into()))
+        .await;
+    assert!(result.is_ok(), "ext_notification must always return Ok");
+
+    let subject = tokio::time::timeout(Duration::from_secs(2), rx)
+        .await
+        .expect("timed out waiting for ext_notification publish")
+        .unwrap();
+    assert_eq!(subject, "acp.agent.ext.my_notify");
+}
+
+/// ext_notification with no subscriber still returns Ok (fire-and-forget).
+#[tokio::test]
+async fn ext_notification_integration_always_ok_with_no_subscriber() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+    let result = bridge
+        .ext_notification(ExtNotification::new("my_notify", params.into()))
+        .await;
+    assert!(result.is_ok(), "fire-and-forget: must be Ok even with no subscriber");
 }

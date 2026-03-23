@@ -27,6 +27,7 @@ trogon-std        = { path = "../trogon-std" }
 uuid              = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+futures-util = "0.3"
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
 

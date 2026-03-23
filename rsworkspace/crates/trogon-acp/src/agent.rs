@@ -1798,6 +1798,7 @@ mod tests {
             SetSessionModeRequest, SetSessionModelRequest, ToolCallStatus,
         };
         use async_nats::jetstream;
+        use futures_util::StreamExt as _;
         use std::sync::Arc;
         use testcontainers_modules::nats::Nats;
         use testcontainers_modules::testcontainers::runners::AsyncRunner;
@@ -2639,6 +2640,48 @@ mod tests {
             let store = SessionStore::open(&js).await.unwrap();
             let state = store.load(&sid).await.unwrap();
             assert_eq!(state.cwd, "", "deleted session must return empty default");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn close_session_publishes_cancel_and_cancelled_notifications() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let sid = new_resp.session_id.to_string();
+
+            // Subscribe to cancel and cancelled NATS subjects BEFORE calling close.
+            let cancel_sub_subject = format!("acp.{}.agent.session.cancel", sid);
+            let cancelled_sub_subject = format!("acp.{}.agent.session.cancelled", sid);
+            let mut cancel_sub = nats.subscribe(cancel_sub_subject.clone()).await.unwrap();
+            let mut cancelled_sub = nats.subscribe(cancelled_sub_subject.clone()).await.unwrap();
+
+            // Close the session via ext_method.
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(params_json)
+                    .unwrap()
+                    .into();
+            agent
+                .ext_method(ExtRequest::new("session/close", params))
+                .await
+                .unwrap();
+
+            // Both cancel and cancelled NATS messages must have been published.
+            let cancel_msg = tokio::time::timeout(Duration::from_secs(2), cancel_sub.next())
+                .await
+                .expect("timed out waiting for cancel notification")
+                .expect("cancel subscription ended unexpectedly");
+            assert_eq!(cancel_msg.subject.as_str(), cancel_sub_subject);
+
+            let cancelled_msg = tokio::time::timeout(Duration::from_secs(2), cancelled_sub.next())
+                .await
+                .expect("timed out waiting for cancelled notification")
+                .expect("cancelled subscription ended unexpectedly");
+            assert_eq!(cancelled_msg.subject.as_str(), cancelled_sub_subject);
         }
 
         #[tokio::test(flavor = "current_thread")]

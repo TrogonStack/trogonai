@@ -3964,6 +3964,7 @@ dependencies = [
  "anyhow",
  "async-nats 0.45.0",
  "async-trait",
+ "futures-util",
  "opentelemetry",
  "reqwest",
  "serde_json",
