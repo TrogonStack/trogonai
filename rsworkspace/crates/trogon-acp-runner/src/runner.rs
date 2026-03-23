@@ -156,7 +156,7 @@ impl Runner {
 
             if let Some((first_payload, first_subject)) = spawn_args {
                 let runner = self.clone();
-                tokio::spawn(async move {
+                tokio::task::spawn_local(async move {
                     runner
                         .drain_session_queue(session_id, first_payload, first_subject)
                         .await;
