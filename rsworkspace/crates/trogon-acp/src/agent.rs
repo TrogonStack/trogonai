@@ -2639,8 +2639,7 @@ mod tests {
             assert_eq!(
                 forked_state.messages.len(),
                 2,
-                "forked session must have the same number of messages as the source; got {}",
-                forked_state.messages.len()
+                "forked session must have the same number of messages as the source"
             );
             assert_eq!(
                 forked_state.messages[0].role, "user",

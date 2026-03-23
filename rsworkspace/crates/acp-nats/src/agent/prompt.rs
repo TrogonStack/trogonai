@@ -879,10 +879,10 @@ mod tests {
     fn make_meta_with_terminal_exit_signal_none_inserts_null() {
         let meta = make_meta_with_terminal_exit("Bash", "t-1", Some(0), None);
         let exit = meta["terminal_exit"].as_object().unwrap();
-        assert!(
-            exit["signal"].is_null(),
-            "signal None should produce JSON null, got: {:?}",
-            exit["signal"]
+        assert_eq!(
+            exit["signal"],
+            serde_json::Value::Null,
+            "signal None should produce JSON null"
         );
     }
 }

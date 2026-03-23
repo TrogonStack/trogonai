@@ -384,4 +384,33 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
         conn_thread.join().unwrap();
     }
+
+    /// `start_connection_thread` spawns a thread and returns a JoinHandle that
+    /// exits cleanly when the connection channel is closed.
+    #[tokio::test]
+    async fn test_start_connection_thread_exits_cleanly_when_channel_closed() {
+        use acp_nats_ws::start_connection_thread;
+
+        let nats_mock = AdvancedMockNatsClient::new();
+        let config = Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+
+        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+        let handle = start_connection_thread(conn_rx, nats_mock, config);
+
+        drop(conn_tx);
+
+        let result = tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
+        assert!(
+            result.is_ok(),
+            "start_connection_thread handle must join cleanly"
+        );
+    }
 }
