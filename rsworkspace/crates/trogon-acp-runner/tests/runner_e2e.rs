@@ -1508,7 +1508,9 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
 
             let events_1 = collect_until_done(&mut events_sub_1, 15).await;
             assert!(
-                events_1.iter().any(|e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")),
+                events_1.iter().any(
+                    |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+                ),
                 "first prompt must complete with Done(end_turn); got: {events_1:?}"
             );
 
@@ -1537,7 +1539,9 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
 
             let events_2 = collect_until_done(&mut events_sub_2, 15).await;
             assert!(
-                events_2.iter().any(|e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")),
+                events_2.iter().any(
+                    |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
+                ),
                 "second prompt must complete with Done(end_turn); got: {events_2:?}"
             );
 
@@ -1636,7 +1640,10 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
                 tool_started.is_some(),
                 "expected ToolCallStarted event; got: {events:?}"
             );
-            if let Some(PromptEvent::ToolCallStarted { parent_tool_use_id, .. }) = tool_started {
+            if let Some(PromptEvent::ToolCallStarted {
+                parent_tool_use_id, ..
+            }) = tool_started
+            {
                 assert_eq!(
                     parent_tool_use_id.as_deref(),
                     Some("tu_parent_001"),
@@ -1800,9 +1807,9 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
             .unwrap();
 
             let events = collect_until_done(&mut events_sub, 15).await;
-            let done = events
-                .iter()
-                .find(|e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"));
+            let done = events.iter().find(
+                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            );
             assert!(done.is_some(), "expected Done(end_turn); got: {events:?}");
         })
         .await;
