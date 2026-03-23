@@ -1,7 +1,6 @@
 mod extensions;
 pub mod parsing;
 mod subjects;
-pub(crate) mod token;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
