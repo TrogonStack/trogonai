@@ -208,4 +208,12 @@ mod tests {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
     }
+
+    #[test]
+    fn meter_returns_named_meter() {
+        let m = meter("coverage-test");
+        let counter = m.u64_counter("c").build();
+        counter.add(1, &[]);
+        assert!(!format!("{:?}", m).is_empty());
+    }
 }

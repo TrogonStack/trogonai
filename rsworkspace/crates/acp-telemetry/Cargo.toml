@@ -3,6 +3,9 @@ name = "acp-telemetry"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 opentelemetry = "0.31.0"
 opentelemetry-appender-tracing = "0.31.0"
@@ -15,4 +18,5 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "jso
 trogon-std = { path = "../trogon-std" }
 
 [dev-dependencies]
+tokio = { version = "1.49.0", features = ["rt", "macros", "signal", "time"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }

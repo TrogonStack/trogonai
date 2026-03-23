@@ -180,3 +180,65 @@ async fn run_send_pump(
     }
     let _ = ws_sender.close().await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::State;
+    use axum::extract::ws::WebSocketUpgrade;
+    use axum::response::Response;
+    use std::time::Duration;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+
+    #[derive(Clone)]
+    struct EchoState;
+
+    async fn echo_handler(ws: WebSocketUpgrade, State(_): State<EchoState>) -> Response {
+        ws.on_upgrade(|socket| async move {
+            let (ws_sender, ws_receiver) = socket.split();
+            let (duplex_write, duplex_read) = tokio::io::duplex(DUPLEX_BUFFER_SIZE);
+            let recv = run_recv_pump(ws_receiver, duplex_write);
+            let send = run_send_pump(ws_sender, duplex_read);
+            tokio::join!(recv, send);
+        })
+    }
+
+    async fn start_echo_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new()
+            .route("/ws", axum::routing::get(echo_handler))
+            .with_state(EchoState);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("ws://{}/ws", addr)
+    }
+
+    #[tokio::test]
+    async fn multiple_messages_round_trip() {
+        let url = start_echo_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        let messages = vec!["alpha", "beta", "gamma"];
+        for msg in &messages {
+            ws.send(TungsteniteMessage::Text((*msg).into()))
+                .await
+                .unwrap();
+        }
+
+        for expected in &messages {
+            let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+                .await
+                .expect("timeout")
+                .expect("stream ended")
+                .unwrap();
+            match msg {
+                TungsteniteMessage::Text(t) => assert_eq!(t, *expected),
+                other => panic!("expected Text('{expected}'), got {other:?}"),
+            }
+        }
+    }
+}
