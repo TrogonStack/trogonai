@@ -107,12 +107,11 @@ fn apply_reconnect_options(
                     }
                     _ => None,
                 };
-                if let Some(ok) = signal {
-                    if let Ok(mut guard) = tx.lock() {
-                        if let Some(sender) = guard.take() {
-                            let _ = sender.send(ok);
-                        }
-                    }
+                if let Some(ok) = signal
+                    && let Ok(mut guard) = tx.lock()
+                    && let Some(sender) = guard.take()
+                {
+                    let _ = sender.send(ok);
                 }
                 handle_event(event).await;
             }
@@ -397,12 +396,11 @@ mod tests {
             }
             _ => None,
         };
-        if let Some(ok) = signal {
-            if let Ok(mut guard) = tx_arc.lock() {
-                if let Some(sender) = guard.take() {
-                    let _ = sender.send(ok);
-                }
-            }
+        if let Some(ok) = signal
+            && let Ok(mut guard) = tx_arc.lock()
+            && let Some(sender) = guard.take()
+        {
+            let _ = sender.send(ok);
         }
 
         let result = rx.await.expect("sender must have fired");
