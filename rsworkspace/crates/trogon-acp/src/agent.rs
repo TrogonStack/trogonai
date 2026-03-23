@@ -270,7 +270,9 @@ where
                                     return;
                                 }
                             }
-                            AgentContentBlock::ToolUse { id, name, input } => {
+                            AgentContentBlock::ToolUse {
+                                id, name, input, ..
+                            } => {
                                 // TodoWrite → replay as Plan update, not a tool_call
                                 if name == "TodoWrite"
                                     && let Some(entries) = replay_todo_write_to_plan(input)
@@ -2620,6 +2622,7 @@ mod tests {
                         id: "tu-1".to_string(),
                         name: "Bash".to_string(),
                         input: serde_json::json!({"command": "ls"}),
+                        parent_tool_use_id: None,
                     }],
                 }],
                 ..Default::default()
@@ -2646,6 +2649,7 @@ mod tests {
                             id: "tu-1".to_string(),
                             name: "Bash".to_string(),
                             input: serde_json::json!({"command": "ls"}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     AgentMsg {
@@ -2687,6 +2691,7 @@ mod tests {
                                 { "content": "Write tests", "status": "in_progress", "priority": "high" }
                             ]
                         }),
+                        parent_tool_use_id: None,
                     }],
                 }],
                 ..Default::default()
@@ -2748,11 +2753,13 @@ mod tests {
                             input: serde_json::json!({
                                 "todos": [{ "content": "task", "status": "pending", "priority": "high" }]
                             }),
+                            parent_tool_use_id: None,
                         },
                         AgentCb::ToolUse {
                             id: "tu-1".to_string(),
                             name: "Bash".to_string(),
                             input: serde_json::json!({}),
+                            parent_tool_use_id: None,
                         },
                     ],
                 }],
@@ -2780,6 +2787,7 @@ mod tests {
                             id: "tu-1".to_string(),
                             name: "Read".to_string(),
                             input: serde_json::json!({}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     AgentMsg {
@@ -2872,6 +2880,7 @@ mod tests {
                             input: serde_json::json!({
                                 "todos": [{ "content": "task", "status": "pending", "priority": "high" }]
                             }),
+                            parent_tool_use_id: None,
                         }],
                     },
                     AgentMsg {
@@ -2948,6 +2957,7 @@ mod tests {
                             id: "tu-bash".to_string(),
                             name: "Bash".to_string(), // not TodoWrite → not skipped
                             input: serde_json::json!({"command": "echo hi"}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     AgentMsg {
@@ -3004,6 +3014,7 @@ mod tests {
                             id: "bash-replay-term".to_string(),
                             name: "Bash".to_string(),
                             input: serde_json::json!({"command": "echo hello"}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     AgentMsg {

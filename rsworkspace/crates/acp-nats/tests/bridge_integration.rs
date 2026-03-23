@@ -1062,6 +1062,7 @@ async fn tool_call_started_produces_tool_call_in_progress_notification() {
                 id: "call-1".to_string(),
                 name: "get_pr_diff".to_string(),
                 input: serde_json::json!({"owner": "acme", "repo": "api", "pr_number": 42}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "call-1".to_string(),
@@ -1112,6 +1113,7 @@ async fn tool_call_finished_success_produces_completed_update() {
                 id: "call-ok".to_string(),
                 name: "list_pr_files".to_string(),
                 input: serde_json::json!({}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "call-ok".to_string(),
@@ -1165,6 +1167,7 @@ async fn tool_call_finished_nonzero_exit_code_produces_failed_update() {
                 id: "call-fail".to_string(),
                 name: "update_file".to_string(),
                 input: serde_json::json!({}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "call-fail".to_string(),
@@ -1218,6 +1221,7 @@ async fn tool_call_finished_with_signal_produces_failed_update() {
                 id: "call-sig".to_string(),
                 name: "post_pr_comment".to_string(),
                 input: serde_json::json!({}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "call-sig".to_string(),
@@ -1272,11 +1276,13 @@ async fn duplicate_tool_id_is_silently_ignored() {
                 id: "dup-id".to_string(),
                 name: "get_pr_diff".to_string(),
                 input: serde_json::json!({}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallStarted {
                 id: "dup-id".to_string(),
                 name: "get_pr_diff".to_string(),
                 input: serde_json::json!({}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "dup-id".to_string(),
@@ -1329,6 +1335,7 @@ async fn todo_write_produces_plan_notification_not_tool_call() {
                         {"content": "Write tests", "status": "pending", "priority": "medium"},
                     ]
                 }),
+                parent_tool_use_id: None,
             },
             // Finished event for TodoWrite must be silently skipped (no ToolCallUpdate).
             PromptEvent::ToolCallFinished {
@@ -1515,6 +1522,7 @@ async fn notification_receiver_dropped_prompt_still_completes() {
                 id: "call-normal".to_string(),
                 name: "bash".to_string(),
                 input: serde_json::json!({"command": "ls"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallStarted {
                 id: "call-todo".to_string(),
@@ -1522,6 +1530,7 @@ async fn notification_receiver_dropped_prompt_still_completes() {
                 input: serde_json::json!({
                     "todos": [{ "content": "task", "status": "pending", "priority": "high" }]
                 }),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "call-normal".to_string(),
@@ -1689,6 +1698,7 @@ async fn bash_with_terminal_output_cap_emits_three_notifications() {
                 id: "bash-term-1".to_string(),
                 name: "Bash".to_string(),
                 input: serde_json::json!({"command": "echo hello"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "bash-term-1".to_string(),
@@ -1810,6 +1820,7 @@ async fn bash_with_terminal_output_cap_and_nonzero_exit_emits_failed_status() {
                 id: "bash-fail-1".to_string(),
                 name: "Bash".to_string(),
                 input: serde_json::json!({"command": "exit 1"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "bash-fail-1".to_string(),
@@ -1873,6 +1884,7 @@ async fn bash_without_terminal_output_cap_emits_standard_two_notifications() {
                 id: "bash-std-1".to_string(),
                 name: "Bash".to_string(),
                 input: serde_json::json!({"command": "ls"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "bash-std-1".to_string(),
@@ -1947,6 +1959,7 @@ async fn edit_tool_started_includes_file_location_and_kind() {
                     "old_string": "foo",
                     "new_string": "bar"
                 }),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "edit-loc-1".to_string(),
@@ -2010,6 +2023,7 @@ async fn read_tool_started_includes_file_location_and_kind() {
                 id: "read-loc-1".to_string(),
                 name: "Read".to_string(),
                 input: serde_json::json!({"file_path": "/src/lib.rs"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "read-loc-1".to_string(),
@@ -2080,6 +2094,7 @@ async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
                     "old_string": "old code",
                     "new_string": "new code"
                 }),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "edit-diff-1".to_string(),
@@ -2176,6 +2191,7 @@ async fn read_tool_finished_wraps_output_in_fenced_code_block() {
                 id: "read-fence-1".to_string(),
                 name: "Read".to_string(),
                 input: serde_json::json!({"file_path": "/src/main.rs"}),
+                parent_tool_use_id: None,
             },
             PromptEvent::ToolCallFinished {
                 id: "read-fence-1".to_string(),

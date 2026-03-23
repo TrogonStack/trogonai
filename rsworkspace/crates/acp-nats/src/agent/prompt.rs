@@ -207,7 +207,12 @@ where
             PromptEvent::Error { message } => {
                 return Err(Error::new(ErrorCode::InternalError.into(), message));
             }
-            PromptEvent::ToolCallStarted { id, name, input } => {
+            PromptEvent::ToolCallStarted {
+                id,
+                name,
+                input,
+                parent_tool_use_id,
+            } => {
                 if seen_tool_ids.contains(&id) {
                     continue;
                 }
@@ -230,11 +235,19 @@ where
                     continue;
                 }
 
-                let meta = if name == "Bash" && supports_terminal {
+                let mut meta = if name == "Bash" && supports_terminal {
                     make_meta_with_terminal_info(&name, &id)
                 } else {
                     make_claude_code_meta(&name)
                 };
+                if let Some(pid) = parent_tool_use_id
+                    && let Some(cc) = meta.get_mut("claudeCode").and_then(|v| v.as_object_mut())
+                {
+                    cc.insert(
+                        "parentToolUseId".to_string(),
+                        serde_json::Value::String(pid),
+                    );
+                }
                 let kind = tool_kind_for(&name);
                 let locations = tool_locations_from_input(&name, &input);
                 let tool_call = ToolCall::new(id, name.clone())
@@ -385,6 +398,23 @@ where
             }
             PromptEvent::SystemStatus { message } => {
                 tracing::info!(message = %message, "agent system status");
+                let lower = message.to_lowercase();
+                if lower.contains("compact") {
+                    let text = if lower.contains("complet") {
+                        "\n\nCompacting completed.".to_string()
+                    } else {
+                        "Compacting...".to_string()
+                    };
+                    let notification = SessionNotification::new(
+                        args.session_id.clone(),
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                            TextContent::new(text),
+                        ))),
+                    );
+                    if bridge.notification_sender.send(notification).await.is_err() {
+                        warn_notification_dropped();
+                    }
+                }
             }
             PromptEvent::UsageUpdate {
                 input_tokens,

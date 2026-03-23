@@ -56,6 +56,8 @@ pub enum PromptEvent {
         id: String,
         name: String,
         input: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
     },
     /// A tool call finished executing.
     ToolCallFinished {
