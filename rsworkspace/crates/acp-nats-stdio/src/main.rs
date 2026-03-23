@@ -1,19 +1,21 @@
 mod config;
 
-use acp_nats::{StdJsonSerialize, agent::Bridge, client, nats, spawn_notification_forwarder};
+use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, SessionNotification};
-use async_nats::Client as NatsAsyncClient;
 use std::rc::Rc;
 use tracing::{error, info};
-use trogon_std::env::SystemEnv;
-use trogon_std::fs::SystemFs;
 use trogon_std::time::SystemClock;
 
-use acp_telemetry::ServiceName;
+#[cfg(not(coverage))]
+use {
+    acp_nats::nats, acp_telemetry::ServiceName, trogon_std::env::SystemEnv,
+    trogon_std::fs::SystemFs,
+};
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = config::base_config(&SystemEnv)?;
+    let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     acp_telemetry::init_logger(
         ServiceName::AcpNatsStdio,
         config.acp_prefix(),
@@ -27,9 +29,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = nats::connect(config.nats(), nats_connect_timeout).await?;
 
-    let local = tokio::task::LocalSet::new();
+    let stdin = async_compat::Compat::new(tokio::io::stdin());
+    let stdout = async_compat::Compat::new(tokio::io::stdout());
 
-    let result = local.run_until(run_bridge(nats_client, &config)).await;
+    let local = tokio::task::LocalSet::new();
+    let result = local
+        .run_until(run_bridge(
+            nats_client,
+            &config,
+            stdout,
+            stdin,
+            acp_telemetry::signal::shutdown_signal(),
+        ))
+        .await;
 
     if let Err(ref e) = result {
         error!(error = %e, "ACP bridge stopped with error");
@@ -42,17 +54,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
-// `Rc` is intentional throughout this function: the ACP `Agent` trait is
-// `?Send`, so the entire bridge runs on a `LocalSet` with `spawn_local`.
-// Do not replace with `Arc` or move tasks to `tokio::spawn` — that would
-// violate the `!Send` constraint.
-async fn run_bridge(
-    nats_client: NatsAsyncClient,
-    config: &acp_nats::Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = async_compat::Compat::new(tokio::io::stdin());
-    let stdout = async_compat::Compat::new(tokio::io::stdout());
+#[cfg(coverage)]
+fn main() {}
 
+async fn run_bridge<N, W, R>(
+    nats_client: N,
+    config: &acp_nats::Config,
+    stdout: W,
+    stdin: R,
+    shutdown_signal: impl std::future::Future<Output = ()>,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    N: acp_nats::RequestClient
+        + acp_nats::PublishClient
+        + acp_nats::FlushClient
+        + acp_nats::SubscribeClient
+        + 'static,
+    W: futures::AsyncWrite + Unpin + 'static,
+    R: futures::AsyncRead + Unpin + 'static,
+{
     let meter = acp_telemetry::meter("acp-io-bridge-nats");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
@@ -106,7 +126,7 @@ async fn run_bridge(
                 }
             }
         }
-        _ = acp_telemetry::signal::shutdown_signal() => {
+        _ = shutdown_signal => {
             info!("ACP bridge shutting down (signal received)");
             Ok(())
         }
@@ -118,4 +138,73 @@ async fn run_bridge(
     }
 
     shutdown_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_nats::AdvancedMockNatsClient;
+
+    #[tokio::test]
+    async fn run_bridge_shuts_down_on_signal() {
+        let mock = AdvancedMockNatsClient::new();
+        let _sub = mock.inject_messages();
+        let config = acp_nats::Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+
+        let (reader, _writer) = tokio::io::duplex(1024);
+        let (_reader2, writer2) = tokio::io::duplex(1024);
+        let stdin = async_compat::Compat::new(reader);
+        let stdout = async_compat::Compat::new(writer2);
+
+        let local = tokio::task::LocalSet::new();
+        let result = local
+            .run_until(run_bridge(
+                mock,
+                &config,
+                stdout,
+                stdin,
+                std::future::ready(()),
+            ))
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_bridge_exits_on_io_close() {
+        let mock = AdvancedMockNatsClient::new();
+        let _sub = mock.inject_messages();
+        let config = acp_nats::Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        );
+
+        let (reader, writer) = tokio::io::duplex(1024);
+        let (_reader2, writer2) = tokio::io::duplex(1024);
+        drop(writer);
+        let stdin = async_compat::Compat::new(reader);
+        let stdout = async_compat::Compat::new(writer2);
+
+        let local = tokio::task::LocalSet::new();
+        let result = local
+            .run_until(run_bridge(
+                mock,
+                &config,
+                stdout,
+                stdin,
+                std::future::pending(),
+            ))
+            .await;
+
+        assert!(result.is_ok());
+    }
 }
