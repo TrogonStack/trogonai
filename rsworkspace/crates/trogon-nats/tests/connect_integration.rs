@@ -164,3 +164,28 @@ async fn connect_with_correct_token_succeeds() {
         result
     );
 }
+
+/// Covers the `_ = tokio::time::sleep(check_window)` arm in `connect()`.
+///
+/// When the server is unreachable, no `Connected` or auth-violation event fires
+/// within `INITIAL_CONNECT_CHECK_SECS`. The select times out and `connect()`
+/// returns `Ok(client)` so the caller's retry loop can continue in the background.
+/// No Docker required: we simply point at a port with nothing listening.
+#[tokio::test]
+async fn connect_to_unreachable_server_returns_ok_with_background_retry() {
+    let config = NatsConfig::new(vec!["nats://127.0.0.1:19998".to_string()], NatsAuth::None);
+
+    // connect() must return within a few seconds (INITIAL_CONNECT_CHECK_SECS + margin).
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        connect(&config, Duration::from_secs(30)),
+    )
+    .await
+    .expect("connect() must not hang indefinitely on unreachable server");
+
+    assert!(
+        result.is_ok(),
+        "expected Ok(client) for unreachable server (retry in background), got: {:?}",
+        result
+    );
+}

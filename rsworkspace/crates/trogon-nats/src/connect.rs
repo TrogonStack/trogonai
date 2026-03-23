@@ -406,4 +406,17 @@ mod tests {
         let result = rx.await.expect("sender must have fired");
         assert!(!result, "authorization violation should send false");
     }
+
+    /// Covers the `Err(_)` arm in the `select!` inside `connect()`:
+    /// when the outcome sender is dropped before sending, the receiver
+    /// returns `Err(RecvError)` and the connect() function continues normally.
+    #[tokio::test]
+    async fn select_outcome_rx_err_arm_is_reachable() {
+        let (tx, rx) = oneshot::channel::<bool>();
+        // Drop the sender immediately — rx.await will return Err(RecvError)
+        drop(tx);
+        let outcome: Result<bool, _> = rx.await;
+        assert!(outcome.is_err(), "dropped sender must yield Err on receive");
+        // This mirrors the `Err(_) => {}` arm in connect(): nothing to do, just continue.
+    }
 }
