@@ -1,75 +1,34 @@
+#![allow(unused)]
+
 use crate::agent::Bridge;
 use crate::config::Config;
 use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter};
+use opentelemetry_sdk::metrics::{
+    PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
+};
 use std::time::Duration;
 use trogon_nats::AdvancedMockNatsClient;
 
 pub fn mock_bridge() -> (
     AdvancedMockNatsClient,
-    MockJs,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
 ) {
     let mock = AdvancedMockNatsClient::new();
-    let js = MockJs::new();
     let bridge = Bridge::new(
         mock.clone(),
-        js.clone(),
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,
     );
-    (mock, js, bridge)
-}
-
-#[derive(Clone)]
-pub struct MockJs {
-    pub publisher: trogon_nats::jetstream::MockJetStreamPublisher,
-    pub consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
-}
-
-impl MockJs {
-    pub fn new() -> Self {
-        Self {
-            publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
-            consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
-        }
-    }
-}
-
-impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
-    type PublishError = trogon_nats::mocks::MockError;
-    type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
-
-    async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
-        &self,
-        subject: S,
-        headers: async_nats::HeaderMap,
-        payload: bytes::Bytes,
-    ) -> Result<Self::AckFuture, Self::PublishError> {
-        self.publisher.publish_with_headers(subject, headers, payload).await
-    }
-}
-
-impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
-    type Error = async_nats::jetstream::context::GetStreamError;
-    type Stream = trogon_nats::jetstream::MockJetStreamStream;
-
-    async fn get_stream<T: AsRef<str> + Send>(
-        &self,
-        stream_name: T,
-    ) -> Result<trogon_nats::jetstream::MockJetStreamStream, Self::Error> {
-        self.consumer_factory.get_stream(stream_name).await
-    }
+    (mock, bridge)
 }
 
 pub fn mock_bridge_with_metrics() -> (
     AdvancedMockNatsClient,
-    MockJs,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
     InMemoryMetricExporter,
     SdkMeterProvider,
 ) {
@@ -81,52 +40,23 @@ pub fn mock_bridge_with_metrics() -> (
     let meter = provider.meter("acp-nats-test");
 
     let mock = AdvancedMockNatsClient::new();
-    let js = MockJs::new();
     let bridge = Bridge::new(
         mock.clone(),
-        js.clone(),
         trogon_std::time::SystemClock,
         &meter,
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,
     );
-    (mock, js, bridge, exporter, provider)
+    (mock, bridge, exporter, provider)
 }
 
-pub fn set_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, subject: &str, resp: &T) {
+pub fn set_json_response<T: serde::Serialize>(
+    mock: &AdvancedMockNatsClient,
+    subject: &str,
+    resp: &T,
+) {
     let bytes = serde_json::to_vec(resp).unwrap();
     mock.set_response(subject, bytes.into());
-}
-
-pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: bytes::Bytes::from(payload.to_vec()),
-        headers: None,
-        status: None,
-        description: None,
-        length: 0,
-    });
-    let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    tx.unbounded_send(Ok(msg)).unwrap();
-    js.consumer_factory.add_consumer(consumer);
-}
-
-pub fn set_js_response<T: serde::Serialize>(js: &MockJs, resp: &T) {
-    let bytes = serde_json::to_vec(resp).unwrap();
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: bytes::Bytes::from(bytes),
-        headers: None,
-        status: None,
-        description: None,
-        length: 0,
-    });
-    let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    tx.unbounded_send(Ok(msg)).unwrap();
-    js.consumer_factory.add_consumer(consumer);
 }
 
 pub fn has_request_metric(
@@ -197,8 +127,14 @@ pub fn has_error_metric(
         .is_some()
 }
 
-pub fn has_session_ready_error_metric(finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics]) -> bool {
-    has_error_metric(finished_metrics, "session_ready", "session_ready_publish_failed")
+pub fn has_session_ready_error_metric(
+    finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+) -> bool {
+    has_error_metric(
+        finished_metrics,
+        "session_ready",
+        "session_ready_publish_failed",
+    )
 }
 
 fn flush_metrics(
@@ -271,7 +207,10 @@ mod tests {
     fn has_request_metric_returns_false_for_histogram_metric() {
         let (provider, exporter) = test_provider();
         let meter = provider.meter("test");
-        let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
+        let histogram = meter
+            .f64_histogram("acp.requests")
+            .with_description("test")
+            .build();
         histogram.record(1.0, &[]);
 
         let finished = flush_metrics(&provider, &exporter);
@@ -287,7 +226,11 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(has_error_metric(&finished, "session_validate", "invalid_session_id"));
+        assert!(has_error_metric(
+            &finished,
+            "session_validate",
+            "invalid_session_id"
+        ));
         provider.shutdown().unwrap();
     }
 
@@ -299,7 +242,11 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "wrong_operation", "invalid_session_id"));
+        assert!(!has_error_metric(
+            &finished,
+            "wrong_operation",
+            "invalid_session_id"
+        ));
         provider.shutdown().unwrap();
     }
 
@@ -311,7 +258,11 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "session_validate", "wrong_reason"));
+        assert!(!has_error_metric(
+            &finished,
+            "session_validate",
+            "wrong_reason"
+        ));
         provider.shutdown().unwrap();
     }
 
@@ -319,11 +270,18 @@ mod tests {
     fn has_error_metric_returns_false_for_histogram_metric() {
         let (provider, exporter) = test_provider();
         let meter = provider.meter("test");
-        let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
+        let histogram = meter
+            .f64_histogram("acp.errors")
+            .with_description("test")
+            .build();
         histogram.record(1.0, &[]);
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "session_validate", "invalid_session_id"));
+        assert!(!has_error_metric(
+            &finished,
+            "session_validate",
+            "invalid_session_id"
+        ));
         provider.shutdown().unwrap();
     }
 
