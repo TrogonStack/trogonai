@@ -12,7 +12,7 @@ acp-telemetry = { path = "../acp-telemetry" }
 agent-client-protocol = "0.10.2"
 async-compat = "0.2.5"
 futures = "0.3"
-async-nats = "0.46.0"
+async-nats = { version = "0.46.0", default-features = false }
 clap = { version = "4.6", features = ["derive", "env"] }
 opentelemetry = "0.31.0"
 trogon-std = { path = "../trogon-std", features = ["clap"] }
