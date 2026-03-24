@@ -295,8 +295,8 @@ mod tests {
     use crate::session_id::AcpSessionId;
     use agent_client_protocol::{
         ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse,
-        KillTerminalCommandRequest, KillTerminalCommandResponse, ReadTextFileRequest,
-        ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
+        KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse,
+        ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
         RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
         SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest,
         TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
@@ -385,12 +385,12 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal_command(
+        async fn kill_terminal(
             &self,
-            _: KillTerminalCommandRequest,
-        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
+            _: KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
             *self.kill_terminal_calls.borrow_mut() += 1;
-            Ok(KillTerminalCommandResponse::new())
+            Ok(KillTerminalResponse::new())
         }
 
         async fn terminal_output(
@@ -767,8 +767,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -1525,8 +1525,8 @@ mod tests {
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -1730,8 +1730,8 @@ mod tests {
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -2183,7 +2183,7 @@ mod tests {
         let envelope = Request {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
-            params: Some(KillTerminalCommandRequest::new("sess-1", "term-001")),
+            params: Some(KillTerminalRequest::new("sess-1", "term-001")),
         };
         let payload = bytes::Bytes::from(serde_json::to_vec(&envelope).unwrap());
 
@@ -2458,8 +2458,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -2500,8 +2500,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-b"),
                 "term-001".to_string(),
             )),
@@ -2630,13 +2630,13 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal_command(
+        async fn kill_terminal(
             &self,
-            _: KillTerminalCommandRequest,
-        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
+            _: KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
             Err(agent_client_protocol::Error::new(
                 -32603,
-                "mock kill_terminal_command failure",
+                "mock kill_terminal failure",
             ))
         }
 
@@ -2704,11 +2704,11 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal_command(
+        async fn kill_terminal(
             &self,
-            _: KillTerminalCommandRequest,
-        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
-            Ok(KillTerminalCommandResponse::new())
+            _: KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+            Ok(KillTerminalResponse::new())
         }
 
         async fn terminal_output(
@@ -2784,11 +2784,11 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal_command(
+        async fn kill_terminal(
             &self,
-            _: KillTerminalCommandRequest,
-        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
-            Ok(KillTerminalCommandResponse::new())
+            _: KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+            Ok(KillTerminalResponse::new())
         }
 
         async fn terminal_output(
@@ -2862,11 +2862,11 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal_command(
+        async fn kill_terminal(
             &self,
-            _: KillTerminalCommandRequest,
-        ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
-            Ok(KillTerminalCommandResponse::new())
+            _: KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+            Ok(KillTerminalResponse::new())
         }
 
         async fn terminal_output(
@@ -2905,8 +2905,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -2945,9 +2945,7 @@ mod tests {
         );
         assert_eq!(
             response.get("error").and_then(|e| e.get("message")),
-            Some(&serde_json::Value::from(
-                "mock kill_terminal_command failure"
-            ))
+            Some(&serde_json::Value::from("mock kill_terminal failure"))
         );
     }
 
@@ -2960,8 +2958,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(42),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -3009,8 +3007,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -3050,8 +3048,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -3092,8 +3090,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
@@ -3133,8 +3131,8 @@ mod tests {
 
         let envelope = Request {
             id: RequestId::Number(1),
-            method: std::sync::Arc::from("terminal/kill_command"),
-            params: Some(KillTerminalCommandRequest::new(
+            method: std::sync::Arc::from("terminal/kill"),
+            params: Some(KillTerminalRequest::new(
                 agent_client_protocol::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
