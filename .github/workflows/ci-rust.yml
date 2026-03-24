@@ -14,15 +14,15 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.3.1
+      - uses: actions/checkout@v6.0.2
 
-      - uses: jdx/mise-action@v3.6.1
+      - uses: jdx/mise-action@v4.0.1
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.8.2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: rsworkspace -> target
           save-if: always
@@ -38,15 +38,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.3.1
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: true
 
-      - uses: jdx/mise-action@v3.6.1
+      - uses: jdx/mise-action@v4.0.1
 
       - name: Install Rust components
         run: rustup component add llvm-tools-preview
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.8.2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: rsworkspace -> target
           save-if: always
@@ -78,12 +80,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.3.1
+      - uses: actions/checkout@v6.0.2
 
-      - uses: jdx/mise-action@v3.6.1
+      - uses: jdx/mise-action@v4.0.1
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.8.2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: rsworkspace -> target
           save-if: always
