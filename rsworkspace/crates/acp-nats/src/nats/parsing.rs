@@ -1,4 +1,11 @@
+use crate::ext_method_name::ExtMethodName;
 use crate::session_id::AcpSessionId;
+
+/// NATS subject prefix for generic extension methods.
+/// `client.ext.{name}` — the `ext` token makes extensions explicit in subjects.
+/// `ExtSessionPromptResponse` is matched first as a specific ext, so it won't
+/// collide with this catch-all.
+const EXT_SUBJECT_PREFIX: &str = "client.ext.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMethod {
@@ -12,6 +19,7 @@ pub enum ClientMethod {
     TerminalRelease,
     TerminalWaitForExit,
     ExtSessionPromptResponse,
+    Ext(String),
 }
 
 impl ClientMethod {
@@ -27,7 +35,11 @@ impl ClientMethod {
             "client.terminal.release" => Some(Self::TerminalRelease),
             "client.terminal.wait_for_exit" => Some(Self::TerminalWaitForExit),
             "client.ext.session.prompt_response" => Some(Self::ExtSessionPromptResponse),
-            _ => None,
+            other => {
+                let ext_name = other.strip_prefix(EXT_SUBJECT_PREFIX)?;
+                ExtMethodName::new(ext_name).ok()?;
+                Some(Self::Ext(ext_name.to_string()))
+            }
         }
     }
 }
@@ -48,8 +60,15 @@ pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
 
     let suffix = &subject[client_byte_pos + 1..];
 
-    ClientMethod::from_subject_suffix(suffix)
-        .map(|method| ParsedClientSubject { session_id, method })
+    let method = ClientMethod::from_subject_suffix(suffix)?;
+
+    if let ClientMethod::Ext(ref name) = method
+        && name.contains(".client.")
+    {
+        return None;
+    }
+
+    Some(ParsedClientSubject { session_id, method })
 }
 
 #[cfg(test)]
@@ -236,7 +255,17 @@ mod tests {
                 "client.ext.session.prompt_response",
                 Some(ClientMethod::ExtSessionPromptResponse),
             ),
+            (
+                "client.ext.my_method",
+                Some(ClientMethod::Ext("my_method".to_string())),
+            ),
+            (
+                "client.ext.vendor.operation",
+                Some(ClientMethod::Ext("vendor.operation".to_string())),
+            ),
             ("client.unknown", None),
+            ("client.ext.", None),
+            ("client.ext.method.*", None),
             ("", None),
         ];
 
@@ -268,6 +297,58 @@ mod tests {
             let parsed = parse_client_subject(subject).unwrap();
             assert_eq!(parsed.session_id.as_str(), expected_session_id);
         }
+    }
+
+    #[test]
+    fn test_parse_ext_method() {
+        let subject = "acp.sess123.client.ext.my_custom_method";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(
+            parsed.method,
+            ClientMethod::Ext("my_custom_method".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_ext_method_dotted_namespace() {
+        let subject = "acp.sess123.client.ext.vendor.operation";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(
+            parsed.method,
+            ClientMethod::Ext("vendor.operation".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_ext_empty_name_returns_none() {
+        assert!(parse_client_subject("acp.sess123.client.ext.").is_none());
+    }
+
+    #[test]
+    fn test_parse_ext_wildcard_name_returns_none() {
+        assert!(parse_client_subject("acp.sess123.client.ext.method.*").is_none());
+    }
+
+    #[test]
+    fn test_parse_ext_rejects_ambiguous_client_in_name() {
+        assert!(parse_client_subject("acp.sess123.client.ext.foo.client.bar").is_none());
+    }
+
+    #[test]
+    fn test_parse_ext_with_client_in_prefix() {
+        let subject = "org.client.app.sess123.client.ext.my_tool";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.session_id.as_str(), "sess123");
+        assert_eq!(parsed.method, ClientMethod::Ext("my_tool".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ext_does_not_shadow_prompt_response() {
+        let subject = "acp.sess123.client.ext.session.prompt_response";
+        let parsed = parse_client_subject(subject).unwrap();
+        assert_eq!(parsed.method, ClientMethod::ExtSessionPromptResponse);
     }
 
     #[test]

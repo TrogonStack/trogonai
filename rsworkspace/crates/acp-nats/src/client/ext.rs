@@ -1,27 +1,52 @@
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, ExtNotification, ExtRequest, ExtResponse, Request, Response};
+use agent_client_protocol::{
+    Client, ErrorCode, ExtNotification, ExtRequest, ExtResponse, Request, Response,
+};
 use bytes::Bytes;
 use serde_json::value::RawValue;
 use std::sync::Arc;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ExtError {
-    #[error("malformed JSON: {0}")]
-    MalformedJson(#[source] serde_json::Error),
-    #[error("params is null or missing")]
+    MalformedJson(serde_json::Error),
     MissingParams,
-    #[error("client error: {0}")]
-    ClientError(#[source] agent_client_protocol::Error),
+    ClientError(agent_client_protocol::Error),
+}
+
+impl std::fmt::Display for ExtError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MalformedJson(e) => write!(f, "malformed JSON: {}", e),
+            Self::MissingParams => write!(f, "params is null or missing"),
+            Self::ClientError(e) => write!(f, "client error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ExtError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MalformedJson(e) => Some(e),
+            Self::MissingParams => None,
+            Self::ClientError(e) => Some(e),
+        }
+    }
 }
 
 pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {
     match e {
-        ExtError::MalformedJson(inner) => (ErrorCode::ParseError, format!("Malformed ext request JSON: {}", inner)),
-        ExtError::MissingParams => (ErrorCode::InvalidParams, "params is null or missing".to_string()),
+        ExtError::MalformedJson(inner) => (
+            ErrorCode::ParseError,
+            format!("Malformed ext request JSON: {}", inner),
+        ),
+        ExtError::MissingParams => (
+            ErrorCode::InvalidParams,
+            "params is null or missing".to_string(),
+        ),
         ExtError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }
@@ -75,13 +100,28 @@ async fn handle_request<N: PublishClient + FlushClient, C: Client, S: JsonSerial
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "ext_method reply").await;
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                response_bytes,
+                content_type,
+                "ext_method reply",
+            )
+            .await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
             warn!(error = %e, "Failed to handle ext method");
-            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "ext_method error reply").await;
+            let (bytes, content_type) =
+                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(
+                nats,
+                reply_to,
+                bytes,
+                content_type,
+                "ext_method error reply",
+            )
+            .await;
         }
     }
 }
@@ -106,10 +146,14 @@ async fn forward_request<C: Client>(
     client: &C,
     ext_method_name: &str,
 ) -> Result<ExtResponse, ExtError> {
-    let envelope: Request<Arc<RawValue>> = serde_json::from_slice(payload).map_err(ExtError::MalformedJson)?;
+    let envelope: Request<Arc<RawValue>> =
+        serde_json::from_slice(payload).map_err(ExtError::MalformedJson)?;
     let params = envelope.params.ok_or(ExtError::MissingParams)?;
     let request = ExtRequest::new(ext_method_name, params);
-    client.ext_method(request).await.map_err(ExtError::ClientError)
+    client
+        .ext_method(request)
+        .await
+        .map_err(ExtError::ClientError)
 }
 
 #[cfg(test)]
@@ -143,7 +187,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -151,7 +198,9 @@ mod tests {
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
+            Ok(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ))
         }
 
         async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
@@ -159,8 +208,13 @@ mod tests {
             Ok(ExtResponse::new(raw.into()))
         }
 
-        async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
-            self.notifications.borrow_mut().push(args.method.to_string());
+        async fn ext_notification(
+            &self,
+            args: ExtNotification,
+        ) -> agent_client_protocol::Result<()> {
+            self.notifications
+                .borrow_mut()
+                .push(args.method.to_string());
             Ok(())
         }
     }
@@ -169,7 +223,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(
+            &self,
+            _: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -177,7 +234,9 @@ mod tests {
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
+            Ok(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ))
         }
 
         async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
@@ -283,7 +342,15 @@ mod tests {
         let serializer = FailNextSerialize::new(1);
         let payload = make_ext_envelope(r#"{}"#);
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "my_method", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "my_method",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -366,7 +433,15 @@ mod tests {
         let client = MockClient::new();
         let payload = br#"{"event":"ping"}"#;
 
-        handle(payload, &client, None, &nats, "my_notify", &StdJsonSerialize).await;
+        handle(
+            payload,
+            &client,
+            None,
+            &nats,
+            "my_notify",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(client.notification_count(), 1);
         assert!(nats.published_messages().is_empty());
@@ -377,7 +452,15 @@ mod tests {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
 
-        handle(b"not json", &client, None, &nats, "my_notify", &StdJsonSerialize).await;
+        handle(
+            b"not json",
+            &client,
+            None,
+            &nats,
+            "my_notify",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(client.notification_count(), 0);
     }
@@ -388,7 +471,15 @@ mod tests {
         let client = FailingClient;
         let payload = br#"{"event":"ping"}"#;
 
-        handle(payload, &client, None, &nats, "my_notify", &StdJsonSerialize).await;
+        handle(
+            payload,
+            &client,
+            None,
+            &nats,
+            "my_notify",
+            &StdJsonSerialize,
+        )
+        .await;
     }
 
     // --- error type tests ---
