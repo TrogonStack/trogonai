@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 mod config;
 mod connection;
 mod upgrade;

@@ -8,6 +8,8 @@ workspace = true
 
 [dependencies]
 acp-nats      = { path = "../acp-nats" }
+agent-client-protocol = { version = "0.9.4", features = ["unstable_session_fork", "unstable_session_resume", "unstable_session_list"] }
+uuid          = { version = "1", features = ["v4"] }
 anyhow        = "1"
 async-nats    = "0.45.0"
 bytes         = "1"
@@ -16,7 +18,8 @@ reqwest       = { version = "0.12", default-features = false, features = ["rustl
 serde         = { version = "1.0.228", features = ["derive"] }
 serde_json    = "1.0.149"
 tokio         = { version = "1.49.0", features = ["full"] }
-tracing       = "0.1.44"
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-mcp        = { path = "../trogon-mcp" }

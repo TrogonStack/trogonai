@@ -87,6 +87,9 @@ where
     pub(crate) default_model: String,
     /// Shared gateway config — written by `authenticate()`, read by the Runner.
     pub(crate) gateway_config: std::sync::Arc<RwLock<Option<GatewayConfig>>>,
+    /// Whether the connected client supports streaming terminal output.
+    /// Set from `_meta.terminal_output` in `initialize()`.
+    pub(crate) terminal_output_cap: std::cell::Cell<bool>,
 }
 
 impl<N, C> TrogonAcpAgent<N, C>
@@ -111,6 +114,7 @@ where
             notification_sender,
             default_model: default_model.into(),
             gateway_config,
+            terminal_output_cap: std::cell::Cell::new(false),
         }
     }
 
@@ -241,7 +245,7 @@ where
         // id → (name, input) for content/diff/location reconstruction on ToolResult
         let mut tool_replay_cache: std::collections::HashMap<String, (String, serde_json::Value)> =
             std::collections::HashMap::new();
-        let supports_terminal = self.bridge.supports_terminal_output();
+        let supports_terminal = self.terminal_output_cap.get();
 
         for msg in &state.messages {
             match msg.role.as_str() {
@@ -582,7 +586,7 @@ where
             .and_then(|m| m.get("terminal_output"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        self.bridge.set_terminal_output_cap(terminal_output);
+        self.terminal_output_cap.set(terminal_output);
 
         let mut caps_meta = serde_json::Map::new();
         // Advertise `close` capability — not yet a first-class field in the Rust SDK
@@ -1920,7 +1924,7 @@ mod tests {
             agent.initialize(req).await.unwrap();
 
             assert!(
-                agent.bridge.supports_terminal_output(),
+                agent.terminal_output_cap.get(),
                 "bridge must have terminal_output_cap=true after TrogonAcpAgent::initialize with terminal_output:true in _meta"
             );
         }
@@ -1935,7 +1939,7 @@ mod tests {
             agent.initialize(req).await.unwrap();
 
             assert!(
-                !agent.bridge.supports_terminal_output(),
+                !agent.terminal_output_cap.get(),
                 "bridge must have terminal_output_cap=false when terminal_output is absent from _meta"
             );
         }
@@ -3180,7 +3184,7 @@ mod tests {
             let (agent, mut rx) = make_agent(nats, &js).await;
 
             // Enable terminal output capability before replay
-            agent.bridge.set_terminal_output_cap(true);
+            agent.terminal_output_cap.set(true);
 
             let state = SessionState {
                 messages: vec![

@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
