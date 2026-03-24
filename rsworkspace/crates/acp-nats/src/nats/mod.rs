@@ -1,7 +1,6 @@
 mod extensions;
 pub mod parsing;
 mod subjects;
-pub(crate) mod token;
 
 pub use extensions::ExtSessionReady;
 pub use parsing::{ClientMethod, ParsedClientSubject, parse_client_subject};
