@@ -1,47 +1,9 @@
 use super::Bridge;
-use crate::error::AGENT_UNAVAILABLE;
+use crate::error::map_nats_error;
 use crate::nats::{self, RequestClient, agent};
-use agent_client_protocol::{Error, ErrorCode, InitializeRequest, InitializeResponse, Result};
-use tracing::{info, instrument, warn};
-use trogon_nats::NatsError;
+use agent_client_protocol::{InitializeRequest, InitializeResponse, Result};
+use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
-
-fn map_initialize_error(e: NatsError) -> Error {
-    match &e {
-        NatsError::Timeout { subject } => {
-            warn!(subject = %subject, "initialize request timed out");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                "Initialize request timed out; agent may be overloaded or unavailable",
-            )
-        }
-        NatsError::Request { subject, error } => {
-            warn!(subject = %subject, error = %error, "initialize NATS request failed");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                format!("Agent unavailable: {}", error),
-            )
-        }
-        NatsError::Serialize(inner) => {
-            warn!(error = %inner, "failed to serialize initialize request");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("Failed to serialize initialize request: {}", inner),
-            )
-        }
-        NatsError::Deserialize(inner) => {
-            warn!(error = %inner, "failed to deserialize initialize response");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Invalid response from agent",
-            )
-        }
-        _ => {
-            warn!(error = %e, "initialize NATS request failed");
-            Error::new(ErrorCode::InternalError.into(), "Initialize request failed")
-        }
-    }
-}
 
 #[instrument(
     name = "acp.initialize",
@@ -72,7 +34,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         bridge.config.operation_timeout,
     )
     .await
-    .map_err(map_initialize_error);
+    .map_err(map_nats_error);
 
     bridge.metrics.record_request(
         "initialize",
@@ -85,7 +47,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
 
 #[cfg(test)]
 mod tests {
-    use super::{Bridge, map_initialize_error};
+    use super::Bridge;
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{
@@ -98,13 +60,13 @@ mod tests {
         PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
     };
     use std::time::Duration;
-    use trogon_nats::{AdvancedMockNatsClient, NatsError};
+    use trogon_nats::AdvancedMockNatsClient;
 
-    fn assert_initialize_metric_recorded(
+    fn has_initialize_metric(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
         expected_success: bool,
-    ) {
-        let found = finished_metrics
+    ) -> bool {
+        finished_metrics
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .any(|sm| {
@@ -130,9 +92,15 @@ mod tests {
                         method_ok && success_ok
                     })
                 })
-            });
+            })
+    }
+
+    fn assert_initialize_metric_recorded(
+        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+        expected_success: bool,
+    ) {
         assert!(
-            found,
+            has_initialize_metric(finished_metrics, expected_success),
             "expected acp.requests datapoint with method=initialize, success={}",
             expected_success
         );
@@ -184,13 +152,6 @@ mod tests {
     ) {
         let bytes = serde_json::to_vec(resp).unwrap();
         mock.set_response(subject, bytes.into());
-    }
-
-    struct FailsSerialize;
-    impl serde::Serialize for FailsSerialize {
-        fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("test serialize failure"))
-        }
     }
 
     #[tokio::test]
@@ -278,48 +239,6 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
-    #[test]
-    fn map_initialize_error_timeout() {
-        let err = map_initialize_error(NatsError::Timeout {
-            subject: "acp.agent.initialize".into(),
-        });
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_initialize_error_request() {
-        let err = map_initialize_error(NatsError::Request {
-            subject: "acp.agent.initialize".into(),
-            error: "connection refused".into(),
-        });
-        assert!(err.to_string().contains("Agent unavailable"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_initialize_error_serialize() {
-        let serde_err = serde_json::to_vec(&FailsSerialize).unwrap_err();
-        let err = map_initialize_error(NatsError::Serialize(serde_err));
-        assert!(err.to_string().contains("serialize"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_initialize_error_deserialize() {
-        let serde_err = serde_json::from_str::<InitializeResponse>("{}").unwrap_err();
-        let err = map_initialize_error(NatsError::Deserialize(serde_err));
-        assert!(err.to_string().contains("Invalid response from agent"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_initialize_error_other() {
-        let err = map_initialize_error(NatsError::Other("misc failure".into()));
-        assert!(err.to_string().contains("Initialize request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
     #[tokio::test]
     async fn handlers_use_custom_prefix() {
         let mock = AdvancedMockNatsClient::new();
@@ -336,5 +255,26 @@ mod tests {
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
         let result = bridge.initialize(request).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn has_initialize_metric_returns_false_when_metric_is_histogram() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = provider.meter("test");
+        let counter = meter.u64_counter("acp.other_metric").build();
+        counter.add(1, &[]);
+        let histogram = meter
+            .f64_histogram("acp.requests")
+            .with_description("test")
+            .build();
+        histogram.record(1.0, &[]);
+        provider.force_flush().unwrap();
+        let finished_metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!has_initialize_metric(&finished_metrics, true));
+        provider.shutdown().unwrap();
     }
 }
