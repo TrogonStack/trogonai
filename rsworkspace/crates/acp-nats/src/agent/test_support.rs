@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use crate::agent::Bridge;
 use crate::config::Config;
 use jsonrpc_nats::{Message, ResponseId};
