@@ -4,13 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.3.1
@@ -18,17 +19,13 @@ jobs:
       - uses: jdx/mise-action@v3.6.1
 
       - name: Install Rust components
-        run: rustup component add rustfmt clippy llvm-tools-preview
+        run: rustup component add rustfmt clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2.8.2
         with:
           workspaces: rsworkspace -> target
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
+          save-if: always
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -38,9 +35,26 @@ jobs:
         run: cargo clippy --all-targets --all-features
         working-directory: rsworkspace
 
-      - name: Build
-        run: cargo build --release
-        working-directory: rsworkspace
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+
+      - uses: jdx/mise-action@v3.6.1
+
+      - name: Install Rust components
+        run: rustup component add llvm-tools-preview
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.8.2
+        with:
+          workspaces: rsworkspace -> target
+          save-if: always
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Run tests with coverage
         run: cargo cov --cobertura --output-path coverage.xml
@@ -60,3 +74,20 @@ jobs:
           new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+
+      - uses: jdx/mise-action@v3.6.1
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.8.2
+        with:
+          workspaces: rsworkspace -> target
+          save-if: always
+
+      - name: Build release
+        run: cargo build --release
+        working-directory: rsworkspace
