@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features",
+      "hidden": false
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes",
+      "hidden": false
+    }
+  ],
+  "packages": {
+    "rsworkspace/crates/acp-nats-stdio": {
+      "component": "acp-nats-stdio"
+    }
+  },
+  "plugins": [
+    {
+      "type": "sentence-case"
+    },
+    {
+      "type": "cargo-workspace",
+      "merge": false
+    }
+  ],
+  "tag-separator": "@",
+  "include-v-in-tag": true,
+  "include-component-in-tag": true,
+  "release-type": "rust",
+  "draft": false,
+  "draft-pull-request": false,
+  "prerelease": false,
+  "pull-request-header": "An automated release has been created for you.",
+  "separate-pull-requests": true,
+  "signoff": "Straw Hat Team Bot <61149376+sht-bot@users.noreply.github.com>"
+}

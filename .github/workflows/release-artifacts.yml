@@ -1,0 +1,122 @@
+name: cd / release artifacts
+
+on:
+  push:
+    tags:
+      - "acp-nats-stdio@v*"
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: true
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            use-cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            use-cross: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#acp-nats-stdio@v}" >> "$GITHUB_OUTPUT"
+
+      - uses: jdx/mise-action@v4.0.1
+
+      - name: Add Rust target
+        if: ${{ !matrix.use-cross }}
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.use-cross }}
+        uses: taiki-e/install-action@cross
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.9.1
+        with:
+          workspaces: rsworkspace -> target
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: rsworkspace
+        shell: bash
+        env:
+          USE_CROSS: ${{ matrix.use-cross }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$USE_CROSS" = "true" ]; then
+            cross build --release --target "$TARGET" -p acp-nats-stdio
+          else
+            cargo build --release --target "$TARGET" -p acp-nats-stdio
+          fi
+
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          staging="acp-nats-stdio-${VERSION}-${TARGET}"
+          mkdir -p "$staging"
+          cp "rsworkspace/target/${TARGET}/release/acp-nats-stdio" "$staging/"
+          tar czf "$staging.tar.gz" "$staging"
+          echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ env.ASSET }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  upload:
+    name: Upload to release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum acp-nats-stdio-* > sha256sums.txt
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
