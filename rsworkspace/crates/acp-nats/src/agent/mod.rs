@@ -14,6 +14,8 @@ mod resume_session;
 mod set_session_config_option;
 mod set_session_mode;
 mod set_session_model;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use bridge::Bridge;
 pub use prompt::REQ_ID_HEADER;
