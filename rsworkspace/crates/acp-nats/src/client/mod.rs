@@ -21,7 +21,7 @@ use crate::nats::{
 use agent_client_protocol::{Client, ErrorCode};
 use async_nats::Message;
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures::StreamExt;
 use std::cell::Cell;
 use std::rc::Rc;
 use tracing::{Span, error, info, instrument, warn};

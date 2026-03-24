@@ -37,7 +37,7 @@ impl Metrics {
     }
 
     pub fn record_error(&self, operation: &'static str, reason: &'static str) {
-        self.errors_total.add(
+        self.errors.add(
             1,
             &[
                 KeyValue::new("operation", operation),

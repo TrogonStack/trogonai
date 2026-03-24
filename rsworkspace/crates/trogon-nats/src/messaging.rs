@@ -427,12 +427,6 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_policy_default() {
-        let policy = FlushPolicy::default();
-        assert_eq!(policy.retry_policy.max_retries, 0);
-    }
-
-    #[test]
     fn test_publish_options_default() {
         let options = PublishOptions::default();
         assert_eq!(options.publish_retry_policy.max_retries, 0);

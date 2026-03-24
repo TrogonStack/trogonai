@@ -94,6 +94,21 @@ pub mod agent {
         format!("{}.{}.agent.session.close", prefix, session_id)
     }
 
+    /// Alias for `session_prompt` — used by the runner crate.
+    pub fn prompt(prefix: &str, session_id: &str) -> String {
+        session_prompt(prefix, session_id)
+    }
+
+    /// Alias for `session_prompt_wildcard` — used by the runner crate.
+    pub fn prompt_wildcard(prefix: &str) -> String {
+        session_prompt_wildcard(prefix)
+    }
+
+    /// Alias for `session_update` — used by the runner crate.
+    pub fn prompt_events(prefix: &str, session_id: &str, req_id: &str) -> String {
+        session_update(prefix, session_id, req_id)
+    }
+
     pub fn ext(prefix: &str, method: &str) -> String {
         format!("{}.agent.ext.{}", prefix, method)
     }

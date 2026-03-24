@@ -25,7 +25,7 @@ use agent_client_protocol::{
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCallContent, ToolCallStatus,
     ToolKind,
 };
-use futures_util::StreamExt as _;
+use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_std::time::SystemClock;
