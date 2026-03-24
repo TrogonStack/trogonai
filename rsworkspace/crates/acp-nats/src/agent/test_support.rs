@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use crate::agent::Bridge;
 use crate::config::Config;
 use opentelemetry::Value;
