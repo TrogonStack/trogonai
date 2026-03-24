@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthMethod, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
     AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate, ContentBlock, ContentChunk,
     CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
     ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
@@ -616,8 +616,10 @@ where
                     .meta(meta),
             )
             .auth_methods(vec![
-                AuthMethod::new("gateway", "Model Gateway")
-                    .description("Connect via a custom Anthropic-compatible gateway"),
+                AuthMethod::Agent(
+                    AuthMethodAgent::new("gateway", "Model Gateway")
+                        .description("Connect via a custom Anthropic-compatible gateway"),
+                ),
             ])
             .agent_info(Implementation::new("trogon-acp", "0.1.0").title("Claude Agent")))
     }

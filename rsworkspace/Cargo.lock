@@ -6,8 +6,8 @@ version = 4
 name = "acp-nats"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol 0.10.2",
- "async-nats 0.46.0",
+ "agent-client-protocol",
+ "async-nats",
  "async-trait",
  "bytes",
  "futures",
@@ -30,9 +30,9 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "acp-telemetry",
- "agent-client-protocol 0.10.2",
+ "agent-client-protocol",
  "async-compat",
- "async-nats 0.46.0",
+ "async-nats",
  "clap",
  "futures",
  "opentelemetry",
@@ -49,9 +49,9 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "acp-telemetry",
- "agent-client-protocol 0.10.2",
+ "agent-client-protocol",
  "async-compat",
- "async-nats 0.46.0",
+ "async-nats",
  "axum",
  "bytes",
  "clap",
@@ -85,28 +85,11 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "499b7ff5c6c842e43fb188f6da7c99a258ae89a9df8c896d6e9784da9b4b23e7"
-dependencies = [
- "agent-client-protocol-schema 0.10.8",
- "anyhow",
- "async-broadcast",
- "async-trait",
- "derive_more",
- "futures",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agent-client-protocol"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c56a59cf6315e99f874d2c1f96c69d2da5ffe0087d211297fc4a41f849770a2"
 dependencies = [
- "agent-client-protocol-schema 0.11.2",
+ "agent-client-protocol-schema",
  "anyhow",
  "async-broadcast",
  "async-trait",
@@ -115,20 +98,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "agent-client-protocol-schema"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44bc1fef9c32f03bce2ab44af35b6f483bfd169bf55cc59beeb2e3b1a00ae4d1"
-dependencies = [
- "anyhow",
- "derive_more",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "strum 0.27.2",
 ]
 
 [[package]]
@@ -142,7 +111,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
- "strum 0.28.0",
+ "strum",
 ]
 
 [[package]]
@@ -356,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.45.0"
+version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86dde77d8a733a9dbaf865a9eb65c72e09c88f3d14d3dd0d2aecf511920ee4fe"
+checksum = "df5af9ebfb0a14481d3eaf6101e6391261e4f30d25b26a7635ade8a39482ded0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -373,7 +342,7 @@ dependencies = [
  "regex",
  "ring",
  "rustls-native-certs 0.7.3",
- "rustls-pemfile",
+ "rustls-pki-types",
  "rustls-webpki 0.102.8",
  "serde",
  "serde_json",
@@ -388,39 +357,6 @@ dependencies = [
  "tokio-websockets",
  "tracing",
  "tryhard",
- "url",
-]
-
-[[package]]
-name = "async-nats"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df5af9ebfb0a14481d3eaf6101e6391261e4f30d25b26a7635ade8a39482ded0"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures-util",
- "memchr",
- "nkeys",
- "once_cell",
- "pin-project",
- "portable-atomic",
- "rand 0.8.5",
- "regex",
- "ring",
- "rustls-native-certs 0.7.3",
- "rustls-pki-types",
- "rustls-webpki 0.102.8",
- "serde",
- "serde_json",
- "serde_repr",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-stream",
- "tokio-util",
- "tokio-websockets",
- "tracing",
  "url",
 ]
 
@@ -3410,32 +3346,11 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
-dependencies = [
- "strum_macros 0.27.2",
-]
-
-[[package]]
-name = "strum"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
 dependencies = [
- "strum_macros 0.28.0",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
+ "strum_macros",
 ]
 
 [[package]]
@@ -3961,9 +3876,9 @@ name = "trogon-acp"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
- "agent-client-protocol 0.9.5",
+ "agent-client-protocol",
  "anyhow",
- "async-nats 0.45.0",
+ "async-nats",
  "async-trait",
  "futures-util",
  "opentelemetry",
@@ -3988,7 +3903,7 @@ dependencies = [
  "acp-nats",
  "agent-client-protocol",
  "anyhow",
- "async-nats 0.45.0",
+ "async-nats",
  "bytes",
  "futures-util",
  "httpmock",
@@ -4036,7 +3951,7 @@ dependencies = [
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
- "async-nats 0.46.0",
+ "async-nats",
  "bytes",
  "futures",
  "opentelemetry",
