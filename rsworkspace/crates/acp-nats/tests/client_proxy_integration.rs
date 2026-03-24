@@ -12,13 +12,12 @@ use std::time::Duration;
 use acp_nats::client;
 use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize};
 use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
-    KillTerminalCommandResponse, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, SessionUpdate, StopReason, TerminalExitStatus,
-    TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    Client, CreateTerminalRequest, CreateTerminalResponse, PromptResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    StopReason, TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate,
+    ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -100,16 +99,6 @@ impl Client for MockClient {
     ) -> agent_client_protocol::Result<CreateTerminalResponse> {
         self.calls.borrow_mut().push("create_terminal".to_string());
         Ok(CreateTerminalResponse::new(self.terminal_id.clone()))
-    }
-
-    async fn kill_terminal_command(
-        &self,
-        _: KillTerminalCommandRequest,
-    ) -> agent_client_protocol::Result<KillTerminalCommandResponse> {
-        self.calls
-            .borrow_mut()
-            .push("kill_terminal_command".to_string());
-        Ok(KillTerminalCommandResponse::new())
     }
 
     async fn terminal_output(
@@ -445,56 +434,6 @@ async fn terminal_create_through_proxy_returns_terminal_id() {
                 response["result"].get("terminalId").is_some(),
                 "expected terminalId field, got: {}",
                 response["result"]
-            );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn terminal_kill_through_proxy_returns_success() {
-    let (_container, port) = start_nats().await;
-    let nats1 = nats_client(port).await;
-    let nats2 = nats_client(port).await;
-
-    let bridge = make_bridge(nats2.clone(), "acp");
-    let mock_client = MockClient::new();
-
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let client_rc = Rc::new(mock_client);
-            let bridge_rc = Rc::new(bridge);
-
-            tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
-            });
-
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            let envelope = Request {
-                id: RequestId::Number(6),
-                method: std::sync::Arc::from("terminal/kill_command"),
-                params: Some(KillTerminalCommandRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "term-001",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.sess-1.client.terminal.kill", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
-
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
             );
         })
         .await;

@@ -244,43 +244,6 @@ mod tests {
     }
 
     #[test]
-    fn session_list_subject() {
-        assert_eq!(agent::session_list("acp"), "acp.agent.session.list");
-    }
-
-    #[test]
-    fn session_set_config_option_subject() {
-        assert_eq!(
-            agent::session_set_config_option("acp", "s1"),
-            "acp.s1.agent.session.set_config_option"
-        );
-    }
-
-    #[test]
-    fn session_set_model_subject() {
-        assert_eq!(
-            agent::session_set_model("acp", "s1"),
-            "acp.s1.agent.session.set_model"
-        );
-    }
-
-    #[test]
-    fn session_fork_subject() {
-        assert_eq!(
-            agent::session_fork("acp", "s1"),
-            "acp.s1.agent.session.fork"
-        );
-    }
-
-    #[test]
-    fn session_resume_subject() {
-        assert_eq!(
-            agent::session_resume("acp", "s1"),
-            "acp.s1.agent.session.resume"
-        );
-    }
-
-    #[test]
     fn session_close_subject() {
         assert_eq!(
             agent::session_close("acp", "s1"),

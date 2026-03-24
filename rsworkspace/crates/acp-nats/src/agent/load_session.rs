@@ -61,6 +61,7 @@ mod tests {
     use opentelemetry_sdk::metrics::{
         PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
     };
+    use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
 
     fn has_load_session_metric(
