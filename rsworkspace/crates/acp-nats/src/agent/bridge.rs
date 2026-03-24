@@ -1,39 +1,45 @@
 use std::cell::RefCell;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
-    SubscribeClient, responses,
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
+    RetryPolicy, SubscribeClient, agent,
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, Result, ResumeSessionRequest,
+    ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 use super::{
-    authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize, js_request,
-    list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
+    authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize,
+    list_sessions, load_session, new_session, prompt, resume_session, set_session_config_option,
     set_session_mode, set_session_model,
 };
 
-use crate::constants::SESSION_READY_DELAY;
+/// Delay before publishing `session.ready` to NATS.
+///
+/// The `Agent` trait returns the response value *before* the transport layer
+/// serializes and writes it to the client. Without a delay the spawned task
+/// could publish `session.ready` before the client has received the
+/// `session/new` response, violating the ordering guarantee.
+const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
-pub struct Bridge<N, C: GetElapsed, J> {
+pub struct Bridge<N, C: GetElapsed> {
     pub(crate) nats: N,
-    pub(crate) js: J,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
@@ -42,10 +48,9 @@ pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
 }
 
-impl<N, C: GetElapsed, J> Bridge<N, C, J> {
+impl<N, C: GetElapsed> Bridge<N, C> {
     pub fn new(
         nats: N,
-        js: J,
         clock: C,
         meter: &Meter,
         config: Config,
@@ -53,7 +58,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
     ) -> Self {
         Self {
             nats,
-            js,
             clock,
             config,
             metrics: Metrics::new(meter),
@@ -65,10 +69,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
 
     pub(crate) fn nats(&self) -> &N {
         &self.nats
-    }
-
-    pub(crate) fn js(&self) -> &J {
-        &self.js
     }
 
     pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
@@ -83,10 +83,10 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
     }
 }
 
-impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> Bridge<N, C, J> {
+impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed> Bridge<N, C> {
     pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
         let nats = self.nats.clone();
-        let prefix = self.config.acp_prefix_ref().clone();
+        let prefix = self.config.acp_prefix().to_string();
         let metrics = self.metrics.clone();
         let handle = tokio::spawn(async move {
             publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
@@ -97,21 +97,13 @@ impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> 
 
 async fn publish_session_ready<N: PublishClient + FlushClient>(
     nats: &N,
-    prefix: &crate::acp_prefix::AcpPrefix,
+    prefix: &str,
     session_id: &SessionId,
     metrics: &Metrics,
 ) {
     tokio::time::sleep(SESSION_READY_DELAY).await;
 
-    let acp_session_id = match crate::session_id::AcpSessionId::new(session_id.to_string()) {
-        Ok(id) => id,
-        Err(e) => {
-            warn!(session_id = %session_id, error = %e, "Invalid session ID from backend, skipping session.ready");
-            metrics.record_error("session_ready", "invalid_session_id");
-            return;
-        }
-    };
-    let subject = responses::ExtReadySubject::new(prefix, &acp_session_id);
+    let subject = agent::ext_session_ready(prefix, &session_id.to_string());
     info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
 
     let message = ExtSessionReady::new(session_id.clone());
@@ -133,46 +125,9 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
     }
 }
 
-impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J: JetStreamPublisher + JetStreamGetStream>
-    Bridge<N, C, J>
-where
-    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
-{
-    pub(crate) async fn session_request<Req, Res>(
-        &self,
-        subject: &impl crate::nats::markers::SessionCommand,
-        method: &str,
-        args: &Req,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Result<Res>
-    where
-        Req: serde::Serialize,
-        Res: serde::de::DeserializeOwned,
-    {
-        let subject_str = subject.to_string();
-        let req_id = crate::req_id::ReqId::new();
-        js_request::js_request::<J, _, Res>(
-            self.js(),
-            &subject_str,
-            method,
-            args,
-            self.config.acp_prefix_ref(),
-            session_id,
-            &req_id,
-            self.config.operation_timeout,
-        )
-        .await
-    }
-}
-
 #[async_trait::async_trait(?Send)]
-impl<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
-    C: GetElapsed,
-    J: JetStreamPublisher + JetStreamGetStream,
-> Agent for Bridge<N, C, J>
-where
-    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
+impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Agent
+    for Bridge<N, C>
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
@@ -180,10 +135,6 @@ where
 
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
         authenticate::handle(self, args).await
-    }
-
-    async fn logout(&self, args: LogoutRequest) -> Result<LogoutResponse> {
-        logout::handle(self, args).await
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
@@ -194,7 +145,10 @@ where
         load_session::handle(self, args).await
     }
 
-    async fn set_session_mode(&self, args: SetSessionModeRequest) -> Result<SetSessionModeResponse> {
+    async fn set_session_mode(
+        &self,
+        args: SetSessionModeRequest,
+    ) -> Result<SetSessionModeResponse> {
         set_session_mode::handle(self, args).await
     }
 
@@ -217,7 +171,10 @@ where
         set_session_config_option::handle(self, args).await
     }
 
-    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
+    async fn set_session_model(
+        &self,
+        args: SetSessionModelRequest,
+    ) -> Result<SetSessionModelResponse> {
         set_session_model::handle(self, args).await
     }
 
