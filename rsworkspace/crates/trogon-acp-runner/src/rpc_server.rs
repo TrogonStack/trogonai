@@ -4,7 +4,7 @@
 //! NATS request and deserialises the reply.  This module is the other side of
 //! those requests, implementing the actual agent logic for:
 //!   initialize · authenticate · new_session · load_session
-//!   set_session_mode · set_session_config_option
+//!   set_session_mode · set_session_model · set_session_config_option
 //!   list_sessions · fork_session · resume_session
 //!
 //! `prompt` / `cancel` are handled by `runner.rs` via the streaming pub/sub
@@ -19,7 +19,7 @@ use agent_client_protocol::{
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionForkCapabilities,
     SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use acp_nats::nats::{ExtSessionReady, agent as subjects};
 use futures_util::StreamExt;
@@ -108,6 +108,10 @@ impl RpcServer {
             .nats
             .subscribe(format!("{}.*.agent.session.set_mode", prefix))
             .await?;
+        let mut set_model_sub = self
+            .nats
+            .subscribe(format!("{}.*.agent.session.set_model", prefix))
+            .await?;
         let mut set_config_sub = self
             .nats
             .subscribe(format!("{}.*.agent.session.set_config_option", prefix))
@@ -145,6 +149,10 @@ impl RpcServer {
                 msg = set_mode_sub.next() => {
                     let Some(msg) = msg else { break; };
                     self.handle_set_session_mode(msg).await;
+                }
+                msg = set_model_sub.next() => {
+                    let Some(msg) = msg else { break; };
+                    self.handle_set_session_model(msg).await;
                 }
                 msg = set_config_sub.next() => {
                     let Some(msg) = msg else { break; };
@@ -269,6 +277,32 @@ impl RpcServer {
         }
 
         self.reply(&msg, &SetSessionModeResponse::new()).await;
+    }
+
+    async fn handle_set_session_model(&self, msg: async_nats::Message) {
+        let request: SetSessionModelRequest = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "rpc: bad set_session_model payload");
+                return;
+            }
+        };
+
+        let session_id = request.session_id.to_string();
+        match self.store.load(&session_id).await {
+            Ok(mut state) => {
+                state.model = Some(request.model_id.to_string());
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
+                }
+            }
+            Err(e) => {
+                warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
+            }
+        }
+
+        self.reply(&msg, &SetSessionModelResponse::new()).await;
     }
 
     async fn handle_set_session_config_option(&self, msg: async_nats::Message) {

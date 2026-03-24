@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
@@ -13,7 +13,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ResumeSessionRequest,
 ) -> Result<ResumeSessionResponse> {
@@ -41,10 +41,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     )
     .await
     .map_err(map_nats_error);
-
-    if result.is_ok() {
-        bridge.schedule_session_ready(args.session_id.clone());
-    }
 
     bridge.metrics.record_request(
         "resume_session",

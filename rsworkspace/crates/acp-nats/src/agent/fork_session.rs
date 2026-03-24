@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
@@ -11,7 +11,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id, new_session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ForkSessionRequest,
 ) -> Result<ForkSessionResponse> {
@@ -44,7 +44,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         Span::current().record("new_session_id", response.session_id.to_string().as_str());
         info!(new_session_id = %response.session_id, "Session forked");
 
-        bridge.schedule_session_ready(response.session_id.clone());
     }
 
     bridge.metrics.record_request(

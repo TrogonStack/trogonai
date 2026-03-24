@@ -47,6 +47,10 @@ pub mod agent {
         format!("{}.{}.agent.session.resume", prefix, session_id)
     }
 
+    pub fn session_close(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.close", prefix, session_id)
+    }
+
     pub fn ext_session_ready(prefix: &str, session_id: &str) -> String {
         format!("{}.{}.agent.ext.session.ready", prefix, session_id)
     }
@@ -68,30 +72,6 @@ pub mod agent {
             "{}.{}.agent.ext.session.prompt.response.{}",
             prefix, session_id, req_id
         )
-    }
-
-    pub fn session_list(prefix: &str) -> String {
-        format!("{}.agent.session.list", prefix)
-    }
-
-    pub fn session_set_config_option(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.set_config_option", prefix, session_id)
-    }
-
-    pub fn session_set_model(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.set_model", prefix, session_id)
-    }
-
-    pub fn session_fork(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.fork", prefix, session_id)
-    }
-
-    pub fn session_resume(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.resume", prefix, session_id)
-    }
-
-    pub fn session_close(prefix: &str, session_id: &str) -> String {
-        format!("{}.{}.agent.session.close", prefix, session_id)
     }
 
     /// Alias for `session_prompt` — used by the runner crate.
