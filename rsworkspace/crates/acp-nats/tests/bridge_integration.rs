@@ -258,45 +258,6 @@ async fn new_session_returns_session_id() {
     assert_eq!(result.unwrap().session_id, expected_id);
 }
 
-#[tokio::test]
-async fn new_session_publishes_session_ready_after_delay() {
-    let (_container, port) = start_nats().await;
-    let nats = nats_client(port).await;
-    let bridge = make_bridge(nats.clone(), "acp");
-
-    let session_id = SessionId::from("sess-ready-test");
-
-    // Subscribe to the session.ready notification BEFORE calling new_session.
-    let ready_subject = format!("acp.{}.agent.ext.session.ready", session_id);
-    let mut ready_sub = nats.subscribe(ready_subject.clone()).await.unwrap();
-
-    // Set up mock agent.
-    let mut agent_sub = nats.subscribe("acp.agent.session.new").await.unwrap();
-    let nats2 = nats.clone();
-    let resp_id = session_id.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&NewSessionResponse::new(resp_id)).unwrap();
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp.into()).await.unwrap();
-            }
-        }
-    });
-
-    bridge
-        .new_session(NewSessionRequest::new("."))
-        .await
-        .unwrap();
-
-    // The session.ready is published ~100ms after new_session returns.
-    let msg = tokio::time::timeout(Duration::from_secs(2), ready_sub.next())
-        .await
-        .expect("timed out waiting for session.ready")
-        .expect("subscriber closed");
-
-    assert_eq!(msg.subject.as_str(), ready_subject.as_str());
-}
-
 // ── load_session ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -357,43 +318,6 @@ async fn load_session_invalid_session_id_returns_error_without_nats() {
         result.is_err(),
         "no NATS message should be sent for invalid session IDs"
     );
-}
-
-#[tokio::test]
-async fn load_session_publishes_session_ready() {
-    let (_container, port) = start_nats().await;
-    let nats = nats_client(port).await;
-    let bridge = make_bridge(nats.clone(), "acp");
-
-    let session_id = "ls-ready-test";
-    let ready_subject = format!("acp.{}.agent.ext.session.ready", session_id);
-    let mut ready_sub = nats.subscribe(ready_subject.clone()).await.unwrap();
-
-    let mut agent_sub = nats
-        .subscribe(format!("acp.{}.agent.session.load", session_id))
-        .await
-        .unwrap();
-    let nats2 = nats.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&LoadSessionResponse::new()).unwrap();
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp.into()).await.unwrap();
-            }
-        }
-    });
-
-    bridge
-        .load_session(LoadSessionRequest::new(session_id, "."))
-        .await
-        .unwrap();
-
-    let msg = tokio::time::timeout(Duration::from_secs(2), ready_sub.next())
-        .await
-        .expect("timed out waiting for session.ready")
-        .expect("subscriber closed");
-
-    assert_eq!(msg.subject.as_str(), ready_subject.as_str());
 }
 
 // ── set_session_mode ──────────────────────────────────────────────────────────

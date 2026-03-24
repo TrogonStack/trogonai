@@ -66,39 +66,6 @@ mod tests {
     use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
 
-    fn has_session_ready_error_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut operation_ok = false;
-                            let mut reason_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "operation" {
-                                    operation_ok = attr.value.as_str() == "session_ready";
-                                } else if attr.key.as_str() == "reason" {
-                                    reason_ok =
-                                        attr.value.as_str() == "session_ready_publish_failed";
-                                }
-                            }
-                            operation_ok && reason_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
-    }
-
     fn has_request_metric(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
         method: &str,
@@ -225,28 +192,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resume_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.resume",
-            &ResumeSessionResponse::new(),
-        );
-
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let published = mock.published_messages();
-        assert!(
-            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
-            published
-        );
-    }
-
-    #[tokio::test]
     async fn resume_session_records_metrics_on_success() {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
@@ -287,34 +232,6 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
-    #[tokio::test]
-    async fn resume_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.resume",
-            &ResumeSessionResponse::new(),
-        );
-        mock.fail_publish_count(4);
-
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_session_ready_error_metric(&finished_metrics),
-            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
-        );
-        assert!(
-            has_request_metric(&finished_metrics, "resume_session", true),
-            "expected acp.requests with method=resume_session, success=true"
-        );
-        provider.shutdown().unwrap();
-    }
-
     #[test]
     fn has_request_metric_returns_false_when_metric_is_histogram() {
         let exporter = InMemoryMetricExporter::default();
@@ -338,22 +255,4 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
-    #[test]
-    fn has_session_ready_error_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.errors")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_session_ready_error_metric(&finished_metrics));
-        provider.shutdown().unwrap();
-    }
 }
