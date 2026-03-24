@@ -1,51 +1,10 @@
 use super::Bridge;
-use crate::error::AGENT_UNAVAILABLE;
+use crate::error::map_nats_error;
 use crate::ext_method_name::ExtMethodName;
 use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
-use tracing::{info, instrument, warn};
-use trogon_nats::NatsError;
+use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
-
-fn map_ext_method_error(e: NatsError) -> Error {
-    match &e {
-        NatsError::Timeout { subject } => {
-            warn!(subject = %subject, "ext_method request timed out");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                "Extension method request timed out; agent may be overloaded or unavailable",
-            )
-        }
-        NatsError::Request { subject, error } => {
-            warn!(subject = %subject, error = %error, "ext_method NATS request failed");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                format!("Agent unavailable: {}", error),
-            )
-        }
-        NatsError::Serialize(inner) => {
-            warn!(error = %inner, "failed to serialize ext_method request");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("Failed to serialize ext_method request: {}", inner),
-            )
-        }
-        NatsError::Deserialize(inner) => {
-            warn!(error = %inner, "failed to deserialize ext_method response");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Invalid response from agent",
-            )
-        }
-        _ => {
-            warn!(error = %e, "ext_method NATS request failed");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Extension method request failed",
-            )
-        }
-    }
-}
 
 #[instrument(
     name = "acp.ext",
@@ -85,7 +44,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         bridge.config.operation_timeout(),
     )
     .await
-    .map_err(map_ext_method_error);
+    .map_err(map_nats_error);
 
     bridge.metrics.record_request(
         "ext_method",
@@ -109,7 +68,7 @@ mod tests {
     };
     use serde_json::value::RawValue;
     use std::time::Duration;
-    use trogon_nats::{AdvancedMockNatsClient, NatsError};
+    use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
@@ -380,54 +339,5 @@ mod tests {
             "invalid_method_name"
         ));
         provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn map_error_timeout() {
-        let err = map_ext_method_error(NatsError::Timeout {
-            subject: "acp.agent.ext.my_method".into(),
-        });
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_error_request() {
-        let err = map_ext_method_error(NatsError::Request {
-            subject: "acp.agent.ext.my_method".into(),
-            error: "connection refused".into(),
-        });
-        assert!(err.to_string().contains("Agent unavailable"));
-        assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_error_serialize() {
-        let serde_err = serde_json::to_vec(&FailsSerialize).unwrap_err();
-        let err = map_ext_method_error(NatsError::Serialize(serde_err));
-        assert!(err.to_string().contains("serialize"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_error_deserialize() {
-        let serde_err = serde_json::from_str::<ExtResponse>("invalid").unwrap_err();
-        let err = map_ext_method_error(NatsError::Deserialize(serde_err));
-        assert!(err.to_string().contains("Invalid response from agent"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_error_other() {
-        let err = map_ext_method_error(NatsError::Other("misc failure".into()));
-        assert!(err.to_string().contains("Extension method request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    struct FailsSerialize;
-    impl serde::Serialize for FailsSerialize {
-        fn serialize<S: serde::Serializer>(&self, _s: S) -> std::result::Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("test serialize failure"))
-        }
     }
 }
