@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
 use tracing::{info, instrument};
@@ -11,7 +11,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: LoadSessionRequest,
 ) -> Result<LoadSessionResponse> {
@@ -40,10 +40,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     .await
     .map_err(map_nats_error);
 
-    if result.is_ok() {
-        bridge.schedule_session_ready(args.session_id.clone());
-    }
-
     bridge.metrics.record_request(
         "load_session",
         bridge.clock.elapsed(start).as_secs_f64(),
@@ -65,50 +61,7 @@ mod tests {
     use opentelemetry_sdk::metrics::{
         PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
     };
-    use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
-
-    fn has_session_ready_error_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut operation_ok = false;
-                            let mut reason_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "operation" {
-                                    operation_ok = attr.value.as_str() == "session_ready";
-                                } else if attr.key.as_str() == "reason" {
-                                    reason_ok =
-                                        attr.value.as_str() == "session_ready_publish_failed";
-                                }
-                            }
-                            operation_ok && reason_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
-    }
-
-    fn assert_session_ready_error_recorded(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    ) {
-        assert!(
-            has_session_ready_error_metric(finished_metrics),
-            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
-        );
-    }
 
     fn has_load_session_metric(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
@@ -251,7 +204,6 @@ mod tests {
             .load_session(LoadSessionRequest::new("s1", "."))
             .await;
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert_load_session_metric_recorded(&finished_metrics, true);
@@ -270,25 +222,6 @@ mod tests {
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert_load_session_metric_recorded(&finished_metrics, false);
-        provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn has_session_ready_error_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.errors")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_session_ready_error_metric(&finished_metrics));
         provider.shutdown().unwrap();
     }
 
@@ -319,47 +252,4 @@ mod tests {
         assert!(err.to_string().contains("Invalid session ID"));
     }
 
-    #[tokio::test]
-    async fn load_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.load",
-            &LoadSessionResponse::new(),
-        );
-        mock.fail_publish_count(4);
-
-        let _ = bridge
-            .load_session(LoadSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert_session_ready_error_recorded(&finished_metrics);
-        assert_load_session_metric_recorded(&finished_metrics, true);
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test]
-    async fn load_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.load",
-            &LoadSessionResponse::new(),
-        );
-
-        let _ = bridge
-            .load_session(LoadSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let published = mock.published_messages();
-        assert!(
-            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
-            published
-        );
-    }
 }

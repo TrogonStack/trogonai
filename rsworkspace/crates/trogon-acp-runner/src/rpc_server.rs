@@ -15,13 +15,13 @@ use std::sync::Arc;
 use agent_client_protocol::{
     AgentCapabilities, AuthenticateResponse, ForkSessionRequest, ForkSessionResponse,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, ProtocolVersion,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, ProtocolVersion, SessionId,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionForkCapabilities,
     SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     SetSessionModeResponse,
 };
-use acp_nats::nats::agent as subjects;
+use acp_nats::nats::{ExtSessionReady, agent as subjects};
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -50,6 +50,22 @@ impl RpcServer {
             store,
             prefix: prefix.into(),
             gateway_config,
+        }
+    }
+
+    /// Publish `session.ready` on NATS to signal that the session is ready for prompts.
+    async fn publish_session_ready(&self, session_id: &str) {
+        let subject = subjects::ext_session_ready(&self.prefix, session_id);
+        let message = ExtSessionReady::new(SessionId::from(session_id.to_owned()));
+        match serde_json::to_vec(&message) {
+            Ok(bytes) => {
+                if let Err(e) = self.nats.publish(subject, bytes.into()).await {
+                    warn!(error = %e, session_id = %session_id, "rpc: failed to publish session.ready");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "rpc: failed to serialize session.ready");
+            }
         }
     }
 
@@ -211,19 +227,21 @@ impl RpcServer {
             warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
         }
 
+        self.publish_session_ready(&session_id).await;
         self.reply(&msg, &NewSessionResponse::new(session_id)).await;
     }
 
     async fn handle_load_session(&self, msg: async_nats::Message) {
         // Deserialise just to validate the request; history is loaded implicitly
         // on the next prompt (runner.rs calls store.load() there).
-        let _request: LoadSessionRequest = match serde_json::from_slice(&msg.payload) {
+        let request: LoadSessionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "rpc: bad load_session payload");
                 return;
             }
         };
+        self.publish_session_ready(&request.session_id.to_string()).await;
         self.reply(&msg, &LoadSessionResponse::new()).await;
     }
 
