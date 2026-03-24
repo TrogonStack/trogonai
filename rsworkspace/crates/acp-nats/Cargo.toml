@@ -7,7 +7,17 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-agent-client-protocol = { version = "0.10.2", features = ["unstable_session_model", "unstable_session_fork", "unstable_session_resume", "unstable_session_usage"] }
+agent-client-protocol = { version = "0.10.2", features = [
+    "unstable_auth_methods",
+    "unstable_boolean_config",
+    "unstable_cancel_request",
+    "unstable_message_id",
+    "unstable_session_close",
+    "unstable_session_fork",
+    "unstable_session_model",
+    "unstable_session_resume",
+    "unstable_session_usage",
+] }
 opentelemetry = "0.31.0"
 async-nats = { version = "0.46.0", default-features = false }
 async-trait = "0.1.89"

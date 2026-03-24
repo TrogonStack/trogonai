@@ -1,3 +1,4 @@
+pub(crate) mod ext;
 pub(crate) mod ext_session_prompt_response;
 pub(crate) mod fs_read_text_file;
 pub(crate) mod fs_write_text_file;
@@ -282,6 +283,17 @@ async fn dispatch_client_method<
                 ctx.nats,
                 parsed.session_id.as_str(),
                 ctx.bridge.config.operation_timeout(),
+                ctx.serializer,
+            )
+            .await;
+        }
+        ClientMethod::Ext(ref method_name) => {
+            ext::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                method_name,
                 ctx.serializer,
             )
             .await;

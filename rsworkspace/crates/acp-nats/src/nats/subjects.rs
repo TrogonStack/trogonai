@@ -50,6 +50,30 @@ pub mod agent {
         )
     }
 
+    pub fn session_list(prefix: &str) -> String {
+        format!("{}.agent.session.list", prefix)
+    }
+
+    pub fn session_set_config_option(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.set_config_option", prefix, session_id)
+    }
+
+    pub fn session_set_model(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.set_model", prefix, session_id)
+    }
+
+    pub fn session_fork(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.fork", prefix, session_id)
+    }
+
+    pub fn session_resume(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.resume", prefix, session_id)
+    }
+
+    pub fn session_close(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.agent.session.close", prefix, session_id)
+    }
+
     pub fn ext(prefix: &str, method: &str) -> String {
         format!("{}.agent.ext.{}", prefix, method)
     }
@@ -168,6 +192,51 @@ mod tests {
     }
 
     #[test]
+    fn session_list_subject() {
+        assert_eq!(agent::session_list("acp"), "acp.agent.session.list");
+    }
+
+    #[test]
+    fn session_set_config_option_subject() {
+        assert_eq!(
+            agent::session_set_config_option("acp", "s1"),
+            "acp.s1.agent.session.set_config_option"
+        );
+    }
+
+    #[test]
+    fn session_set_model_subject() {
+        assert_eq!(
+            agent::session_set_model("acp", "s1"),
+            "acp.s1.agent.session.set_model"
+        );
+    }
+
+    #[test]
+    fn session_fork_subject() {
+        assert_eq!(
+            agent::session_fork("acp", "s1"),
+            "acp.s1.agent.session.fork"
+        );
+    }
+
+    #[test]
+    fn session_resume_subject() {
+        assert_eq!(
+            agent::session_resume("acp", "s1"),
+            "acp.s1.agent.session.resume"
+        );
+    }
+
+    #[test]
+    fn session_close_subject() {
+        assert_eq!(
+            agent::session_close("acp", "s1"),
+            "acp.s1.agent.session.close"
+        );
+    }
+
+    #[test]
     fn session_scoped_subjects_share_token_layout() {
         let prefix = "acp";
         let sid = "abc";
@@ -176,6 +245,11 @@ mod tests {
         assert!(agent::session_load(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::session_cancel(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::session_set_mode(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_set_config_option(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_set_model(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_fork(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_resume(prefix, sid).starts_with(&expected_prefix));
+        assert!(agent::session_close(prefix, sid).starts_with(&expected_prefix));
         assert!(agent::ext_session_ready(prefix, sid).starts_with(&expected_prefix));
     }
 

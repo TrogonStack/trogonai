@@ -1,12 +1,18 @@
 mod authenticate;
 mod cancel;
+mod close_session;
 mod ext_method;
 mod ext_notification;
+mod fork_session;
 mod initialize;
+mod list_sessions;
 mod load_session;
 mod new_session;
 mod prompt;
+mod resume_session;
+mod set_session_config_option;
 mod set_session_mode;
+mod set_session_model;
 
 pub use prompt::REQ_ID_HEADER;
 
@@ -21,9 +27,15 @@ use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
-    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    Result, SessionId, SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
+    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, Result, SessionId, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse,
+};
+use agent_client_protocol::{
+    CloseSessionRequest, CloseSessionResponse, ForkSessionRequest, ForkSessionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use std::cell::RefCell;
@@ -160,6 +172,36 @@ impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetEla
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
         cancel::handle(self, args).await
+    }
+
+    async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
+        list_sessions::handle(self, args).await
+    }
+
+    async fn set_session_config_option(
+        &self,
+        args: SetSessionConfigOptionRequest,
+    ) -> Result<SetSessionConfigOptionResponse> {
+        set_session_config_option::handle(self, args).await
+    }
+
+    async fn set_session_model(
+        &self,
+        args: SetSessionModelRequest,
+    ) -> Result<SetSessionModelResponse> {
+        set_session_model::handle(self, args).await
+    }
+
+    async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
+        fork_session::handle(self, args).await
+    }
+
+    async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
+        resume_session::handle(self, args).await
+    }
+
+    async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        close_session::handle(self, args).await
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
