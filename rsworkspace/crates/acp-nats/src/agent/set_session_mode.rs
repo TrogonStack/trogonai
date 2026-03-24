@@ -1,53 +1,12 @@
 use super::Bridge;
-use crate::error::AGENT_UNAVAILABLE;
+use crate::error::map_nats_error;
 use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, SetSessionModeRequest, SetSessionModeResponse,
 };
-use tracing::{info, instrument, warn};
-use trogon_nats::NatsError;
+use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
-
-fn map_set_session_mode_error(e: NatsError) -> Error {
-    match &e {
-        NatsError::Timeout { subject } => {
-            warn!(subject = %subject, "set_session_mode request timed out");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                "Set session mode request timed out; agent may be overloaded or unavailable",
-            )
-        }
-        NatsError::Request { subject, error } => {
-            warn!(subject = %subject, error = %error, "set_session_mode NATS request failed");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                format!("Agent unavailable: {}", error),
-            )
-        }
-        NatsError::Serialize(inner) => {
-            warn!(error = %inner, "failed to serialize set_session_mode request");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("Failed to serialize set_session_mode request: {}", inner),
-            )
-        }
-        NatsError::Deserialize(inner) => {
-            warn!(error = %inner, "failed to deserialize set_session_mode response");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Invalid response from agent",
-            )
-        }
-        _ => {
-            warn!(error = %e, "set_session_mode NATS request failed");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Set session mode request failed",
-            )
-        }
-    }
-}
 
 #[instrument(
     name = "acp.session.set_mode",
@@ -81,7 +40,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         bridge.config.operation_timeout,
     )
     .await
-    .map_err(map_set_session_mode_error);
+    .map_err(map_nats_error);
 
     bridge.metrics.record_request(
         "set_session_mode",
@@ -105,7 +64,7 @@ mod tests {
         PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
     };
     use std::time::Duration;
-    use trogon_nats::{AdvancedMockNatsClient, NatsError};
+    use trogon_nats::AdvancedMockNatsClient;
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
@@ -297,54 +256,5 @@ mod tests {
             true
         ));
         provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn map_error_timeout() {
-        let err = map_set_session_mode_error(NatsError::Timeout {
-            subject: "acp.s1.agent.session.set_mode".into(),
-        });
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_error_request() {
-        let err = map_set_session_mode_error(NatsError::Request {
-            subject: "acp.s1.agent.session.set_mode".into(),
-            error: "connection refused".into(),
-        });
-        assert!(err.to_string().contains("Agent unavailable"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_error_serialize() {
-        let serde_err = serde_json::to_vec(&FailsSerialize).unwrap_err();
-        let err = map_set_session_mode_error(NatsError::Serialize(serde_err));
-        assert!(err.to_string().contains("serialize"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_error_deserialize() {
-        let serde_err = serde_json::from_str::<SetSessionModeResponse>("[]").unwrap_err();
-        let err = map_set_session_mode_error(NatsError::Deserialize(serde_err));
-        assert!(err.to_string().contains("Invalid response from agent"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_error_other() {
-        let err = map_set_session_mode_error(NatsError::Other("misc failure".into()));
-        assert!(err.to_string().contains("Set session mode request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    struct FailsSerialize;
-    impl serde::Serialize for FailsSerialize {
-        fn serialize<S: serde::Serializer>(&self, _s: S) -> std::result::Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("test serialize failure"))
-        }
     }
 }

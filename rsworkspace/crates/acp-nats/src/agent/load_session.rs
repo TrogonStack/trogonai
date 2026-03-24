@@ -1,51 +1,10 @@
 use super::Bridge;
-use crate::error::AGENT_UNAVAILABLE;
+use crate::error::map_nats_error;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
-use tracing::{info, instrument, warn};
-use trogon_nats::NatsError;
+use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
-
-fn map_load_session_error(e: NatsError) -> Error {
-    match &e {
-        NatsError::Timeout { subject } => {
-            warn!(subject = %subject, "load_session request timed out");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                "Load session request timed out; agent may be overloaded or unavailable",
-            )
-        }
-        NatsError::Request { subject, error } => {
-            warn!(subject = %subject, error = %error, "load_session NATS request failed");
-            Error::new(
-                ErrorCode::Other(AGENT_UNAVAILABLE).into(),
-                format!("Agent unavailable: {}", error),
-            )
-        }
-        NatsError::Serialize(inner) => {
-            warn!(error = %inner, "failed to serialize load_session request");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("Failed to serialize load_session request: {}", inner),
-            )
-        }
-        NatsError::Deserialize(inner) => {
-            warn!(error = %inner, "failed to deserialize load_session response");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Invalid response from agent",
-            )
-        }
-        _ => {
-            warn!(error = %e, "load_session NATS request failed");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Load session request failed",
-            )
-        }
-    }
-}
 
 #[instrument(
     name = "acp.session.load",
@@ -79,7 +38,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         bridge.config.operation_timeout,
     )
     .await
-    .map_err(map_load_session_error);
+    .map_err(map_nats_error);
 
     if result.is_ok() {
         bridge.schedule_session_ready(args.session_id.clone());
@@ -96,7 +55,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 
 #[cfg(test)]
 mod tests {
-    use super::{Bridge, map_load_session_error};
+    use super::Bridge;
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, LoadSessionRequest, LoadSessionResponse};
@@ -107,7 +66,7 @@ mod tests {
         PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
     };
     use std::time::Duration;
-    use trogon_nats::{AdvancedMockNatsClient, NatsError};
+    use trogon_nats::AdvancedMockNatsClient;
 
     fn has_session_ready_error_metric(
         finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
@@ -243,13 +202,6 @@ mod tests {
         mock.set_response(subject, bytes.into());
     }
 
-    struct FailsSerialize;
-    impl serde::Serialize for FailsSerialize {
-        fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("test serialize failure"))
-        }
-    }
-
     #[tokio::test]
     async fn load_session_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
@@ -319,48 +271,6 @@ mod tests {
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert_load_session_metric_recorded(&finished_metrics, false);
         provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn map_load_session_error_timeout() {
-        let err = map_load_session_error(NatsError::Timeout {
-            subject: "acp.s1.agent.session.load".into(),
-        });
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_load_session_error_request() {
-        let err = map_load_session_error(NatsError::Request {
-            subject: "acp.s1.agent.session.load".into(),
-            error: "connection refused".into(),
-        });
-        assert!(err.to_string().contains("Agent unavailable"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[test]
-    fn map_load_session_error_serialize() {
-        let serde_err = serde_json::to_vec(&FailsSerialize).unwrap_err();
-        let err = map_load_session_error(NatsError::Serialize(serde_err));
-        assert!(err.to_string().contains("serialize"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_load_session_error_deserialize() {
-        let serde_err = serde_json::from_str::<LoadSessionResponse>("[]").unwrap_err();
-        let err = map_load_session_error(NatsError::Deserialize(serde_err));
-        assert!(err.to_string().contains("Invalid response from agent"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[test]
-    fn map_load_session_error_other() {
-        let err = map_load_session_error(NatsError::Other("misc failure".into()));
-        assert!(err.to_string().contains("Load session request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[test]
