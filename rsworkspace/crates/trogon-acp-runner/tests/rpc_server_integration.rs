@@ -87,6 +87,12 @@ async fn initialize_returns_protocol_version_and_capabilities() {
         session_caps.resume.is_some(),
         "must advertise session resume"
     );
+    // close is advertised via _meta since it is not yet a first-class SDK field.
+    let meta = session_caps.meta.expect("session_capabilities must have _meta");
+    assert!(
+        meta.get("close").is_some(),
+        "session_capabilities._meta must contain 'close'"
+    );
 }
 
 // ── authenticate ──────────────────────────────────────────────────────────────
@@ -498,11 +504,11 @@ async fn fork_session_bad_payload_does_not_crash_server() {
 // ── set_session_config_option ─────────────────────────────────────────────────
 
 #[tokio::test]
-async fn set_session_config_option_replies_with_empty_updates() {
+async fn set_session_config_option_returns_populated_config_options() {
     let (_container, nats, js) = start_nats().await;
     let _ = start_rpc_server(nats.clone(), js, "acp").await;
 
-    let req = SetSessionConfigOptionRequest::new("sess-cfg-1", "theme", "dark");
+    let req = SetSessionConfigOptionRequest::new("sess-cfg-1", "mode", "plan");
     let reply = nats
         .request(
             "acp.sess-cfg-1.agent.session.set_config_option",
@@ -514,8 +520,68 @@ async fn set_session_config_option_replies_with_empty_updates() {
     let resp: SetSessionConfigOptionResponse =
         serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
     assert!(
-        resp.config_options.is_empty(),
-        "response must have no updates"
+        !resp.config_options.is_empty(),
+        "response must contain config options"
+    );
+    let ids: Vec<String> = resp
+        .config_options
+        .iter()
+        .map(|o| o.id.to_string())
+        .collect();
+    assert!(ids.iter().any(|id| id == "mode"), "response must include mode option");
+    assert!(ids.iter().any(|id| id == "model"), "response must include model option");
+}
+
+#[tokio::test]
+async fn set_session_config_option_mode_updates_store() {
+    let (_container, nats, js) = start_nats().await;
+    let store = start_rpc_server(nats.clone(), js, "acp").await;
+
+    // Create a session first.
+    let new_req = NewSessionRequest::new("/tmp");
+    let reply = nats
+        .request("acp.agent.session.new", request_bytes(&new_req))
+        .await
+        .unwrap();
+    let new_resp: NewSessionResponse = serde_json::from_slice(&reply.payload).unwrap();
+    let session_id = new_resp.session_id.to_string();
+
+    // Change mode via set_session_config_option.
+    let cfg_req = SetSessionConfigOptionRequest::new(session_id.clone(), "mode", "plan");
+    let subject = format!("acp.{}.agent.session.set_config_option", session_id);
+    nats.request(subject, request_bytes(&cfg_req))
+        .await
+        .expect("set_session_config_option must reply");
+
+    let state = store.load(&session_id).await.unwrap();
+    assert_eq!(state.mode, "plan", "mode must be updated in store");
+}
+
+#[tokio::test]
+async fn set_session_config_option_model_updates_store() {
+    let (_container, nats, js) = start_nats().await;
+    let store = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let new_req = NewSessionRequest::new("/tmp");
+    let reply = nats
+        .request("acp.agent.session.new", request_bytes(&new_req))
+        .await
+        .unwrap();
+    let new_resp: NewSessionResponse = serde_json::from_slice(&reply.payload).unwrap();
+    let session_id = new_resp.session_id.to_string();
+
+    let cfg_req =
+        SetSessionConfigOptionRequest::new(session_id.clone(), "model", "claude-haiku-4-5-20251001");
+    let subject = format!("acp.{}.agent.session.set_config_option", session_id);
+    nats.request(subject, request_bytes(&cfg_req))
+        .await
+        .expect("set_session_config_option must reply");
+
+    let state = store.load(&session_id).await.unwrap();
+    assert_eq!(
+        state.model.as_deref(),
+        Some("claude-haiku-4-5-20251001"),
+        "model must be updated in store"
     );
 }
 
