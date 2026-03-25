@@ -88,6 +88,7 @@ const THREAD_NAME: &str = "acp-ws-local";
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
 /// `Agent` trait is `?Send`, requiring `spawn_local` / `Rc`.
+#[cfg_attr(coverage, coverage(off))]
 fn run_connection_thread<N>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
@@ -118,6 +119,7 @@ fn run_connection_thread<N>(
     info!("Local thread exiting");
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn process_connections<N>(
     mut conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
@@ -237,17 +239,11 @@ mod tests {
 
         let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}}"#;
 
-        match msg {
-            Message::Text(t) => {
-                let text = t.to_string();
-                // order of fields in JSON might vary, so we parse to compare
-                let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
-                let expected: serde_json::Value =
-                    serde_json::from_str(expected_ws_response).unwrap();
-                assert_eq!(actual, expected);
-            }
-            _ => panic!("Expected text message"),
-        }
+        let text = msg.to_text().expect("Expected text message").to_string();
+        // order of fields in JSON might vary, so we parse to compare
+        let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(expected_ws_response).unwrap();
+        assert_eq!(actual, expected);
 
         // Trigger shutdown
         shutdown_tx.send(true).unwrap();

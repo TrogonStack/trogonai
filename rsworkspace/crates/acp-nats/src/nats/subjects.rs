@@ -272,4 +272,25 @@ mod tests {
     fn client_wildcard_all_subject() {
         assert_eq!(client::wildcards::all("acp"), "acp.*.client.>");
     }
+
+    #[test]
+    fn prompt_alias_matches_session_prompt() {
+        assert_eq!(agent::prompt("acp", "s1"), agent::session_prompt("acp", "s1"));
+    }
+
+    #[test]
+    fn prompt_wildcard_alias_matches_session_prompt_wildcard() {
+        assert_eq!(
+            agent::prompt_wildcard("acp"),
+            agent::session_prompt_wildcard("acp")
+        );
+    }
+
+    #[test]
+    fn prompt_events_alias_matches_session_update() {
+        assert_eq!(
+            agent::prompt_events("acp", "s1", "r1"),
+            agent::session_update("acp", "s1", "r1")
+        );
+    }
 }
