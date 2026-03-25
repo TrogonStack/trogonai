@@ -187,8 +187,10 @@ mod tests {
                 stdin,
                 std::future::pending::<()>(),
             )))
-            .map_err(|e| Box::new(std::io::Error::other(e.to_string()))
-                as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
         });
 
         (handle, stdin_w, stdout_r)
@@ -204,8 +206,7 @@ mod tests {
             serde_json::to_vec(&init_resp).unwrap().into(),
         );
 
-        let (bridge_handle, mut stdin_w, stdout_r) =
-            start_bridge_thread(mock, make_config());
+        let (bridge_handle, mut stdin_w, stdout_r) = start_bridge_thread(mock, make_config());
 
         stdin_w
             .write_all(
@@ -242,14 +243,10 @@ mod tests {
             serde_json::to_vec(&init_resp).unwrap().into(),
         );
 
-        let (bridge_handle, mut stdin_w, stdout_r) =
-            start_bridge_thread(mock, make_config());
+        let (bridge_handle, mut stdin_w, stdout_r) = start_bridge_thread(mock, make_config());
 
         // Send invalid JSON first
-        stdin_w
-            .write_all(b"this is not json\n")
-            .await
-            .unwrap();
+        stdin_w.write_all(b"this is not json\n").await.unwrap();
 
         // Then send a valid initialize request — bridge must still respond
         stdin_w
@@ -337,5 +334,4 @@ mod tests {
 
         assert!(result.is_ok());
     }
-
 }
