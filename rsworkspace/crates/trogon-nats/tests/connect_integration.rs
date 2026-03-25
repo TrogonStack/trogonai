@@ -170,7 +170,16 @@ async fn connect_with_correct_token_succeeds() {
 /// No Docker required: we simply point at a port with nothing listening.
 #[tokio::test]
 async fn connect_to_unreachable_server_returns_ok_with_background_retry() {
-    let config = NatsConfig::new(vec!["nats://127.0.0.1:19998".to_string()], NatsAuth::None);
+    // Bind to port 0 to get a free ephemeral port, then immediately drop the
+    // listener so nothing is listening — avoids hard-coded port collisions.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let config = NatsConfig::new(
+        vec![format!("nats://127.0.0.1:{port}")],
+        NatsAuth::None,
+    );
 
     // connect() must return within a few seconds (INITIAL_CONNECT_CHECK_SECS + margin).
     let result = tokio::time::timeout(

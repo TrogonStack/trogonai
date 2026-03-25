@@ -95,11 +95,11 @@ impl McpClient {
             "method": "tools/list",
             "params": {}
         });
-        let resp = self.rpc(body).await?;
+        let mut resp = self.rpc(body).await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tools/list error: {err}"));
         }
-        let result: ListToolsResult = serde_json::from_value(resp["result"].clone())
+        let result: ListToolsResult = serde_json::from_value(resp["result"].take())
             .map_err(|e| format!("MCP tools/list deserialize error: {e}"))?;
         debug!(url = %self.url, count = result.tools.len(), "MCP tools listed");
         Ok(result.tools)
@@ -113,11 +113,11 @@ impl McpClient {
             "method": "tools/call",
             "params": { "name": name, "arguments": arguments }
         });
-        let resp = self.rpc(body).await?;
+        let mut resp = self.rpc(body).await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tool error: {err}"));
         }
-        let result: CallToolResult = serde_json::from_value(resp["result"].clone())
+        let result: CallToolResult = serde_json::from_value(resp["result"].take())
             .map_err(|e| format!("MCP tools/call deserialize error: {e}"))?;
 
         let text = result
