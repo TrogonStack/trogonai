@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use acp_nats::nats::{ExtSessionReady, agent as subjects};
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateResponse, ForkSessionRequest,
     ForkSessionResponse, Implementation, InitializeResponse, ListSessionsRequest,
@@ -22,7 +23,6 @@ use agent_client_protocol::{
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
-use acp_nats::nats::{ExtSessionReady, agent as subjects};
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -360,7 +360,8 @@ impl RpcServer {
                 return;
             }
         };
-        self.reply(&msg, &SetSessionConfigOptionResponse::new(vec![])).await;
+        self.reply(&msg, &SetSessionConfigOptionResponse::new(vec![]))
+            .await;
     }
 
     async fn handle_list_sessions(&self, msg: async_nats::Message) {
@@ -384,7 +385,11 @@ impl RpcServer {
         let mut sessions: Vec<SessionInfo> = Vec::with_capacity(ids.len());
         for id in ids {
             let state = self.store.load(&id).await.unwrap_or_default();
-            let cwd = if state.cwd.is_empty() { "/" } else { &state.cwd };
+            let cwd = if state.cwd.is_empty() {
+                "/"
+            } else {
+                &state.cwd
+            };
             let mut info = SessionInfo::new(id, cwd);
             if !state.title.is_empty() {
                 info = info.title(state.title);
