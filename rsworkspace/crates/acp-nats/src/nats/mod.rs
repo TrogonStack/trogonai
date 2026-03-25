@@ -4,8 +4,11 @@ mod subjects;
 pub(crate) mod token;
 
 pub use extensions::ExtSessionReady;
-pub use parsing::{ClientMethod, ParsedClientSubject, parse_client_subject};
-pub use subjects::{agent, client as client_subjects};
+pub use parsing::{
+    AgentMethod, ClientMethod, ParsedAgentSubject, ParsedClientSubject, parse_agent_subject,
+    parse_client_subject,
+};
+pub use subjects::{agent, client as client_subjects, wildcards};
 pub use trogon_nats::{
     FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
     SubscribeClient, client, connect, headers_with_trace_context, inject_trace_context, publish,

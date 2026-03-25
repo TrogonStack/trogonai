@@ -1,9 +1,10 @@
 pub mod acp_prefix;
 pub mod agent;
 pub mod client;
+pub mod client_proxy;
 pub mod config;
 pub mod error;
-pub(crate) mod ext_method_name;
+pub mod ext_method_name;
 pub(crate) mod in_flight_slot_guard;
 pub(crate) mod jsonrpc;
 pub mod nats;
@@ -15,6 +16,7 @@ pub(crate) mod telemetry;
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;
 pub use agent::REQ_ID_HEADER;
+pub use client_proxy::NatsClientProxy;
 pub use config::{
     Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout,
 };

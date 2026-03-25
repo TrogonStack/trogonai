@@ -77,9 +77,58 @@ pub mod agent {
     pub fn ext(prefix: &str, method: &str) -> String {
         format!("{}.agent.ext.{}", prefix, method)
     }
+
+    pub mod wildcards {
+        pub fn all(prefix: &str) -> String {
+            format!("{}.agent.>", prefix)
+        }
+
+        pub fn all_sessions(prefix: &str) -> String {
+            format!("{}.*.agent.>", prefix)
+        }
+    }
 }
 
 pub mod client {
+    pub fn fs_read_text_file(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.fs.read_text_file", prefix, session_id)
+    }
+
+    pub fn fs_write_text_file(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.fs.write_text_file", prefix, session_id)
+    }
+
+    pub fn session_request_permission(prefix: &str, session_id: &str) -> String {
+        format!(
+            "{}.{}.client.session.request_permission",
+            prefix, session_id
+        )
+    }
+
+    pub fn session_update(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.session.update", prefix, session_id)
+    }
+
+    pub fn terminal_create(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.create", prefix, session_id)
+    }
+
+    pub fn terminal_kill(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.kill", prefix, session_id)
+    }
+
+    pub fn terminal_output(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.output", prefix, session_id)
+    }
+
+    pub fn terminal_release(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.release", prefix, session_id)
+    }
+
+    pub fn terminal_wait_for_exit(prefix: &str, session_id: &str) -> String {
+        format!("{}.{}.client.terminal.wait_for_exit", prefix, session_id)
+    }
+
     pub mod wildcards {
         pub fn all(prefix: &str) -> String {
             format!("{}.*.client.>", prefix)
@@ -87,9 +136,15 @@ pub mod client {
     }
 }
 
+pub mod wildcards {
+    pub fn all(prefix: &str) -> String {
+        format!("{}.>", prefix)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{agent, client};
+    use super::{agent, client, wildcards};
 
     #[test]
     fn initialize_subject() {
@@ -254,7 +309,209 @@ mod tests {
     }
 
     #[test]
+    fn ext_subject() {
+        assert_eq!(agent::ext("acp", "my_tool"), "acp.agent.ext.my_tool");
+    }
+
+    #[test]
+    fn agent_wildcard_all_subject() {
+        assert_eq!(agent::wildcards::all("acp"), "acp.agent.>");
+    }
+
+    #[test]
+    fn agent_wildcard_all_sessions_subject() {
+        assert_eq!(agent::wildcards::all_sessions("acp"), "acp.*.agent.>");
+    }
+
+    #[test]
+    fn agent_wildcards_overlap_when_session_id_is_agent() {
+        let subject = "acp.agent.agent.session.load";
+        let global = agent::wildcards::all("acp");
+        let session = agent::wildcards::all_sessions("acp");
+
+        // Both wildcards match this subject in NATS:
+        // - "acp.agent.>" matches because "agent.session.load" falls under "acp.agent."
+        // - "acp.*.agent.>" matches because * = "agent", rest = "session.load"
+        // This is a known trade-off: using two subscriptions avoids consuming
+        // client messages, but causes duplicate delivery for session ID "agent".
+        assert!(nats_wildcard_matches(&global, subject));
+        assert!(nats_wildcard_matches(&session, subject));
+    }
+
+    fn nats_wildcard_matches(pattern: &str, subject: &str) -> bool {
+        let pattern_parts: Vec<&str> = pattern.split('.').collect();
+        let subject_parts: Vec<&str> = subject.split('.').collect();
+        nats_match(&pattern_parts, &subject_parts)
+    }
+
+    fn nats_match(pattern: &[&str], subject: &[&str]) -> bool {
+        match (pattern.first(), subject.first()) {
+            (Some(&">"), _) => true,
+            (Some(&"*"), Some(_)) => nats_match(&pattern[1..], &subject[1..]),
+            (Some(p), Some(s)) if p == s => nats_match(&pattern[1..], &subject[1..]),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn nats_match_exact_match() {
+        assert!(nats_wildcard_matches(
+            "acp.agent.initialize",
+            "acp.agent.initialize"
+        ));
+    }
+
+    #[test]
+    fn nats_match_no_match() {
+        assert!(!nats_wildcard_matches(
+            "acp.agent.initialize",
+            "acp.agent.authenticate"
+        ));
+    }
+
+    #[test]
+    fn nats_match_length_mismatch() {
+        assert!(!nats_wildcard_matches("acp.agent", "acp.agent.initialize"));
+    }
+
+    #[test]
+    fn prefix_wildcard_all() {
+        assert_eq!(wildcards::all("acp"), "acp.>");
+    }
+
+    #[test]
+    fn prefix_wildcard_custom_prefix() {
+        assert_eq!(wildcards::all("myapp"), "myapp.>");
+    }
+
+    #[test]
+    fn agent_wildcard_custom_prefix() {
+        assert_eq!(agent::wildcards::all("myapp"), "myapp.agent.>");
+        assert_eq!(agent::wildcards::all_sessions("myapp"), "myapp.*.agent.>");
+    }
+
+    #[test]
+    fn ext_subject_dotted_method() {
+        assert_eq!(
+            agent::ext("acp", "vendor.operation"),
+            "acp.agent.ext.vendor.operation"
+        );
+    }
+
+    #[test]
+    fn ext_subject_custom_prefix() {
+        assert_eq!(agent::ext("myapp", "my_tool"), "myapp.agent.ext.my_tool");
+    }
+
+    #[test]
+    fn client_fs_read_text_file_subject() {
+        assert_eq!(
+            client::fs_read_text_file("acp", "s1"),
+            "acp.s1.client.fs.read_text_file"
+        );
+    }
+
+    #[test]
+    fn client_fs_write_text_file_subject() {
+        assert_eq!(
+            client::fs_write_text_file("acp", "s1"),
+            "acp.s1.client.fs.write_text_file"
+        );
+    }
+
+    #[test]
+    fn client_session_request_permission_subject() {
+        assert_eq!(
+            client::session_request_permission("acp", "s1"),
+            "acp.s1.client.session.request_permission"
+        );
+    }
+
+    #[test]
+    fn client_session_update_subject() {
+        assert_eq!(
+            client::session_update("acp", "s1"),
+            "acp.s1.client.session.update"
+        );
+    }
+
+    #[test]
+    fn client_terminal_create_subject() {
+        assert_eq!(
+            client::terminal_create("acp", "s1"),
+            "acp.s1.client.terminal.create"
+        );
+    }
+
+    #[test]
+    fn client_terminal_kill_subject() {
+        assert_eq!(
+            client::terminal_kill("acp", "s1"),
+            "acp.s1.client.terminal.kill"
+        );
+    }
+
+    #[test]
+    fn client_terminal_output_subject() {
+        assert_eq!(
+            client::terminal_output("acp", "s1"),
+            "acp.s1.client.terminal.output"
+        );
+    }
+
+    #[test]
+    fn client_terminal_release_subject() {
+        assert_eq!(
+            client::terminal_release("acp", "s1"),
+            "acp.s1.client.terminal.release"
+        );
+    }
+
+    #[test]
+    fn client_terminal_wait_for_exit_subject() {
+        assert_eq!(
+            client::terminal_wait_for_exit("acp", "s1"),
+            "acp.s1.client.terminal.wait_for_exit"
+        );
+    }
+
+    #[test]
     fn client_wildcard_all_subject() {
         assert_eq!(client::wildcards::all("acp"), "acp.*.client.>");
+    }
+
+    #[test]
+    fn client_wildcard_custom_prefix() {
+        assert_eq!(client::wildcards::all("myapp"), "myapp.*.client.>");
+    }
+
+    #[test]
+    fn client_subjects_share_token_layout() {
+        let prefix = "acp";
+        let sid = "abc";
+        let expected_prefix = format!("{}.{}.client.", prefix, sid);
+
+        assert!(client::fs_read_text_file(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::fs_write_text_file(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::session_request_permission(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::session_update(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::terminal_create(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::terminal_kill(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::terminal_output(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::terminal_release(prefix, sid).starts_with(&expected_prefix));
+        assert!(client::terminal_wait_for_exit(prefix, sid).starts_with(&expected_prefix));
+    }
+
+    #[test]
+    fn client_subjects_custom_prefix() {
+        assert_eq!(
+            client::fs_read_text_file("myapp", "sess-42"),
+            "myapp.sess-42.client.fs.read_text_file"
+        );
+        assert_eq!(
+            client::terminal_create("myapp", "sess-42"),
+            "myapp.sess-42.client.terminal.create"
+        );
     }
 }
