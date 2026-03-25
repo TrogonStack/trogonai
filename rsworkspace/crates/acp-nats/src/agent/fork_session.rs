@@ -45,8 +45,6 @@ where
     if let Ok(ref response) = result {
         Span::current().record("new_session_id", response.session_id.to_string().as_str());
         info!(new_session_id = %response.session_id, "Session forked");
-
-        bridge.schedule_session_ready(response.session_id.clone());
     }
 
     bridge.metrics.record_request(
@@ -67,7 +65,6 @@ mod tests {
     use agent_client_protocol::{
         Agent, ErrorCode, ForkSessionRequest, ForkSessionResponse, SessionId,
     };
-    use std::time::Duration;
 
     #[tokio::test]
     async fn fork_session_forwards_request_and_returns_response() {
@@ -143,7 +140,6 @@ mod tests {
             .fork_session(ForkSessionRequest::new("s1", "."))
             .await;
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
