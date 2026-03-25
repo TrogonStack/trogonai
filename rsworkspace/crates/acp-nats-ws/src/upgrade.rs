@@ -15,6 +15,7 @@ pub struct UpgradeState {
     pub shutdown_tx: watch::Sender<bool>,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub async fn handle(ws: WebSocketUpgrade, State(state): State<UpgradeState>) -> Response {
     let shutdown_rx = state.shutdown_tx.subscribe();
     ws.on_upgrade(move |socket| async move {

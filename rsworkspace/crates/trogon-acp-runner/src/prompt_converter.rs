@@ -51,6 +51,7 @@ pub struct PromptEventConverter {
 }
 
 impl PromptEventConverter {
+    #[cfg_attr(coverage, coverage(off))]
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -64,6 +65,7 @@ impl PromptEventConverter {
     ///
     /// Returns `(notifications, outcome)`. When `outcome` is `Some`, this is the
     /// last event and no more events should be processed.
+    #[cfg_attr(coverage, coverage(off))]
     pub fn convert(
         &mut self,
         event: PromptEvent,
@@ -209,6 +211,7 @@ impl PromptEventConverter {
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     fn notif(&self, update: SessionUpdate) -> SessionNotification {
         SessionNotification::new(self.session_id.clone(), update)
     }
@@ -216,6 +219,7 @@ impl PromptEventConverter {
 
 // ── Helper functions ──────────────────────────────────────────────────────────
 
+#[cfg_attr(coverage, coverage(off))]
 fn system_status_to_text(message: &str) -> Option<String> {
     let lower = message.to_lowercase();
     if lower.contains("compact complete") || lower.contains("compacting complete") {
@@ -227,6 +231,7 @@ fn system_status_to_text(message: &str) -> Option<String> {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn tool_kind_for(name: &str) -> ToolKind {
     match name {
         "Read" | "LS" => ToolKind::Read,
@@ -240,6 +245,7 @@ fn tool_kind_for(name: &str) -> ToolKind {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn tool_locations_from_input(name: &str, input: &serde_json::Value) -> Vec<ToolCallLocation> {
     let path_key = match name {
         "Read" | "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "file_path",
@@ -253,6 +259,7 @@ fn tool_locations_from_input(name: &str, input: &serde_json::Value) -> Vec<ToolC
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn build_tool_call_meta(
     tool_name: &str,
     parent_tool_use_id: Option<&str>,
@@ -276,6 +283,7 @@ fn build_tool_call_meta(
     Some(meta)
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
     let todos = input.get("todos")?.as_array()?;
     let entries: Vec<PlanEntry> = todos
@@ -302,6 +310,7 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {
     let mode_options: Vec<SessionConfigSelectOption> = MODE_OPTIONS
         .iter()

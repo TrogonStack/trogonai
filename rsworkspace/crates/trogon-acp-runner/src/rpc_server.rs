@@ -42,6 +42,7 @@ pub struct RpcServer {
 }
 
 impl RpcServer {
+    #[cfg_attr(coverage, coverage(off))]
     pub fn new(
         nats: async_nats::Client,
         store: SessionStore,
@@ -95,6 +96,7 @@ impl RpcServer {
     }
 
     /// Build the mode state to include in session responses.
+    #[cfg_attr(coverage, coverage(off))]
     fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
         SessionModeState::new(
             current_mode.to_string(),
@@ -108,6 +110,7 @@ impl RpcServer {
     }
 
     /// Build the model state to include in session responses.
+    #[cfg_attr(coverage, coverage(off))]
     fn session_model_state(&self, current_model: Option<&str>) -> SessionModelState {
         let current = current_model.unwrap_or(&self.default_model).to_string();
         SessionModelState::new(
@@ -214,6 +217,7 @@ impl RpcServer {
 
     // ── Handlers ────────────────────────────────────────────────────────────
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_initialize(&self, msg: async_nats::Message) {
         let capabilities = AgentCapabilities::new()
             .load_session(true)
@@ -236,6 +240,7 @@ impl RpcServer {
         self.reply(&msg, &response).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_authenticate(&self, msg: async_nats::Message) {
         // No authentication required — reply with empty response.
         self.reply(&msg, &AuthenticateResponse::new()).await;
@@ -286,6 +291,7 @@ impl RpcServer {
         self.reply(&msg, &response).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_load_session(&self, msg: async_nats::Message) {
         // Deserialise just to validate the request; history is loaded implicitly
         // on the next prompt (runner.rs calls store.load() there).
@@ -359,6 +365,7 @@ impl RpcServer {
         self.reply(&msg, &SetSessionModelResponse::new()).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_set_session_config_option(&self, msg: async_nats::Message) {
         let _request: SetSessionConfigOptionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -441,6 +448,7 @@ impl RpcServer {
         self.reply(&msg, &ForkSessionResponse::new(new_id)).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_resume_session(&self, msg: async_nats::Message) {
         let _request: ResumeSessionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,

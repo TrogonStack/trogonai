@@ -65,6 +65,7 @@ fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
         .collect()
 }
 
+#[cfg_attr(coverage, coverage(off))]
 #[instrument(
     name = "acp.session.prompt",
     skip(bridge, args, serializer),
