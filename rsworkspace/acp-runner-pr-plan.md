@@ -146,7 +146,7 @@ Tests: resume_session handler unit and integration tests.
 
 **Branch:** `acp/runner/close_session`
 
-Adds the `close_session` handler. Removes the session state from `SessionStore`.
+Adds the `close_session` handler. Publishes a cancel signal to stop any in-flight prompt, then removes the session state from `SessionStore`.
 
 Tests: close_session handler unit and integration tests.
 
