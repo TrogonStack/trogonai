@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AuthenticateRequest, AuthenticateResponse, ForkSessionRequest, ForkSessionResponse,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
-    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse,
+    AuthenticateRequest, AuthenticateResponse, CloseSessionRequest, CloseSessionResponse,
+    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    NewSessionRequest, NewSessionResponse, ProtocolVersion, ResumeSessionRequest,
+    ResumeSessionResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use async_nats::jetstream;
 use bytes::Bytes;
@@ -569,6 +569,61 @@ async fn resume_session_bad_payload_does_not_crash_server() {
     let _ = nats
         .publish(
             "acp.sess-bad.agent.session.resume",
+            Bytes::from_static(b"not json"),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let req = ResumeSessionRequest::new("sess-alive", "/tmp");
+    nats.request("acp.sess-alive.agent.session.resume", request_bytes(&req))
+        .await
+        .expect("server must be alive after bad payload");
+}
+
+#[tokio::test]
+async fn close_session_removes_session_from_store() {
+    let (_container, nats, js) = start_nats().await;
+    let store = start_rpc_server(nats.clone(), js, "acp").await;
+
+    // Create a session first.
+    let new_req = NewSessionRequest::new("/tmp");
+    let reply = nats
+        .request("acp.agent.session.new", request_bytes(&new_req))
+        .await
+        .expect("new_session must reply");
+    let new_resp: NewSessionResponse =
+        serde_json::from_slice(&reply.payload).expect("valid JSON");
+    let session_id = new_resp.session_id.to_string();
+
+    // Verify it exists with a non-empty cwd.
+    let before = store.load(&session_id).await.unwrap();
+    assert!(!before.cwd.is_empty());
+
+    // Close it.
+    let close_req = CloseSessionRequest::new(session_id.clone());
+    let reply = nats
+        .request(
+            format!("acp.{session_id}.agent.session.close"),
+            request_bytes(&close_req),
+        )
+        .await
+        .expect("close_session must reply");
+    let _resp: CloseSessionResponse =
+        serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
+
+    // After deletion, load returns the empty default (cwd is empty string).
+    let after = store.load(&session_id).await.unwrap();
+    assert!(after.cwd.is_empty());
+}
+
+#[tokio::test]
+async fn close_session_bad_payload_does_not_crash_server() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let _ = nats
+        .publish(
+            "acp.sess-bad.agent.session.close",
             Bytes::from_static(b"not json"),
         )
         .await;
