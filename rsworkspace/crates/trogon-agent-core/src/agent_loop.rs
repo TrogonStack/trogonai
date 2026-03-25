@@ -344,6 +344,8 @@ impl AgentLoop {
                 .send()
                 .await
                 .map_err(AgentError::Http)?
+                .error_for_status()
+                .map_err(AgentError::Http)?
                 .json::<AnthropicResponse>()
                 .await
                 .map_err(AgentError::Http)?;
@@ -439,6 +441,8 @@ impl AgentLoop {
                 .json(&request)
                 .send()
                 .await
+                .map_err(AgentError::Http)?
+                .error_for_status()
                 .map_err(AgentError::Http)?
                 .json::<AnthropicResponse>()
                 .await
@@ -553,6 +557,8 @@ impl AgentLoop {
                 .json(&body)
                 .send()
                 .await
+                .map_err(AgentError::Http)?
+                .error_for_status()
                 .map_err(AgentError::Http)?
                 .json::<AnthropicResponse>()
                 .await
@@ -740,8 +746,16 @@ impl AgentLoop {
             {
                 debug!(tool = %name, "Executing tool");
 
+                // Ask permission before executing (if a checker is installed).
+                let allowed = match &self.permission_checker {
+                    Some(checker) => checker.check(id, name, input).await,
+                    None => true,
+                };
+
                 // Check MCP dispatch first, then fall back to built-in tools.
-                let output = if let Some((_, original, client)) = self
+                let output = if !allowed {
+                    format!("Permission denied: user refused to run tool `{name}`")
+                } else if let Some((_, original, client)) = self
                     .mcp_dispatch
                     .iter()
                     .find(|(prefixed, _, _)| prefixed == name)
