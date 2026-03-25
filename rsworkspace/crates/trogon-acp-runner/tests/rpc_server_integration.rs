@@ -231,6 +231,26 @@ async fn load_session_replies_and_publishes_session_ready() {
         .expect("subscription closed");
 }
 
+#[tokio::test]
+async fn load_session_bad_payload_does_not_crash_server() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let _ = nats
+        .publish(
+            "acp.sess-bad.agent.session.load",
+            Bytes::from_static(b"not json"),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Server still alive.
+    let req = LoadSessionRequest::new("sess-bad", "/tmp");
+    nats.request("acp.sess-bad.agent.session.load", request_bytes(&req))
+        .await
+        .expect("server must be alive after bad payload");
+}
+
 // ── set_session_mode ──────────────────────────────────────────────────────────
 
 #[tokio::test]
