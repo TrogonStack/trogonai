@@ -173,9 +173,7 @@ impl PromptEventConverter {
                     return (vec![], None);
                 }
 
-                let status = if exit_code == Some(0)
-                    || (exit_code.is_none() && signal.is_none())
-                {
+                let status = if exit_code == Some(0) || (exit_code.is_none() && signal.is_none()) {
                     ToolCallStatus::Completed
                 } else {
                     ToolCallStatus::Failed

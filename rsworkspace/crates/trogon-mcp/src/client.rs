@@ -29,9 +29,7 @@ fn safe_url(url: &str) -> String {
         None => after_scheme,
     };
     // Keep only host[:port] — stop at first '/', '?', or '#'.
-    let host_end = authority
-        .find(['/', '?', '#'])
-        .unwrap_or(authority.len());
+    let host_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
     format!("{}://{}", scheme, &authority[..host_end])
 }
 
