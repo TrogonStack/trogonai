@@ -32,8 +32,6 @@
 //! | `AGENT_MODEL`      | `claude-opus-4-6`        | Claude model ID                    |
 //! | `AGENT_MAX_ITERATIONS` | `10`                 | Max loop iterations per prompt     |
 
-#![cfg_attr(coverage, feature(coverage_attribute))]
-
 mod agent;
 
 use std::sync::Arc;
