@@ -18,11 +18,12 @@ use agent_client_protocol::{
     CloseSessionResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
     LoadSessionResponse, ModelInfo, NewSessionRequest, NewSessionResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionForkCapabilities,
-    SessionId, SessionInfo, SessionListCapabilities, SessionMode, SessionModeState,
-    SessionModelState, SessionResumeCapabilities, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode,
+    SessionModeState, SessionModelState, SessionResumeCapabilities,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
@@ -228,13 +229,16 @@ impl RpcServer {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_initialize(&self, msg: async_nats::Message) {
+        let mut session_caps_meta = serde_json::Map::new();
+        session_caps_meta.insert("close".to_string(), serde_json::json!({}));
         let capabilities = AgentCapabilities::new()
             .load_session(true)
             .session_capabilities(
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
                     .fork(SessionForkCapabilities::new())
-                    .resume(SessionResumeCapabilities::new()),
+                    .resume(SessionResumeCapabilities::new())
+                    .meta(session_caps_meta),
             );
         let response = InitializeResponse::new(ProtocolVersion::LATEST)
             .agent_capabilities(capabilities)
@@ -404,14 +408,74 @@ impl RpcServer {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_set_session_config_option(&self, msg: async_nats::Message) {
-        let _request: SetSessionConfigOptionRequest = match serde_json::from_slice(&msg.payload) {
+        let request: SetSessionConfigOptionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "rpc: bad set_session_config_option payload");
                 return;
             }
         };
-        self.reply(&msg, &SetSessionConfigOptionResponse::new(vec![]))
+
+        let session_id = request.session_id.to_string();
+        let config_id = request.config_id.to_string();
+        let value = match &request.value {
+            agent_client_protocol::SessionConfigOptionValue::ValueId { value } => {
+                value.to_string()
+            }
+            agent_client_protocol::SessionConfigOptionValue::Boolean { value } => {
+                value.to_string()
+            }
+            _ => String::new(),
+        };
+
+        let mut state = self.store.load(&session_id).await.unwrap_or_default();
+
+        match config_id.as_str() {
+            "mode" => {
+                state.mode = value.clone();
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist config mode update");
+                }
+            }
+            "model" => {
+                state.model = Some(value.clone());
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist config model update");
+                }
+            }
+            other => {
+                warn!(session_id = %session_id, config_id = %other, "rpc: unknown config option");
+            }
+        }
+
+        let mode_options: Vec<SessionConfigSelectOption> = self
+            .session_mode_state(&state.mode)
+            .available_modes
+            .iter()
+            .map(|m| SessionConfigSelectOption::new(m.id.to_string(), m.name.as_str()))
+            .collect();
+        let model_options: Vec<SessionConfigSelectOption> = self
+            .session_model_state(state.model.as_deref())
+            .available_models
+            .iter()
+            .map(|m| SessionConfigSelectOption::new(m.model_id.to_string(), m.name.as_str()))
+            .collect();
+        let current_mode = state.mode.clone();
+        let current_model = state
+            .model
+            .as_deref()
+            .unwrap_or(&self.default_model)
+            .to_string();
+        let config_options = vec![
+            SessionConfigOption::select("mode", "Mode", current_mode, mode_options)
+                .category(SessionConfigOptionCategory::Mode),
+            SessionConfigOption::select("model", "Model", current_model, model_options)
+                .category(SessionConfigOptionCategory::Model),
+        ];
+
+        self.reply(&msg, &SetSessionConfigOptionResponse::new(config_options))
             .await;
     }
 
