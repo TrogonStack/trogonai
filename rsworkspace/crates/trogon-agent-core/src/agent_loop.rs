@@ -335,6 +335,17 @@ impl AgentLoop {
                 messages: &messages,
             };
 
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
+            if let Some(budget) = self.thinking_budget
+                && budget > 0
+            {
+                body["thinking"] = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": budget
+                });
+            }
+
             let mut req_builder = self
                 .http_client
                 .post(self.messages_url())
@@ -344,7 +355,7 @@ impl AgentLoop {
                 req_builder = req_builder.header(k.as_str(), v.as_str());
             }
             let response = req_builder
-                .json(&request)
+                .json(&body)
                 .send()
                 .await
                 .map_err(AgentError::Http)?
@@ -434,6 +445,17 @@ impl AgentLoop {
                 messages: &messages,
             };
 
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
+            if let Some(budget) = self.thinking_budget
+                && budget > 0
+            {
+                body["thinking"] = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": budget
+                });
+            }
+
             let mut req_builder = self
                 .http_client
                 .post(self.messages_url())
@@ -443,7 +465,7 @@ impl AgentLoop {
                 req_builder = req_builder.header(k.as_str(), v.as_str());
             }
             let response = req_builder
-                .json(&request)
+                .json(&body)
                 .send()
                 .await
                 .map_err(AgentError::Http)?

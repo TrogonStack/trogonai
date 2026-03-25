@@ -29,6 +29,7 @@ pub struct PromptPayload {
     pub session_id: String,
     /// Rich content blocks from the ACP prompt (text, images, resources).
     /// Always populated by current Bridge versions.
+    #[serde(default)]
     pub content: Vec<UserContentBlock>,
     /// Plain-text fallback for backward compatibility.
     /// Used only when `content` is empty (old Bridge versions).
@@ -91,6 +92,16 @@ pub enum PromptEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Legacy Bridge messages omit the `content` field; `#[serde(default)]` must
+    /// deserialize them as an empty Vec instead of returning an error.
+    #[test]
+    fn prompt_payload_legacy_without_content_deserializes() {
+        let legacy = r#"{"req_id":"r1","session_id":"s1","user_message":"hello"}"#;
+        let p: PromptPayload = serde_json::from_str(legacy).unwrap();
+        assert!(p.content.is_empty());
+        assert_eq!(p.user_message, "hello");
+    }
 
     #[test]
     fn prompt_payload_roundtrip() {
