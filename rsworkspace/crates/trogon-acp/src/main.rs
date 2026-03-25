@@ -139,7 +139,6 @@ async fn main() -> anyhow::Result<()> {
         gateway_config.clone(),
     )
     .await?;
-    tokio::spawn(async move { runner.run().await });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
 
@@ -182,6 +181,9 @@ async fn main() -> anyhow::Result<()> {
 
     local
         .run_until(async move {
+            // Runner::run() uses spawn_local internally — must run within a LocalSet.
+            tokio::task::spawn_local(async move { runner.run().await });
+
             let stdin = tokio::io::stdin().compat();
             let stdout = tokio::io::stdout().compat_write();
 
