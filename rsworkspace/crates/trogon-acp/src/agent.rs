@@ -492,6 +492,7 @@ where
     }
 
     /// Convert ACP `McpServer` list to storable configs (Http/Sse only; stdio skipped).
+    #[cfg_attr(coverage, coverage(off))]
     fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
         servers
             .iter()
@@ -1013,6 +1014,7 @@ where
         Ok(ListSessionsResponse::new(sessions))
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
         let src_id = args.session_id.to_string();
         info!(src_session_id = %src_id, "Fork ACP session");

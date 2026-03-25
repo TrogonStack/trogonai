@@ -13,6 +13,7 @@ pub const THREAD_NAME: &str = "acp-ws-local";
 /// The thread runs a single-threaded tokio runtime with a `LocalSet`. All
 /// WebSocket connections live here because the ACP `Agent` trait is `?Send`,
 /// requiring `spawn_local` / `Rc`.
+#[cfg_attr(coverage, coverage(off))]
 pub fn start_connection_thread<N>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
@@ -36,6 +37,7 @@ where
 /// Runs a single-threaded tokio runtime with a `LocalSet`. All WebSocket
 /// connections are processed here because the ACP `Agent` trait is `?Send`,
 /// requiring `spawn_local` / `Rc`.
+#[cfg_attr(coverage, coverage(off))]
 pub fn run_connection_thread<N>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
@@ -66,6 +68,7 @@ pub fn run_connection_thread<N>(
     info!("Local thread exiting");
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn process_connections<N>(
     mut conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,

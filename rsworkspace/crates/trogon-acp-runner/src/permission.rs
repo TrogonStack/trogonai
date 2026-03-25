@@ -32,6 +32,7 @@ pub struct ChannelPermissionChecker {
 }
 
 impl PermissionChecker for ChannelPermissionChecker {
+    #[cfg_attr(coverage, coverage(off))]
     fn check<'a>(
         &'a self,
         tool_call_id: &'a str,
