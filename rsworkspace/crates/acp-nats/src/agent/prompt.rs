@@ -163,14 +163,14 @@ where
                 match resp {
                     Ok(Some(msg)) => {
                         // Check for error envelope {"error": "..."} before parsing as PromptResponse.
-                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
-                            if let Some(err_msg) = env.get("error").and_then(|v| v.as_str()) {
-                                bridge.metrics.record_error("prompt", "runner_error");
-                                break Err(Error::new(
-                                    ErrorCode::InternalError.into(),
-                                    err_msg.to_string(),
-                                ));
-                            }
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(
+                                ErrorCode::InternalError.into(),
+                                err_msg.to_string(),
+                            ));
                         }
                         match serde_json::from_slice::<PromptResponse>(&msg.payload) {
                             Ok(response) => break Ok(response),
