@@ -111,6 +111,150 @@ where
     result
 }
 
+async fn handle_nats<N, C, J, S>(
+    bridge: &Bridge<N, C, J>,
+    args: &PromptRequest,
+    serializer: &S,
+    session_id: &AcpSessionId,
+    prefix: &crate::acp_prefix::AcpPrefix,
+    req_id: &str,
+) -> agent_client_protocol::Result<PromptResponse>
+where
+    N: PublishClient + SubscribeClient + FlushClient,
+    C: trogon_std::time::GetElapsed,
+    S: JsonSerialize,
+{
+    // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
+    let mut notifications_sub = bridge
+        .nats
+        .subscribe(session::agent::UpdateSubject::new(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
+
+    let mut response_sub = bridge
+        .nats
+        .subscribe(session::agent::PromptResponseSubject::new(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
+
+    let mut cancel_sub = bridge
+        .nats
+        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("subscribe cancelled: {e}"),
+            )
+        })?;
+
+    let prompt_payload = PromptPayload {
+        req_id: req_id.clone(),
+        session_id: args.session_id.to_string(),
+        content: content_blocks_to_user(&args.prompt),
+        user_message: String::new(),
+    };
+    let payload_bytes = serializer
+        .to_vec(args)
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(SESSION_ID_HEADER, session_id.as_str());
+
+    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
+    bridge
+        .nats
+        .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("publish: {e}")))?;
+
+    bridge
+        .nats
+        .flush()
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("flush: {e}")))?;
+
+    let op_timeout = bridge.config.prompt_timeout();
+
+    loop {
+        tokio::select! {
+            notif = notifications_sub.next() => {
+                let Some(msg) = notif else {
+                    bridge.metrics.record_error("prompt", "notification_stream_closed");
+                    break Err(Error::new(
+                        ErrorCode::InternalError.into(),
+                        "notification stream closed unexpectedly",
+                    ));
+                };
+                let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        bridge.metrics.record_error("prompt", "bad_event_payload");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            format!("bad event payload: {e}"),
+                        ));
+                    }
+                };
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
+            resp = timeout(op_timeout, response_sub.next()) => {
+                match resp {
+                    Ok(Some(msg)) => {
+                        // Check for error envelope {"error": "..."} before parsing as PromptResponse.
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(
+                                ErrorCode::InternalError.into(),
+                                err_msg.to_string(),
+                            ));
+                        }
+                        match serde_json::from_slice::<PromptResponse>(&msg.payload) {
+                            Ok(response) => break Ok(response),
+                            Err(_) => {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(&msg.payload) {
+                                    break Err(agent_err);
+                                }
+                                bridge.metrics.record_error("prompt", "bad_response_payload");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    "bad response payload",
+                                ));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        bridge.metrics.record_error("prompt", "response_stream_closed");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "response stream closed unexpectedly",
+                        ));
+                    }
+                    Err(_elapsed) => {
+                        bridge.metrics.record_error("prompt", "prompt_timeout");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt timed out waiting for runner",
+                        ));
+                    }
+                }
+            }
+            _ = cancel_sub.next() => {
+                break Ok(PromptResponse::new(StopReason::Cancelled));
+            }
+        }
+    }
+}
+
 async fn handle_js<N, C, J, S>(
     bridge: &Bridge<N, C, J>,
     js: &J,
