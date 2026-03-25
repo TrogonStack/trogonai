@@ -442,7 +442,10 @@ mod tests {
         }
 
         let result = rx.await.expect("sender must have fired");
-        assert!(!result, "ServerError::AuthorizationViolation should send false");
+        assert!(
+            !result,
+            "ServerError::AuthorizationViolation should send false"
+        );
     }
 
     /// Covers the `Err(_)` arm in the `select!` inside `connect()`:
