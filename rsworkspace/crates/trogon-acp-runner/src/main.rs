@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         anthropic_token,
         anthropic_base_url: None,
         anthropic_extra_headers: vec![],
-        model,
+        model: model.clone(),
         max_iterations,
         tool_context,
         memory_owner: None,
@@ -115,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         nats.clone(),
         store.clone(),
         acp_prefix.clone(),
+        model.clone(),
         gateway_config.clone(),
     );
     tokio::spawn(async move { rpc_server.run().await });
