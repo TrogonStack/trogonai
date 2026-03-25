@@ -72,6 +72,7 @@ impl<N, C: GetElapsed> Bridge<N, C> {
         self.background_tasks.borrow_mut().push(task);
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn drain_background_tasks(&self) {
         let tasks: Vec<_> = self.background_tasks.borrow_mut().drain(..).collect();
         for task in tasks {

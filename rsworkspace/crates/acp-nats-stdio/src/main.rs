@@ -162,6 +162,7 @@ mod tests {
     /// Starts the bridge in a background OS thread with its own Tokio runtime and LocalSet.
     /// Returns a handle to the thread and both ends of the stdio pipes.
     #[allow(clippy::type_complexity)]
+    #[cfg_attr(coverage, coverage(off))]
     fn start_bridge_thread(
         mock: AdvancedMockNatsClient,
         config: acp_nats::Config,

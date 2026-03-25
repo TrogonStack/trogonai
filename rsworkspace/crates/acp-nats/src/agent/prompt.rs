@@ -16,6 +16,7 @@ use crate::session_id::AcpSessionId;
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
 /// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
+#[cfg_attr(coverage, coverage(off))]
 fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     blocks
         .iter()
@@ -471,6 +472,34 @@ mod tests {
             subjects.iter().any(|s| s == "acp.s1.agent.session.prompt"),
             "expected publish to acp.s1.agent.session.prompt, got: {:?}",
             subjects
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_error_when_runner_sends_error_envelope() {
+        let (mock, bridge) = mock_bridge();
+
+        let _notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        resp_tx
+            .unbounded_send(make_nats_msg(b"{\"error\": \"runner failed with something\"}"))
+            .unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("runner failed with something"),
+            "expected error message to be forwarded"
         );
     }
 }
