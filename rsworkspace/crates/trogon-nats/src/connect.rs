@@ -1,5 +1,5 @@
 use crate::auth::{NatsAuth, NatsConfig};
-use async_nats::{Client, ClientError, ConnectOptions, Event};
+use async_nats::{Client, ClientError, ConnectOptions, Event, ServerError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -103,6 +103,7 @@ fn apply_reconnect_options(
             async move {
                 let signal: Option<bool> = match &event {
                     Event::Connected => Some(true),
+                    Event::ServerError(ServerError::AuthorizationViolation) => Some(false),
                     Event::ClientError(ClientError::Other(msg))
                         if msg.contains("authorization violation") =>
                     {
@@ -384,7 +385,7 @@ mod tests {
     }
 
     /// When `Event::ClientError(ClientError::Other("authorization violation"))` fires,
-    /// the outcome sender receives `false`.
+    /// the outcome sender receives `false` (unstructured fallback path).
     #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn apply_reconnect_options_signals_auth_violation() {
@@ -395,6 +396,7 @@ mod tests {
         let event = Event::ClientError(ClientError::Other("authorization violation".to_string()));
         let signal: Option<bool> = match &event {
             Event::Connected => Some(true),
+            Event::ServerError(ServerError::AuthorizationViolation) => Some(false),
             Event::ClientError(ClientError::Other(msg))
                 if msg.contains("authorization violation") =>
             {
@@ -411,6 +413,36 @@ mod tests {
 
         let result = rx.await.expect("sender must have fired");
         assert!(!result, "authorization violation should send false");
+    }
+
+    /// When `Event::ServerError(ServerError::AuthorizationViolation)` fires (structured variant),
+    /// the outcome sender receives `false`.
+    #[cfg_attr(coverage, coverage(off))]
+    #[tokio::test]
+    async fn apply_reconnect_options_signals_server_auth_violation() {
+        let (tx, rx) = oneshot::channel::<bool>();
+        let tx_arc = Arc::new(Mutex::new(Some(tx)));
+
+        let event = Event::ServerError(ServerError::AuthorizationViolation);
+        let signal: Option<bool> = match &event {
+            Event::Connected => Some(true),
+            Event::ServerError(ServerError::AuthorizationViolation) => Some(false),
+            Event::ClientError(ClientError::Other(msg))
+                if msg.contains("authorization violation") =>
+            {
+                Some(false)
+            }
+            _ => None,
+        };
+        if let Some(ok) = signal
+            && let Ok(mut guard) = tx_arc.lock()
+            && let Some(sender) = guard.take()
+        {
+            let _ = sender.send(ok);
+        }
+
+        let result = rx.await.expect("sender must have fired");
+        assert!(!result, "ServerError::AuthorizationViolation should send false");
     }
 
     /// Covers the `Err(_)` arm in the `select!` inside `connect()`:
