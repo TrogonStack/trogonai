@@ -13,7 +13,6 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, ag
 use crate::prompt_event::{PromptPayload, UserContentBlock};
 use crate::session_id::AcpSessionId;
 
-
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
 /// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
@@ -21,7 +20,9 @@ fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     blocks
         .iter()
         .filter_map(|b| match b {
-            ContentBlock::Text(t) => Some(UserContentBlock::Text { text: t.text.clone() }),
+            ContentBlock::Text(t) => Some(UserContentBlock::Text {
+                text: t.text.clone(),
+            }),
             ContentBlock::Image(img) => {
                 if let Some(url) = &img.uri {
                     Some(UserContentBlock::ImageUrl { url: url.clone() })
@@ -472,5 +473,4 @@ mod tests {
             subjects
         );
     }
-
 }
