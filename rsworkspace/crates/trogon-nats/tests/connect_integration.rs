@@ -25,10 +25,7 @@ async fn start_nats() -> (
 async fn connect_with_no_auth_succeeds() {
     let (_container, port) = start_nats().await;
 
-    let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
-        NatsAuth::None,
-    );
+    let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
 
     let _client = connect(&config, Duration::from_secs(10))
         .await
