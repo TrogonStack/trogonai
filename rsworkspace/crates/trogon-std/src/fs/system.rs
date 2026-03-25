@@ -69,8 +69,7 @@ mod tests {
 
     #[test]
     fn write_creates_file_with_content() {
-        let path =
-            std::env::temp_dir().join(format!("trogon_fs_write_{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("trogon_fs_write_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let fs = SystemFs;
         fs.write(&path, "hello world").unwrap();
@@ -93,8 +92,7 @@ mod tests {
     #[test]
     fn open_append_creates_and_appends_to_file() {
         use std::io::Write;
-        let path =
-            std::env::temp_dir().join(format!("trogon_fs_append_{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("trogon_fs_append_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let fs = SystemFs;
         let mut f = fs.open_append(&path).unwrap();
