@@ -204,6 +204,39 @@ mod tests {
         assert!(msg.contains("File logging disabled"));
     }
 
+    /// Covers the `Err(e)` arm in `try_open_log_file` when `open_append` fails.
+    #[test]
+    fn try_open_log_file_reports_failed_to_create_when_open_append_fails() {
+        use std::io;
+        use std::path::Path;
+        use trogon_std::fs::CreateDirAll;
+
+        /// A filesystem stub whose `open_append` always returns an I/O error.
+        struct FailOpenFs(MemFs);
+
+        impl CreateDirAll for FailOpenFs {
+            fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+                self.0.create_dir_all(path)
+            }
+        }
+
+        impl trogon_std::fs::OpenAppendFile for FailOpenFs {
+            type Writer = <MemFs as trogon_std::fs::OpenAppendFile>::Writer;
+            fn open_append(&self, _path: &Path) -> io::Result<Self::Writer> {
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
+            }
+        }
+
+        let env = InMemoryEnv::new();
+        env.set("ACP_LOG_DIR", "/tmp/test-logs-failopen");
+        let fs = FailOpenFs(MemFs::new());
+
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+        assert!(writer.is_none());
+        let msg = info.unwrap();
+        assert!(msg.contains("Failed to create log file"), "got: {msg}");
+    }
+
     #[test]
     fn service_name_reexported() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");

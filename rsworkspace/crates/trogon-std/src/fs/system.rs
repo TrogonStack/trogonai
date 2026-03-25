@@ -66,4 +66,42 @@ mod tests {
         let fs = SystemFs;
         assert_eq!(read_config(&fs, Path::new("/nonexistent_12345")), "{}");
     }
+
+    #[test]
+    fn write_creates_file_with_content() {
+        let path = std::env::temp_dir().join("trogon_fs_write_test_xk9");
+        let _ = std::fs::remove_file(&path);
+        let fs = SystemFs;
+        fs.write(&path, "hello world").unwrap();
+        assert_eq!(fs.read_to_string(&path).unwrap(), "hello world");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn create_dir_all_creates_nested_directories() {
+        let base = std::env::temp_dir()
+            .join("trogon_fs_mkdir_xk9")
+            .join("nested");
+        let _ = std::fs::remove_dir_all(base.parent().unwrap());
+        let fs = SystemFs;
+        fs.create_dir_all(&base).unwrap();
+        assert!(base.is_dir());
+        let _ = std::fs::remove_dir_all(base.parent().unwrap());
+    }
+
+    #[test]
+    fn open_append_creates_and_appends_to_file() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join("trogon_fs_append_xk9");
+        let _ = std::fs::remove_file(&path);
+        let fs = SystemFs;
+        let mut f = fs.open_append(&path).unwrap();
+        f.write_all(b"hello").unwrap();
+        drop(f);
+        let mut f2 = fs.open_append(&path).unwrap();
+        f2.write_all(b" world").unwrap();
+        drop(f2);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
+        let _ = std::fs::remove_file(&path);
+    }
 }
