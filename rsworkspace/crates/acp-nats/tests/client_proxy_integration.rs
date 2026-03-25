@@ -602,7 +602,7 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
 }
 
 #[tokio::test]
-async fn ext_session_prompt_response_through_proxy_is_delivered() {
+async fn ext_session_prompt_response_through_proxy_does_not_panic() {
     let (_container, port) = start_nats().await;
     let nats1 = nats_client(port).await;
     let nats2 = nats_client(port).await;
