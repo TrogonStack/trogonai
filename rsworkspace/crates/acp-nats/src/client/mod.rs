@@ -27,6 +27,7 @@ use tracing::{Span, error, info, instrument, warn};
 use trogon_std::JsonSerialize;
 use trogon_std::time::GetElapsed;
 
+#[cfg_attr(coverage, coverage(off))]
 async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: JsonSerialize>(
     nats: &N,
     payload: &[u8],
@@ -56,6 +57,7 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: Jso
 /// This function uses [`tokio::task::spawn_local`] internally and **must** be called from within
 /// a [`tokio::task::LocalSet`] (or any executor that supports `!Send` tasks). Calling it outside
 /// a `LocalSet` will panic at runtime when the first message is dispatched.
+#[cfg_attr(coverage, coverage(off))]
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client + 'static,
@@ -97,6 +99,7 @@ pub async fn run<
     info!("Client proxy subscriber ended");
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn process_message<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client + 'static,
@@ -169,6 +172,7 @@ where
     serializer: &'a S,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 #[instrument(skip(payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,

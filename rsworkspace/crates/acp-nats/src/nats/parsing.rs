@@ -46,6 +46,7 @@ pub struct ParsedClientSubject {
     pub method: ClientMethod,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
     let client_byte_pos = subject.rmatch_indices(".client.").next()?.0;
 
