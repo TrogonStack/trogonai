@@ -1,17 +1,60 @@
 use agent_client_protocol::{
-    Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason,
+    ContentBlock, EmbeddedResourceResource, Error, ErrorCode, PromptRequest, PromptResponse,
+    SessionNotification, StopReason,
 };
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
 use crate::agent::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::prompt_event::{PromptPayload, UserContentBlock};
 use crate::session_id::AcpSessionId;
 
+
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
+
+/// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
+fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text(t) => Some(UserContentBlock::Text { text: t.text.clone() }),
+            ContentBlock::Image(img) => {
+                if let Some(url) = &img.uri {
+                    Some(UserContentBlock::ImageUrl { url: url.clone() })
+                } else {
+                    Some(UserContentBlock::Image {
+                        data: img.data.clone(),
+                        mime_type: img.mime_type.clone(),
+                    })
+                }
+            }
+            ContentBlock::ResourceLink(rl) => Some(UserContentBlock::ResourceLink {
+                uri: rl.uri.clone(),
+                name: rl.name.clone(),
+            }),
+            ContentBlock::Resource(er) => match &er.resource {
+                EmbeddedResourceResource::TextResourceContents(t) => {
+                    Some(UserContentBlock::Context {
+                        uri: t.uri.clone(),
+                        text: t.text.clone(),
+                    })
+                }
+                EmbeddedResourceResource::BlobResourceContents(b) => {
+                    Some(UserContentBlock::Image {
+                        data: b.blob.clone(),
+                        mime_type: b.mime_type.clone().unwrap_or_default(),
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
 
 #[instrument(
     name = "acp.session.prompt",
@@ -63,8 +106,14 @@ where
             )
         })?;
 
+    let prompt_payload = PromptPayload {
+        req_id: req_id.clone(),
+        session_id: args.session_id.to_string(),
+        content: content_blocks_to_user(&args.prompt),
+        user_message: String::new(),
+    };
     let payload_bytes = serializer
-        .to_vec(&args)
+        .to_vec(&prompt_payload)
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
     let mut headers = async_nats::HeaderMap::new();
@@ -98,8 +147,11 @@ where
                 let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
                     Ok(n) => n,
                     Err(e) => {
-                        warn!(error = %e, "bad notification payload; skipping");
-                        continue;
+                        bridge.metrics.record_error("prompt", "bad_event_payload");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            format!("bad event payload: {e}"),
+                        ));
                     }
                 };
                 if bridge.notification_sender.send(notification).await.is_err() {
@@ -109,6 +161,16 @@ where
             resp = timeout(op_timeout, response_sub.next()) => {
                 match resp {
                     Ok(Some(msg)) => {
+                        // Check for error envelope {"error": "..."} before parsing as PromptResponse.
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                            if let Some(err_msg) = env.get("error").and_then(|v| v.as_str()) {
+                                bridge.metrics.record_error("prompt", "runner_error");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    err_msg.to_string(),
+                                ));
+                            }
+                        }
                         match serde_json::from_slice::<PromptResponse>(&msg.payload) {
                             Ok(response) => break Ok(response),
                             Err(e) => {
@@ -141,6 +203,15 @@ where
             }
         }
     };
+
+    // Drain any notifications that arrived in the same batch as the response.
+    // Without this, tokio::select! might have picked the response branch before
+    // processing buffered notifications, leaving them silently dropped.
+    while let Some(Some(msg)) = notifications_sub.next().now_or_never() {
+        if let Ok(notification) = serde_json::from_slice::<SessionNotification>(&msg.payload) {
+            let _ = bridge.notification_sender.send(notification).await;
+        }
+    }
 
     bridge.metrics.record_request(
         "prompt",
@@ -401,4 +472,5 @@ mod tests {
             subjects
         );
     }
+
 }

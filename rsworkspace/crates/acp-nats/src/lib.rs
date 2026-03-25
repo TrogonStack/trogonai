@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 pub mod acp_prefix;
 pub mod agent;
 pub mod client;
@@ -8,7 +10,7 @@ pub mod ext_method_name;
 pub(crate) mod in_flight_slot_guard;
 pub(crate) mod jsonrpc;
 pub mod nats;
-pub(crate) mod pending_prompt_waiters;
+pub mod prompt_event;
 pub mod session_id;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
