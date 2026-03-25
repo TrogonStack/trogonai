@@ -26,7 +26,12 @@ use trogon_acp_runner::{RpcServer, SessionStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context, u16) {
+async fn start_nats() -> (
+    ContainerAsync<Nats>,
+    async_nats::Client,
+    jetstream::Context,
+    u16,
+) {
     let container = Nats::default()
         .with_cmd(["--jetstream"])
         .start()
@@ -101,7 +106,11 @@ async fn start_ws_server(
 }
 
 /// Read the next Text message from a WS stream, skipping non-Text frames.
-async fn next_text(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>) -> String {
+async fn next_text(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> String {
     loop {
         match ws.next().await {
             Some(Ok(Message::Text(t))) => return t.to_string(),
@@ -137,7 +146,9 @@ async fn e2e_initialize_returns_protocol_version_and_capabilities() {
         "must have protocolVersion: {text}"
     );
     assert!(
-        val["result"]["agentCapabilities"]["loadSession"].as_bool().unwrap_or(false),
+        val["result"]["agentCapabilities"]["loadSession"]
+            .as_bool()
+            .unwrap_or(false),
         "must advertise loadSession: {text}"
     );
 
@@ -205,7 +216,9 @@ async fn e2e_list_sessions_returns_created_sessions() {
 
     let val: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(val["id"], 5);
-    let sessions = val["result"]["sessions"].as_array().expect("must have sessions array");
+    let sessions = val["result"]["sessions"]
+        .as_array()
+        .expect("must have sessions array");
     assert_eq!(sessions.len(), 2, "expected 2 sessions: {text}");
 
     shutdown_tx.send(true).unwrap();
@@ -221,7 +234,8 @@ async fn e2e_authenticate_returns_ok() {
 
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
-    let req = r#"{"jsonrpc":"2.0","id":6,"method":"authenticate","params":{"methodId":"password"}}"#;
+    let req =
+        r#"{"jsonrpc":"2.0","id":6,"method":"authenticate","params":{"methodId":"password"}}"#;
     ws.send(Message::Text(req.into())).await.unwrap();
 
     let text = tokio::time::timeout(Duration::from_secs(10), next_text(&mut ws))
