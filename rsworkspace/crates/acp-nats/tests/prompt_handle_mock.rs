@@ -122,15 +122,17 @@ fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemCloc
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// When the second `subscribe()` call (for `session_cancelled`) fails, `handle`
+/// When the third `subscribe()` call (for `session_cancelled`) fails, `handle`
 /// must return an `InternalError` describing the failure.
 ///
 /// Covers: lines 69-73 in `agent/prompt.rs`
 #[tokio::test]
 async fn subscribe_cancel_notify_failure_returns_error() {
     let mock = MultiStreamMock::new();
-    // Inject only one stream → first subscribe (events) succeeds, second (cancel) fails.
-    let _events_tx = mock.inject();
+    // Inject two streams → first subscribe (notifications) and second (response) succeed,
+    // third subscribe (cancel) fails.
+    let _notifications_tx = mock.inject();
+    let _response_tx = mock.inject();
 
     let bridge = make_mock_bridge(mock);
     let err = bridge
@@ -151,11 +153,12 @@ async fn subscribe_cancel_notify_failure_returns_error() {
 #[tokio::test]
 async fn event_stream_closed_before_message_returns_error() {
     let mock = MultiStreamMock::new();
-    let events_tx = mock.inject(); // first subscribe → events stream
-    let _cancel_tx = mock.inject(); // second subscribe → cancel stream (never fires)
+    let notifications_tx = mock.inject(); // first subscribe → notifications stream
+    let _response_tx = mock.inject(); // second subscribe → response stream (never fires)
+    let _cancel_tx = mock.inject(); // third subscribe → cancel stream (never fires)
 
-    // Drop immediately so the events stream is already closed when polled.
-    drop(events_tx);
+    // Drop immediately so the notifications stream is already closed when polled.
+    drop(notifications_tx);
 
     let bridge = make_mock_bridge(mock);
     let err = bridge
@@ -182,8 +185,9 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 let mock = MultiStreamMock::new();
-                let _events_tx = mock.inject(); // first subscribe → never sends (no drop → no close)
-                let _cancel_tx = mock.inject(); // second subscribe → never fires
+                let _notifications_tx = mock.inject(); // first subscribe → never sends (no drop → no close)
+                let _response_tx = mock.inject(); // second subscribe → never sends (timeout path)
+                let _cancel_tx = mock.inject(); // third subscribe → never fires
                 let bridge = make_mock_bridge(mock);
                 bridge
                     .prompt(PromptRequest::new("session-123", vec![]))
