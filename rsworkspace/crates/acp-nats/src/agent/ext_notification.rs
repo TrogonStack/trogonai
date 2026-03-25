@@ -72,7 +72,9 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
 
 #[cfg(test)]
 mod tests {
-    use crate::test_helpers::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
+    use crate::agent::test_support::{
+        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics,
+    };
     use agent_client_protocol::{Agent, ErrorCode, ExtNotification};
     use serde_json::value::RawValue;
 
@@ -189,5 +191,4 @@ mod tests {
         );
         provider.shutdown().unwrap();
     }
-
 }

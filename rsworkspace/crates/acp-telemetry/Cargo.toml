@@ -7,16 +7,16 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-opentelemetry = "0.31.0"
-opentelemetry-appender-tracing = "0.31.1"
-opentelemetry-otlp = { version = "0.31.1", features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "logs", "metrics"] }
-tokio = { version = "1.50.0", features = ["macros", "signal"] }
-tracing = "0.1.44"
-tracing-opentelemetry = "0.32.1"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
-trogon-std = { path = "../trogon-std" }
+opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "logs", "metrics"] }
+tokio = { workspace = true, features = ["signal"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
+trogon-std = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.50.0", features = ["rt", "macros", "signal", "time"] }
-trogon-std = { path = "../trogon-std", features = ["test-support"] }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "time"] }
+trogon-std = { workspace = true, features = ["test-support"] }

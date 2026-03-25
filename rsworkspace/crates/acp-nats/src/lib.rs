@@ -13,8 +13,6 @@ pub mod prompt_event;
 pub mod session_id;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
-#[cfg(test)]
-pub(crate) mod test_helpers;
 
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;

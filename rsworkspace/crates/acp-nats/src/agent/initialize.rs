@@ -48,9 +48,11 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
+    use crate::agent::test_support::{
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+    };
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
-    use crate::test_helpers::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use agent_client_protocol::{
         Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion,
     };
@@ -122,7 +124,10 @@ mod tests {
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(has_request_metric(&finished_metrics, "initialize", true), "expected acp.requests with method=initialize, success=true");
+        assert!(
+            has_request_metric(&finished_metrics, "initialize", true),
+            "expected acp.requests with method=initialize, success=true"
+        );
         provider.shutdown().unwrap();
     }
 
@@ -137,7 +142,10 @@ mod tests {
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(has_request_metric(&finished_metrics, "initialize", false), "expected acp.requests with method=initialize, success=false");
+        assert!(
+            has_request_metric(&finished_metrics, "initialize", false),
+            "expected acp.requests with method=initialize, success=false"
+        );
         provider.shutdown().unwrap();
     }
 
@@ -158,5 +166,4 @@ mod tests {
         let result = bridge.initialize(request).await;
         assert!(result.is_ok());
     }
-
 }

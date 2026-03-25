@@ -39,8 +39,10 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
 
 #[cfg(test)]
 mod tests {
+    use crate::agent::test_support::{
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+    };
     use crate::error::AGENT_UNAVAILABLE;
-    use crate::test_helpers::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, ErrorCode};
 
     #[tokio::test]
@@ -91,7 +93,10 @@ mod tests {
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(has_request_metric(&finished_metrics, "authenticate", true), "expected acp.requests with method=authenticate, success=true");
+        assert!(
+            has_request_metric(&finished_metrics, "authenticate", true),
+            "expected acp.requests with method=authenticate, success=true"
+        );
         provider.shutdown().unwrap();
     }
 
@@ -104,7 +109,10 @@ mod tests {
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(has_request_metric(&finished_metrics, "authenticate", false), "expected acp.requests with method=authenticate, success=false");
+        assert!(
+            has_request_metric(&finished_metrics, "authenticate", false),
+            "expected acp.requests with method=authenticate, success=false"
+        );
         provider.shutdown().unwrap();
     }
 }

@@ -51,8 +51,10 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
 
 #[cfg(test)]
 mod tests {
+    use crate::agent::test_support::{
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+    };
     use crate::error::AGENT_UNAVAILABLE;
-    use crate::test_helpers::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use agent_client_protocol::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
 
     #[tokio::test]
@@ -133,5 +135,4 @@ mod tests {
         );
         provider.shutdown().unwrap();
     }
-
 }

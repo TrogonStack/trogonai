@@ -83,8 +83,10 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
+    use crate::agent::test_support::{
+        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics,
+    };
     use crate::config::Config;
-    use crate::test_helpers::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_std::time::MockClock;
