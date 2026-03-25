@@ -87,9 +87,7 @@ impl PromptEventConverter {
                 (vec![], Some(PromptOutcome::Done { stop_reason }))
             }
 
-            PromptEvent::Error { message } => {
-                (vec![], Some(PromptOutcome::Error { message }))
-            }
+            PromptEvent::Error { message } => (vec![], Some(PromptOutcome::Error { message })),
 
             PromptEvent::UsageUpdate {
                 input_tokens,
@@ -144,7 +142,8 @@ impl PromptEventConverter {
                     return (vec![notif], None);
                 }
 
-                self.tool_cache.insert(id.clone(), (name.clone(), input.clone()));
+                self.tool_cache
+                    .insert(id.clone(), (name.clone(), input.clone()));
 
                 let kind = tool_kind_for(&name);
                 let locations = tool_locations_from_input(&name, &input);
@@ -184,14 +183,23 @@ impl PromptEventConverter {
                     (vec![], vec![])
                 };
 
-                let meta = self.tool_cache.get(&id).and_then(|(name, _)| {
-                    build_tool_call_meta(name, None)
-                });
+                let meta = self
+                    .tool_cache
+                    .get(&id)
+                    .and_then(|(name, _)| build_tool_call_meta(name, None));
 
                 let fields = ToolCallUpdateFields::new()
                     .status(status)
-                    .content(if content.is_empty() { None } else { Some(content) })
-                    .locations(if locations.is_empty() { None } else { Some(locations) })
+                    .content(if content.is_empty() {
+                        None
+                    } else {
+                        Some(content)
+                    })
+                    .locations(if locations.is_empty() {
+                        None
+                    } else {
+                        Some(locations)
+                    })
                     .raw_output(serde_json::Value::String(output));
 
                 let update = ToolCallUpdate::new(ToolCallId::new(id), fields).meta(meta);
@@ -287,7 +295,11 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
             Some(PlanEntry::new(content, priority, status))
         })
         .collect();
-    if entries.is_empty() { None } else { Some(entries) }
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
 }
 
 fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {

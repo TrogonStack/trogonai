@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::prompt_converter::PromptEventConverter;
 use acp_nats::nats::agent as subjects;
 use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
-use crate::prompt_converter::PromptEventConverter;
 use agent_client_protocol::{PromptResponse, SessionNotification, StopReason};
 use async_nats::jetstream;
 use bytes::Bytes;
@@ -171,8 +171,11 @@ impl Runner {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_prompt(&self, payload: PromptPayload, events_subject: String) {
-        let response_subject =
-            subjects::ext_session_prompt_response(&self.prefix, &payload.session_id, &payload.req_id);
+        let response_subject = subjects::ext_session_prompt_response(
+            &self.prefix,
+            &payload.session_id,
+            &payload.req_id,
+        );
         let mut converter = PromptEventConverter::new(payload.session_id.clone());
 
         // Subscribe to the cancel subject for this session so we can abort mid-run
@@ -419,7 +422,8 @@ impl Runner {
 
         if cancelled {
             // Bridge already returns Cancelled via session_cancelled; publish response for safety.
-            self.publish_prompt_response(&response_subject, StopReason::Cancelled).await;
+            self.publish_prompt_response(&response_subject, StopReason::Cancelled)
+                .await;
             return;
         }
 
@@ -429,15 +433,19 @@ impl Runner {
             if let Err(e) = self.store.save(&payload.session_id, &state).await {
                 warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
             }
-            self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
+            self.publish_prompt_response(&response_subject, StopReason::EndTurn)
+                .await;
         }
     }
 
     /// Fallback path when we cannot subscribe to the cancel subject.
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_prompt_no_cancel(&self, payload: PromptPayload, events_subject: String) {
-        let response_subject =
-            subjects::ext_session_prompt_response(&self.prefix, &payload.session_id, &payload.req_id);
+        let response_subject = subjects::ext_session_prompt_response(
+            &self.prefix,
+            &payload.session_id,
+            &payload.req_id,
+        );
         let mut converter = PromptEventConverter::new(payload.session_id.clone());
 
         let mut state = match self.store.load(&payload.session_id).await {
@@ -585,7 +593,8 @@ impl Runner {
                         exit_code,
                         signal,
                     };
-                    self.publish_via_converter(&mut converter, &events_subject, finished_event).await;
+                    self.publish_via_converter(&mut converter, &events_subject, finished_event)
+                        .await;
                     if is_enter_plan {
                         state.mode = "plan".to_string();
                         self.publish_via_converter(
@@ -620,7 +629,8 @@ impl Runner {
                     }
                 }
             };
-            self.publish_via_converter(&mut converter, &events_subject, prompt_event).await;
+            self.publish_via_converter(&mut converter, &events_subject, prompt_event)
+                .await;
         }
 
         match agent_handle.await {
@@ -630,7 +640,8 @@ impl Runner {
                 if let Err(e) = self.store.save(&payload.session_id, &state).await {
                     warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
                 }
-                self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
+                self.publish_prompt_response(&response_subject, StopReason::EndTurn)
+                    .await;
             }
             Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
@@ -647,7 +658,8 @@ impl Runner {
                     )
                     .await;
                 }
-                self.publish_prompt_response(&response_subject, StopReason::MaxTurnRequests).await;
+                self.publish_prompt_response(&response_subject, StopReason::MaxTurnRequests)
+                    .await;
             }
             Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
@@ -664,10 +676,12 @@ impl Runner {
                     )
                     .await;
                 }
-                self.publish_prompt_response(&response_subject, StopReason::MaxTokens).await;
+                self.publish_prompt_response(&response_subject, StopReason::MaxTokens)
+                    .await;
             }
             _ => {
-                self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
+                self.publish_prompt_response(&response_subject, StopReason::EndTurn)
+                    .await;
             }
         }
     }
@@ -1219,10 +1233,7 @@ mod tests {
                 .expect("timeout waiting for error envelope")
                 .expect("no message received");
             let envelope: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-            assert_eq!(
-                envelope["error"].as_str().unwrap(),
-                "something went wrong"
-            );
+            assert_eq!(envelope["error"].as_str().unwrap(), "something went wrong");
         }
 
         #[tokio::test(flavor = "current_thread")]
