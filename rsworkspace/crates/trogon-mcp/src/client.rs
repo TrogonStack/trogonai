@@ -168,3 +168,42 @@ impl McpClient {
             .map_err(|e| format!("MCP parse error: {e}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::safe_url;
+
+    #[test]
+    fn safe_url_strips_path_query_fragment() {
+        assert_eq!(
+            safe_url("http://mcp.example.com/mcp?token=secret#frag"),
+            "http://mcp.example.com"
+        );
+    }
+
+    #[test]
+    fn safe_url_strips_userinfo() {
+        assert_eq!(
+            safe_url("http://user:pass@mcp.example.com/mcp"),
+            "http://mcp.example.com"
+        );
+    }
+
+    #[test]
+    fn safe_url_preserves_port() {
+        assert_eq!(
+            safe_url("http://mcp.example.com:8080/mcp"),
+            "http://mcp.example.com:8080"
+        );
+    }
+
+    #[test]
+    fn safe_url_no_scheme_returns_original() {
+        assert_eq!(safe_url("not-a-url"), "not-a-url");
+    }
+
+    #[test]
+    fn safe_url_plain_host_no_path() {
+        assert_eq!(safe_url("http://mcp.example.com"), "http://mcp.example.com");
+    }
+}
