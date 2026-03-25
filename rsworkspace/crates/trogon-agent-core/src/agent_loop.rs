@@ -817,6 +817,7 @@ mod tests {
             .build()
             .unwrap_err();
         let agent_err = AgentError::Http(err);
+        assert!(agent_err.to_string().contains("HTTP error"));
         assert!(std::error::Error::source(&agent_err).is_some());
     }
 
