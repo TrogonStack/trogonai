@@ -5,7 +5,7 @@
 //! those requests, implementing the actual agent logic for:
 //!   initialize · authenticate · new_session · load_session
 //!   set_session_mode · set_session_model · set_session_config_option
-//!   list_sessions · fork_session · resume_session
+//!   list_sessions · fork_session · resume_session · close_session
 //!
 //! `prompt` / `cancel` are handled by `runner.rs` via the streaming pub/sub
 //! pattern (no request-reply there).
@@ -14,14 +14,15 @@ use std::sync::Arc;
 
 use acp_nats::nats::{ExtSessionReady, agent as subjects};
 use agent_client_protocol::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateResponse, ForkSessionRequest,
-    ForkSessionResponse, Implementation, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest,
-    NewSessionResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
-    SessionCapabilities, SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities,
-    SessionMode, SessionModeState, SessionModelState, SessionResumeCapabilities,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateResponse, CloseSessionRequest,
+    CloseSessionResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, ModelInfo, NewSessionRequest, NewSessionResponse, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionForkCapabilities,
+    SessionId, SessionInfo, SessionListCapabilities, SessionMode, SessionModeState,
+    SessionModelState, SessionResumeCapabilities, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse,
 };
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
@@ -163,6 +164,10 @@ impl RpcServer {
             .nats
             .subscribe(format!("{}.*.agent.session.resume", prefix))
             .await?;
+        let mut close_session_sub = self
+            .nats
+            .subscribe(format!("{}.*.agent.session.close", prefix))
+            .await?;
 
         info!(prefix = %prefix, "rpc_server: listening for ACP methods");
 
@@ -207,6 +212,10 @@ impl RpcServer {
                 msg = resume_session_sub.next() => {
                     let Some(msg) = msg else { break; };
                     self.handle_resume_session(msg).await;
+                }
+                msg = close_session_sub.next() => {
+                    let Some(msg) = msg else { break; };
+                    self.handle_close_session(msg).await;
                 }
             }
         }
@@ -497,5 +506,28 @@ impl RpcServer {
         // Session history lives in KV and is loaded on the next prompt.
         self.reply(&msg, &ResumeSessionResponse::new()).await;
         self.publish_session_ready(&session_id).await;
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn handle_close_session(&self, msg: async_nats::Message) {
+        let request: CloseSessionRequest = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "rpc: bad close_session payload");
+                return;
+            }
+        };
+        let session_id = request.session_id.to_string();
+
+        // Cancel any running prompt for this session.
+        let cancel_subject = subjects::session_cancel(&self.prefix, &session_id);
+        let _ = self.nats.publish(cancel_subject, bytes::Bytes::new()).await;
+
+        // Remove session state from the store.
+        if let Err(e) = self.store.delete(&session_id).await {
+            warn!(session_id = %session_id, error = %e, "rpc: failed to delete session");
+        }
+
+        self.reply(&msg, &CloseSessionResponse::new()).await;
     }
 }
