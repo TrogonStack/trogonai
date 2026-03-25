@@ -38,7 +38,6 @@ pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
-    pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
 }
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
@@ -57,7 +56,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
             config,
             metrics: Metrics::new(meter),
             notification_sender,
-            background_tasks: RefCell::new(Vec::new()),
         }
     }
 
