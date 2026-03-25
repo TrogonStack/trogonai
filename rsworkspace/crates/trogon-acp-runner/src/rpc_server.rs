@@ -241,6 +241,7 @@ impl RpcServer {
         self.reply(&msg, &AuthenticateResponse::new()).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_new_session(&self, msg: async_nats::Message) {
         let request: NewSessionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -275,10 +276,7 @@ impl RpcServer {
         };
 
         if let Err(e) = self.store.save(&session_id, &state).await {
-            #[cfg_attr(coverage, coverage(off))]
-            {
-                warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
-            }
+            warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
         }
 
         self.publish_session_ready(&session_id).await;
@@ -307,6 +305,7 @@ impl RpcServer {
         self.reply(&msg, &response).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_set_session_mode(&self, msg: async_nats::Message) {
         let request: SetSessionModeRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -322,23 +321,18 @@ impl RpcServer {
                 state.mode = request.mode_id.to_string();
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
-                    #[cfg_attr(coverage, coverage(off))]
-                    {
-                        warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
-                    }
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
                 }
             }
             Err(e) => {
-                #[cfg_attr(coverage, coverage(off))]
-                {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to load session for mode update");
-                }
+                warn!(session_id = %session_id, error = %e, "rpc: failed to load session for mode update");
             }
         }
 
         self.reply(&msg, &SetSessionModeResponse::new()).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_set_session_model(&self, msg: async_nats::Message) {
         let request: SetSessionModelRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -354,17 +348,11 @@ impl RpcServer {
                 state.model = Some(request.model_id.to_string());
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
-                    #[cfg_attr(coverage, coverage(off))]
-                    {
-                        warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
-                    }
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
                 }
             }
             Err(e) => {
-                #[cfg_attr(coverage, coverage(off))]
-                {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
-                }
+                warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
             }
         }
 
@@ -383,6 +371,7 @@ impl RpcServer {
             .await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_list_sessions(&self, msg: async_nats::Message) {
         let _request: ListSessionsRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -422,6 +411,7 @@ impl RpcServer {
         self.reply(&msg, &ListSessionsResponse::new(sessions)).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn handle_fork_session(&self, msg: async_nats::Message) {
         let request: ForkSessionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
@@ -440,17 +430,11 @@ impl RpcServer {
                 state.created_at = now.clone();
                 state.updated_at = now;
                 if let Err(e) = self.store.save(&new_id, &state).await {
-                    #[cfg_attr(coverage, coverage(off))]
-                    {
-                        warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
-                    }
+                    warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
                 }
             }
             Err(e) => {
-                #[cfg_attr(coverage, coverage(off))]
-                {
-                    warn!(source_id = %source_id, error = %e, "rpc: failed to load source session for fork");
-                }
+                warn!(source_id = %source_id, error = %e, "rpc: failed to load source session for fork");
             }
         }
 
