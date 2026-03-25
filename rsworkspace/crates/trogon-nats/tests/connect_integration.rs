@@ -15,10 +15,11 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_nats::auth::{NatsAuth, NatsConfig};
 use trogon_nats::connect::{ConnectError, connect};
 
-async fn start_nats() -> Result<(ContainerAsync<Nats>, u16), Box<dyn std::error::Error>> {
+async fn start_nats() -> Result<(ContainerAsync<Nats>, String, u16), Box<dyn std::error::Error>> {
     let container = Nats::default().start().await?;
+    let host = container.get_host().await?.to_string();
     let port = container.get_host_port_ipv4(4222).await?;
-    Ok((container, port))
+    Ok((container, host, port))
 }
 
 /// Covers the `NatsAuth::None` arm (lines 123-128) and the success branch (130-138).
@@ -26,9 +27,9 @@ async fn start_nats() -> Result<(ContainerAsync<Nats>, u16), Box<dyn std::error:
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn connect_with_no_auth_succeeds() -> Result<(), Box<dyn std::error::Error>> {
-    let (_container, port) = start_nats().await?;
+    let (_container, host, port) = start_nats().await?;
 
-    let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
+    let config = NatsConfig::new(vec![format!("nats://{host}:{port}")], NatsAuth::None);
 
     connect(&config, Duration::from_secs(10))
         .await
@@ -42,10 +43,10 @@ async fn connect_with_no_auth_succeeds() -> Result<(), Box<dyn std::error::Error
 async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn std::error::Error>>
 {
     // An open NATS server accepts any token — the token is just passed through.
-    let (_container, port) = start_nats().await?;
+    let (_container, host, port) = start_nats().await?;
 
     let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
+        vec![format!("nats://{host}:{port}")],
         NatsAuth::Token("any-token".to_string()),
     );
 
@@ -60,10 +61,10 @@ async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn
 #[ignore = "requires Docker"]
 async fn connect_with_user_password_succeeds_on_open_server()
 -> Result<(), Box<dyn std::error::Error>> {
-    let (_container, port) = start_nats().await?;
+    let (_container, host, port) = start_nats().await?;
 
     let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
+        vec![format!("nats://{host}:{port}")],
         NatsAuth::UserPassword {
             user: "user".to_string(),
             password: "pass".to_string(),
@@ -84,17 +85,15 @@ async fn connect_with_user_password_succeeds_on_open_server()
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn connect_with_nkey_auth_on_open_server() -> Result<(), Box<dyn std::error::Error>> {
-    let (_container, port) = start_nats().await?;
+    let (_container, host, port) = start_nats().await?;
 
-    // A valid NKey user seed (base32-encoded, 58-char canonical format).
-    // On an open server the key is not validated — the test simply exercises
-    // the `NatsAuth::NKey` branch in `connect()`.
-    let seed = "SUACSSL3UAHUDXKFSNVUZRF5UHPMWZ6BFDTJ7M6USDRCRBZLYKI4LZPFZFR".to_string();
+    // A valid NKey user seed (base32-encoded, 58-char canonical format,
+    // starts with "SU"). On an open server the key is not validated against
+    // a registered user — the test simply exercises the `NatsAuth::NKey`
+    // branch in `connect()`.
+    let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY".to_string();
 
-    let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
-        NatsAuth::NKey(seed),
-    );
+    let config = NatsConfig::new(vec![format!("nats://{host}:{port}")], NatsAuth::NKey(seed));
 
     let result = connect(&config, Duration::from_secs(10)).await;
     assert!(
@@ -134,10 +133,11 @@ async fn connect_with_wrong_token_returns_authorization_violation()
         .with_cmd(["--auth", "correct-token"])
         .start()
         .await?;
+    let host = container.get_host().await?.to_string();
     let port = container.get_host_port_ipv4(4222).await?;
 
     let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
+        vec![format!("nats://{host}:{port}")],
         NatsAuth::Token("wrong-token".to_string()),
     );
 
@@ -160,10 +160,11 @@ async fn connect_with_correct_token_succeeds() -> Result<(), Box<dyn std::error:
         .with_cmd(["--auth", "correct-token"])
         .start()
         .await?;
+    let host = container.get_host().await?.to_string();
     let port = container.get_host_port_ipv4(4222).await?;
 
     let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
+        vec![format!("nats://{host}:{port}")],
         NatsAuth::Token("correct-token".to_string()),
     );
 
@@ -190,7 +191,7 @@ async fn connect_to_unreachable_server_returns_ok_with_background_retry() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
+    let config = NatsConfig::new(vec![format!("nats://{host}:{port}")], NatsAuth::None);
 
     // connect() must return within a few seconds (INITIAL_CONNECT_CHECK_SECS + margin).
     let result = tokio::time::timeout(
