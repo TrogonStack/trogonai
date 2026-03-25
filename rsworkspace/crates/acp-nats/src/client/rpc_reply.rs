@@ -98,4 +98,48 @@ mod tests {
         assert_eq!(parsed["id"], serde_json::Value::Null);
         assert_eq!(parsed["error"]["code"], -32603);
     }
+
+    /// Covers the `warn!` branch when `publish_with_headers` fails (lines 37-40).
+    #[tokio::test]
+    async fn publish_reply_publish_failure_does_not_panic() {
+        use trogon_nats::AdvancedMockNatsClient;
+
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+
+        // Should not panic even though publish fails — only logs a warning.
+        publish_reply(
+            &nats,
+            "some.reply",
+            bytes::Bytes::from_static(b"{\"result\":null}"),
+            CONTENT_TYPE_JSON,
+            "test publish failure",
+        )
+        .await;
+
+        // Publish failed, so nothing was recorded.
+        assert!(nats.published_messages().is_empty());
+    }
+
+    /// Covers the `warn!` branch when `flush` fails (lines 42-44).
+    #[tokio::test]
+    async fn publish_reply_flush_failure_does_not_panic() {
+        use trogon_nats::AdvancedMockNatsClient;
+
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_flush();
+
+        // Publish succeeds, flush fails — should not panic, only logs a warning.
+        publish_reply(
+            &nats,
+            "some.reply",
+            bytes::Bytes::from_static(b"{\"result\":null}"),
+            CONTENT_TYPE_JSON,
+            "test flush failure",
+        )
+        .await;
+
+        // Publish succeeded even though flush failed.
+        assert_eq!(nats.published_messages(), vec!["some.reply"]);
+    }
 }
