@@ -222,7 +222,7 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
 
             // Must be either an error response or a stop_reason response.
             assert!(
-                resp.get("stop_reason").is_some() || resp.get("error").is_some(),
+                resp.get("stopReason").is_some() || resp.get("error").is_some(),
                 "expected stop_reason or error in response; got: {resp}"
             );
         })
@@ -304,7 +304,7 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
                 "expected notification containing 'Great response!'"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn; got: {resp}"
             );
@@ -466,7 +466,7 @@ async fn runner_skips_invalid_prompt_payload() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert!(
-                resp.get("stop_reason").is_some(),
+                resp.get("stopReason").is_some(),
                 "expected stop_reason in response after skipping bad payload; got: {resp}"
             );
         })
@@ -538,7 +538,7 @@ async fn runner_publishes_done_max_tokens() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("max_tokens"),
                 "expected stop_reason=max_tokens; got: {resp}"
             );
@@ -612,7 +612,7 @@ async fn runner_publishes_done_max_turn_requests() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("max_turn_requests"),
                 "expected stop_reason=max_turn_requests; got: {resp}"
             );
@@ -707,7 +707,7 @@ async fn runner_publishes_tool_call_events() {
                 "expected ToolCallUpdate notification"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn after tool call; got: {resp}"
             );
@@ -805,7 +805,7 @@ async fn runner_tool_call_allowed_via_permission_channel() {
                 "expected notification containing 'unknown_tool' after permission approved; notifs: {notifs:?}"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn; got: {resp}"
             );
@@ -898,7 +898,7 @@ async fn runner_tool_call_denied_via_permission_channel() {
 
             // The agent sends a denial tool-result and Anthropic returns end_turn
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn after permission denial; got: {resp}"
             );
@@ -1039,7 +1039,7 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
                 "expected notification containing 'my_srv__my_tool'; notifs: {notifs:?}"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn after MCP tool call; got: {resp}"
             );
@@ -1122,7 +1122,7 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("cancelled"),
                 "expected stop_reason=cancelled; got: {resp}"
             );
@@ -1204,7 +1204,7 @@ async fn runner_uses_gateway_config_base_url_and_token() {
                 "expected notification with gateway response; notifs: {notifs:?}"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn via gateway; got: {resp}"
             );
@@ -1293,7 +1293,7 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
                 let (_notifs, resp) =
                     collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
                 assert!(
-                    resp.get("stop_reason").is_some(),
+                    resp.get("stopReason").is_some(),
                     "expected stop_reason in response for prompt #{i} (req_id={}); got: {resp}",
                     req_ids[i]
                 );
@@ -1380,14 +1380,14 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
             let (_notifs_a, resp_a_val) =
                 collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
             assert!(
-                resp_a_val.get("stop_reason").is_some(),
+                resp_a_val.get("stopReason").is_some(),
                 "expected stop_reason for session_a; got: {resp_a_val}"
             );
 
             let (_notifs_b, resp_b_val) =
                 collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
             assert!(
-                resp_b_val.get("stop_reason").is_some(),
+                resp_b_val.get("stopReason").is_some(),
                 "expected stop_reason for session_b; got: {resp_b_val}"
             );
         })
@@ -1467,7 +1467,7 @@ async fn runner_processes_prompt_with_context_content_block() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn after Context content block; got: {resp}"
             );
@@ -1546,7 +1546,7 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn after Image content block; got: {resp}"
             );
@@ -1630,7 +1630,7 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             let (_notifs_1, resp_1) =
                 collect_notifs_and_response(&mut events_sub_1, &mut resp_sub_1, 15).await;
             assert_eq!(
-                resp_1["stop_reason"].as_str(),
+                resp_1["stopReason"].as_str(),
                 Some("end_turn"),
                 "first prompt must complete with stop_reason=end_turn; got: {resp_1}"
             );
@@ -1667,7 +1667,7 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             let (_notifs_2, resp_2) =
                 collect_notifs_and_response(&mut events_sub_2, &mut resp_sub_2, 15).await;
             assert_eq!(
-                resp_2["stop_reason"].as_str(),
+                resp_2["stopReason"].as_str(),
                 Some("end_turn"),
                 "second prompt must complete with stop_reason=end_turn; got: {resp_2}"
             );
@@ -1780,7 +1780,7 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
                 "expected notification containing 'tu_parent_001'; notifs: {notifs:?}"
             );
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn; got: {resp}"
             );
@@ -1881,7 +1881,7 @@ async fn runner_cancel_during_tool_execution_completes() {
 
             // Should complete with some stop_reason (cancelled or end_turn depending on timing)
             assert!(
-                resp.get("stop_reason").is_some(),
+                resp.get("stopReason").is_some(),
                 "runner must publish a stop_reason after cancel during tool; got: {resp}"
             );
         })
@@ -1956,7 +1956,7 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
                 collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
-                resp["stop_reason"].as_str(),
+                resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected stop_reason=end_turn; got: {resp}"
             );
