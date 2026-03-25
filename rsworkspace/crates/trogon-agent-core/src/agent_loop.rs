@@ -821,6 +821,11 @@ mod tests {
                 .contains("pause")
         );
         assert!(AgentError::MaxTokens.to_string().contains("max_tokens"));
+        let http_err = reqwest::Client::new()
+            .get("not-a-url:///")
+            .build()
+            .unwrap_err();
+        assert!(AgentError::Http(http_err).to_string().contains("HTTP error"));
     }
 
     #[test]
