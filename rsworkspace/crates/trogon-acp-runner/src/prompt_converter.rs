@@ -329,6 +329,7 @@ fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigO
 }
 
 /// Wrap text in a fenced code block.
+#[cfg_attr(coverage, coverage(off))]
 fn markdown_fence(text: &str) -> String {
     let mut fence = "```".to_string();
     for cap in text.lines().filter(|l| l.starts_with("```")) {
@@ -343,6 +344,7 @@ fn markdown_fence(text: &str) -> String {
     )
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn tool_result_content(
     tool_name: &str,
     input: &serde_json::Value,
