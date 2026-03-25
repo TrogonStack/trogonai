@@ -1,5 +1,5 @@
 use crate::auth::{NatsAuth, NatsConfig};
-use async_nats::{Client, ClientError, ConnectOptions, Event};
+use async_nats::{Client, ClientError, ConnectOptions, Event, ServerError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -103,6 +103,7 @@ fn apply_reconnect_options(
             async move {
                 let signal: Option<bool> = match &event {
                     Event::Connected => Some(true),
+                    Event::ServerError(ServerError::AuthorizationViolation) => Some(false),
                     Event::ClientError(ClientError::Other(msg))
                         if msg.contains("authorization violation") =>
                     {
