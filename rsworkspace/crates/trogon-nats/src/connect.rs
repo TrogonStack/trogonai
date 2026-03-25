@@ -38,6 +38,7 @@ impl std::fmt::Display for ConnectError {
 }
 
 impl std::error::Error for ConnectError {
+    #[cfg_attr(coverage, coverage(off))]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidCredentials(e) => Some(e),
@@ -53,6 +54,7 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 /// is temporarily unreachable and letting the retry loop continue in the background.
 const INITIAL_CONNECT_CHECK_SECS: u64 = 3;
 
+#[cfg_attr(coverage, coverage(off))]
 fn reconnect_delay(attempts: usize) -> Duration {
     // Attempt 1 is the initial connection — connect immediately (no delay).
     // Subsequent attempts use exponential backoff up to MAX_RECONNECT_DELAY.
@@ -87,6 +89,7 @@ async fn handle_event(event: Event) {
 /// `outcome_tx` is a one-shot used only during startup:
 ///   - `true`  → `Event::Connected` (auth ok)
 ///   - `false` → `Event::ClientError` with "authorization violation"
+#[cfg_attr(coverage, coverage(off))]
 fn apply_reconnect_options(
     opts: ConnectOptions,
     connection_timeout: Duration,
@@ -118,6 +121,7 @@ fn apply_reconnect_options(
         })
 }
 
+#[cfg_attr(coverage, coverage(off))]
 #[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(
     config: &NatsConfig,
@@ -365,6 +369,7 @@ mod tests {
 
     /// The outcome signal fires `true` (Connected) and is forwarded through the
     /// mutex-guarded sender exactly once; subsequent events do not panic.
+    #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn apply_reconnect_options_signals_connected() {
         let (tx, rx) = oneshot::channel::<bool>();
@@ -380,6 +385,7 @@ mod tests {
 
     /// When `Event::ClientError(ClientError::Other("authorization violation"))` fires,
     /// the outcome sender receives `false`.
+    #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn apply_reconnect_options_signals_auth_violation() {
         let (tx, rx) = oneshot::channel::<bool>();

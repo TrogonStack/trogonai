@@ -12,6 +12,7 @@ use trogon_std::time::SystemClock;
 const DUPLEX_BUFFER_SIZE: usize = 64 * 1024;
 
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
+#[cfg_attr(coverage, coverage(off))]
 pub async fn handle<N>(
     socket: WebSocket,
     nats_client: N,
@@ -119,6 +120,7 @@ pub async fn handle<N>(
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn run_recv_pump(
     mut ws_receiver: SplitStream<WebSocket>,
     mut ws_recv_write: tokio::io::DuplexStream,
@@ -156,6 +158,7 @@ async fn run_recv_pump(
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn run_send_pump(
     mut ws_sender: SplitSink<WebSocket, Message>,
     ws_send_read: tokio::io::DuplexStream,

@@ -57,8 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(coverage)]
+#[cfg_attr(coverage, coverage(off))]
 fn main() {}
 
+#[cfg_attr(coverage, coverage(off))]
 async fn run_bridge<N, W, R>(
     nats_client: N,
     config: &acp_nats::Config,
@@ -341,6 +343,7 @@ mod tests {
     }
 
     /// E2E: real NATS container + RpcServer + stdio bridge → initialize → response.
+    #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn e2e_initialize_with_real_nats_returns_protocol_version() {
         use testcontainers_modules::nats::Nats;

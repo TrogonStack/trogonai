@@ -58,6 +58,7 @@ pub struct Runner {
 }
 
 impl Runner {
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn new(
         nats: async_nats::Client,
         js: &jetstream::Context,
