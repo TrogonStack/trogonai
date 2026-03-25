@@ -1,5 +1,4 @@
 pub(crate) mod ext;
-pub(crate) mod ext_session_prompt_response;
 pub(crate) mod fs_read_text_file;
 pub(crate) mod fs_write_text_file;
 pub(crate) mod request_permission;
@@ -225,15 +224,6 @@ async fn dispatch_client_method<
         }
         ClientMethod::SessionUpdate => {
             session_update::handle(&payload, ctx.client, reply.is_some()).await;
-        }
-        ClientMethod::ExtSessionPromptResponse => {
-            ext_session_prompt_response::handle(
-                parsed.session_id.as_str(),
-                &payload,
-                reply.as_deref(),
-                ctx.bridge,
-            )
-            .await;
         }
         ClientMethod::TerminalCreate => {
             terminal_create::handle(

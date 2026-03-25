@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 pub mod acp_prefix;
 pub mod agent;
 pub mod client;

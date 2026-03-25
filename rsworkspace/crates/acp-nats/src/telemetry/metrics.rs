@@ -3,7 +3,7 @@ use opentelemetry::metrics::{Counter, Histogram, Meter};
 
 #[derive(Clone)]
 pub struct Metrics {
-    requests: Counter<u64>,
+    requests_total: Counter<u64>,
     request_duration: Histogram<f64>,
     errors: Counter<u64>,
 }
@@ -11,7 +11,7 @@ pub struct Metrics {
 impl Metrics {
     pub fn new(meter: &Meter) -> Self {
         Self {
-            requests: meter
+            requests_total: meter
                 .u64_counter("acp.requests")
                 .with_description("Total number of ACP requests")
                 .build(),
@@ -32,7 +32,7 @@ impl Metrics {
             KeyValue::new("method", method),
             KeyValue::new("success", success),
         ];
-        self.requests.add(1, attrs);
+        self.requests_total.add(1, attrs);
         self.request_duration.record(duration, attrs);
     }
 
