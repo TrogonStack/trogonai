@@ -825,7 +825,11 @@ mod tests {
             .get("not-a-url:///")
             .build()
             .unwrap_err();
-        assert!(AgentError::Http(http_err).to_string().contains("HTTP error"));
+        assert!(
+            AgentError::Http(http_err)
+                .to_string()
+                .contains("HTTP error")
+        );
     }
 
     #[test]
