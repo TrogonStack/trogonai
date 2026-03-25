@@ -58,8 +58,8 @@ async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn
 /// Covers the `NatsAuth::UserPassword` arm (lines 107-114).
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn connect_with_user_password_succeeds_on_open_server(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn connect_with_user_password_succeeds_on_open_server()
+-> Result<(), Box<dyn std::error::Error>> {
     let (_container, port) = start_nats().await?;
 
     let config = NatsConfig::new(
@@ -128,8 +128,8 @@ async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
 /// `ConnectError::AuthorizationViolation` immediately instead of retrying forever.
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn connect_with_wrong_token_returns_authorization_violation(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn connect_with_wrong_token_returns_authorization_violation()
+-> Result<(), Box<dyn std::error::Error>> {
     let container = Nats::default()
         .with_cmd(["--auth", "correct-token"])
         .start()
