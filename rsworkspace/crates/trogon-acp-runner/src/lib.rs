@@ -1,6 +1,7 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod permission;
+pub mod prompt_converter;
 pub mod rpc_server;
 pub mod runner;
 pub mod session_store;

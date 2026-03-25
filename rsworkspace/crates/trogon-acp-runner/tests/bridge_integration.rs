@@ -3,7 +3,7 @@
 //! Requires Docker (uses testcontainers to spin up a NATS server).
 //!
 //! Run with:
-//!   cargo test -p acp-nats --test bridge_integration
+//!   cargo test -p trogon-acp-runner --test bridge_integration
 
 use std::collections::HashSet;
 use std::sync::{
@@ -12,7 +12,8 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use acp_nats::prompt_event::{PromptEvent, PromptEventConverter, PromptOutcome};
+use acp_nats::prompt_event::PromptEvent;
+use trogon_acp_runner::prompt_converter::{PromptEventConverter, PromptOutcome};
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,

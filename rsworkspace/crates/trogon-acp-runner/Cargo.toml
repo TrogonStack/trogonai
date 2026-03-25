@@ -8,7 +8,17 @@ workspace = true
 
 [dependencies]
 acp-nats      = { path = "../acp-nats" }
-agent-client-protocol = { version = "0.10.2", features = ["unstable_session_fork", "unstable_session_resume"] }
+agent-client-protocol = { version = "0.10.2", features = [
+    "unstable_auth_methods",
+    "unstable_boolean_config",
+    "unstable_cancel_request",
+    "unstable_message_id",
+    "unstable_session_close",
+    "unstable_session_fork",
+    "unstable_session_model",
+    "unstable_session_resume",
+    "unstable_session_usage",
+] }
 uuid          = { version = "1", features = ["v4"] }
 anyhow        = "1"
 async-nats    = "0.46.0"
@@ -27,5 +37,8 @@ trogon-nats       = { path = "../trogon-nats" }
 trogon-std        = { path = "../trogon-std" }
 
 [dev-dependencies]
+futures                = "0.3"
 httpmock               = "0.7"
+opentelemetry          = { workspace = true }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
+trogon-std             = { path = "../trogon-std", features = ["test-support"] }

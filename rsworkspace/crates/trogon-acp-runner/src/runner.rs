@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use acp_nats::nats::agent as subjects;
-use acp_nats::prompt_event::{PromptEvent, PromptEventConverter, PromptPayload, UserContentBlock};
+use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
+use crate::prompt_converter::PromptEventConverter;
 use agent_client_protocol::{PromptResponse, SessionNotification, StopReason};
 use async_nats::jetstream;
 use bytes::Bytes;
