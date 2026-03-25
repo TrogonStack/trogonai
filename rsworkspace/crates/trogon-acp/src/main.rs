@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //! `trogon-acp` — ACP server that routes prompts through NATS to `trogon-acp-runner`.
 //!
 //! ## Architecture

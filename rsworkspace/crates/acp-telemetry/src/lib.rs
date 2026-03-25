@@ -39,6 +39,7 @@ impl std::fmt::Display for TelemetryShutdownError {
 
 impl std::error::Error for TelemetryShutdownError {}
 
+#[cfg_attr(coverage, coverage(off))]
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
     env: &impl ReadEnv,

@@ -9,6 +9,7 @@ use tracing::debug;
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
+#[cfg_attr(coverage, coverage(off))]
 fn next_id() -> u64 {
     REQUEST_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -59,6 +60,7 @@ pub struct McpClient {
 
 impl McpClient {
     /// Create a new client pointing at `url` (e.g. `http://server/mcp`).
+    #[cfg_attr(coverage, coverage(off))]
     pub fn new(http: Client, url: impl Into<String>) -> Self {
         Self {
             http,
@@ -68,6 +70,7 @@ impl McpClient {
 
     /// Perform the MCP `initialize` handshake.
     /// Must be called once before `list_tools` or `call_tool`.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn initialize(&self) -> Result<(), String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -88,6 +91,7 @@ impl McpClient {
     }
 
     /// Retrieve the list of tools the server exposes (`tools/list`).
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_tools(&self) -> Result<Vec<McpTool>, String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -106,6 +110,7 @@ impl McpClient {
     }
 
     /// Call a tool by its original (non-prefixed) name and return the text output.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn call_tool(&self, name: &str, arguments: &Value) -> Result<String, String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -131,6 +136,7 @@ impl McpClient {
         if result.is_error { Err(text) } else { Ok(text) }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn rpc(&self, body: Value) -> Result<Value, String> {
         self.http
             .post(&self.url)

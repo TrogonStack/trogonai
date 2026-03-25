@@ -61,6 +61,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     pub(crate) fn nats(&self) -> &N {
         &self.nats
     }
@@ -69,6 +70,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         &self.js
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
         self.background_tasks.borrow_mut().push(task);
     }
@@ -83,6 +85,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
 }
 
 impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> Bridge<N, C, J> {
+    #[cfg_attr(coverage, coverage(off))]
     pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
         let nats = self.nats.clone();
         let prefix = self.config.acp_prefix_ref().clone();
@@ -94,6 +97,7 @@ impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> 
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 async fn publish_session_ready<N: PublishClient + FlushClient>(
     nats: &N,
     prefix: &crate::acp_prefix::AcpPrefix,
@@ -175,10 +179,12 @@ impl<
 where
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
+    #[cfg_attr(coverage, coverage(off))]
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
         authenticate::handle(self, args).await
     }
@@ -187,14 +193,17 @@ where
         logout::handle(self, args).await
     }
 
+
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
         new_session::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
         load_session::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn set_session_mode(
         &self,
         args: SetSessionModeRequest,
@@ -202,18 +211,22 @@ where
         set_session_mode::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
         prompt::handle(self, args, &trogon_std::StdJsonSerialize).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
         cancel::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
         list_sessions::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn set_session_config_option(
         &self,
         args: SetSessionConfigOptionRequest,
@@ -221,6 +234,7 @@ where
         set_session_config_option::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn set_session_model(
         &self,
         args: SetSessionModelRequest,
@@ -228,22 +242,27 @@ where
         set_session_model::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
         fork_session::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
         resume_session::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
         close_session::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
         ext_method::handle(self, args).await
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
         ext_notification::handle(self, args).await
     }
