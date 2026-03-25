@@ -290,11 +290,11 @@ impl RpcServer {
             return;
         }
 
-        self.publish_session_ready(&session_id).await;
-        let response = NewSessionResponse::new(session_id)
+        let response = NewSessionResponse::new(session_id.clone())
             .modes(self.session_mode_state(&state.mode))
             .models(self.session_model_state(state.model.as_deref()));
         self.reply(&msg, &response).await;
+        self.publish_session_ready(&session_id).await;
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -310,11 +310,11 @@ impl RpcServer {
         };
         let session_id = request.session_id.to_string();
         let state = self.store.load(&session_id).await.unwrap_or_default();
-        self.publish_session_ready(&session_id).await;
         let response = LoadSessionResponse::new()
             .modes(self.session_mode_state(&state.mode))
             .models(self.session_model_state(state.model.as_deref()));
         self.reply(&msg, &response).await;
+        self.publish_session_ready(&session_id).await;
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -479,19 +479,23 @@ impl RpcServer {
             warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
         }
 
-        self.reply(&msg, &ForkSessionResponse::new(new_id)).await;
+        self.reply(&msg, &ForkSessionResponse::new(new_id.clone()))
+            .await;
+        self.publish_session_ready(&new_id).await;
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_resume_session(&self, msg: async_nats::Message) {
-        let _request: ResumeSessionRequest = match serde_json::from_slice(&msg.payload) {
+        let request: ResumeSessionRequest = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "rpc: bad resume_session payload");
                 return;
             }
         };
+        let session_id = request.session_id.to_string();
         // Session history lives in KV and is loaded on the next prompt.
         self.reply(&msg, &ResumeSessionResponse::new()).await;
+        self.publish_session_ready(&session_id).await;
     }
 }

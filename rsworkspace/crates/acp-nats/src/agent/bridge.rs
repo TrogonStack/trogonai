@@ -1,11 +1,5 @@
-use std::cell::RefCell;
-use std::time::Duration;
-
 use crate::config::Config;
-use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
-    RetryPolicy, SubscribeClient, agent,
-};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
@@ -13,14 +7,12 @@ use agent_client_protocol::{
     ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
     NewSessionResponse, PromptRequest, PromptResponse, Result, ResumeSessionRequest,
-    ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
-use tracing::{info, warn};
 use trogon_std::time::GetElapsed;
 
 use super::{
@@ -29,21 +21,12 @@ use super::{
     set_session_mode, set_session_model,
 };
 
-/// Delay before publishing `session.ready` to NATS.
-///
-/// The `Agent` trait returns the response value *before* the transport layer
-/// serializes and writes it to the client. Without a delay the spawned task
-/// could publish `session.ready` before the client has received the
-/// `session/new` response, violating the ordering guarantee.
-const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
-
 pub struct Bridge<N, C: GetElapsed> {
     pub(crate) nats: N,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
-    pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
 }
 
 impl<N, C: GetElapsed> Bridge<N, C> {
@@ -61,70 +44,12 @@ impl<N, C: GetElapsed> Bridge<N, C> {
             config,
             metrics: Metrics::new(meter),
             notification_sender,
-            background_tasks: RefCell::new(Vec::new()),
         }
     }
 
     #[cfg_attr(coverage, coverage(off))]
     pub(crate) fn nats(&self) -> &N {
         &self.nats
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
-        self.background_tasks.borrow_mut().push(task);
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    pub async fn drain_background_tasks(&self) {
-        let tasks: Vec<_> = self.background_tasks.borrow_mut().drain(..).collect();
-        for task in tasks {
-            let _ = task.await;
-        }
-    }
-}
-
-impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed> Bridge<N, C> {
-    #[cfg_attr(coverage, coverage(off))]
-    pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
-        let nats = self.nats.clone();
-        let prefix = self.config.acp_prefix().to_string();
-        let metrics = self.metrics.clone();
-        let handle = tokio::spawn(async move {
-            publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
-        });
-        self.spawn_background(handle);
-    }
-}
-
-#[cfg_attr(coverage, coverage(off))]
-async fn publish_session_ready<N: PublishClient + FlushClient>(
-    nats: &N,
-    prefix: &str,
-    session_id: &SessionId,
-    metrics: &Metrics,
-) {
-    tokio::time::sleep(SESSION_READY_DELAY).await;
-
-    let subject = agent::ext_session_ready(prefix, &session_id.to_string());
-    info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
-
-    let message = ExtSessionReady::new(session_id.clone());
-
-    let options = PublishOptions::builder()
-        .publish_retry_policy(RetryPolicy::standard())
-        .flush_policy(FlushPolicy::standard())
-        .build();
-
-    if let Err(e) = nats::publish(nats, &subject, &message, options).await {
-        warn!(
-            error = %e,
-            session_id = %session_id,
-            "Failed to publish session.ready"
-        );
-        metrics.record_error("session_ready", "session_ready_publish_failed");
-    } else {
-        info!(session_id = %session_id, "Published session.ready");
     }
 }
 

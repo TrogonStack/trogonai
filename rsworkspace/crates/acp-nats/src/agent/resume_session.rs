@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
@@ -13,7 +13,7 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
+pub async fn handle<N: RequestClient, C: GetElapsed>(
     bridge: &Bridge<N, C>,
     args: ResumeSessionRequest,
 ) -> Result<ResumeSessionResponse> {
@@ -42,10 +42,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     .await
     .map_err(map_nats_error);
 
-    if result.is_ok() {
-        bridge.schedule_session_ready(args.session_id.clone());
-    }
-
     bridge.metrics.record_request(
         "resume_session",
         bridge.clock.elapsed(start).as_secs_f64(),
@@ -58,12 +54,10 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, ResumeSessionRequest, ResumeSessionResponse};
-    use std::time::Duration;
 
     #[tokio::test]
     async fn resume_session_forwards_request_and_returns_response() {
@@ -109,28 +103,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resume_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.resume",
-            &ResumeSessionResponse::new(),
-        );
-
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let published = mock.published_messages();
-        assert!(
-            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
-            published
-        );
-    }
-
-    #[tokio::test]
     async fn resume_session_records_metrics_on_success() {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
@@ -143,7 +115,6 @@ mod tests {
             .resume_session(ResumeSessionRequest::new("s1", "."))
             .await;
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
@@ -167,34 +138,6 @@ mod tests {
         assert!(
             has_request_metric(&finished_metrics, "resume_session", false),
             "expected acp.requests with method=resume_session, success=false"
-        );
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test]
-    async fn resume_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.s1.agent.session.resume",
-            &ResumeSessionResponse::new(),
-        );
-        mock.fail_publish_count(4);
-
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
-
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_session_ready_error_metric(&finished_metrics),
-            "expected acp.errors.total datapoint with operation=session_ready, reason=session_ready_publish_failed"
-        );
-        assert!(
-            has_request_metric(&finished_metrics, "resume_session", true),
-            "expected acp.requests with method=resume_session, success=true"
         );
         provider.shutdown().unwrap();
     }
