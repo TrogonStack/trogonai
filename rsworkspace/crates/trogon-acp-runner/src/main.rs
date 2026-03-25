@@ -1,4 +1,5 @@
 //! `trogon-acp-runner` — standalone ACP runner server.
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //!
 //! ## Architecture
 //!
@@ -37,6 +38,7 @@ use tracing::info;
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
+#[cfg_attr(coverage, coverage(off))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
