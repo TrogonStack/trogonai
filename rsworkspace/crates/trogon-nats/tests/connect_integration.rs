@@ -1,58 +1,66 @@
 //! Integration tests for `trogon_nats::connect` — requires Docker (testcontainers starts NATS).
+//!
+//! Tests that need Docker are marked `#[ignore]` and only run when explicitly
+//! requested:
+//!
+//! ```sh
+//! cargo test -p trogon-nats -- --ignored
+//! ```
 
 use std::time::Duration;
 use testcontainers_modules::nats::Nats;
+use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::ImageExt;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_nats::auth::{NatsAuth, NatsConfig};
 use trogon_nats::connect::{ConnectError, connect};
 
-async fn start_nats() -> (
-    testcontainers_modules::testcontainers::ContainerAsync<Nats>,
-    u16,
-) {
-    let container = Nats::default()
-        .start()
-        .await
-        .expect("Failed to start NATS container — is Docker running?");
-    let port = container.get_host_port_ipv4(4222).await.unwrap();
-    (container, port)
+async fn start_nats() -> Result<(ContainerAsync<Nats>, u16), Box<dyn std::error::Error>> {
+    let container = Nats::default().start().await?;
+    let port = container.get_host_port_ipv4(4222).await?;
+    Ok((container, port))
 }
 
 /// Covers the `NatsAuth::None` arm (lines 123-128) and the success branch (130-138).
 /// Also exercises `apply_reconnect_options` (lines 69-74) indirectly.
 #[tokio::test]
-async fn connect_with_no_auth_succeeds() {
-    let (_container, port) = start_nats().await;
+#[ignore = "requires Docker"]
+async fn connect_with_no_auth_succeeds() -> Result<(), Box<dyn std::error::Error>> {
+    let (_container, port) = start_nats().await?;
 
     let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
 
-    let _client = connect(&config, Duration::from_secs(10))
+    connect(&config, Duration::from_secs(10))
         .await
         .expect("connect() should succeed with a running NATS server");
-    // client drops here → connection closes
+    Ok(())
 }
 
 /// Covers the `NatsAuth::Token` arm (lines 115-122).
 #[tokio::test]
-async fn connect_with_token_auth_succeeds_on_open_server() {
+#[ignore = "requires Docker"]
+async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn std::error::Error>>
+{
     // An open NATS server accepts any token — the token is just passed through.
-    let (_container, port) = start_nats().await;
+    let (_container, port) = start_nats().await?;
 
     let config = NatsConfig::new(
         vec![format!("nats://127.0.0.1:{port}")],
         NatsAuth::Token("any-token".to_string()),
     );
 
-    let _client = connect(&config, Duration::from_secs(10))
+    connect(&config, Duration::from_secs(10))
         .await
         .expect("open NATS server should accept connections regardless of token");
+    Ok(())
 }
 
 /// Covers the `NatsAuth::UserPassword` arm (lines 107-114).
 #[tokio::test]
-async fn connect_with_user_password_succeeds_on_open_server() {
-    let (_container, port) = start_nats().await;
+#[ignore = "requires Docker"]
+async fn connect_with_user_password_succeeds_on_open_server(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (_container, port) = start_nats().await?;
 
     let config = NatsConfig::new(
         vec![format!("nats://127.0.0.1:{port}")],
@@ -62,9 +70,10 @@ async fn connect_with_user_password_succeeds_on_open_server() {
         },
     );
 
-    let _client = connect(&config, Duration::from_secs(10))
+    connect(&config, Duration::from_secs(10))
         .await
         .expect("open NATS server should accept user/password connections");
+    Ok(())
 }
 
 /// Covers the `NatsAuth::NKey` arm (lines 101-106).
@@ -73,8 +82,9 @@ async fn connect_with_user_password_succeeds_on_open_server() {
 /// An open NATS server (no `authorization` config) does not enforce auth and
 /// accepts the connection regardless of which key is presented.
 #[tokio::test]
-async fn connect_with_nkey_auth_on_open_server() {
-    let (_container, port) = start_nats().await;
+#[ignore = "requires Docker"]
+async fn connect_with_nkey_auth_on_open_server() -> Result<(), Box<dyn std::error::Error>> {
+    let (_container, port) = start_nats().await?;
 
     // A valid NKey user seed (base32-encoded, 58-char canonical format).
     // On an open server the key is not validated — the test simply exercises
@@ -92,6 +102,7 @@ async fn connect_with_nkey_auth_on_open_server() {
         "NKey connect should succeed on an open NATS server: {:?}",
         result
     );
+    Ok(())
 }
 
 /// Covers the `NatsAuth::Credentials` arm — specifically the `InvalidCredentials`
@@ -116,13 +127,14 @@ async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
 /// Wrong token against an auth-enabled NATS server must return
 /// `ConnectError::AuthorizationViolation` immediately instead of retrying forever.
 #[tokio::test]
-async fn connect_with_wrong_token_returns_authorization_violation() {
+#[ignore = "requires Docker"]
+async fn connect_with_wrong_token_returns_authorization_violation(
+) -> Result<(), Box<dyn std::error::Error>> {
     let container = Nats::default()
         .with_cmd(["--auth", "correct-token"])
         .start()
-        .await
-        .expect("Failed to start NATS container — is Docker running?");
-    let port = container.get_host_port_ipv4(4222).await.unwrap();
+        .await?;
+    let port = container.get_host_port_ipv4(4222).await?;
 
     let config = NatsConfig::new(
         vec![format!("nats://127.0.0.1:{port}")],
@@ -136,18 +148,19 @@ async fn connect_with_wrong_token_returns_authorization_violation() {
         "expected AuthorizationViolation, got: {:?}",
         result
     );
+    Ok(())
 }
 
 /// Correct token must still connect successfully after the fix.
 #[tokio::test]
-async fn connect_with_correct_token_succeeds() {
+#[ignore = "requires Docker"]
+async fn connect_with_correct_token_succeeds() -> Result<(), Box<dyn std::error::Error>> {
     let container = Nats::default()
         .with_startup_timeout(Duration::from_secs(30))
         .with_cmd(["--auth", "correct-token"])
         .start()
-        .await
-        .expect("Failed to start NATS container — is Docker running?");
-    let port = container.get_host_port_ipv4(4222).await.unwrap();
+        .await?;
+    let port = container.get_host_port_ipv4(4222).await?;
 
     let config = NatsConfig::new(
         vec![format!("nats://127.0.0.1:{port}")],
@@ -160,6 +173,7 @@ async fn connect_with_correct_token_succeeds() {
         "correct token should connect successfully: {:?}",
         result
     );
+    Ok(())
 }
 
 /// Covers the `_ = tokio::time::sleep(check_window)` arm in `connect()`.
