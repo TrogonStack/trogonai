@@ -23,6 +23,7 @@ use crate::session_id::AcpSessionId;
 pub use trogon_nats::REQ_ID_HEADER;
 
 /// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
+#[cfg_attr(coverage, coverage(off))]
 fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     blocks
         .iter()
