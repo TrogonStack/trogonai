@@ -34,6 +34,7 @@ trogon-std = { workspace = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "metrics", "testing"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
