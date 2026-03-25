@@ -532,7 +532,10 @@ mod tests {
 
     #[test]
     fn prompt_alias_matches_session_prompt() {
-        assert_eq!(agent::prompt("acp", "s1"), agent::session_prompt("acp", "s1"));
+        assert_eq!(
+            agent::prompt("acp", "s1"),
+            agent::session_prompt("acp", "s1")
+        );
     }
 
     #[test]

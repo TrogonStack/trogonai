@@ -484,7 +484,9 @@ mod tests {
         let _cancel_tx = mock.inject_messages();
 
         resp_tx
-            .unbounded_send(make_nats_msg(b"{\"error\": \"runner failed with something\"}"))
+            .unbounded_send(make_nats_msg(
+                b"{\"error\": \"runner failed with something\"}",
+            ))
             .unwrap();
 
         let result = handle(
