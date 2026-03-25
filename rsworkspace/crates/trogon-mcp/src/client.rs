@@ -14,6 +14,27 @@ fn next_id() -> u64 {
     REQUEST_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Return `scheme://host[:port]` from `url`, stripping userinfo, path, query, and fragment.
+/// Falls back to the original string if parsing fails.
+fn safe_url(url: &str) -> String {
+    // Locate "://" to split scheme from the rest.
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let scheme = &url[..scheme_end];
+    let after_scheme = &url[scheme_end + 3..];
+    // Strip userinfo (user:pass@).
+    let authority = match after_scheme.rfind('@') {
+        Some(at) => &after_scheme[at + 1..],
+        None => after_scheme,
+    };
+    // Keep only host[:port] — stop at first '/', '?', or '#'.
+    let host_end = authority
+        .find(['/', '?', '#'])
+        .unwrap_or(authority.len());
+    format!("{}://{}", scheme, &authority[..host_end])
+}
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// A tool advertised by an MCP server.
@@ -86,7 +107,7 @@ impl McpClient {
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP initialize error: {err}"));
         }
-        debug!(url = %self.url, "MCP server initialized");
+        debug!(url = %safe_url(&self.url), "MCP server initialized");
         Ok(())
     }
 
@@ -105,7 +126,7 @@ impl McpClient {
         }
         let result: ListToolsResult = serde_json::from_value(resp["result"].take())
             .map_err(|e| format!("MCP tools/list deserialize error: {e}"))?;
-        debug!(url = %self.url, count = result.tools.len(), "MCP tools listed");
+        debug!(url = %safe_url(&self.url), count = result.tools.len(), "MCP tools listed");
         Ok(result.tools)
     }
 
