@@ -1,9 +1,10 @@
 use agent_client_protocol::{
-    Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason,
+    ContentBlock, EmbeddedResourceResource, Error, ErrorCode, PromptRequest, PromptResponse,
+    SessionNotification, StopReason,
 };
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
@@ -20,6 +21,46 @@ use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
 pub use trogon_nats::REQ_ID_HEADER;
+
+/// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
+fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text(t) => Some(UserContentBlock::Text { text: t.text.clone() }),
+            ContentBlock::Image(img) => {
+                if let Some(url) = &img.uri {
+                    Some(UserContentBlock::ImageUrl { url: url.clone() })
+                } else {
+                    Some(UserContentBlock::Image {
+                        data: img.data.clone(),
+                        mime_type: img.mime_type.clone(),
+                    })
+                }
+            }
+            ContentBlock::ResourceLink(rl) => Some(UserContentBlock::ResourceLink {
+                uri: rl.uri.clone(),
+                name: rl.name.clone(),
+            }),
+            ContentBlock::Resource(er) => match &er.resource {
+                EmbeddedResourceResource::TextResourceContents(t) => {
+                    Some(UserContentBlock::Context {
+                        uri: t.uri.clone(),
+                        text: t.text.clone(),
+                    })
+                }
+                EmbeddedResourceResource::BlobResourceContents(b) => {
+                    Some(UserContentBlock::Image {
+                        data: b.blob.clone(),
+                        mime_type: b.mime_type.clone().unwrap_or_default(),
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
 
 #[instrument(
     name = "acp.session.prompt",

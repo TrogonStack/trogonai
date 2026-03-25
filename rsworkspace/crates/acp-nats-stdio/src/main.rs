@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
@@ -151,6 +152,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::{InitializeResponse, ProtocolVersion};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::sync::RwLock;
     use trogon_nats::AdvancedMockNatsClient;
 
     #[derive(Clone)]
@@ -261,5 +267,98 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    /// E2E: real NATS container + RpcServer + stdio bridge → initialize → response.
+    #[tokio::test]
+    async fn e2e_initialize_with_real_nats_returns_protocol_version() {
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+        use trogon_acp_runner::{RpcServer, SessionStore};
+
+        // Start NATS with JetStream.
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("Docker must be running for this test");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats_url = format!("127.0.0.1:{port}");
+
+        // Connect clients.
+        let nats_for_server = async_nats::connect(&nats_url).await.unwrap();
+        let nats_for_bridge = async_nats::connect(&nats_url).await.unwrap();
+        let js = async_nats::jetstream::new(nats_for_server.clone());
+
+        // Start RpcServer.
+        let store = SessionStore::open(&js).await.unwrap();
+        let gateway_config = Arc::new(RwLock::new(None));
+        let server = RpcServer::new(nats_for_server, store, "acp", gateway_config);
+        tokio::spawn(async move { server.run().await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Build bridge config.
+        let config = acp_nats::Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec![nats_url],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        )
+        .with_operation_timeout(Duration::from_secs(5));
+
+        // Create stdio pipes.
+        let (stdin_r, mut stdin_w) = tokio::io::duplex(4096);
+        let (stdout_r, stdout_w) = tokio::io::duplex(4096);
+
+        // Run bridge in background thread with its own LocalSet.
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let local = tokio::task::LocalSet::new();
+            let stdin = async_compat::Compat::new(stdin_r);
+            let stdout = async_compat::Compat::new(stdout_w);
+            rt.block_on(local.run_until(run_bridge(
+                nats_for_bridge,
+                &config,
+                stdout,
+                stdin,
+                std::future::pending::<()>(),
+            )))
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
+        });
+
+        // Send initialize request.
+        stdin_w
+            .write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":0}}\n",
+            )
+            .await
+            .unwrap();
+
+        // Read response.
+        let mut reader = BufReader::new(stdout_r);
+        let mut line = String::new();
+        tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut line))
+            .await
+            .expect("timed out waiting for initialize response")
+            .unwrap();
+
+        drop(stdin_w);
+        tokio::task::spawn_blocking(move || handle.join().unwrap().unwrap())
+            .await
+            .unwrap();
+
+        let response: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(response["id"], serde_json::json!(1));
+        assert!(
+            response["result"]["protocolVersion"].is_number(),
+            "must have protocolVersion: {line}"
+        );
     }
 }
