@@ -21,6 +21,7 @@ trogon-std = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
