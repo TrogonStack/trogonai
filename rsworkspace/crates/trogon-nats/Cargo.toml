@@ -19,6 +19,7 @@ tracing-opentelemetry = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 

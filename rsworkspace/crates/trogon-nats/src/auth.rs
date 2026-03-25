@@ -178,6 +178,16 @@ mod tests {
     }
 
     #[test]
+    fn nats_config_new_constructor() {
+        let config = NatsConfig::new(
+            vec!["nats://host:4222".to_string()],
+            NatsAuth::Token("tok".to_string()),
+        );
+        assert_eq!(config.servers, vec!["nats://host:4222"]);
+        assert!(matches!(config.auth, NatsAuth::Token(t) if t == "tok"));
+    }
+
+    #[test]
     fn from_url_convenience() {
         let config = NatsConfig::from_url("nats://custom:4222");
 
