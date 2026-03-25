@@ -25,7 +25,10 @@ mod tests {
 
     #[test]
     fn variants_are_not_equal_to_each_other() {
-        assert_ne!(SubjectTokenViolation::Empty, SubjectTokenViolation::TooLong(1));
+        assert_ne!(
+            SubjectTokenViolation::Empty,
+            SubjectTokenViolation::TooLong(1)
+        );
         assert_ne!(
             SubjectTokenViolation::InvalidCharacter('*'),
             SubjectTokenViolation::InvalidCharacter('>')
