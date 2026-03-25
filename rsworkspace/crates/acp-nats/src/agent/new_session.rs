@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, RequestClient, agent};
 use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
 use tracing::{Span, info, instrument};
 use trogon_std::time::GetElapsed;
@@ -33,8 +33,6 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     if let Ok(ref response) = result {
         Span::current().record("session_id", response.session_id.to_string().as_str());
         info!(session_id = %response.session_id, "Session created");
-
-        bridge.schedule_session_ready(response.session_id.clone());
     }
 
     bridge.metrics.record_request(
@@ -49,14 +47,12 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{
         Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId,
     };
-    use std::time::Duration;
 
     #[tokio::test]
     async fn new_session_forwards_request_and_returns_response() {
@@ -109,7 +105,6 @@ mod tests {
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
