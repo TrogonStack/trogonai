@@ -27,7 +27,9 @@ fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     blocks
         .iter()
         .filter_map(|b| match b {
-            ContentBlock::Text(t) => Some(UserContentBlock::Text { text: t.text.clone() }),
+            ContentBlock::Text(t) => Some(UserContentBlock::Text {
+                text: t.text.clone(),
+            }),
             ContentBlock::Image(img) => {
                 if let Some(url) = &img.uri {
                     Some(UserContentBlock::ImageUrl { url: url.clone() })
