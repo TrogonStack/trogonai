@@ -297,17 +297,11 @@ mod tests {
 
         let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}}"#;
 
-        match msg {
-            Message::Text(t) => {
-                let text = t.to_string();
-                // order of fields in JSON might vary, so we parse to compare
-                let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
-                let expected: serde_json::Value =
-                    serde_json::from_str(expected_ws_response).unwrap();
-                assert_eq!(actual, expected);
-            }
-            _ => panic!("Expected text message"),
-        }
+        let text = msg.to_text().expect("Expected text message").to_string();
+        // order of fields in JSON might vary, so we parse to compare
+        let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(expected_ws_response).unwrap();
+        assert_eq!(actual, expected);
 
         // Trigger shutdown
         shutdown_tx.send(true).unwrap();
