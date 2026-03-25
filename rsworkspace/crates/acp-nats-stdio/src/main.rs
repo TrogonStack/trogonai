@@ -294,7 +294,13 @@ mod tests {
         // Start RpcServer.
         let store = SessionStore::open(&js).await.unwrap();
         let gateway_config = Arc::new(RwLock::new(None));
-        let server = RpcServer::new(nats_for_server, store, "acp", gateway_config);
+        let server = RpcServer::new(
+            nats_for_server,
+            store,
+            "acp",
+            "claude-opus-4-6",
+            gateway_config,
+        );
         tokio::spawn(async move { server.run().await });
         tokio::time::sleep(Duration::from_millis(50)).await;
 
