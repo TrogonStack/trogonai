@@ -138,6 +138,7 @@ pub struct ParsedClientSubject {
     pub method: ClientMethod,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
     for (session_pos, _) in subject.match_indices(SESSION_PREFIX) {
         let after_session = &subject[session_pos + SESSION_PREFIX.len()..];

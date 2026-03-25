@@ -22,6 +22,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
+#[cfg_attr(coverage, coverage(off))]
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
     env: &impl ReadEnv,

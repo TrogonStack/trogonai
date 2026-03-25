@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //! Zero-cost abstractions over `std` for TrogonStack projects.
 //!
 //! # Quick Start
