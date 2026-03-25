@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::nats::agent as subjects;
-use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
+use acp_nats::prompt_event::{PromptPayload, UserContentBlock};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -91,28 +91,40 @@ fn end_turn_body(text: &str) -> String {
     .to_string()
 }
 
-/// Collect events from `sub` until a `Done` or `Error` event arrives (or timeout).
-/// Returns all events received.
-async fn collect_until_done(
-    sub: &mut async_nats::Subscriber,
+/// Collect `SessionNotification` messages from `notif_sub` until a message
+/// arrives on `resp_sub`, then return all notifications and the final response.
+///
+/// Notifications are returned as raw `serde_json::Value` for flexible assertion.
+/// The response is the parsed JSON from the response subject (either
+/// `{"stop_reason": "..."}` or `{"error": "..."}`).
+async fn collect_notifs_and_response(
+    notif_sub: &mut async_nats::Subscriber,
+    resp_sub: &mut async_nats::Subscriber,
     timeout_secs: u64,
-) -> Vec<PromptEvent> {
+) -> (Vec<serde_json::Value>, serde_json::Value) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
-    let mut events = vec![];
+    let mut notifs = vec![];
     loop {
-        let msg = tokio::time::timeout_at(deadline, sub.next())
-            .await
-            .expect("timed out waiting for prompt event")
-            .expect("events subscription ended unexpectedly");
-        let event: PromptEvent =
-            serde_json::from_slice(&msg.payload).expect("invalid PromptEvent JSON");
-        let is_terminal = matches!(event, PromptEvent::Done { .. } | PromptEvent::Error { .. });
-        events.push(event);
-        if is_terminal {
-            break;
+        tokio::select! {
+            biased;
+            msg = tokio::time::timeout_at(deadline, resp_sub.next()) => {
+                let msg = msg
+                    .expect("timed out waiting for response message")
+                    .expect("response subscription ended unexpectedly");
+                let resp: serde_json::Value =
+                    serde_json::from_slice(&msg.payload).expect("invalid response JSON");
+                return (notifs, resp);
+            }
+            msg = tokio::time::timeout_at(deadline, notif_sub.next()) => {
+                let msg = msg
+                    .expect("timed out waiting for notification")
+                    .expect("notification subscription ended unexpectedly");
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                    notifs.push(v);
+                }
+            }
         }
     }
-    events
 }
 
 // ── Runner::new ───────────────────────────────────────────────────────────────
@@ -162,6 +174,12 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
         .subscribe(events_subject)
         .await
         .expect("subscribe to events");
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -199,16 +217,13 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
             .await
             .unwrap();
 
-            // Collect events until we get Error or Done.
-            let events = collect_until_done(&mut events_sub, 10).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
 
-            // At least one terminal event must have arrived.
-            let terminal = events
-                .iter()
-                .find(|e| matches!(e, PromptEvent::Error { .. } | PromptEvent::Done { .. }));
+            // Must be either an error response or a stop_reason response.
             assert!(
-                terminal.is_some(),
-                "expected Error or Done event, got: {events:?}"
+                resp.get("stop_reason").is_some() || resp.get("error").is_some(),
+                "expected stop_reason or error in response; got: {resp}"
             );
         })
         .await;
@@ -240,6 +255,12 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
         .subscribe(events_subject)
         .await
         .expect("subscribe to events");
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -273,17 +294,20 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let text_delta = events
-                .iter()
-                .find(|e| matches!(e, PromptEvent::TextDelta { text } if text.contains("Great response!")));
-            assert!(text_delta.is_some(), "expected TextDelta event");
-
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
-            assert!(done.is_some(), "expected Done(end_turn) event");
+            assert!(
+                notifs
+                    .iter()
+                    .any(|n| n.to_string().contains("Great response!")),
+                "expected notification containing 'Great response!'"
+            );
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
         })
         .await;
 }
@@ -309,6 +333,12 @@ async fn runner_persists_session_after_end_turn() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -342,7 +372,7 @@ async fn runner_persists_session_after_end_turn() {
             .await
             .unwrap();
 
-            collect_until_done(&mut events_sub, 15).await;
+            collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             // After the turn, the session must be persisted in KV.
             let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
@@ -381,6 +411,12 @@ async fn runner_skips_invalid_prompt_payload() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -426,14 +462,12 @@ async fn runner_skips_invalid_prompt_payload() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let done = events
-                .iter()
-                .find(|e| matches!(e, PromptEvent::Done { .. }));
             assert!(
-                done.is_some(),
-                "expected Done event after skipping bad payload"
+                resp.get("stop_reason").is_some(),
+                "expected stop_reason in response after skipping bad payload; got: {resp}"
             );
         })
         .await;
@@ -461,6 +495,12 @@ async fn runner_publishes_done_max_tokens() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -494,12 +534,14 @@ async fn runner_publishes_done_max_tokens() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "max_tokens"),
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("max_tokens"),
+                "expected stop_reason=max_tokens; got: {resp}"
             );
-            assert!(done.is_some(), "expected Done(max_tokens) event");
         })
         .await;
 }
@@ -527,6 +569,12 @@ async fn runner_publishes_done_max_turn_requests() {
 
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -560,12 +608,14 @@ async fn runner_publishes_done_max_turn_requests() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "max_turn_requests")
-            });
-            assert!(done.is_some(), "expected Done(max_turn_requests) event");
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("max_turn_requests"),
+                "expected stop_reason=max_turn_requests; got: {resp}"
+            );
         })
         .await;
 }
@@ -601,6 +651,12 @@ async fn runner_publishes_tool_call_events() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -634,24 +690,27 @@ async fn runner_publishes_tool_call_events() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             assert!(
-                events
+                notifs
                     .iter()
-                    .any(|e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "unknown_tool")),
-                "expected ToolCallStarted event"
+                    .any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool'"
             );
             assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, PromptEvent::ToolCallFinished { .. })),
-                "expected ToolCallFinished event"
+                notifs.iter().any(|n| {
+                    let s = n.to_string();
+                    s.contains("ToolCallUpdate") || s.contains("tool_call_update")
+                }),
+                "expected ToolCallUpdate notification"
             );
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
-            assert!(done.is_some(), "expected Done(end_turn) after tool call");
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after tool call; got: {resp}"
+            );
         })
         .await;
 }
@@ -689,6 +748,12 @@ async fn runner_tool_call_allowed_via_permission_channel() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
 
@@ -731,19 +796,19 @@ async fn runner_tool_call_allowed_via_permission_channel() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            // ToolCallStarted must appear — permission was checked and approved
+            // ToolCall notification must appear — permission was checked and approved
             assert!(
-                events.iter().any(
-                    |e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "unknown_tool")
-                ),
-                "expected ToolCallStarted(unknown_tool) after permission approved; got {events:?}"
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool' after permission approved; notifs: {notifs:?}"
             );
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
-            assert!(done.is_some(), "expected Done(end_turn)");
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
         })
         .await;
 }
@@ -780,6 +845,12 @@ async fn runner_tool_call_denied_via_permission_channel() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
 
@@ -822,15 +893,14 @@ async fn runner_tool_call_denied_via_permission_channel() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             // The agent sends a denial tool-result and Anthropic returns end_turn
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
-            );
-            assert!(
-                done.is_some(),
-                "expected Done(end_turn) after permission denial; got {events:?}"
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after permission denial; got: {resp}"
             );
         })
         .await;
@@ -919,6 +989,12 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
     let agent = make_agent(&anthropic.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -952,19 +1028,21 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
             // The MCP tool must be dispatched (prefixed name = "my_srv__my_tool")
             assert!(
-                events.iter().any(
-                    |e| matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "my_srv__my_tool")
-                ),
-                "expected ToolCallStarted(my_srv__my_tool); got {events:?}"
+                notifs
+                    .iter()
+                    .any(|n| n.to_string().contains("my_srv__my_tool")),
+                "expected notification containing 'my_srv__my_tool'; notifs: {notifs:?}"
             );
-            let done = events.iter().find(|e| {
-                matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-            });
-            assert!(done.is_some(), "expected Done(end_turn) after MCP tool call");
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after MCP tool call; got: {resp}"
+            );
         })
         .await;
 }
@@ -995,6 +1073,12 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1034,12 +1118,14 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
             tokio::time::sleep(Duration::from_millis(300)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
-            let events = collect_until_done(&mut events_sub, 10).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
 
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "cancelled"),
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("cancelled"),
+                "expected stop_reason=cancelled; got: {resp}"
             );
-            assert!(done.is_some(), "expected Done(cancelled); got {events:?}");
         })
         .await;
 }
@@ -1071,6 +1157,12 @@ async fn runner_uses_gateway_config_base_url_and_token() {
     let agent = make_agent("http://127.0.0.1:1");
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let gateway_config = Arc::new(RwLock::new(Some(trogon_acp_runner::GatewayConfig {
         base_url: gateway.base_url(),
@@ -1103,19 +1195,19 @@ async fn runner_uses_gateway_config_base_url_and_token() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 10).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
 
-            // The TextDelta must contain the response from the gateway mock
+            // The notification must contain the response from the gateway mock
             assert!(
-                events.iter().any(
-                    |e| matches!(e, PromptEvent::TextDelta { text } if text.contains("via gateway"))
-                ),
-                "expected TextDelta with gateway response; got {events:?}"
+                notifs.iter().any(|n| n.to_string().contains("via gateway")),
+                "expected notification with gateway response; notifs: {notifs:?}"
             );
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn via gateway; got: {resp}"
             );
-            assert!(done.is_some(), "expected Done(end_turn) via gateway");
         })
         .await;
 }
@@ -1157,15 +1249,22 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            // Subscribe to all 3 event streams BEFORE the runner starts and BEFORE publishing.
-            let mut subs = Vec::new();
+            // Subscribe to all 3 event streams and response subjects BEFORE the runner
+            // starts and BEFORE publishing.
+            let mut sub_pairs = Vec::new();
             for req_id in &req_ids {
                 let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-                let sub = nats
+                let notif_sub = nats
                     .subscribe(events_subject)
                     .await
                     .expect("subscribe to events");
-                subs.push(sub);
+                let resp_sub = nats
+                    .subscribe(subjects::ext_session_prompt_response(
+                        prefix, session_id, req_id,
+                    ))
+                    .await
+                    .expect("subscribe to response");
+                sub_pairs.push((notif_sub, resp_sub));
             }
 
             tokio::task::spawn_local(async move { runner.run().await });
@@ -1190,14 +1289,12 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
             }
 
             // Wait for Done on each subscription in order.
-            for (i, sub) in subs.iter_mut().enumerate() {
-                let events = collect_until_done(sub, 30).await;
-                let done = events
-                    .iter()
-                    .find(|e| matches!(e, PromptEvent::Done { .. }));
+            for (i, (mut notif_sub, mut resp_sub)) in sub_pairs.into_iter().enumerate() {
+                let (_notifs, resp) =
+                    collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
                 assert!(
-                    done.is_some(),
-                    "expected Done event for prompt #{i} (req_id={}); got: {events:?}",
+                    resp.get("stop_reason").is_some(),
+                    "expected stop_reason in response for prompt #{i} (req_id={}); got: {resp}",
                     req_ids[i]
                 );
             }
@@ -1243,8 +1340,20 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
         .run_until(async {
             let events_a = subjects::prompt_events(prefix, session_a, req_a);
             let events_b = subjects::prompt_events(prefix, session_b, req_b);
-            let mut sub_a = nats.subscribe(events_a).await.expect("subscribe a");
-            let mut sub_b = nats.subscribe(events_b).await.expect("subscribe b");
+            let mut notif_a = nats.subscribe(events_a).await.expect("subscribe a");
+            let mut notif_b = nats.subscribe(events_b).await.expect("subscribe b");
+            let mut resp_a = nats
+                .subscribe(subjects::ext_session_prompt_response(
+                    prefix, session_a, req_a,
+                ))
+                .await
+                .expect("subscribe resp_a");
+            let mut resp_b = nats
+                .subscribe(subjects::ext_session_prompt_response(
+                    prefix, session_b, req_b,
+                ))
+                .await
+                .expect("subscribe resp_b");
 
             tokio::task::spawn_local(async move { runner.run().await });
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1267,23 +1376,19 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
                 .unwrap();
             }
 
-            // Both sessions must receive Done.
-            let events_a = collect_until_done(&mut sub_a, 15).await;
-            let done_a = events_a
-                .iter()
-                .find(|e| matches!(e, PromptEvent::Done { .. }));
+            // Both sessions must receive a terminal response.
+            let (_notifs_a, resp_a_val) =
+                collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
             assert!(
-                done_a.is_some(),
-                "expected Done for session_a; got: {events_a:?}"
+                resp_a_val.get("stop_reason").is_some(),
+                "expected stop_reason for session_a; got: {resp_a_val}"
             );
 
-            let events_b = collect_until_done(&mut sub_b, 15).await;
-            let done_b = events_b
-                .iter()
-                .find(|e| matches!(e, PromptEvent::Done { .. }));
+            let (_notifs_b, resp_b_val) =
+                collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
             assert!(
-                done_b.is_some(),
-                "expected Done for session_b; got: {events_b:?}"
+                resp_b_val.get("stop_reason").is_some(),
+                "expected stop_reason for session_b; got: {resp_b_val}"
             );
         })
         .await;
@@ -1313,6 +1418,12 @@ async fn runner_processes_prompt_with_context_content_block() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1352,14 +1463,13 @@ async fn runner_processes_prompt_with_context_content_block() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
-            );
-            assert!(
-                done.is_some(),
-                "expected Done(end_turn) after Context content block; got: {events:?}"
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after Context content block; got: {resp}"
             );
         })
         .await;
@@ -1386,6 +1496,12 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1426,14 +1542,13 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
-            );
-            assert!(
-                done.is_some(),
-                "expected Done(end_turn) after Image content block; got: {events:?}"
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after Image content block; got: {resp}"
             );
         })
         .await;
@@ -1490,6 +1605,12 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             let req_id_1 = "req-hist-1";
             let events_subject_1 = subjects::prompt_events(prefix, session_id, req_id_1);
             let mut events_sub_1 = nats.subscribe(events_subject_1).await.unwrap();
+            let mut resp_sub_1 = nats
+                .subscribe(subjects::ext_session_prompt_response(
+                    prefix, session_id, req_id_1,
+                ))
+                .await
+                .unwrap();
 
             let payload_1 = PromptPayload {
                 req_id: req_id_1.to_string(),
@@ -1506,12 +1627,12 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             .await
             .unwrap();
 
-            let events_1 = collect_until_done(&mut events_sub_1, 15).await;
-            assert!(
-                events_1.iter().any(
-                    |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-                ),
-                "first prompt must complete with Done(end_turn); got: {events_1:?}"
+            let (_notifs_1, resp_1) =
+                collect_notifs_and_response(&mut events_sub_1, &mut resp_sub_1, 15).await;
+            assert_eq!(
+                resp_1["stop_reason"].as_str(),
+                Some("end_turn"),
+                "first prompt must complete with stop_reason=end_turn; got: {resp_1}"
             );
 
             // Short pause so session state is persisted before second prompt.
@@ -1521,6 +1642,12 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             let req_id_2 = "req-hist-2";
             let events_subject_2 = subjects::prompt_events(prefix, session_id, req_id_2);
             let mut events_sub_2 = nats.subscribe(events_subject_2).await.unwrap();
+            let mut resp_sub_2 = nats
+                .subscribe(subjects::ext_session_prompt_response(
+                    prefix, session_id, req_id_2,
+                ))
+                .await
+                .unwrap();
 
             let payload_2 = PromptPayload {
                 req_id: req_id_2.to_string(),
@@ -1537,12 +1664,12 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             .await
             .unwrap();
 
-            let events_2 = collect_until_done(&mut events_sub_2, 15).await;
-            assert!(
-                events_2.iter().any(
-                    |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn")
-                ),
-                "second prompt must complete with Done(end_turn); got: {events_2:?}"
+            let (_notifs_2, resp_2) =
+                collect_notifs_and_response(&mut events_sub_2, &mut resp_sub_2, 15).await;
+            assert_eq!(
+                resp_2["stop_reason"].as_str(),
+                Some("end_turn"),
+                "second prompt must complete with stop_reason=end_turn; got: {resp_2}"
             );
 
             // The second Anthropic request (matched by body_contains "Second question")
@@ -1597,6 +1724,12 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1630,26 +1763,27 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            // Find the ToolCallStarted event and verify parent_tool_use_id.
-            let tool_started = events.iter().find(|e| {
-                matches!(e, PromptEvent::ToolCallStarted { name, .. } if name == "unknown_tool")
-            });
+            // Find the notification for "unknown_tool" and verify parent_tool_use_id is present.
             assert!(
-                tool_started.is_some(),
-                "expected ToolCallStarted event; got: {events:?}"
+                notifs
+                    .iter()
+                    .any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool'; notifs: {notifs:?}"
             );
-            if let Some(PromptEvent::ToolCallStarted {
-                parent_tool_use_id, ..
-            }) = tool_started
-            {
-                assert_eq!(
-                    parent_tool_use_id.as_deref(),
-                    Some("tu_parent_001"),
-                    "parent_tool_use_id must be propagated from Anthropic response"
-                );
-            }
+            assert!(
+                notifs
+                    .iter()
+                    .any(|n| n.to_string().contains("tu_parent_001")),
+                "expected notification containing 'tu_parent_001'; notifs: {notifs:?}"
+            );
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
         })
         .await;
 }
@@ -1697,6 +1831,12 @@ async fn runner_cancel_during_tool_execution_completes() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1736,13 +1876,13 @@ async fn runner_cancel_during_tool_execution_completes() {
             tokio::time::sleep(Duration::from_millis(50)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
 
-            // Should complete with some Done event (cancelled or end_turn depending on timing)
-            let has_done = events.iter().any(|e| matches!(e, PromptEvent::Done { .. }));
+            // Should complete with some stop_reason (cancelled or end_turn depending on timing)
             assert!(
-                has_done,
-                "runner must publish Done after cancel during tool; got: {events:?}"
+                resp.get("stop_reason").is_some(),
+                "runner must publish a stop_reason after cancel during tool; got: {resp}"
             );
         })
         .await;
@@ -1773,6 +1913,12 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
     let agent = make_agent(&server.base_url());
     let events_subject = subjects::prompt_events(prefix, session_id, req_id);
     let mut events_sub = nats.subscribe(events_subject).await.unwrap();
+    let mut resp_sub = nats
+        .subscribe(subjects::ext_session_prompt_response(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .unwrap();
 
     let runner = Runner::new(
         nats.clone(),
@@ -1806,11 +1952,14 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
             .await
             .unwrap();
 
-            let events = collect_until_done(&mut events_sub, 15).await;
-            let done = events.iter().find(
-                |e| matches!(e, PromptEvent::Done { stop_reason } if stop_reason == "end_turn"),
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stop_reason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
             );
-            assert!(done.is_some(), "expected Done(end_turn); got: {events:?}");
         })
         .await;
 }
