@@ -13,11 +13,12 @@
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateResponse, ForkSessionRequest, ForkSessionResponse,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, ProtocolVersion, SessionId,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionForkCapabilities,
-    SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateResponse, ForkSessionRequest,
+    ForkSessionResponse, Implementation, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest,
+    NewSessionResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities,
+    SessionMode, SessionModeState, SessionModelState, SessionResumeCapabilities,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
@@ -33,6 +34,8 @@ pub struct RpcServer {
     nats: async_nats::Client,
     store: SessionStore,
     prefix: String,
+    /// Default model ID used when a session has no explicit model override.
+    default_model: String,
     /// Shared with `Runner` — authenticate updates this.
     #[allow(dead_code)]
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
@@ -43,12 +46,14 @@ impl RpcServer {
         nats: async_nats::Client,
         store: SessionStore,
         prefix: impl Into<String>,
+        default_model: impl Into<String>,
         gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     ) -> Self {
         Self {
             nats,
             store,
             prefix: prefix.into(),
+            default_model: default_model.into(),
             gateway_config,
         }
     }
@@ -85,6 +90,32 @@ impl RpcServer {
                 error!(error = %e, "rpc: failed to serialise reply");
             }
         }
+    }
+
+    /// Build the mode state to include in session responses.
+    fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
+        SessionModeState::new(
+            current_mode.to_string(),
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("plan", "Plan"),
+                SessionMode::new("dontAsk", "Don't Ask"),
+            ],
+        )
+    }
+
+    /// Build the model state to include in session responses.
+    fn session_model_state(&self, current_model: Option<&str>) -> SessionModelState {
+        let current = current_model.unwrap_or(&self.default_model).to_string();
+        SessionModelState::new(
+            current,
+            vec![
+                ModelInfo::new("claude-opus-4-6", "Claude Opus 4"),
+                ModelInfo::new("claude-sonnet-4-6", "Claude Sonnet 4"),
+                ModelInfo::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+            ],
+        )
     }
 
     /// Entry point — returns when all subscriptions have closed.
@@ -189,7 +220,15 @@ impl RpcServer {
                     .resume(SessionResumeCapabilities::new()),
             );
         let response = InitializeResponse::new(ProtocolVersion::LATEST)
-            .agent_capabilities(capabilities);
+            .agent_capabilities(capabilities)
+            .agent_info(Implementation::new(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .auth_methods(vec![AuthMethod::Agent(AuthMethodAgent::new(
+                "gateway_auth",
+                "Gateway",
+            ))]);
         self.reply(&msg, &response).await;
     }
 
@@ -236,7 +275,10 @@ impl RpcServer {
         }
 
         self.publish_session_ready(&session_id).await;
-        self.reply(&msg, &NewSessionResponse::new(session_id)).await;
+        let response = NewSessionResponse::new(session_id)
+            .modes(self.session_mode_state(&state.mode))
+            .models(self.session_model_state(state.model.as_deref()));
+        self.reply(&msg, &response).await;
     }
 
     async fn handle_load_session(&self, msg: async_nats::Message) {
@@ -249,8 +291,13 @@ impl RpcServer {
                 return;
             }
         };
-        self.publish_session_ready(&request.session_id.to_string()).await;
-        self.reply(&msg, &LoadSessionResponse::new()).await;
+        let session_id = request.session_id.to_string();
+        let state = self.store.load(&session_id).await.unwrap_or_default();
+        self.publish_session_ready(&session_id).await;
+        let response = LoadSessionResponse::new()
+            .modes(self.session_mode_state(&state.mode))
+            .models(self.session_model_state(state.model.as_deref()));
+        self.reply(&msg, &response).await;
     }
 
     async fn handle_set_session_mode(&self, msg: async_nats::Message) {
