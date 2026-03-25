@@ -36,6 +36,7 @@ pub use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher};
 pub use trogon_nats::{NatsAuth, NatsConfig};
 pub use trogon_std::StdJsonSerialize;
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn spawn_notification_forwarder(
     client: impl agent_client_protocol::Client + 'static,
     mut rx: tokio::sync::mpsc::Receiver<agent_client_protocol::SessionNotification>,

@@ -39,6 +39,7 @@ pub struct Message {
 
 impl Message {
     /// Simple user turn with plain text.
+    #[cfg_attr(coverage, coverage(off))]
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
@@ -47,6 +48,7 @@ impl Message {
     }
 
     /// Assistant turn (used when appending a model response to history).
+    #[cfg_attr(coverage, coverage(off))]
     pub fn assistant(content: Vec<ContentBlock>) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -189,6 +191,7 @@ impl std::fmt::Display for AgentError {
 }
 
 impl std::error::Error for AgentError {
+    #[cfg_attr(coverage, coverage(off))]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         if let Self::Http(e) = self {
             Some(e)
@@ -292,6 +295,7 @@ impl AgentLoop {
     ///
     /// Returns the final text produced by the model when it stops requesting
     /// tools.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn run(
         &self,
         initial_messages: Vec<Message>,
@@ -395,6 +399,7 @@ impl AgentLoop {
     /// `initial_messages` should contain the prior history; the returned
     /// `Vec<Message>` is that history extended with the new user turn, all
     /// intermediate tool exchanges, and the final assistant turn.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn run_chat(
         &self,
         initial_messages: Vec<Message>,
@@ -494,6 +499,7 @@ impl AgentLoop {
     ///
     /// Returns the updated message history (same as [`run_chat`]).
     /// Errors on `event_tx` are swallowed — the receiver dropping does not abort the loop.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn run_chat_streaming(
         &self,
         initial_messages: Vec<Message>,

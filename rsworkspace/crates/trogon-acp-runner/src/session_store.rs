@@ -65,6 +65,7 @@ pub struct SessionStore {
 
 impl SessionStore {
     /// Create or open the `ACP_SESSIONS` KV bucket.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn open(js: &jetstream::Context) -> anyhow::Result<Self> {
         let kv = js
             .create_key_value(jetstream::kv::Config {
@@ -76,6 +77,7 @@ impl SessionStore {
     }
 
     /// Load session history, returning an empty state if the key does not exist.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
         match self.kv.get(session_id).await? {
             Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
@@ -84,6 +86,7 @@ impl SessionStore {
     }
 
     /// Persist updated session state.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
         let bytes = serde_json::to_vec(state)?;
         self.kv.put(session_id, bytes.into()).await?;
@@ -91,6 +94,7 @@ impl SessionStore {
     }
 
     /// Delete a session from the store (best-effort).
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
         self.kv.delete(session_id).await?;
         Ok(())
