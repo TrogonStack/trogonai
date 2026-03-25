@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
-use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
@@ -28,7 +27,6 @@ pub struct Bridge<N, C: GetElapsed> {
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
-    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
 }
 
 impl<N, C: GetElapsed> Bridge<N, C> {
@@ -45,7 +43,6 @@ impl<N, C: GetElapsed> Bridge<N, C> {
             config,
             metrics: Metrics::new(meter),
             notification_sender,
-            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
         }
     }
 

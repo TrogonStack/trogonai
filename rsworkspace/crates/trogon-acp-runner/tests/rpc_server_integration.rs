@@ -9,10 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, ProtocolVersion, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    AuthenticateRequest, AuthenticateResponse, ForkSessionRequest, ForkSessionResponse,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
+    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse,
 };
 use async_nats::jetstream;
 use bytes::Bytes;
@@ -82,6 +84,23 @@ async fn initialize_returns_protocol_version_and_capabilities() {
     assert!(session_caps.list.is_some(), "must advertise session list");
     assert!(session_caps.fork.is_some(), "must advertise session fork");
     assert!(session_caps.resume.is_some(), "must advertise session resume");
+}
+
+// ── authenticate ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn authenticate_returns_empty_response() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let req = AuthenticateRequest::new("password");
+    let reply = nats
+        .request("acp.agent.authenticate", request_bytes(&req))
+        .await
+        .expect("authenticate must reply");
+
+    let _resp: AuthenticateResponse =
+        serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
@@ -442,4 +461,92 @@ async fn fork_session_bad_payload_does_not_crash_server() {
         .request("acp.nonexistent.agent.session.fork", request_bytes(&req))
         .await
         .expect("server must be alive after bad payload");
+}
+
+// ── set_session_config_option ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_config_option_replies_with_empty_updates() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let req = SetSessionConfigOptionRequest::new("sess-cfg-1", "theme", "dark");
+    let reply = nats
+        .request(
+            "acp.sess-cfg-1.agent.session.set_config_option",
+            request_bytes(&req),
+        )
+        .await
+        .expect("set_session_config_option must reply");
+
+    let resp: SetSessionConfigOptionResponse =
+        serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
+    assert!(
+        resp.config_options.is_empty(),
+        "response must have no updates"
+    );
+}
+
+#[tokio::test]
+async fn set_session_config_option_bad_payload_does_not_crash_server() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let _ = nats
+        .publish(
+            "acp.sess-bad.agent.session.set_config_option",
+            Bytes::from_static(b"not json"),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let req = SetSessionConfigOptionRequest::new("sess-alive", "key", "val");
+    nats.request(
+        "acp.sess-alive.agent.session.set_config_option",
+        request_bytes(&req),
+    )
+    .await
+    .expect("server must be alive after bad payload");
+}
+
+// ── resume_session ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn resume_session_replies_successfully() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let req = ResumeSessionRequest::new("sess-resume-1", "/tmp");
+    let reply = nats
+        .request(
+            "acp.sess-resume-1.agent.session.resume",
+            request_bytes(&req),
+        )
+        .await
+        .expect("resume_session must reply");
+
+    let _resp: ResumeSessionResponse =
+        serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
+}
+
+#[tokio::test]
+async fn resume_session_bad_payload_does_not_crash_server() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let _ = nats
+        .publish(
+            "acp.sess-bad.agent.session.resume",
+            Bytes::from_static(b"not json"),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let req = ResumeSessionRequest::new("sess-alive", "/tmp");
+    nats.request(
+        "acp.sess-alive.agent.session.resume",
+        request_bytes(&req),
+    )
+    .await
+    .expect("server must be alive after bad payload");
 }

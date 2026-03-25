@@ -1,5 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
+/// Fallback context-window size (tokens) used when the runner does not report one.
+/// Matches the default Claude context window.
+const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
+
+/// Available permission modes exposed in `ConfigOptionUpdate` after a mode change.
+const MODE_OPTIONS: &[(&str, &str)] = &[
+    ("default", "Default"),
+    ("acceptEdits", "Accept Edits"),
+    ("plan", "Plan Mode"),
+    ("dontAsk", "Don't Ask"),
+];
+
+/// Available models exposed in `ConfigOptionUpdate` after a mode change.
+const MODEL_OPTIONS: &[(&str, &str)] = &[
+    ("claude-opus-4-6", "Claude Opus 4"),
+    ("claude-sonnet-4-6", "Claude Sonnet 4"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+];
+
 use agent_client_protocol::{
     ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Plan, PlanEntry,
     PlanEntryPriority, PlanEntryStatus, SessionConfigOption, SessionConfigOptionCategory,
@@ -169,7 +188,7 @@ impl PromptEventConverter {
                 ..
             } => {
                 let used = (input_tokens + output_tokens) as u64;
-                let size = context_window.unwrap_or(200_000);
+                let size = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
                 let notif = self.notif(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)));
                 (vec![notif], None)
             }
@@ -362,17 +381,14 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
 }
 
 fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {
-    let mode_options = vec![
-        SessionConfigSelectOption::new("default", "Default"),
-        SessionConfigSelectOption::new("acceptEdits", "Accept Edits"),
-        SessionConfigSelectOption::new("plan", "Plan Mode"),
-        SessionConfigSelectOption::new("dontAsk", "Don't Ask"),
-    ];
-    let model_options = vec![
-        SessionConfigSelectOption::new("claude-opus-4-6", "Claude Opus 4"),
-        SessionConfigSelectOption::new("claude-sonnet-4-6", "Claude Sonnet 4"),
-        SessionConfigSelectOption::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
-    ];
+    let mode_options: Vec<SessionConfigSelectOption> = MODE_OPTIONS
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption::new(*value, *name))
+        .collect();
+    let model_options: Vec<SessionConfigSelectOption> = MODEL_OPTIONS
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption::new(*value, *name))
+        .collect();
     vec![
         SessionConfigOption::select("mode", "Mode", mode.to_string(), mode_options)
             .category(SessionConfigOptionCategory::Mode),

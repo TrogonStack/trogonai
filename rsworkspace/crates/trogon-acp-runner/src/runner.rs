@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use acp_nats::nats::agent as subjects;
-use acp_nats::prompt_event::{PromptEvent, PromptPayload, UserContentBlock};
+use acp_nats::prompt_event::{PromptEvent, PromptEventConverter, PromptPayload, UserContentBlock};
+use agent_client_protocol::{PromptResponse, SessionNotification, StopReason};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -169,6 +170,10 @@ impl Runner {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_prompt(&self, payload: PromptPayload, events_subject: String) {
+        let response_subject =
+            subjects::ext_session_prompt_response(&self.prefix, &payload.session_id, &payload.req_id);
+        let mut converter = PromptEventConverter::new(payload.session_id.clone());
+
         // Subscribe to the cancel subject for this session so we can abort mid-run
         let cancel_subject = subjects::session_cancel(&self.prefix, &payload.session_id);
         let mut cancel_sub = match self.nats.subscribe(cancel_subject.clone()).await {
@@ -185,7 +190,7 @@ impl Runner {
             Ok(s) => s,
             Err(e) => {
                 error!(session_id = %payload.session_id, error = %e, "runner: failed to load session");
-                self.publish_error(&events_subject, format!("session load failed: {e}"))
+                self.publish_prompt_error(&response_subject, format!("session load failed: {e}"))
                     .await;
                 return;
             }
@@ -324,12 +329,13 @@ impl Runner {
                                         .map(|n| n == "EnterPlanMode")
                                         .unwrap_or(false);
                                     let finished_event = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
-                                    self.publish_event(&events_subject, &finished_event).await;
+                                    self.publish_via_converter(&mut converter, &events_subject, finished_event).await;
                                     if is_enter_plan {
                                         state.mode = "plan".to_string();
-                                        self.publish_event(
+                                        self.publish_via_converter(
+                                            &mut converter,
                                             &events_subject,
-                                            &PromptEvent::ModeChanged {
+                                            PromptEvent::ModeChanged {
                                                 mode: "plan".to_string(),
                                                 model: current_model.clone(),
                                             },
@@ -348,7 +354,7 @@ impl Runner {
                                     PromptEvent::UsageUpdate { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, context_window }
                                 }
                             };
-                            self.publish_event(&events_subject, &prompt_event).await;
+                            self.publish_via_converter(&mut converter, &events_subject, prompt_event).await;
                         }
                         None => {
                             // Channel closed — agent loop is done; join the task
@@ -358,9 +364,10 @@ impl Runner {
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
-                                        self.publish_event(
+                                        self.publish_via_converter(
+                                            &mut converter,
                                             &events_subject,
-                                            &PromptEvent::UsageUpdate {
+                                            PromptEvent::UsageUpdate {
                                                 input_tokens: last_input_tokens,
                                                 output_tokens: last_output_tokens,
                                                 cache_creation_tokens: last_cache_creation_tokens,
@@ -369,16 +376,14 @@ impl Runner {
                                             },
                                         ).await;
                                     }
-                                    self.publish_event(
-                                        &events_subject,
-                                        &PromptEvent::Done { stop_reason: "max_turn_requests".to_string() },
-                                    ).await;
+                                    self.publish_prompt_response(&response_subject, StopReason::MaxTurnRequests).await;
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
-                                        self.publish_event(
+                                        self.publish_via_converter(
+                                            &mut converter,
                                             &events_subject,
-                                            &PromptEvent::UsageUpdate {
+                                            PromptEvent::UsageUpdate {
                                                 input_tokens: last_input_tokens,
                                                 output_tokens: last_output_tokens,
                                                 cache_creation_tokens: last_cache_creation_tokens,
@@ -387,16 +392,13 @@ impl Runner {
                                             },
                                         ).await;
                                     }
-                                    self.publish_event(
-                                        &events_subject,
-                                        &PromptEvent::Done { stop_reason: "max_tokens".to_string() },
-                                    ).await;
+                                    self.publish_prompt_response(&response_subject, StopReason::MaxTokens).await;
                                 }
                                 Ok(Err(e)) => {
-                                    self.publish_error(&events_subject, e.to_string()).await;
+                                    self.publish_prompt_error(&response_subject, e.to_string()).await;
                                 }
                                 Err(e) => {
-                                    self.publish_error(&events_subject, format!("agent task panicked: {e}")).await;
+                                    self.publish_prompt_error(&response_subject, format!("agent task panicked: {e}")).await;
                                 }
                             }
                             break;
@@ -415,13 +417,8 @@ impl Runner {
         }
 
         if cancelled {
-            self.publish_event(
-                &events_subject,
-                &PromptEvent::Done {
-                    stop_reason: "cancelled".to_string(),
-                },
-            )
-            .await;
+            // Bridge already returns Cancelled via session_cancelled; publish response for safety.
+            self.publish_prompt_response(&response_subject, StopReason::Cancelled).await;
             return;
         }
 
@@ -431,24 +428,22 @@ impl Runner {
             if let Err(e) = self.store.save(&payload.session_id, &state).await {
                 warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
             }
-            self.publish_event(
-                &events_subject,
-                &PromptEvent::Done {
-                    stop_reason: "end_turn".to_string(),
-                },
-            )
-            .await;
+            self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
         }
     }
 
     /// Fallback path when we cannot subscribe to the cancel subject.
     #[cfg_attr(coverage, coverage(off))]
     async fn handle_prompt_no_cancel(&self, payload: PromptPayload, events_subject: String) {
+        let response_subject =
+            subjects::ext_session_prompt_response(&self.prefix, &payload.session_id, &payload.req_id);
+        let mut converter = PromptEventConverter::new(payload.session_id.clone());
+
         let mut state = match self.store.load(&payload.session_id).await {
             Ok(s) => s,
             Err(e) => {
                 error!(session_id = %payload.session_id, error = %e, "runner: failed to load session");
-                self.publish_error(&events_subject, format!("session load failed: {e}"))
+                self.publish_prompt_error(&response_subject, format!("session load failed: {e}"))
                     .await;
                 return;
             }
@@ -589,12 +584,13 @@ impl Runner {
                         exit_code,
                         signal,
                     };
-                    self.publish_event(&events_subject, &finished_event).await;
+                    self.publish_via_converter(&mut converter, &events_subject, finished_event).await;
                     if is_enter_plan {
                         state.mode = "plan".to_string();
-                        self.publish_event(
+                        self.publish_via_converter(
+                            &mut converter,
                             &events_subject,
-                            &PromptEvent::ModeChanged {
+                            PromptEvent::ModeChanged {
                                 mode: "plan".to_string(),
                                 model: current_model.clone(),
                             },
@@ -623,7 +619,7 @@ impl Runner {
                     }
                 }
             };
-            self.publish_event(&events_subject, &prompt_event).await;
+            self.publish_via_converter(&mut converter, &events_subject, prompt_event).await;
         }
 
         match agent_handle.await {
@@ -633,19 +629,14 @@ impl Runner {
                 if let Err(e) = self.store.save(&payload.session_id, &state).await {
                     warn!(session_id = %payload.session_id, error = %e, "runner: failed to save session");
                 }
-                self.publish_event(
-                    &events_subject,
-                    &PromptEvent::Done {
-                        stop_reason: "end_turn".to_string(),
-                    },
-                )
-                .await;
+                self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
             }
             Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
-                    self.publish_event(
+                    self.publish_via_converter(
+                        &mut converter,
                         &events_subject,
-                        &PromptEvent::UsageUpdate {
+                        PromptEvent::UsageUpdate {
                             input_tokens: last_input_tokens,
                             output_tokens: last_output_tokens,
                             cache_creation_tokens: last_cache_creation_tokens,
@@ -655,19 +646,14 @@ impl Runner {
                     )
                     .await;
                 }
-                self.publish_event(
-                    &events_subject,
-                    &PromptEvent::Done {
-                        stop_reason: "max_turn_requests".to_string(),
-                    },
-                )
-                .await;
+                self.publish_prompt_response(&response_subject, StopReason::MaxTurnRequests).await;
             }
             Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                 if last_input_tokens > 0 || last_output_tokens > 0 {
-                    self.publish_event(
+                    self.publish_via_converter(
+                        &mut converter,
                         &events_subject,
-                        &PromptEvent::UsageUpdate {
+                        PromptEvent::UsageUpdate {
                             input_tokens: last_input_tokens,
                             output_tokens: last_output_tokens,
                             cache_creation_tokens: last_cache_creation_tokens,
@@ -677,47 +663,86 @@ impl Runner {
                     )
                     .await;
                 }
-                self.publish_event(
-                    &events_subject,
-                    &PromptEvent::Done {
-                        stop_reason: "max_tokens".to_string(),
-                    },
-                )
-                .await;
+                self.publish_prompt_response(&response_subject, StopReason::MaxTokens).await;
             }
             _ => {
-                self.publish_event(
-                    &events_subject,
-                    &PromptEvent::Done {
-                        stop_reason: "end_turn".to_string(),
-                    },
-                )
-                .await;
+                self.publish_prompt_response(&response_subject, StopReason::EndTurn).await;
             }
         }
     }
 
+    /// Publish a `SessionNotification` as JSON to `update_subject`.
     #[cfg_attr(coverage, coverage(off))]
-    async fn publish_event(&self, subject: &str, event: &PromptEvent) {
-        match serde_json::to_vec(event) {
+    async fn publish_notification(&self, update_subject: &str, notif: &SessionNotification) {
+        match serde_json::to_vec(notif) {
             Ok(bytes) => {
                 if let Err(e) = self
                     .nats
-                    .publish(subject.to_string(), Bytes::from(bytes))
+                    .publish(update_subject.to_string(), Bytes::from(bytes))
                     .await
                 {
-                    warn!(subject, error = %e, "runner: failed to publish event");
+                    warn!(subject = update_subject, error = %e, "runner: failed to publish notification");
                 }
             }
             Err(e) => {
-                warn!(error = %e, "runner: failed to serialize event");
+                warn!(error = %e, "runner: failed to serialize notification");
             }
         }
     }
 
-    async fn publish_error(&self, subject: &str, message: String) {
-        self.publish_event(subject, &PromptEvent::Error { message })
-            .await;
+    /// Convert a `PromptEvent` via `converter` and publish resulting notifications.
+    /// Terminal outcomes (Done/Error) are handled separately — this method ignores them.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn publish_via_converter(
+        &self,
+        converter: &mut PromptEventConverter,
+        update_subject: &str,
+        event: PromptEvent,
+    ) {
+        let (notifications, _outcome) = converter.convert(event);
+        for notif in notifications {
+            self.publish_notification(update_subject, &notif).await;
+        }
+    }
+
+    /// Publish a final `PromptResponse` to `response_subject`.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn publish_prompt_response(&self, response_subject: &str, stop_reason: StopReason) {
+        let response = PromptResponse::new(stop_reason);
+        match serde_json::to_vec(&response) {
+            Ok(bytes) => {
+                if let Err(e) = self
+                    .nats
+                    .publish(response_subject.to_string(), Bytes::from(bytes))
+                    .await
+                {
+                    warn!(subject = response_subject, error = %e, "runner: failed to publish response");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "runner: failed to serialize response");
+            }
+        }
+    }
+
+    /// Publish an error envelope `{"error": "..."}` to `response_subject`.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn publish_prompt_error(&self, response_subject: &str, message: String) {
+        let envelope = serde_json::json!({"error": message});
+        match serde_json::to_vec(&envelope) {
+            Ok(bytes) => {
+                if let Err(e) = self
+                    .nats
+                    .publish(response_subject.to_string(), Bytes::from(bytes))
+                    .await
+                {
+                    warn!(subject = response_subject, error = %e, "runner: failed to publish error envelope");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "runner: failed to serialize error envelope");
+            }
+        }
     }
 }
 
@@ -1150,45 +1175,52 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn publish_event_sends_serialized_event_to_nats() {
+        async fn publish_notification_sends_serialized_notification_to_nats() {
             let (_c, nats, js) = start_nats().await;
             let runner = make_runner(nats.clone(), &js).await;
-            let mut sub = nats.subscribe("acp.s1.events").await.unwrap();
+            let mut sub = nats.subscribe("acp.s1.session.update.req1").await.unwrap();
+
+            let notif = SessionNotification::new(
+                "s1".to_string(),
+                agent_client_protocol::SessionUpdate::AgentMessageChunk(
+                    agent_client_protocol::ContentChunk::new(
+                        agent_client_protocol::ContentBlock::from("hello world".to_string()),
+                    ),
+                ),
+            );
+            runner
+                .publish_notification("acp.s1.session.update.req1", &notif)
+                .await;
+
+            let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+                .await
+                .expect("timeout waiting for notification")
+                .expect("no message received");
+            let received: SessionNotification = serde_json::from_slice(&msg.payload).unwrap();
+            assert_eq!(received.session_id, "s1".into());
+        }
+
+        #[tokio::test]
+        async fn publish_prompt_error_sends_error_envelope_to_nats() {
+            let (_c, nats, js) = start_nats().await;
+            let runner = make_runner(nats.clone(), &js).await;
+            let mut sub = nats.subscribe("acp.s1.prompt.response.req1").await.unwrap();
 
             runner
-                .publish_event(
-                    "acp.s1.events",
-                    &PromptEvent::TextDelta {
-                        text: "hello world".to_string(),
-                    },
+                .publish_prompt_error(
+                    "acp.s1.prompt.response.req1",
+                    "something went wrong".to_string(),
                 )
                 .await;
 
             let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
                 .await
-                .expect("timeout waiting for event")
+                .expect("timeout waiting for error envelope")
                 .expect("no message received");
-            let event: PromptEvent = serde_json::from_slice(&msg.payload).unwrap();
-            assert!(matches!(event, PromptEvent::TextDelta { text } if text == "hello world"));
-        }
-
-        #[tokio::test]
-        async fn publish_error_sends_error_event_to_nats() {
-            let (_c, nats, js) = start_nats().await;
-            let runner = make_runner(nats.clone(), &js).await;
-            let mut sub = nats.subscribe("acp.s1.events").await.unwrap();
-
-            runner
-                .publish_error("acp.s1.events", "something went wrong".to_string())
-                .await;
-
-            let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
-                .await
-                .expect("timeout waiting for error event")
-                .expect("no message received");
-            let event: PromptEvent = serde_json::from_slice(&msg.payload).unwrap();
-            assert!(
-                matches!(event, PromptEvent::Error { message } if message == "something went wrong")
+            let envelope: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+            assert_eq!(
+                envelope["error"].as_str().unwrap(),
+                "something went wrong"
             );
         }
 
@@ -1224,20 +1256,23 @@ mod tests {
         }
 
         #[tokio::test(flavor = "current_thread")]
-        async fn runner_publish_event_does_not_crash_on_nats_error() {
+        async fn runner_publish_notification_does_not_crash_on_nats_error() {
             let (_c, nats, js) = start_nats().await;
             let runner = make_runner(nats.clone(), &js).await;
 
-            // Publish to an ungrouped subject with no subscriber — should not crash
+            // Publish to a subject with no subscriber — should not crash
+            let notif = SessionNotification::new(
+                "s1".to_string(),
+                agent_client_protocol::SessionUpdate::AgentMessageChunk(
+                    agent_client_protocol::ContentChunk::new(
+                        agent_client_protocol::ContentBlock::from("test".to_string()),
+                    ),
+                ),
+            );
             runner
-                .publish_event(
-                    "acp.no-subscriber.events",
-                    &PromptEvent::SystemStatus {
-                        message: "test".to_string(),
-                    },
-                )
+                .publish_notification("acp.no-subscriber.update.req1", &notif)
                 .await;
-            // If we reach here without panic, publish_event handles missing subscribers gracefully
+            // If we reach here without panic, publish_notification handles missing subscribers gracefully
         }
 
         /// Covers lines 74-76: `run()` returns early when subscribe fails because

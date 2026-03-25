@@ -23,7 +23,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
 
     info!(session_id = %args.session_id, "Cancel notification");
 
-    AcpSessionId::try_from(&args.session_id).map_err(|e| {
+    let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
         bridge
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
@@ -34,7 +34,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
         )
     })?;
 
-    let subject = agent::session_cancel(bridge.config.acp_prefix(), &args.session_id.to_string());
+    let subject = agent::session_cancel(bridge.config.acp_prefix(), session_id.as_str());
 
     let publish_result = nats::publish(
         bridge.nats(),
@@ -58,7 +58,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
     }
 
     let cancelled_subject =
-        agent::session_cancelled(bridge.config.acp_prefix(), &args.session_id.to_string());
+        agent::session_cancelled(bridge.config.acp_prefix(), session_id.as_str());
     if let Err(e) = bridge
         .nats()
         .publish_with_headers(
@@ -84,55 +84,10 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
 mod tests {
     use super::Bridge;
     use crate::config::Config;
+    use crate::test_helpers::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
-    use opentelemetry::Value;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-    use opentelemetry_sdk::metrics::{
-        PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
-    };
-    use std::time::Duration;
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_std::time::MockClock;
-
-    fn mock_bridge() -> (
-        AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
-    ) {
-        let mock = AdvancedMockNatsClient::new();
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("acp-nats-test"),
-            Config::for_test("acp"),
-            tokio::sync::mpsc::channel(1).0,
-        );
-        (mock, bridge)
-    }
-
-    fn mock_bridge_with_metrics() -> (
-        AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
-        InMemoryMetricExporter,
-        SdkMeterProvider,
-    ) {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("acp-nats-test");
-
-        let mock = AdvancedMockNatsClient::new();
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &meter,
-            Config::for_test("acp"),
-            tokio::sync::mpsc::channel(1).0,
-        );
-        (mock, bridge, exporter, provider)
-    }
 
     fn mock_bridge_with_clock() -> (
         AdvancedMockNatsClient,
@@ -149,74 +104,6 @@ mod tests {
             tokio::sync::mpsc::channel(1).0,
         );
         (mock, clock, bridge)
-    }
-
-    fn has_request_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-        method: &str,
-        expected_success: bool,
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.requests")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut method_ok = false;
-                            let mut success_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "method" {
-                                    method_ok = attr.value.as_str() == method;
-                                } else if attr.key.as_str() == "success" {
-                                    success_ok = attr.value == Value::from(expected_success);
-                                }
-                            }
-                            method_ok && success_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
-    }
-
-    fn has_error_metric(
-        finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-        operation: &str,
-        reason: &str,
-    ) -> bool {
-        finished_metrics
-            .iter()
-            .flat_map(|rm| rm.scope_metrics())
-            .flat_map(|sm| sm.metrics())
-            .find(|m| m.name() == "acp.errors")
-            .and_then(|metric| {
-                let data = metric.data();
-                if let AggregatedMetrics::U64(MetricData::Sum(s)) = data {
-                    s.data_points()
-                        .find(|dp| {
-                            let mut operation_ok = false;
-                            let mut reason_ok = false;
-                            for attr in dp.attributes() {
-                                if attr.key.as_str() == "operation" {
-                                    operation_ok = attr.value.as_str() == operation;
-                                } else if attr.key.as_str() == "reason" {
-                                    reason_ok = attr.value.as_str() == reason;
-                                }
-                            }
-                            operation_ok && reason_ok
-                        })
-                        .map(|_| ())
-                } else {
-                    None
-                }
-            })
-            .is_some()
     }
 
     #[tokio::test]
@@ -311,48 +198,6 @@ mod tests {
             has_request_metric(&finished_metrics, "cancel", false),
             "request metric records publish outcome; success=false when publish fails"
         );
-        provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn has_request_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.requests")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_request_metric(&finished_metrics, "cancel", true));
-        provider.shutdown().unwrap();
-    }
-
-    #[test]
-    fn has_error_metric_returns_false_when_metric_is_histogram() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.errors")
-            .with_description("test")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!has_error_metric(
-            &finished_metrics,
-            "cancel",
-            "cancel_publish_failed"
-        ));
         provider.shutdown().unwrap();
     }
 

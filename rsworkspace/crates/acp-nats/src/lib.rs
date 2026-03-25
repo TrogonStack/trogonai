@@ -9,11 +9,12 @@ pub(crate) mod ext_method_name;
 pub(crate) mod in_flight_slot_guard;
 pub(crate) mod jsonrpc;
 pub mod nats;
-pub(crate) mod pending_prompt_waiters;
 pub mod prompt_event;
 pub mod session_id;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;

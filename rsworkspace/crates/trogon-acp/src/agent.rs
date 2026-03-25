@@ -17,8 +17,9 @@ use agent_client_protocol::{
     ProtocolVersion, Result, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
     SessionConfigOption, SessionConfigOptionCategory, SessionForkCapabilities, SessionId,
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
-    SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SessionConfigOptionValue, SessionNotification, SessionResumeCapabilities, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
@@ -842,7 +843,10 @@ where
     ) -> Result<SetSessionConfigOptionResponse> {
         let session_id = args.session_id.to_string();
         let config_id = args.config_id.0.as_ref();
-        let value = args.value.0.to_string();
+        let value = match &args.value {
+            SessionConfigOptionValue::ValueId { value } => value.to_string(),
+            other => format!("{other:?}"),
+        };
 
         let mut state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
@@ -3459,5 +3463,311 @@ mod tests {
         let output = "```\ncode\n```";
         let (c, _) = replay_tool_result_content("Read", None, output);
         assert_eq!(c.len(), 1, "fenced content block should be produced");
+    }
+
+    // ── Integration tests (real NATS + JetStream) ─────────────────────────────
+
+    use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+    use agent_client_protocol::{
+        Agent as _, AuthenticateRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
+        LoadSessionRequest, NewSessionRequest, ProtocolVersion, ResumeSessionRequest,
+        SetSessionModeRequest, SetSessionModelRequest,
+    };
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+    use trogon_std::time::SystemClock;
+
+    async fn start_nats_js() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("Docker must be running for this test");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let js = jetstream::new(nats.clone());
+        (container, nats, js)
+    }
+
+    async fn make_agent_with_nats(
+        nats: async_nats::Client,
+        js: jetstream::Context,
+    ) -> (
+        TrogonAcpAgent<async_nats::Client, SystemClock>,
+        mpsc::Receiver<SessionNotification>,
+    ) {
+        let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
+        let config = Config::new(
+            AcpPrefix::new("acp").unwrap(),
+            NatsConfig {
+                servers: vec!["unused".to_string()],
+                auth: NatsAuth::None,
+            },
+        )
+        .with_operation_timeout(std::time::Duration::from_millis(500));
+        let meter = opentelemetry::global::meter("trogon-acp-test");
+        let (bridge_notif_tx, _) = mpsc::channel(1);
+        let bridge = Bridge::new(nats.clone(), SystemClock, &meter, config, bridge_notif_tx);
+        let gateway_config = std::sync::Arc::new(RwLock::new(None));
+        let (tx, rx) = mpsc::channel(64);
+        (
+            TrogonAcpAgent::new(
+                bridge,
+                store,
+                nats,
+                "acp",
+                tx,
+                "claude-sonnet-4-6",
+                gateway_config,
+            ),
+            rx,
+        )
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_returns_load_session_capability() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let req = InitializeRequest::new(ProtocolVersion::LATEST);
+        let resp = agent.initialize(req).await.unwrap();
+        assert!(
+            resp.agent_capabilities.load_session,
+            "must advertise loadSession"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authenticate_unsupported_method_returns_error() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let req = AuthenticateRequest::new("oauth");
+        let err = agent.authenticate(req).await.unwrap_err();
+        assert!(
+            err.message.contains("unsupported auth method"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authenticate_gateway_sets_gateway_config() {
+        let (_container, nats, js) = start_nats_js().await;
+        let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
+        let config = Config::new(
+            AcpPrefix::new("acp").unwrap(),
+            NatsConfig {
+                servers: vec!["unused".to_string()],
+                auth: NatsAuth::None,
+            },
+        );
+        let meter = opentelemetry::global::meter("test");
+        let (bridge_tx, _) = mpsc::channel(1);
+        let bridge = Bridge::new(nats.clone(), SystemClock, &meter, config, bridge_tx);
+        let gateway_config = std::sync::Arc::new(RwLock::new(None));
+        let (tx, _rx) = mpsc::channel(64);
+        let agent = TrogonAcpAgent::new(
+            bridge,
+            store,
+            nats,
+            "acp",
+            tx,
+            "claude-sonnet-4-6",
+            gateway_config.clone(),
+        );
+
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "gateway".to_string(),
+            serde_json::json!({
+                "baseUrl": "https://gateway.example.com",
+                "headers": { "Authorization": "Bearer tok-abc" }
+            }),
+        );
+        let req = AuthenticateRequest::new("gateway").meta(Some(meta));
+        agent.authenticate(req).await.unwrap();
+
+        let cfg = gateway_config.read().await;
+        let cfg = cfg.as_ref().expect("gateway config must be set after authenticate");
+        assert_eq!(cfg.base_url, "https://gateway.example.com");
+        assert_eq!(cfg.token, "tok-abc");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn new_session_creates_session_in_store() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let req = NewSessionRequest::new("/workspace").mcp_servers(vec![]);
+        let resp = agent.new_session(req).await.unwrap();
+        let session_id = resp.session_id.to_string();
+        assert!(!session_id.is_empty());
+
+        let state = agent.store.load(&session_id).await.unwrap();
+        assert_eq!(state.cwd, "/workspace");
+        assert_eq!(state.mode, "default");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn new_session_response_includes_modes_and_models() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let req = NewSessionRequest::new("/tmp").mcp_servers(vec![]);
+        let resp = agent.new_session(req).await.unwrap();
+        assert!(resp.modes.is_some(), "must return modes");
+        assert!(resp.models.is_some(), "must return models");
+        assert!(
+            resp.config_options.as_ref().map_or(false, |v| !v.is_empty()),
+            "must return config_options"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn load_session_returns_session_modes() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/src").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        let req = LoadSessionRequest::new(session_id.to_string(), "/src");
+        let resp = agent.load_session(req).await.unwrap();
+        assert!(resp.modes.is_some(), "must return modes");
+        assert!(resp.models.is_some(), "must return models");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn load_session_preserves_cwd_from_new_session() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/my-project").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        // Load it back and verify the store still has the right cwd
+        let req = LoadSessionRequest::new(session_id.to_string(), "/my-project");
+        agent.load_session(req).await.unwrap();
+
+        let state = agent.store.load(&session_id.to_string()).await.unwrap();
+        assert_eq!(state.cwd, "/my-project");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn list_sessions_returns_all_created() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        agent
+            .new_session(NewSessionRequest::new("/project-a").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        agent
+            .new_session(NewSessionRequest::new("/project-b").mcp_servers(vec![]))
+            .await
+            .unwrap();
+
+        let resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+        assert_eq!(resp.sessions.len(), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_session_mode_valid_updates_store() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/x").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        let req = SetSessionModeRequest::new(session_id.clone(), "plan");
+        agent.set_session_mode(req).await.unwrap();
+
+        let state = agent.store.load(&session_id.to_string()).await.unwrap();
+        assert_eq!(state.mode, "plan");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_session_mode_invalid_returns_error() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/x").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        let req = SetSessionModeRequest::new(session_id, "nonexistent-mode");
+        let err = agent.set_session_mode(req).await.unwrap_err();
+        assert!(err.message.contains("Invalid mode"), "unexpected: {}", err.message);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_session_model_resolves_token_to_full_id() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/y").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        let req = SetSessionModelRequest::new(session_id.clone(), "opus");
+        agent.set_session_model(req).await.unwrap();
+
+        let state = agent.store.load(&session_id.to_string()).await.unwrap();
+        assert_eq!(state.model.as_deref(), Some("claude-opus-4-6"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fork_session_creates_new_session_with_forked_cwd() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let src = agent
+            .new_session(NewSessionRequest::new("/original").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let src_id = src.session_id.clone();
+
+        let req = ForkSessionRequest::new(src_id, "/forked").mcp_servers(vec![]);
+        let fork = agent.fork_session(req).await.unwrap();
+
+        let state = agent.store.load(&fork.session_id.to_string()).await.unwrap();
+        assert_eq!(state.cwd, "/forked");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_session_returns_modes_and_models() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/resume-test").mcp_servers(vec![]))
+            .await
+            .unwrap();
+        let session_id = new_resp.session_id.clone();
+
+        let req = ResumeSessionRequest::new(session_id, "/resume-test");
+        let resp = agent.resume_session(req).await.unwrap();
+        assert!(resp.modes.is_some(), "must return modes");
+        assert!(resp.models.is_some(), "must return models");
     }
 }

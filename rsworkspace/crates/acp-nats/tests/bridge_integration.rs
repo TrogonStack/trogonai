@@ -12,18 +12,18 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use acp_nats::prompt_event::PromptEvent;
+use acp_nats::prompt_event::{PromptEvent, PromptEventConverter, PromptOutcome};
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ContentBlock,
-    ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, ImageContent, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, ResumeSessionRequest,
-    ResumeSessionResponse, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCallContent, ToolCallStatus,
-    ToolKind,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ContentBlock, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
+    ForkSessionRequest, ForkSessionResponse, ImageContent, Implementation, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
+    ToolCallContent, ToolCallStatus, ToolKind,
 };
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -55,7 +55,8 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
             auth: NatsAuth::None,
         },
     )
-    .with_operation_timeout(Duration::from_millis(500));
+    .with_operation_timeout(Duration::from_millis(500))
+    .with_prompt_timeout(Duration::from_secs(5));
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
@@ -82,7 +83,8 @@ fn make_bridge_with_rx(
             auth: NatsAuth::None,
         },
     )
-    .with_operation_timeout(Duration::from_millis(500));
+    .with_operation_timeout(Duration::from_millis(500))
+    .with_prompt_timeout(Duration::from_secs(5));
     let (tx, rx) = tokio::sync::mpsc::channel(32);
     let bridge = Bridge::new(
         nats,
@@ -538,9 +540,23 @@ async fn concurrent_requests_dont_mix_replies() {
 
 // ── prompt helpers ────────────────────────────────────────────────────────────
 
-/// Spawn a mock runner that subscribes to `{prefix}.{session_id}.agent.prompt`,
-/// extracts `req_id` from the payload, and publishes the given `events` back on
-/// `{prefix}.{session_id}.agent.prompt.events.{req_id}`.
+/// Parse a stop-reason string to `StopReason`, falling back to `EndTurn`.
+fn parse_stop_reason(s: &str) -> StopReason {
+    match s {
+        "end_turn" => StopReason::EndTurn,
+        "max_tokens" => StopReason::MaxTokens,
+        "max_turn_requests" => StopReason::MaxTurnRequests,
+        "cancelled" => StopReason::Cancelled,
+        _ => StopReason::EndTurn,
+    }
+}
+
+/// Spawn a mock runner that:
+/// 1. Subscribes to `{prefix}.{session_id}.agent.session.prompt`
+/// 2. Reads `req_id` from the `X-Req-Id` header
+/// 3. Converts each `PromptEvent` via `PromptEventConverter` into `SessionNotification`s
+/// 4. Publishes notifications to `agent.session.update.{req_id}`
+/// 5. On terminal outcome (Done/Error) publishes to `agent.ext.session.prompt.response.{req_id}`
 ///
 /// Returns only after the NATS subscription is confirmed, eliminating the race
 /// where the bridge publishes the prompt before the mock has subscribed.
@@ -550,26 +566,66 @@ async fn mock_runner(
     session_id: &str,
     events: Vec<PromptEvent>,
 ) {
-    let subject = format!("{}.{}.agent.prompt", prefix, session_id);
+    let subject = format!("{}.{}.agent.session.prompt", prefix, session_id);
     let prefix = prefix.to_string();
     let session_id = session_id.to_string();
     // Subscribe BEFORE returning so the bridge can't miss the prompt.
     let mut sub = nats.subscribe(subject).await.unwrap();
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let payload: acp_nats::prompt_event::PromptPayload =
-                serde_json::from_slice(&msg.payload).expect("valid PromptPayload");
-            let events_subject = format!(
-                "{}.{}.agent.prompt.events.{}",
-                prefix, session_id, payload.req_id
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+            let update_subject =
+                format!("{}.{}.agent.session.update.{}", prefix, session_id, req_id);
+            let response_subject = format!(
+                "{}.{}.agent.ext.session.prompt.response.{}",
+                prefix, session_id, req_id
             );
+
+            let mut converter = PromptEventConverter::new(session_id.clone());
             for event in events {
-                nats.publish(
-                    events_subject.clone(),
-                    serde_json::to_vec(&event).unwrap().into(),
-                )
-                .await
-                .unwrap();
+                let (notifications, outcome) = converter.convert(event);
+                for notif in &notifications {
+                    nats.publish(
+                        update_subject.clone(),
+                        serde_json::to_vec(notif).unwrap().into(),
+                    )
+                    .await
+                    .unwrap();
+                }
+                if !notifications.is_empty() {
+                    nats.flush().await.unwrap();
+                }
+                if let Some(outcome) = outcome {
+                    match outcome {
+                        PromptOutcome::Done { stop_reason } => {
+                            let resp = agent_client_protocol::PromptResponse::new(
+                                parse_stop_reason(&stop_reason),
+                            );
+                            nats.publish(
+                                response_subject,
+                                serde_json::to_vec(&resp).unwrap().into(),
+                            )
+                            .await
+                            .unwrap();
+                        }
+                        PromptOutcome::Error { message } => {
+                            let env = serde_json::json!({"error": message});
+                            nats.publish(
+                                response_subject,
+                                serde_json::to_vec(&env).unwrap().into(),
+                            )
+                            .await
+                            .unwrap();
+                        }
+                    }
+                    return;
+                }
             }
         }
     });
@@ -939,21 +995,25 @@ async fn malformed_event_json_returns_err() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
-    // Publish garbage bytes instead of a valid PromptEvent JSON.
+    // Publish garbage bytes to the session_update subject instead of a valid SessionNotification.
     let session_id = "sess-bad-json";
     let mut prompt_sub = nats
-        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .subscribe(format!("acp.{}.agent.session.prompt", session_id))
         .await
         .unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = prompt_sub.next().await {
-            let payload: acp_nats::prompt_event::PromptPayload =
-                serde_json::from_slice(&msg.payload).unwrap();
-            let events_subject =
-                format!("acp.{}.agent.prompt.events.{}", session_id, payload.req_id);
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let update_subject =
+                format!("acp.{}.agent.session.update.{}", session_id, req_id);
             nats2
-                .publish(events_subject, b"{not valid json!!!}".as_ref().into())
+                .publish(update_subject, b"{not valid json!!!}".as_ref().into())
                 .await
                 .unwrap();
         }
@@ -1322,7 +1382,7 @@ async fn cancel_while_prompt_running_returns_cancelled() {
     // The mock runner never responds — the cancel signal terminates the prompt.
     let session_id = "sess-cancel-prompt";
     let mut prompt_sub = nats
-        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .subscribe(format!("acp.{}.agent.session.prompt", session_id))
         .await
         .unwrap();
 
@@ -1363,7 +1423,7 @@ async fn bridge_cancel_stops_running_prompt_end_to_end() {
     // Mock runner: subscribe so the bridge can publish the prompt, but never
     // send events back.  The prompt will wait until cancelled.
     let mut prompt_sub = nats
-        .subscribe(format!("acp.{}.agent.prompt", session_id))
+        .subscribe(format!("acp.{}.agent.session.prompt", session_id))
         .await
         .unwrap();
     tokio::spawn(async move {
@@ -2975,5 +3035,58 @@ async fn ext_notification_integration_always_ok_with_no_subscriber() {
     assert!(
         result.is_ok(),
         "fire-and-forget: must be Ok even with no subscriber"
+    );
+}
+
+// ── close_session integration ─────────────────────────────────────────────────
+
+/// close_session through the bridge routes to the correct per-session NATS subject.
+#[tokio::test]
+async fn close_session_integration_forwards_request_and_returns_response() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let mut sub = nats
+        .subscribe("acp.sess-close-1.agent.session.close")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = sub.next().await {
+            let resp = CloseSessionResponse::new();
+            let resp_bytes = serde_json::to_vec(&resp).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp_bytes.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge
+        .close_session(CloseSessionRequest::new("sess-close-1"))
+        .await;
+    assert!(
+        result.is_ok(),
+        "close_session must succeed with real responder, got: {:?}",
+        result.unwrap_err()
+    );
+}
+
+/// close_session with no responder returns AgentUnavailable (timeout).
+#[tokio::test]
+async fn close_session_integration_timeout_returns_agent_unavailable() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp");
+
+    let err = bridge
+        .close_session(CloseSessionRequest::new("sess-close-2"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.code,
+        agent_client_protocol::ErrorCode::Other(AGENT_UNAVAILABLE),
+        "timeout must return AgentUnavailable, got: {:?}",
+        err
     );
 }

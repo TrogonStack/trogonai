@@ -36,9 +36,12 @@ dependencies = [
  "clap",
  "futures",
  "opentelemetry",
+ "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-acp-runner",
  "trogon-nats",
  "trogon-std",
 ]
@@ -64,6 +67,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "trogon-acp-runner",
  "trogon-nats",
  "trogon-std",
 ]
