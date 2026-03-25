@@ -69,7 +69,8 @@ mod tests {
 
     #[test]
     fn write_creates_file_with_content() {
-        let path = std::env::temp_dir().join("trogon_fs_write_test_xk9");
+        let path =
+            std::env::temp_dir().join(format!("trogon_fs_write_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let fs = SystemFs;
         fs.write(&path, "hello world").unwrap();
@@ -80,7 +81,7 @@ mod tests {
     #[test]
     fn create_dir_all_creates_nested_directories() {
         let base = std::env::temp_dir()
-            .join("trogon_fs_mkdir_xk9")
+            .join(format!("trogon_fs_mkdir_{}", std::process::id()))
             .join("nested");
         let _ = std::fs::remove_dir_all(base.parent().unwrap());
         let fs = SystemFs;
@@ -92,7 +93,8 @@ mod tests {
     #[test]
     fn open_append_creates_and_appends_to_file() {
         use std::io::Write;
-        let path = std::env::temp_dir().join("trogon_fs_append_xk9");
+        let path =
+            std::env::temp_dir().join(format!("trogon_fs_append_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let fs = SystemFs;
         let mut f = fs.open_append(&path).unwrap();
