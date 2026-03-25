@@ -282,6 +282,12 @@ impl RpcServer {
 
         if let Err(e) = self.store.save(&session_id, &state).await {
             warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
+            self.reply(
+                &msg,
+                &serde_json::json!({ "error": format!("failed to save session: {e}") }),
+            )
+            .await;
+            return;
         }
 
         self.publish_session_ready(&session_id).await;
@@ -322,17 +328,28 @@ impl RpcServer {
         };
 
         let session_id = request.session_id.to_string();
-        match self.store.load(&session_id).await {
-            Ok(mut state) => {
-                state.mode = request.mode_id.to_string();
-                state.updated_at = now_iso8601();
-                if let Err(e) = self.store.save(&session_id, &state).await {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
-                }
-            }
+        let mut state = match self.store.load(&session_id).await {
+            Ok(s) => s,
             Err(e) => {
                 warn!(session_id = %session_id, error = %e, "rpc: failed to load session for mode update");
+                self.reply(
+                    &msg,
+                    &serde_json::json!({ "error": format!("failed to load session: {e}") }),
+                )
+                .await;
+                return;
             }
+        };
+        state.mode = request.mode_id.to_string();
+        state.updated_at = now_iso8601();
+        if let Err(e) = self.store.save(&session_id, &state).await {
+            warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
+            self.reply(
+                &msg,
+                &serde_json::json!({ "error": format!("failed to save session: {e}") }),
+            )
+            .await;
+            return;
         }
 
         self.reply(&msg, &SetSessionModeResponse::new()).await;
@@ -349,17 +366,28 @@ impl RpcServer {
         };
 
         let session_id = request.session_id.to_string();
-        match self.store.load(&session_id).await {
-            Ok(mut state) => {
-                state.model = Some(request.model_id.to_string());
-                state.updated_at = now_iso8601();
-                if let Err(e) = self.store.save(&session_id, &state).await {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
-                }
-            }
+        let mut state = match self.store.load(&session_id).await {
+            Ok(s) => s,
             Err(e) => {
                 warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
+                self.reply(
+                    &msg,
+                    &serde_json::json!({ "error": format!("failed to load session: {e}") }),
+                )
+                .await;
+                return;
             }
+        };
+        state.model = Some(request.model_id.to_string());
+        state.updated_at = now_iso8601();
+        if let Err(e) = self.store.save(&session_id, &state).await {
+            warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
+            self.reply(
+                &msg,
+                &serde_json::json!({ "error": format!("failed to save session: {e}") }),
+            )
+            .await;
+            return;
         }
 
         self.reply(&msg, &SetSessionModelResponse::new()).await;
@@ -429,20 +457,26 @@ impl RpcServer {
         };
 
         let source_id = request.session_id.to_string();
-        let new_id = uuid::Uuid::new_v4().to_string();
 
-        match self.store.load(&source_id).await {
-            Ok(mut state) => {
-                let now = now_iso8601();
-                state.created_at = now.clone();
-                state.updated_at = now;
-                if let Err(e) = self.store.save(&new_id, &state).await {
-                    warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
-                }
-            }
+        let mut state = match self.store.load(&source_id).await {
+            Ok(s) => s,
             Err(e) => {
                 warn!(source_id = %source_id, error = %e, "rpc: failed to load source session for fork");
+                self.reply(
+                    &msg,
+                    &serde_json::json!({ "error": format!("failed to load source session: {e}") }),
+                )
+                .await;
+                return;
             }
+        };
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let now = now_iso8601();
+        state.created_at = now.clone();
+        state.updated_at = now;
+        if let Err(e) = self.store.save(&new_id, &state).await {
+            warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
         }
 
         self.reply(&msg, &ForkSessionResponse::new(new_id)).await;

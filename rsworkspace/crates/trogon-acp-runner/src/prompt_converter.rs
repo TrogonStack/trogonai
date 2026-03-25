@@ -93,11 +93,15 @@ impl PromptEventConverter {
 
             PromptEvent::UsageUpdate {
                 input_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
                 output_tokens,
                 context_window,
                 ..
             } => {
-                let used = (input_tokens + output_tokens) as u64;
+                let used =
+                    (input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens)
+                        as u64;
                 let size = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
                 let notif = self.notif(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)));
                 (vec![notif], None)
