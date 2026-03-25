@@ -23,7 +23,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
 
     info!(session_id = %args.session_id, "Cancel notification");
 
-    AcpSessionId::try_from(&args.session_id).map_err(|e| {
+    let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
         bridge
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
@@ -34,7 +34,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
         )
     })?;
 
-    let subject = agent::session_cancel(bridge.config.acp_prefix(), &args.session_id.to_string());
+    let subject = agent::session_cancel(bridge.config.acp_prefix(), session_id.as_str());
 
     let publish_result = nats::publish(
         bridge.nats(),
@@ -58,7 +58,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
     }
 
     let cancelled_subject =
-        agent::session_cancelled(bridge.config.acp_prefix(), &args.session_id.to_string());
+        agent::session_cancelled(bridge.config.acp_prefix(), session_id.as_str());
     if let Err(e) = bridge
         .nats()
         .publish_with_headers(

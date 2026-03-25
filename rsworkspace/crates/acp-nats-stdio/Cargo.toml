@@ -20,6 +20,9 @@ tracing = { workspace = true }
 trogon-std = { workspace = true, features = ["clap"] }
 
 [dev-dependencies]
-tracing-subscriber = { workspace = true, features = ["fmt"] }
+serde_json = { workspace = true }
+testcontainers-modules = { version = "0.8.0", features = ["nats"] }
+trogon-acp-runner = { path = "../trogon-acp-runner" }
 trogon-nats = { workspace = true, features = ["test-support"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-std = { workspace = true, features = ["test-support"] }

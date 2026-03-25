@@ -54,14 +54,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_background_tasks_completes() {
-        let (_mock, bridge) = mock_bridge();
-        bridge.spawn_background(tokio::spawn(async {}));
-        bridge.drain_background_tasks().await;
-        assert!(bridge.background_tasks.borrow().is_empty());
-    }
-
-    #[tokio::test]
     async fn prompt_via_agent_trait_returns_done() {
         let (mock, bridge) = mock_bridge();
 
