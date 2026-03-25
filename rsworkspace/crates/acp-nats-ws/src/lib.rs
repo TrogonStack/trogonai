@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 pub mod config;
 pub mod connection;
 pub mod upgrade;
