@@ -362,17 +362,14 @@ dependencies = [
  "rustls-webpki 0.103.10",
  "serde",
  "serde_json",
- "serde_nanos",
  "serde_repr",
  "thiserror 1.0.69",
- "time",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
  "tokio-websockets 0.10.1",
  "tracing",
- "tryhard",
  "url",
 ]
 
@@ -3159,15 +3156,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_nanos"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a93142f0367a4cc53ae0fead1bcda39e85beccfad3dcd717656cacab94b12985"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_path_to_error"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4288,16 +4276,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tryhard"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fe58ebd5edd976e0fe0f8a14d2a04b7c81ef153ea9a54eebc42e67c2c23b4e5"
-dependencies = [
- "pin-project-lite",
- "tokio",
-]
 
 [[package]]
 name = "tungstenite"
