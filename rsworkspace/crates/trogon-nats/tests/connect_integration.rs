@@ -176,10 +176,7 @@ async fn connect_to_unreachable_server_returns_ok_with_background_retry() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    let config = NatsConfig::new(
-        vec![format!("nats://127.0.0.1:{port}")],
-        NatsAuth::None,
-    );
+    let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
 
     // connect() must return within a few seconds (INITIAL_CONNECT_CHECK_SECS + margin).
     let result = tokio::time::timeout(
