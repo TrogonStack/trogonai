@@ -7,19 +7,19 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
-    AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate, ContentBlock, ContentChunk,
-    CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
-    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    McpCapabilities, ModelInfo, NewSessionRequest, NewSessionResponse, Plan, PlanEntry,
-    PlanEntryPriority, PlanEntryStatus, PromptCapabilities, PromptRequest, PromptResponse,
-    ProtocolVersion, Result, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-    SessionConfigOption, SessionConfigOptionCategory, SessionForkCapabilities, SessionId,
-    SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
-    SessionConfigOptionValue, SessionNotification, SessionResumeCapabilities, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
+    AvailableCommand, AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate,
+    ContentBlock, ContentChunk, CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, McpCapabilities, ModelInfo, NewSessionRequest,
+    NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptCapabilities,
+    PromptRequest, PromptResponse, ProtocolVersion, Result, ResumeSessionRequest,
+    ResumeSessionResponse, SessionCapabilities, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
+    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
@@ -616,12 +616,10 @@ where
                     .mcp_capabilities(McpCapabilities::new().http(true).sse(true))
                     .meta(meta),
             )
-            .auth_methods(vec![
-                AuthMethod::Agent(
-                    AuthMethodAgent::new("gateway", "Model Gateway")
-                        .description("Connect via a custom Anthropic-compatible gateway"),
-                ),
-            ])
+            .auth_methods(vec![AuthMethod::Agent(
+                AuthMethodAgent::new("gateway", "Model Gateway")
+                    .description("Connect via a custom Anthropic-compatible gateway"),
+            )])
             .agent_info(Implementation::new("trogon-acp", "0.1.0").title("Claude Agent")))
     }
 
@@ -3469,9 +3467,9 @@ mod tests {
 
     use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
     use agent_client_protocol::{
-        Agent as _, AuthenticateRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
-        LoadSessionRequest, NewSessionRequest, ProtocolVersion, ResumeSessionRequest,
-        SetSessionModeRequest, SetSessionModelRequest,
+        Agent as _, AuthenticateRequest, ForkSessionRequest, InitializeRequest,
+        ListSessionsRequest, LoadSessionRequest, NewSessionRequest, ProtocolVersion,
+        ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest,
     };
     use async_nats::jetstream;
     use testcontainers_modules::nats::Nats;
@@ -3592,7 +3590,9 @@ mod tests {
         agent.authenticate(req).await.unwrap();
 
         let cfg = gateway_config.read().await;
-        let cfg = cfg.as_ref().expect("gateway config must be set after authenticate");
+        let cfg = cfg
+            .as_ref()
+            .expect("gateway config must be set after authenticate");
         assert_eq!(cfg.base_url, "https://gateway.example.com");
         assert_eq!(cfg.token, "tok-abc");
     }
@@ -3622,7 +3622,9 @@ mod tests {
         assert!(resp.modes.is_some(), "must return modes");
         assert!(resp.models.is_some(), "must return models");
         assert!(
-            resp.config_options.as_ref().map_or(false, |v| !v.is_empty()),
+            resp.config_options
+                .as_ref()
+                .map_or(false, |v| !v.is_empty()),
             "must return config_options"
         );
     }
@@ -3715,7 +3717,11 @@ mod tests {
 
         let req = SetSessionModeRequest::new(session_id, "nonexistent-mode");
         let err = agent.set_session_mode(req).await.unwrap_err();
-        assert!(err.message.contains("Invalid mode"), "unexpected: {}", err.message);
+        assert!(
+            err.message.contains("Invalid mode"),
+            "unexpected: {}",
+            err.message
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -3750,7 +3756,11 @@ mod tests {
         let req = ForkSessionRequest::new(src_id, "/forked").mcp_servers(vec![]);
         let fork = agent.fork_session(req).await.unwrap();
 
-        let state = agent.store.load(&fork.session_id.to_string()).await.unwrap();
+        let state = agent
+            .store
+            .load(&fork.session_id.to_string())
+            .await
+            .unwrap();
         assert_eq!(state.cwd, "/forked");
     }
 

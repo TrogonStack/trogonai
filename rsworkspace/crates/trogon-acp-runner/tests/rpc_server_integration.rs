@@ -83,7 +83,10 @@ async fn initialize_returns_protocol_version_and_capabilities() {
     let session_caps = caps.session_capabilities;
     assert!(session_caps.list.is_some(), "must advertise session list");
     assert!(session_caps.fork.is_some(), "must advertise session fork");
-    assert!(session_caps.resume.is_some(), "must advertise session resume");
+    assert!(
+        session_caps.resume.is_some(),
+        "must advertise session resume"
+    );
 }
 
 // ── authenticate ──────────────────────────────────────────────────────────────
@@ -134,7 +137,10 @@ async fn new_session_stores_mode_from_meta() {
     let store = start_rpc_server(nats.clone(), js, "acp").await;
 
     let mut meta = serde_json::Map::new();
-    meta.insert("mode".to_string(), serde_json::Value::String("bypassPermissions".to_string()));
+    meta.insert(
+        "mode".to_string(),
+        serde_json::Value::String("bypassPermissions".to_string()),
+    );
     let req = NewSessionRequest::new("/tmp").meta(meta);
     let reply = nats
         .request("acp.agent.session.new", request_bytes(&req))
@@ -239,7 +245,10 @@ async fn set_session_mode_updates_mode_in_store() {
 
     let req = SetSessionModeRequest::new("sess-mode-1", "acceptEdits");
     let reply = nats
-        .request("acp.sess-mode-1.agent.session.set_mode", request_bytes(&req))
+        .request(
+            "acp.sess-mode-1.agent.session.set_mode",
+            request_bytes(&req),
+        )
         .await
         .expect("set_session_mode must reply");
 
@@ -302,10 +311,7 @@ async fn set_session_model_works_for_session_that_does_not_exist() {
 
     let req = SetSessionModelRequest::new("new-sess", "claude-sonnet-4");
     let reply = nats
-        .request(
-            "acp.new-sess.agent.session.set_model",
-            request_bytes(&req),
-        )
+        .request("acp.new-sess.agent.session.set_model", request_bytes(&req))
         .await
         .expect("must reply even for unknown sessions");
 
@@ -392,8 +398,14 @@ async fn list_sessions_returns_all_saved_sessions_with_metadata() {
     let resp: ListSessionsResponse = serde_json::from_slice(&reply.payload).unwrap();
     assert_eq!(resp.sessions.len(), 2);
 
-    let s1 = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1");
-    let s2 = resp.sessions.iter().find(|s| s.session_id.to_string() == "s2");
+    let s1 = resp
+        .sessions
+        .iter()
+        .find(|s| s.session_id.to_string() == "s1");
+    let s2 = resp
+        .sessions
+        .iter()
+        .find(|s| s.session_id.to_string() == "s2");
 
     assert!(s1.is_some(), "s1 must be in list");
     assert!(s2.is_some(), "s2 must be in list");
@@ -543,10 +555,7 @@ async fn resume_session_bad_payload_does_not_crash_server() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let req = ResumeSessionRequest::new("sess-alive", "/tmp");
-    nats.request(
-        "acp.sess-alive.agent.session.resume",
-        request_bytes(&req),
-    )
-    .await
-    .expect("server must be alive after bad payload");
+    nats.request("acp.sess-alive.agent.session.resume", request_bytes(&req))
+        .await
+        .expect("server must be alive after bad payload");
 }

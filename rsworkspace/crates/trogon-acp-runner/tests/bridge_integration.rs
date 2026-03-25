@@ -13,7 +13,6 @@ use std::sync::{
 use std::time::Duration;
 
 use acp_nats::prompt_event::PromptEvent;
-use trogon_acp_runner::prompt_converter::{PromptEventConverter, PromptOutcome};
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
@@ -29,6 +28,7 @@ use agent_client_protocol::{
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
+use trogon_acp_runner::prompt_converter::{PromptEventConverter, PromptOutcome};
 use trogon_std::time::SystemClock;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1011,8 +1011,7 @@ async fn malformed_event_json_returns_err() {
                 .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
                 .map(|v| v.as_str().to_string())
                 .unwrap_or_default();
-            let update_subject =
-                format!("acp.{}.agent.session.update.{}", session_id, req_id);
+            let update_subject = format!("acp.{}.agent.session.update.{}", session_id, req_id);
             nats2
                 .publish(update_subject, b"{not valid json!!!}".as_ref().into())
                 .await
