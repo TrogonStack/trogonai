@@ -46,6 +46,7 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
     acp_prefix: &str,
@@ -121,6 +122,7 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn try_init_otel(
     service_name: ServiceName,
     acp_prefix: &str,
@@ -144,6 +146,7 @@ fn try_init_otel(
     Ok((tracer_provider, meter_provider, logger_provider))
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn shutdown_otel() {
     tracing::info!("Shutting down OpenTelemetry providers");
 
