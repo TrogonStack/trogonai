@@ -42,10 +42,6 @@ where
         .session_request::<LoadSessionRequest, LoadSessionResponse>(&subject, &args, &session_id)
         .await;
 
-    if result.is_ok() {
-        bridge.schedule_session_ready(args.session_id.clone());
-    }
-
     bridge.metrics.record_request(
         "load_session",
         bridge.clock.elapsed(start).as_secs_f64(),
@@ -62,7 +58,6 @@ mod tests {
         set_js_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, LoadSessionRequest, LoadSessionResponse};
-    use std::time::Duration;
 
     #[tokio::test]
     async fn load_session_forwards_request_and_returns_response() {
@@ -106,7 +101,6 @@ mod tests {
             .load_session(LoadSessionRequest::new("s1", "."))
             .await;
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
