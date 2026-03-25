@@ -3622,9 +3622,7 @@ mod tests {
         assert!(resp.modes.is_some(), "must return modes");
         assert!(resp.models.is_some(), "must return models");
         assert!(
-            resp.config_options
-                .as_ref()
-                .map_or(false, |v| !v.is_empty()),
+            resp.config_options.as_ref().is_some_and(|v| !v.is_empty()),
             "must return config_options"
         );
     }
