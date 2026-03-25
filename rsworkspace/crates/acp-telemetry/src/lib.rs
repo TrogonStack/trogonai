@@ -1,4 +1,7 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 pub mod constants;
+
 mod log;
 mod metric;
 mod service_name;
