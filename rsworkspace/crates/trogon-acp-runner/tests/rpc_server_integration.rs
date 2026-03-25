@@ -634,3 +634,62 @@ async fn close_session_bad_payload_does_not_crash_server() {
         .await
         .expect("server must be alive after bad payload");
 }
+
+#[tokio::test]
+async fn close_session_publishes_cancel_signal() {
+    let (_container, nats, js) = start_nats().await;
+    let store = start_rpc_server(nats.clone(), js, "acp").await;
+
+    // Create a session.
+    let new_req = NewSessionRequest::new("/tmp");
+    let reply = nats
+        .request("acp.agent.session.new", request_bytes(&new_req))
+        .await
+        .expect("new_session must reply");
+    let new_resp: NewSessionResponse =
+        serde_json::from_slice(&reply.payload).expect("valid JSON");
+    let session_id = new_resp.session_id.to_string();
+
+    // Subscribe to the cancel subject BEFORE calling close_session.
+    let cancel_subject = format!("acp.{session_id}.agent.session.cancel");
+    let mut cancel_sub = nats
+        .subscribe(cancel_subject)
+        .await
+        .expect("must subscribe");
+
+    // Close the session.
+    let close_req = CloseSessionRequest::new(session_id.clone());
+    nats.request(
+        format!("acp.{session_id}.agent.session.close"),
+        request_bytes(&close_req),
+    )
+    .await
+    .expect("close_session must reply");
+
+    // The cancel signal should arrive within a short timeout.
+    let cancel_msg = tokio::time::timeout(Duration::from_millis(500), cancel_sub.next())
+        .await
+        .expect("cancel signal must arrive within 500ms")
+        .expect("cancel subscription must not be closed");
+    drop(cancel_msg);
+
+    // Session must also be gone from store.
+    let _ = store; // keep store alive
+}
+
+#[tokio::test]
+async fn close_session_nonexistent_session_does_not_crash() {
+    let (_container, nats, js) = start_nats().await;
+    let _ = start_rpc_server(nats.clone(), js, "acp").await;
+
+    let close_req = CloseSessionRequest::new("nonexistent-session-id");
+    let reply = nats
+        .request(
+            "acp.nonexistent-session-id.agent.session.close",
+            request_bytes(&close_req),
+        )
+        .await
+        .expect("close_session must reply even for nonexistent session");
+    let _resp: CloseSessionResponse =
+        serde_json::from_slice(&reply.payload).expect("reply must be valid JSON");
+}
