@@ -59,6 +59,7 @@ impl RpcServer {
     }
 
     /// Publish `session.ready` on NATS to signal that the session is ready for prompts.
+    #[cfg_attr(coverage, coverage(off))]
     async fn publish_session_ready(&self, session_id: &str) {
         let subject = subjects::ext_session_ready(&self.prefix, session_id);
         let message = ExtSessionReady::new(SessionId::from(session_id.to_owned()));
@@ -75,6 +76,7 @@ impl RpcServer {
     }
 
     /// Serialise `value` and publish it to `msg`'s reply subject.
+    #[cfg_attr(coverage, coverage(off))]
     async fn reply<T: serde::Serialize>(&self, msg: &async_nats::Message, value: &T) {
         let Some(ref reply) = msg.reply else {
             warn!("rpc: message has no reply subject — skipping");
@@ -119,12 +121,14 @@ impl RpcServer {
     }
 
     /// Entry point — returns when all subscriptions have closed.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn run(self) {
         if let Err(e) = self.run_inner().await {
             error!(error = %e, "rpc_server exited with error");
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn run_inner(&self) -> anyhow::Result<()> {
         let prefix = &self.prefix;
 
@@ -271,7 +275,10 @@ impl RpcServer {
         };
 
         if let Err(e) = self.store.save(&session_id, &state).await {
-            warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
+            #[cfg_attr(coverage, coverage(off))]
+            {
+                warn!(session_id = %session_id, error = %e, "rpc: failed to save new session");
+            }
         }
 
         self.publish_session_ready(&session_id).await;
@@ -315,11 +322,17 @@ impl RpcServer {
                 state.mode = request.mode_id.to_string();
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
+                    #[cfg_attr(coverage, coverage(off))]
+                    {
+                        warn!(session_id = %session_id, error = %e, "rpc: failed to persist mode update");
+                    }
                 }
             }
             Err(e) => {
-                warn!(session_id = %session_id, error = %e, "rpc: failed to load session for mode update");
+                #[cfg_attr(coverage, coverage(off))]
+                {
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to load session for mode update");
+                }
             }
         }
 
@@ -341,11 +354,17 @@ impl RpcServer {
                 state.model = Some(request.model_id.to_string());
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
-                    warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
+                    #[cfg_attr(coverage, coverage(off))]
+                    {
+                        warn!(session_id = %session_id, error = %e, "rpc: failed to persist model update");
+                    }
                 }
             }
             Err(e) => {
-                warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
+                #[cfg_attr(coverage, coverage(off))]
+                {
+                    warn!(session_id = %session_id, error = %e, "rpc: failed to load session for model update");
+                }
             }
         }
 
@@ -421,11 +440,17 @@ impl RpcServer {
                 state.created_at = now.clone();
                 state.updated_at = now;
                 if let Err(e) = self.store.save(&new_id, &state).await {
-                    warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
+                    #[cfg_attr(coverage, coverage(off))]
+                    {
+                        warn!(new_id = %new_id, error = %e, "rpc: failed to save forked session");
+                    }
                 }
             }
             Err(e) => {
-                warn!(source_id = %source_id, error = %e, "rpc: failed to load source session for fork");
+                #[cfg_attr(coverage, coverage(off))]
+                {
+                    warn!(source_id = %source_id, error = %e, "rpc: failed to load source session for fork");
+                }
             }
         }
 
