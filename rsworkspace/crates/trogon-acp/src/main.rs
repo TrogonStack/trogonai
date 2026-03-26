@@ -14,9 +14,9 @@
 //!       │    loads history from NATS KV, replays as session notifications
 //!       └─ prompt / cancel
 //!            Bridge<NatsClient>   ← acp-nats
-//!               ↓↑ NATS Core (prompt publish / event subscribe)
-//!         trogon-acp-runner      ← same process
-//!           Runner               subscribes, runs AgentLoop, streams PromptEvents
+//!               ↓↑ NATS request-reply
+//!         TrogonAgent (Agent trait impl)   ← trogon-acp-runner (same process)
+//!           AgentSideNatsConnection        ← acp-nats-agent
 //!              ↓
 //!         Anthropic API (via trogon-secret-proxy)
 //! ```
@@ -119,12 +119,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── Permission gate channel ───────────────────────────────────────────────
-    // The Runner sends PermissionReq over this channel; the LocalSet task below
+    // TrogonAgent sends PermissionReq over this channel; the LocalSet task below
     // handles each request by calling conn.request_permission() on the ACP connection.
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
 
-    // ── Shared gateway config (set by authenticate(), consumed by Runner) ─────
+    // ── Shared gateway config (set by authenticate(), consumed by TrogonAgent) ─
 
     let gateway_config = std::sync::Arc::new(tokio::sync::RwLock::new(None::<GatewayConfig>));
 
