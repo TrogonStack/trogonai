@@ -38,6 +38,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
 ]
@@ -47,6 +48,7 @@ name = "acp-nats-stdio"
 version = "0.0.1"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
@@ -54,12 +56,14 @@ dependencies = [
  "clap",
  "futures",
  "opentelemetry",
+ "reqwest",
  "serde_json",
  "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "trogon-acp-runner",
+ "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
 ]
@@ -69,6 +73,7 @@ name = "acp-nats-ws"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
@@ -78,6 +83,7 @@ dependencies = [
  "clap",
  "futures-util",
  "opentelemetry",
+ "reqwest",
  "serde_json",
  "testcontainers-modules",
  "tokio",
@@ -86,6 +92,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-acp-runner",
+ "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
 ]
@@ -3898,6 +3905,7 @@ name = "trogon-acp"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "agent-client-protocol",
  "anyhow",
  "async-nats",
@@ -3923,9 +3931,11 @@ name = "trogon-acp-runner"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "agent-client-protocol",
  "anyhow",
  "async-nats",
+ "async-trait",
  "bytes",
  "futures",
  "futures-util",

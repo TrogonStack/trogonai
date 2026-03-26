@@ -47,7 +47,8 @@ use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::info;
 
-use trogon_acp_runner::{GatewayConfig, PermissionReq, Runner, SessionStore};
+use acp_nats_agent::AgentSideNatsConnection;
+use trogon_acp_runner::{GatewayConfig, PermissionReq, SessionStore, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 use trogon_nats::NatsConfig;
@@ -127,17 +128,26 @@ async fn main() -> anyhow::Result<()> {
 
     let gateway_config = std::sync::Arc::new(tokio::sync::RwLock::new(None::<GatewayConfig>));
 
-    // ── Runner (NATS subscriber + agent) ─────────────────────────────────────
+    // ── Session store ─────────────────────────────────────────────────────────
 
-    let runner = Runner::new(
+    let store = trogon_acp_runner::SessionStore::open(&js).await?;
+
+    // ── TrogonAgent (NATS subscriber + agent) ────────────────────────────────
+
+    let ta = TrogonAgent::new(
         nats.clone(),
-        &js,
+        store.clone(),
         agent_loop,
         acp_prefix.clone(),
+        model.clone(),
         Some(perm_tx),
         gateway_config.clone(),
-    )
-    .await?;
+    );
+    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)?;
+    let (_, runner_io_task) =
+        AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed, |fut| {
+            tokio::task::spawn_local(fut);
+        });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
 
@@ -158,10 +168,6 @@ async fn main() -> anyhow::Result<()> {
         notification_tx.clone(),
     );
 
-    // ── Session store (shared between Runner and TrogonAcpAgent) ─────────────
-
-    let store = trogon_acp_runner::SessionStore::open(&js).await?;
-
     // ── TrogonAcpAgent (handles lifecycle locally, routes prompt/cancel via Bridge) ──
 
     let acp_agent = agent::TrogonAcpAgent::new(
@@ -180,8 +186,8 @@ async fn main() -> anyhow::Result<()> {
 
     local
         .run_until(async move {
-            // Runner::run() uses spawn_local internally — must run within a LocalSet.
-            tokio::task::spawn_local(async move { runner.run().await });
+            // AgentSideNatsConnection uses spawn_local internally — must run within a LocalSet.
+            tokio::task::spawn_local(runner_io_task);
 
             let stdin = tokio::io::stdin().compat();
             let stdout = tokio::io::stdout().compat_write();
