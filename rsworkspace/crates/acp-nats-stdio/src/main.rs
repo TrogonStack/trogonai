@@ -279,7 +279,10 @@ mod tests {
     async fn e2e_initialize_with_real_nats_returns_protocol_version() {
         use testcontainers_modules::nats::Nats;
         use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
-        use trogon_acp_runner::{RpcServer, SessionStore};
+        use acp_nats_agent::AgentSideNatsConnection;
+        use trogon_acp_runner::{SessionStore, TrogonAgent};
+        use trogon_agent_core::agent_loop::AgentLoop;
+        use trogon_agent_core::tools::ToolContext;
 
         // Start NATS with JetStream.
         let container = Nats::default()
@@ -295,17 +298,49 @@ mod tests {
         let nats_for_bridge = async_nats::connect(&nats_url).await.unwrap();
         let js = async_nats::jetstream::new(nats_for_server.clone());
 
-        // Start RpcServer.
+        // Start TrogonAgent.
         let store = SessionStore::open(&js).await.unwrap();
         let gateway_config = Arc::new(RwLock::new(None));
-        let server = RpcServer::new(
-            nats_for_server,
-            store,
-            "acp",
-            "claude-opus-4-6",
-            gateway_config,
-        );
-        tokio::spawn(async move { server.run().await });
+        let store_clone = store.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let local = tokio::task::LocalSet::new();
+            let http = reqwest::Client::new();
+            let agent_loop = AgentLoop {
+                http_client: http.clone(),
+                proxy_url: String::new(),
+                anthropic_token: String::new(),
+                anthropic_base_url: None,
+                anthropic_extra_headers: vec![],
+                model: "claude-opus-4-6".to_string(),
+                max_iterations: 10,
+                thinking_budget: None,
+                tool_context: Arc::new(ToolContext { http_client: http, proxy_url: String::new() }),
+                memory_owner: None,
+                memory_repo: None,
+                memory_path: None,
+                mcp_tool_defs: vec![],
+                mcp_dispatch: vec![],
+                permission_checker: None,
+            };
+            let ta = TrogonAgent::new(
+                nats_for_server.clone(),
+                store_clone,
+                agent_loop,
+                "acp",
+                "claude-opus-4-6",
+                None,
+                gateway_config,
+            );
+            let prefix = acp_nats::AcpPrefix::new("acp").unwrap();
+            let (_, ta_io_task) = AgentSideNatsConnection::new(ta, nats_for_server, prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            rt.block_on(local.run_until(async move { ta_io_task.await.ok(); }));
+        });
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Build bridge config.
