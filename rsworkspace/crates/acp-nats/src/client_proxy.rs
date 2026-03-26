@@ -1,15 +1,15 @@
 use crate::acp_prefix::AcpPrefix;
-use crate::nats::session;
+use crate::nats::client_subjects;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, Result, SessionNotification, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest,
+    KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse, Result,
+    SessionNotification, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use std::time::Duration;
-use trogon_nats::{FlushClient, PublishClient, RequestClient};
+use trogon_nats::{FlushClient, PublishClient, RequestClient, publish, request_with_timeout};
 
 pub struct NatsClientProxy<N> {
     nats: N,
@@ -34,79 +34,89 @@ fn to_acp_error(e: impl std::fmt::Display) -> Error {
 }
 
 impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
-    fn prefix(&self) -> &AcpPrefix {
-        &self.prefix
+    fn prefix(&self) -> &str {
+        self.prefix.as_str()
     }
 
-    fn session_id(&self) -> &AcpSessionId {
-        &self.session_id
+    fn session_id(&self) -> &str {
+        self.session_id.as_str()
     }
 
     async fn request<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
         &self,
-        subject: &impl crate::nats::markers::ClientRequestable,
+        subject: &str,
         args: &Req,
     ) -> Result<Resp> {
-        crate::nats::request_with_timeout(&self.nats, subject, args, self.timeout)
+        request_with_timeout(&self.nats, subject, args, self.timeout)
             .await
             .map_err(to_acp_error)
     }
 
-    async fn notify<Req: serde::Serialize>(
-        &self,
-        subject: &impl crate::nats::markers::ClientPublishable,
-        args: &Req,
-    ) -> Result<()> {
-        crate::nats::publish(&self.nats, subject, args, trogon_nats::PublishOptions::default())
-            .await
-            .map_err(to_acp_error)
+    async fn notify<Req: serde::Serialize>(&self, subject: &str, args: &Req) -> Result<()> {
+        publish(
+            &self.nats,
+            subject,
+            args,
+            trogon_nats::PublishOptions::default(),
+        )
+        .await
+        .map_err(to_acp_error)
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<N> {
-    async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
-        let s = session::client::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
+    async fn request_permission(
+        &self,
+        args: RequestPermissionRequest,
+    ) -> Result<RequestPermissionResponse> {
+        let s = client_subjects::session_request_permission(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
-        let s = session::client::SessionUpdateSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::session_update(self.prefix(), self.session_id());
         self.notify(&s, &args).await
     }
 
     async fn read_text_file(&self, args: ReadTextFileRequest) -> Result<ReadTextFileResponse> {
-        let s = session::client::FsReadTextFileSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::fs_read_text_file(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn write_text_file(&self, args: WriteTextFileRequest) -> Result<WriteTextFileResponse> {
-        let s = session::client::FsWriteTextFileSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::fs_write_text_file(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn create_terminal(&self, args: CreateTerminalRequest) -> Result<CreateTerminalResponse> {
-        let s = session::client::TerminalCreateSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::terminal_create(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn terminal_output(&self, args: TerminalOutputRequest) -> Result<TerminalOutputResponse> {
-        let s = session::client::TerminalOutputSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::terminal_output(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
-    async fn release_terminal(&self, args: ReleaseTerminalRequest) -> Result<ReleaseTerminalResponse> {
-        let s = session::client::TerminalReleaseSubject::new(self.prefix(), self.session_id());
+    async fn release_terminal(
+        &self,
+        args: ReleaseTerminalRequest,
+    ) -> Result<ReleaseTerminalResponse> {
+        let s = client_subjects::terminal_release(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
-    async fn wait_for_terminal_exit(&self, args: WaitForTerminalExitRequest) -> Result<WaitForTerminalExitResponse> {
-        let s = session::client::TerminalWaitForExitSubject::new(self.prefix(), self.session_id());
+    async fn wait_for_terminal_exit(
+        &self,
+        args: WaitForTerminalExitRequest,
+    ) -> Result<WaitForTerminalExitResponse> {
+        let s = client_subjects::terminal_wait_for_exit(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
-        let s = session::client::TerminalKillSubject::new(self.prefix(), self.session_id());
+        let s = client_subjects::terminal_kill(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 }
@@ -115,8 +125,9 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
-        SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
+        Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome,
+        RequestPermissionResponse, SessionNotification, SessionUpdate, ToolCallUpdate,
+        ToolCallUpdateFields,
     };
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -134,7 +145,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
         nats.set_response(
-            "acp.session.s1.client.session.request_permission",
+            "acp.s1.client.session.request_permission",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -160,7 +171,10 @@ mod tests {
         let result = p.session_notification(notif).await;
 
         assert!(result.is_ok());
-        assert_eq!(nats.published_messages(), vec!["acp.session.s1.client.session.update"]);
+        assert_eq!(
+            nats.published_messages(),
+            vec!["acp.s1.client.session.update"]
+        );
     }
 
     #[tokio::test]
@@ -168,12 +182,14 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = ReadTextFileResponse::new("file contents");
         nats.set_response(
-            "acp.session.s1.client.fs.read_text_file",
+            "acp.s1.client.fs.read_text_file",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
         let p = proxy(nats.clone());
-        let result = p.read_text_file(ReadTextFileRequest::new("s1", "/test.txt")).await;
+        let result = p
+            .read_text_file(ReadTextFileRequest::new("s1", "/test.txt"))
+            .await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().content, "file contents");
@@ -185,7 +201,9 @@ mod tests {
         nats.fail_next_request();
 
         let p = proxy(nats);
-        let result = p.read_text_file(ReadTextFileRequest::new("s1", "/test.txt")).await;
+        let result = p
+            .read_text_file(ReadTextFileRequest::new("s1", "/test.txt"))
+            .await;
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, ErrorCode::InternalError);
@@ -196,7 +214,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = agent_client_protocol::WriteTextFileResponse::default();
         nats.set_response(
-            "acp.session.s1.client.fs.write_text_file",
+            "acp.s1.client.fs.write_text_file",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -213,12 +231,14 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = CreateTerminalResponse::new("t1");
         nats.set_response(
-            "acp.session.s1.client.terminal.create",
+            "acp.s1.client.terminal.create",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
         let p = proxy(nats.clone());
-        let result = p.create_terminal(CreateTerminalRequest::new("s1", "echo")).await;
+        let result = p
+            .create_terminal(CreateTerminalRequest::new("s1", "echo"))
+            .await;
 
         assert!(result.is_ok());
     }
@@ -228,12 +248,14 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = TerminalOutputResponse::new("output", false);
         nats.set_response(
-            "acp.session.s1.client.terminal.output",
+            "acp.s1.client.terminal.output",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
         let p = proxy(nats.clone());
-        let result = p.terminal_output(TerminalOutputRequest::new("s1", "t1")).await;
+        let result = p
+            .terminal_output(TerminalOutputRequest::new("s1", "t1"))
+            .await;
 
         assert!(result.is_ok());
     }
@@ -243,12 +265,14 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = ReleaseTerminalResponse::default();
         nats.set_response(
-            "acp.session.s1.client.terminal.release",
+            "acp.s1.client.terminal.release",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
         let p = proxy(nats.clone());
-        let result = p.release_terminal(ReleaseTerminalRequest::new("s1", "t1")).await;
+        let result = p
+            .release_terminal(ReleaseTerminalRequest::new("s1", "t1"))
+            .await;
 
         assert!(result.is_ok());
     }
@@ -258,7 +282,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = KillTerminalResponse::default();
         nats.set_response(
-            "acp.session.s1.client.terminal.kill",
+            "acp.s1.client.terminal.kill",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -271,9 +295,10 @@ mod tests {
     #[tokio::test]
     async fn wait_for_terminal_exit_publishes_to_correct_subject() {
         let nats = AdvancedMockNatsClient::new();
-        let response = WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
+        let response =
+            WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
         nats.set_response(
-            "acp.session.s1.client.terminal.wait_for_exit",
+            "acp.s1.client.terminal.wait_for_exit",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
