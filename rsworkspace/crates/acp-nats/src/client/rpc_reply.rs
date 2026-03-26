@@ -1,12 +1,10 @@
+pub use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PLAIN};
 use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
 use crate::wire::{encode_agent_error, encode_success, merge_jsonrpc_headers};
 use agent_client_protocol::{Error, ErrorCode};
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::{Encoded, ResponseId};
 use tracing::warn;
-
-pub const CONTENT_TYPE_JSON: &str = "application/json";
-pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub fn error_response_fallback_bytes<S: JsonSerialize>(serializer: &S) -> (Bytes, &'static str) {
     match serializer.to_vec(&Response::<()>::Error {

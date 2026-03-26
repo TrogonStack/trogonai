@@ -6,7 +6,7 @@ use std::time::Duration;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
 
 struct HeaderMapCarrier<'a>(&'a mut HeaderMap);
 
@@ -22,8 +22,6 @@ pub fn inject_trace_context(headers: &mut HeaderMap) {
         propagator.inject_context(&cx, &mut HeaderMapCarrier(headers));
     });
 }
-
-pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
 pub fn headers_with_trace_context() -> HeaderMap {
     let mut headers = HeaderMap::new();

@@ -1,4 +1,5 @@
 use crate::auth::{NatsAuth, NatsConfig};
+use crate::constants::MAX_RECONNECT_DELAY;
 use async_nats::{Client, ConnectOptions, Event};
 use std::time::Duration;
 use tracing::{info, instrument, warn};
@@ -37,8 +38,6 @@ impl std::error::Error for ConnectError {
         }
     }
 }
-
-const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 fn reconnect_delay(attempts: usize) -> Duration {
     let delay = Duration::from_secs(std::cmp::min(

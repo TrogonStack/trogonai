@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::time::Duration;
 
 use crate::config::Config;
 use crate::nats::{
@@ -30,13 +29,7 @@ use super::{
     set_session_mode, set_session_model,
 };
 
-/// Delay before publishing `session.ready` to NATS.
-///
-/// The `Agent` trait returns the response value *before* the transport layer
-/// serializes and writes it to the client. Without a delay the spawned task
-/// could publish `session.ready` before the client has received the
-/// `session/new` response, violating the ordering guarantee.
-const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
+use crate::constants::SESSION_READY_DELAY;
 
 pub struct Bridge<N, C: GetElapsed> {
     pub(crate) nats: N,
