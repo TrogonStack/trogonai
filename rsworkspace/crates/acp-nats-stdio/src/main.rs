@@ -342,7 +342,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// E2E: real NATS container + RpcServer + stdio bridge → initialize → response.
+    /// E2E: real NATS container + TrogonAgent + stdio bridge → initialize → response.
     #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn e2e_initialize_with_real_nats_returns_protocol_version() {
