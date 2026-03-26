@@ -17,6 +17,7 @@ tokio = { workspace = true, features = ["time"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-std = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
