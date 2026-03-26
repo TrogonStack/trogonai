@@ -165,8 +165,8 @@ async fn next_text(
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// Full E2E: WS client → bridge → NATS → RpcServer → back.
-/// The RpcServer handles `initialize` and returns capabilities.
+/// Full E2E: WS client → bridge → NATS → TrogonAgent → back.
+/// TrogonAgent handles `initialize` and returns capabilities.
 #[tokio::test]
 async fn e2e_initialize_returns_protocol_version_and_capabilities() {
     let (_container, nats, js, nats_port) = start_nats().await;
@@ -199,7 +199,7 @@ async fn e2e_initialize_returns_protocol_version_and_capabilities() {
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
 
-/// E2E new_session: bridge → NATS → RpcServer creates session → client gets session ID.
+/// E2E new_session: bridge → NATS → TrogonAgent creates session → client gets session ID.
 #[tokio::test]
 async fn e2e_new_session_returns_session_id() {
     let (_container, nats, js, nats_port) = start_nats().await;
@@ -268,7 +268,7 @@ async fn e2e_list_sessions_returns_created_sessions() {
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
 
-/// E2E authenticate: bridge routes authenticate to RpcServer, which replies with empty response.
+/// E2E authenticate: bridge routes authenticate to TrogonAgent, which replies with empty response.
 #[tokio::test]
 async fn e2e_authenticate_returns_ok() {
     let (_container, nats, js, nats_port) = start_nats().await;
