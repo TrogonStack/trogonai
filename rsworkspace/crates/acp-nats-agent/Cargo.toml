@@ -2,13 +2,11 @@
 name = "acp-nats-agent"
 version = "0.0.1"
 edition = "2024"
-license = "Apache-2.0"
 
 [lints]
 workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
 acp-nats = { workspace = true }
 agent-client-protocol = { workspace = true, features = [
     "unstable_auth_methods",
@@ -21,7 +19,7 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_resume",
     "unstable_session_usage",
 ] }
-async-nats = { workspace = true, features = ["jetstream"] }
+async-nats = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
