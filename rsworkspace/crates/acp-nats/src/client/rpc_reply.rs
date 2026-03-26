@@ -1,11 +1,9 @@
+pub use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PLAIN};
 use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
 use agent_client_protocol::{Error, ErrorCode, RequestId, Response};
 use bytes::Bytes;
 use tracing::warn;
 use trogon_std::JsonSerialize;
-
-pub const CONTENT_TYPE_JSON: &str = "application/json";
-pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub fn error_response_fallback_bytes<S: JsonSerialize>(serializer: &S) -> (Bytes, &'static str) {
     match serializer.to_vec(&Response::<()>::Error {

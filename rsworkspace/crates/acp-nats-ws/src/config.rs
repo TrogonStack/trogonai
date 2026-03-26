@@ -1,10 +1,9 @@
 use acp_nats::{AcpPrefix, AcpPrefixError, Config, NatsConfig};
 use clap::Parser;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use trogon_std::env::ReadEnv;
 
-const DEFAULT_HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-const DEFAULT_PORT: u16 = 8080;
+use crate::constants::{DEFAULT_HOST, DEFAULT_PORT};
 
 #[derive(Parser, Debug)]
 #[command(name = "acp-nats-ws")]
@@ -50,6 +49,7 @@ pub fn apply_timeout_overrides<E: ReadEnv>(mut ws: WsConfig, env_provider: &E) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
     use trogon_std::env::InMemoryEnv;
 
     fn config_from_env(env: &InMemoryEnv) -> WsConfig {

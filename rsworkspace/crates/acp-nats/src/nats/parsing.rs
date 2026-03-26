@@ -1,8 +1,6 @@
+use crate::constants::{AGENT_EXT_PREFIX, AGENT_MARKER, EXT_SUBJECT_PREFIX};
 use crate::ext_method_name::ExtMethodName;
 use crate::session_id::AcpSessionId;
-
-const AGENT_MARKER: &str = ".agent.";
-const AGENT_EXT_PREFIX: &str = "agent.ext.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentMethod {
@@ -85,12 +83,6 @@ pub fn parse_agent_subject(subject: &str) -> Option<ParsedAgentSubject> {
 
     None
 }
-
-/// NATS subject prefix for generic extension methods.
-/// `client.ext.{name}` — the `ext` token makes extensions explicit in subjects.
-/// `ExtSessionPromptResponse` is matched first as a specific ext, so it won't
-/// collide with this catch-all.
-const EXT_SUBJECT_PREFIX: &str = "client.ext.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMethod {
