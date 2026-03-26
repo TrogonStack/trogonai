@@ -7,7 +7,9 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-acp-nats      = { path = "../acp-nats" }
+acp-nats        = { path = "../acp-nats" }
+acp-nats-agent  = { path = "../acp-nats-agent" }
+async-trait     = "0.1"
 agent-client-protocol = { version = "0.10.2", features = [
     "unstable_auth_methods",
     "unstable_boolean_config",
