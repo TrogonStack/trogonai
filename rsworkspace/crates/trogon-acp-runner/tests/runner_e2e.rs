@@ -1,4 +1,4 @@
-//! Integration tests for `Runner` — requires Docker (testcontainers starts NATS).
+//! Integration tests for `TrogonAgent` prompt handling — requires Docker (testcontainers starts NATS).
 //!
 //! Run with:
 //!   cargo test -p trogon-acp-runner --test runner_e2e
@@ -6,8 +6,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use acp_nats::nats::agent as subjects;
-use acp_nats::prompt_event::{PromptPayload, UserContentBlock};
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::nats::agent as agent_subjects;
+use acp_nats::nats::client_subjects;
+use acp_nats_agent::AgentSideNatsConnection;
+use agent_client_protocol::{ContentBlock, ImageContent, PromptRequest, TextContent};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -16,7 +19,9 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::{RwLock, mpsc};
-use trogon_acp_runner::{PermissionReq, Runner, SessionState, SessionStore, StoredMcpServer};
+use trogon_acp_runner::{
+    GatewayConfig, PermissionReq, SessionState, SessionStore, StoredMcpServer, TrogonAgent,
+};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
@@ -60,6 +65,75 @@ fn make_agent(base_url: &str) -> AgentLoop {
     }
 }
 
+/// Start a `TrogonAgent` wired to `AgentSideNatsConnection`. Must be called inside a `LocalSet`.
+async fn start_agent(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+    permission_tx: Option<trogon_acp_runner::PermissionTx>,
+    gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
+) -> SessionStore {
+    let store = SessionStore::open(js).await.unwrap();
+    let ta = TrogonAgent::new(
+        nats.clone(),
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        permission_tx,
+        gateway_config,
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Subscribe to session notifications and send a prompt as NATS request-reply.
+/// Returns (notif_sub, resp_sub) — use with `collect_notifs_and_response`.
+async fn subscribe_and_send(
+    nats: &async_nats::Client,
+    prefix: &str,
+    session_id: &str,
+    blocks: Vec<ContentBlock>,
+) -> (async_nats::Subscriber, async_nats::Subscriber) {
+    let notif_sub = nats
+        .subscribe(client_subjects::session_update(prefix, session_id))
+        .await
+        .expect("subscribe to notifications");
+    let inbox = nats.new_inbox();
+    let resp_sub = nats.subscribe(inbox.clone()).await.expect("subscribe to inbox");
+    let req = PromptRequest::new(session_id.to_owned(), blocks);
+    nats.publish_with_reply(
+        agent_subjects::session_prompt(prefix, session_id),
+        inbox,
+        Bytes::from(serde_json::to_vec(&req).unwrap()),
+    )
+    .await
+    .unwrap();
+    (notif_sub, resp_sub)
+}
+
+/// Send a plain text prompt.
+async fn send_text(
+    nats: &async_nats::Client,
+    prefix: &str,
+    session_id: &str,
+    text: &str,
+) -> (async_nats::Subscriber, async_nats::Subscriber) {
+    subscribe_and_send(
+        nats,
+        prefix,
+        session_id,
+        vec![ContentBlock::Text(TextContent::new(text))],
+    )
+    .await
+}
+
 fn tool_use_body() -> String {
     serde_json::json!({
         "stop_reason": "tool_use",
@@ -96,7 +170,7 @@ fn end_turn_body(text: &str) -> String {
 ///
 /// Notifications are returned as raw `serde_json::Value` for flexible assertion.
 /// The response is the parsed JSON from the response subject (either
-/// `{"stop_reason": "..."}` or `{"error": "..."}`).
+/// `{"stopReason": "..."}` or `{"code": ...}`).
 async fn collect_notifs_and_response(
     notif_sub: &mut async_nats::Subscriber,
     resp_sub: &mut async_nats::Subscriber,
@@ -127,38 +201,40 @@ async fn collect_notifs_and_response(
     }
 }
 
-// ── Runner::new ───────────────────────────────────────────────────────────────
+// ── Agent creation ─────────────────────────────────────────────────────────────
 
-/// `Runner::new` succeeds and creates the `ACP_SESSIONS` KV bucket.
+/// `TrogonAgent` creation succeeds and creates the `ACP_SESSIONS` KV bucket.
 /// After creation, `SessionStore::open` on the same JetStream context is idempotent.
 #[tokio::test]
-async fn runner_new_creates_session_bucket() {
+async fn agent_new_creates_session_bucket() {
     let (_c, nats, js) = start_nats().await;
     let agent = make_agent("http://127.0.0.1:1");
 
-    let runner = Runner::new(
-        nats,
-        &js,
-        agent,
-        "test-new",
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .expect("Runner::new must succeed");
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let _store = start_agent(
+                nats,
+                &js,
+                "test-new",
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
-    // Opening the store again must be idempotent (bucket already exists).
-    trogon_acp_runner::SessionStore::open(&js)
-        .await
-        .expect("SessionStore::open must succeed after Runner::new");
-
-    drop(runner);
+            // Opening the store again must be idempotent (bucket already exists).
+            SessionStore::open(&js)
+                .await
+                .expect("SessionStore::open must succeed after start_agent");
+        })
+        .await;
 }
 
-// ── Runner::run — error path ──────────────────────────────────────────────────
+// ── Error path ─────────────────────────────────────────────────────────────────
 
-/// When the Anthropic endpoint is unreachable, the runner publishes an `Error`
-/// or `Done` event (connection-refused is an HTTP error → `AgentError::Http`).
+/// When the Anthropic endpoint is unreachable, the agent returns an error or
+/// Done response (connection-refused → HTTP error → internal error or cancelled).
 #[tokio::test]
 async fn runner_publishes_error_event_when_anthropic_unreachable() {
     let (_c, nats, js) = start_nats().await;
@@ -167,72 +243,39 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
     let agent = make_agent("http://127.0.0.1:1");
     let prefix = "test-err";
     let session_id = "sess-err-1";
-    let req_id = "req-err-1";
 
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats
-        .subscribe(events_subject)
-        .await
-        .expect("subscribe to events");
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
-    // Runner uses spawn_local internally → must run inside a LocalSet.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-
-            // Give the runner time to subscribe to its wildcard subject.
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            // Publish a prompt.
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "hello".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
 
-            // Must be either an error response or a stop_reason response.
+            // Must be either a PromptResponse (has "stopReason") or an ACP error (has "code").
             assert!(
-                resp.get("stopReason").is_some() || resp.get("error").is_some(),
-                "expected stop_reason or error in response; got: {resp}"
+                resp.get("stopReason").is_some() || resp.get("code").is_some(),
+                "expected stopReason or code in response; got: {resp}"
             );
         })
         .await;
 }
 
-// ── Runner::run — happy path ──────────────────────────────────────────────────
+// ── Happy path ─────────────────────────────────────────────────────────────────
 
-/// When the Anthropic API returns `end_turn`, the runner publishes `TextDelta`
-/// then `Done { stop_reason: "end_turn" }`.
+/// When the Anthropic API returns `end_turn`, the agent publishes `AgentMessageChunk`
+/// notifications then returns `Done { stop_reason: "end_turn" }`.
 #[tokio::test]
 async fn runner_publishes_done_end_turn_with_mock_anthropic() {
     let (_c, nats, js) = start_nats().await;
@@ -247,55 +290,25 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
 
     let prefix = "test-done";
     let session_id = "sess-done-1";
-    let req_id = "req-done-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats
-        .subscribe(events_subject)
-        .await
-        .expect("subscribe to events");
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "hello".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
                 notifs
@@ -328,54 +341,26 @@ async fn runner_persists_session_after_end_turn() {
 
     let prefix = "test-persist";
     let session_id = "sess-persist-1";
-    let req_id = "req-persist-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "persist me".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
 
-            collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "persist me").await;
+
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // After the turn, the session must be persisted in KV.
-            let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
             let state = store.load(session_id).await.unwrap();
 
             // History must contain the user message + assistant reply (>= 2 messages).
@@ -390,8 +375,9 @@ async fn runner_persists_session_after_end_turn() {
         .await;
 }
 
-/// A malformed prompt payload (invalid JSON) is silently skipped — the runner
-/// keeps listening and processes the next valid prompt without crashing.
+/// A malformed prompt payload (invalid JSON) sent without a reply subject is
+/// ignored by the agent — it keeps listening and processes the next valid
+/// prompt without crashing.
 #[tokio::test]
 async fn runner_skips_invalid_prompt_payload() {
     let (_c, nats, js) = start_nats().await;
@@ -406,76 +392,49 @@ async fn runner_skips_invalid_prompt_payload() {
 
     let prefix = "test-skip";
     let session_id = "sess-skip-1";
-    let req_id = "req-skip-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
-            // Send garbage first — runner must skip it without crashing.
+            // Send garbage without a reply subject — agent logs a warning and continues.
             nats.publish(
-                subjects::prompt(prefix, session_id),
+                agent_subjects::session_prompt(prefix, session_id),
                 Bytes::from(b"not valid json".to_vec()),
             )
             .await
             .unwrap();
 
-            // Give runner a moment to process (and discard) the bad message.
+            // Give agent a moment to process (and discard) the bad message.
             tokio::time::sleep(Duration::from_millis(50)).await;
 
-            // Now send a valid prompt — runner must still handle it.
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "valid".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
-            )
-            .await
-            .unwrap();
+            // Now send a valid prompt — agent must still handle it.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "valid").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
                 resp.get("stopReason").is_some(),
-                "expected stop_reason in response after skipping bad payload; got: {resp}"
+                "expected stopReason in response after skipping bad payload; got: {resp}"
             );
         })
         .await;
 }
 
-// ── Runner::run — error stop reasons ─────────────────────────────────────────
+// ── Error stop reasons ─────────────────────────────────────────────────────────
 
-/// When Anthropic returns `max_tokens`, the runner publishes `Done { stop_reason: "max_tokens" }`.
+/// When Anthropic returns `max_tokens`, the agent returns `Done { stop_reason: "max_tokens" }`.
 #[tokio::test]
 async fn runner_publishes_done_max_tokens() {
     let (_c, nats, js) = start_nats().await;
@@ -490,52 +449,25 @@ async fn runner_publishes_done_max_tokens() {
 
     let prefix = "test-maxtok";
     let session_id = "sess-maxtok-1";
-    let req_id = "req-maxtok-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "fill the context".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "fill the context").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -547,7 +479,7 @@ async fn runner_publishes_done_max_tokens() {
 }
 
 /// When `max_iterations` is exhausted (model always returns `tool_use`),
-/// the runner publishes `Done { stop_reason: "max_turn_requests" }`.
+/// the agent returns `Done { stop_reason: "max_turn_requests" }`.
 #[tokio::test]
 async fn runner_publishes_done_max_turn_requests() {
     let (_c, nats, js) = start_nats().await;
@@ -562,54 +494,28 @@ async fn runner_publishes_done_max_turn_requests() {
 
     let prefix = "test-maxiter";
     let session_id = "sess-maxiter-1";
-    let req_id = "req-maxiter-1";
 
     let mut agent = make_agent(&server.base_url());
     agent.max_iterations = 1; // exhaust after one tool_use → MaxIterationsReached
 
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "loop forever".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "loop forever").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -620,8 +526,8 @@ async fn runner_publishes_done_max_turn_requests() {
         .await;
 }
 
-/// When the model requests a tool call, the runner publishes `ToolCallStarted`
-/// and `ToolCallFinished` events before the final `Done`.
+/// When the model requests a tool call, the agent publishes `ToolCall`
+/// and `ToolCallUpdate` notifications before the final `Done`.
 #[tokio::test]
 async fn runner_publishes_tool_call_events() {
     let (_c, nats, js) = start_nats().await;
@@ -646,52 +552,25 @@ async fn runner_publishes_tool_call_events() {
 
     let prefix = "test-toolcall";
     let session_id = "sess-toolcall-1";
-    let req_id = "req-toolcall-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "use a tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
                 notifs
@@ -702,9 +581,9 @@ async fn runner_publishes_tool_call_events() {
             assert!(
                 notifs.iter().any(|n| {
                     let s = n.to_string();
-                    s.contains("ToolCallUpdate") || s.contains("tool_call_update")
+                    s.contains("toolCallUpdate") || s.contains("ToolCallUpdate") || s.contains("toolCall")
                 }),
-                "expected ToolCallUpdate notification"
+                "expected tool call notification"
             );
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -718,7 +597,7 @@ async fn runner_publishes_tool_call_events() {
 // ── Permission gate ───────────────────────────────────────────────────────────
 
 /// When `permission_tx` is set and the checker approves the tool call, the
-/// runner executes the tool and publishes ToolCallStarted + Done(end_turn).
+/// agent executes the tool and publishes ToolCall + Done(end_turn).
 #[tokio::test]
 async fn runner_tool_call_allowed_via_permission_channel() {
     let (_c, nats, js) = start_nats().await;
@@ -743,36 +622,21 @@ async fn runner_tool_call_allowed_via_permission_channel() {
 
     let prefix = "test-perm-allow";
     let session_id = "sess-perm-allow-1";
-    let req_id = "req-perm-allow-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
 
     let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        Some(permission_tx),
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
             // Approve every permission request
             tokio::spawn(async move {
@@ -781,23 +645,11 @@ async fn runner_tool_call_allowed_via_permission_channel() {
                 }
             });
 
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "use a tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
-            )
-            .await
-            .unwrap();
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // ToolCall notification must appear — permission was checked and approved
             assert!(
@@ -814,7 +666,7 @@ async fn runner_tool_call_allowed_via_permission_channel() {
 }
 
 /// When `permission_tx` is set and the checker denies the tool call, the
-/// runner still completes (the agent sends the denial as a tool result and
+/// agent still completes (the agent sends the denial as a tool result and
 /// Anthropic returns end_turn).
 #[tokio::test]
 async fn runner_tool_call_denied_via_permission_channel() {
@@ -840,36 +692,21 @@ async fn runner_tool_call_denied_via_permission_channel() {
 
     let prefix = "test-perm-deny";
     let session_id = "sess-perm-deny-1";
-    let req_id = "req-perm-deny-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
 
     let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        Some(permission_tx),
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
             // Deny every permission request
             tokio::spawn(async move {
@@ -878,23 +715,11 @@ async fn runner_tool_call_denied_via_permission_channel() {
                 }
             });
 
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "use a tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
-            )
-            .await
-            .unwrap();
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // The agent sends a denial tool-result and Anthropic returns end_turn
             assert_eq!(
@@ -908,7 +733,7 @@ async fn runner_tool_call_denied_via_permission_channel() {
 
 // ── MCP dispatch ──────────────────────────────────────────────────────────────
 
-/// When a session has `mcp_servers` configured, the runner calls `build_session_mcp`
+/// When a session has `mcp_servers` configured, the agent calls `build_session_mcp`
 /// at prompt time, lists the tools, and dispatches tool calls to the MCP server.
 #[tokio::test]
 async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
@@ -972,7 +797,6 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
 
     let prefix = "test-mcp";
     let session_id = "sess-mcp-1";
-    let req_id = "req-mcp-1";
 
     // Pre-save session state with the MCP server configured
     let session_store = SessionStore::open(&js).await.unwrap();
@@ -986,50 +810,24 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
     };
     session_store.save(session_id, &state).await.unwrap();
 
-    let agent = make_agent(&anthropic.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "call the MCP tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&anthropic.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "call the MCP tool").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // The MCP tool must be dispatched (prefixed name = "my_srv__my_tool")
             assert!(
@@ -1050,7 +848,7 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
 // ── Cancellation ──────────────────────────────────────────────────────────────
 
 /// Sending a cancel message to `{prefix}.{session_id}.agent.session.cancel` while the
-/// agent is processing a prompt causes the runner to abort and publish
+/// agent is processing a prompt causes the agent to abort and return
 /// `Done { stop_reason: "cancelled" }`.
 #[tokio::test]
 async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
@@ -1068,58 +866,31 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
 
     let prefix = "test-cancel";
     let session_id = "sess-cancel-1";
-    let req_id = "req-cancel-1";
 
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
-    let cancel_subject = subjects::session_cancel(prefix, session_id);
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "do something slow".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
 
-            // Give the runner a moment to start processing, then cancel
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "do something slow").await;
+
+            // Give the agent a moment to start processing, then cancel
             tokio::time::sleep(Duration::from_millis(300)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1132,9 +903,9 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
 
 // ── Gateway config override ───────────────────────────────────────────────────
 
-/// When `gateway_config` is set on the runner, the agent uses the gateway's
+/// When `gateway_config` is set on the agent, the agent uses the gateway's
 /// `base_url` and `token` instead of the agent's own values.
-/// Verified by creating a runner whose embedded agent points at a dead endpoint
+/// Verified by creating an agent whose embedded loop points at a dead endpoint
 /// while gateway_config redirects to a live mock server.
 #[tokio::test]
 async fn runner_uses_gateway_config_base_url_and_token() {
@@ -1151,52 +922,32 @@ async fn runner_uses_gateway_config_base_url_and_token() {
 
     let prefix = "test-gw";
     let session_id = "sess-gw-1";
-    let req_id = "req-gw-1";
 
     // Agent points at port 1 (dead) — must be overridden by gateway_config
-    let agent = make_agent("http://127.0.0.1:1");
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let gateway_config = Arc::new(RwLock::new(Some(trogon_acp_runner::GatewayConfig {
+    let gateway_config = Arc::new(RwLock::new(Some(GatewayConfig {
         base_url: gateway.base_url(),
         token: "gw-token".to_string(),
         extra_headers: vec![],
     })));
 
-    let runner = Runner::new(nats.clone(), &js, agent, prefix, None, gateway_config)
-        .await
-        .unwrap();
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "hello via gateway".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent("http://127.0.0.1:1"),
+                None,
+                gateway_config,
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello via gateway").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 10).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
 
             // The notification must contain the response from the gateway mock
             assert!(
@@ -1215,8 +966,8 @@ async fn runner_uses_gateway_config_base_url_and_token() {
 // ── Session queuing ───────────────────────────────────────────────────────────
 
 /// When 3 prompts are sent to the same session_id without waiting for
-/// acknowledgement, the runner must process them in order and all 3 must
-/// complete with a `Done` event.
+/// acknowledgement, the agent processes them in order via the session semaphore
+/// and all 3 must complete with a `Done` event.
 #[tokio::test]
 async fn concurrent_prompts_same_session_are_queued_in_order() {
     let (_c, nats, js) = start_nats().await;
@@ -1231,71 +982,52 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
 
     let prefix = "test-queue-same";
     let session_id = "sess-queue-same-1";
-    let req_ids = ["req-q-1", "req-q-2", "req-q-3"];
-
-    let agent = make_agent(&server.base_url());
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            // Subscribe to all 3 event streams and response subjects BEFORE the runner
-            // starts and BEFORE publishing.
-            let mut sub_pairs = Vec::new();
-            for req_id in &req_ids {
-                let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-                let notif_sub = nats
-                    .subscribe(events_subject)
-                    .await
-                    .expect("subscribe to events");
-                let resp_sub = nats
-                    .subscribe(subjects::ext_session_prompt_response(
-                        prefix, session_id, req_id,
-                    ))
-                    .await
-                    .expect("subscribe to response");
-                sub_pairs.push((notif_sub, resp_sub));
-            }
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            // Subscribe to the shared notification subject for this session.
+            let mut notif_sub = nats
+                .subscribe(client_subjects::session_update(prefix, session_id))
+                .await
+                .expect("subscribe to notifications");
 
-            // Publish all 3 prompts rapidly without waiting between them.
-            for req_id in &req_ids {
-                let payload = PromptPayload {
-                    req_id: req_id.to_string(),
-                    session_id: session_id.to_string(),
-                    content: vec![UserContentBlock::Text {
-                        text: format!("prompt {req_id}"),
-                    }],
-                    user_message: String::new(),
-                };
-                nats.publish(
-                    subjects::prompt(prefix, session_id),
-                    Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            // Create 3 separate inboxes and send all prompts rapidly.
+            let mut resp_subs = Vec::new();
+            for i in 0..3u32 {
+                let inbox = nats.new_inbox();
+                let resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
+                resp_subs.push(resp_sub);
+                let req = PromptRequest::new(
+                    session_id,
+                    vec![ContentBlock::Text(TextContent::new(format!("prompt {i}")))],
+                );
+                nats.publish_with_reply(
+                    agent_subjects::session_prompt(prefix, session_id),
+                    inbox,
+                    Bytes::from(serde_json::to_vec(&req).unwrap()),
                 )
                 .await
                 .unwrap();
             }
 
             // Wait for Done on each subscription in order.
-            for (i, (mut notif_sub, mut resp_sub)) in sub_pairs.into_iter().enumerate() {
+            for (i, mut resp_sub) in resp_subs.into_iter().enumerate() {
                 let (_notifs, resp) =
                     collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
                 assert!(
                     resp.get("stopReason").is_some(),
-                    "expected stop_reason in response for prompt #{i} (req_id={}); got: {resp}",
-                    req_ids[i]
+                    "expected stopReason in response for prompt #{i}; got: {resp}"
                 );
             }
         })
@@ -1319,86 +1051,48 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
     let prefix = "test-queue-diff";
     let session_a = "sess-conc-a";
     let session_b = "sess-conc-b";
-    let req_a = "req-conc-a";
-    let req_b = "req-conc-b";
-
-    let agent = make_agent(&server.base_url());
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let events_a = subjects::prompt_events(prefix, session_a, req_a);
-            let events_b = subjects::prompt_events(prefix, session_b, req_b);
-            let mut notif_a = nats.subscribe(events_a).await.expect("subscribe a");
-            let mut notif_b = nats.subscribe(events_b).await.expect("subscribe b");
-            let mut resp_a = nats
-                .subscribe(subjects::ext_session_prompt_response(
-                    prefix, session_a, req_a,
-                ))
-                .await
-                .expect("subscribe resp_a");
-            let mut resp_b = nats
-                .subscribe(subjects::ext_session_prompt_response(
-                    prefix, session_b, req_b,
-                ))
-                .await
-                .expect("subscribe resp_b");
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            // Publish both prompts to different sessions simultaneously.
-            for (session_id, req_id) in [(session_a, req_a), (session_b, req_b)] {
-                let payload = PromptPayload {
-                    req_id: req_id.to_string(),
-                    session_id: session_id.to_string(),
-                    content: vec![UserContentBlock::Text {
-                        text: format!("hello {session_id}"),
-                    }],
-                    user_message: String::new(),
-                };
-                nats.publish(
-                    subjects::prompt(prefix, session_id),
-                    Bytes::from(serde_json::to_vec(&payload).unwrap()),
-                )
-                .await
-                .unwrap();
-            }
+            // Send both prompts to different sessions simultaneously.
+            let (mut notif_a, mut resp_a) =
+                send_text(&nats, prefix, session_a, "hello session A").await;
+            let (mut notif_b, mut resp_b) =
+                send_text(&nats, prefix, session_b, "hello session B").await;
 
             // Both sessions must receive a terminal response.
             let (_notifs_a, resp_a_val) =
                 collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
             assert!(
                 resp_a_val.get("stopReason").is_some(),
-                "expected stop_reason for session_a; got: {resp_a_val}"
+                "expected stopReason for session_a; got: {resp_a_val}"
             );
 
             let (_notifs_b, resp_b_val) =
                 collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
             assert!(
                 resp_b_val.get("stopReason").is_some(),
-                "expected stop_reason for session_b; got: {resp_b_val}"
+                "expected stopReason for session_b; got: {resp_b_val}"
             );
         })
         .await;
 }
 
-// ── Context content block ──────────────────────────────────────────────────────
+// ── Content blocks ─────────────────────────────────────────────────────────────
 
-/// Sending a prompt payload with `UserContentBlock::Context` (embedded text
-/// resource) must be processed by the runner without crashing and must
-/// result in a `Done` event.
+/// Sending a prompt with a text resource (context) content block must be processed
+/// by the agent without crashing and must result in a `Done` event.
 #[tokio::test]
 async fn runner_processes_prompt_with_context_content_block() {
     let (_c, nats, js) = start_nats().await;
@@ -1413,70 +1107,44 @@ async fn runner_processes_prompt_with_context_content_block() {
 
     let prefix = "test-ctx-block";
     let session_id = "sess-ctx-1";
-    let req_id = "req-ctx-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![
-                    UserContentBlock::Text {
-                        text: "look at this context".to_string(),
-                    },
-                    UserContentBlock::Context {
-                        uri: "file:///project/README.md".to_string(),
-                        text: "# Project README\nThis is the content.".to_string(),
-                    },
-                ],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            // Two text blocks — simulates a context-rich prompt.
+            let blocks = vec![
+                ContentBlock::Text(TextContent::new("look at this context")),
+                ContentBlock::Text(TextContent::new(
+                    "<context ref=\"file:///project/README.md\">\n# Project README\nThis is the content.\n</context>",
+                )),
+            ];
+            let (mut notif_sub, mut resp_sub) =
+                subscribe_and_send(&nats, prefix, session_id, blocks).await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
                 Some("end_turn"),
-                "expected stop_reason=end_turn after Context content block; got: {resp}"
+                "expected stop_reason=end_turn after context content; got: {resp}"
             );
         })
         .await;
 }
 
 /// A prompt containing a base64-encoded image content block must be
-/// processed by the runner without crashing and result in a `Done` event.
+/// processed by the agent without crashing and result in a `Done` event.
 #[tokio::test]
 async fn runner_image_content_block_in_prompt_does_not_crash() {
     let (_c, nats, js) = start_nats().await;
@@ -1491,59 +1159,33 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
 
     let prefix = "test-img-block";
     let session_id = "sess-img-1";
-    let req_id = "req-img-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![
-                    UserContentBlock::Text {
-                        text: "look at this image".to_string(),
-                    },
-                    UserContentBlock::Image {
-                        // A minimal 1x1 white PNG in base64.
-                        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==".to_string(),
-                        mime_type: "image/png".to_string(),
-                    },
-                ],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            // A minimal 1x1 white PNG in base64.
+            let blocks = vec![
+                ContentBlock::Text(TextContent::new("look at this image")),
+                ContentBlock::Image(ImageContent::new(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==",
+                    "image/png",
+                )),
+            ];
+            let (mut notif_sub, mut resp_sub) =
+                subscribe_and_send(&nats, prefix, session_id, blocks).await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1582,53 +1224,24 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
     let prefix = "test-history";
     let session_id = "sess-hist-1";
 
-    let agent = make_agent(&server.base_url());
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
 
             // First prompt.
-            let req_id_1 = "req-hist-1";
-            let events_subject_1 = subjects::prompt_events(prefix, session_id, req_id_1);
-            let mut events_sub_1 = nats.subscribe(events_subject_1).await.unwrap();
-            let mut resp_sub_1 = nats
-                .subscribe(subjects::ext_session_prompt_response(
-                    prefix, session_id, req_id_1,
-                ))
-                .await
-                .unwrap();
-
-            let payload_1 = PromptPayload {
-                req_id: req_id_1.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "First question".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload_1).unwrap()),
-            )
-            .await
-            .unwrap();
-
+            let (mut notif_sub_1, mut resp_sub_1) =
+                send_text(&nats, prefix, session_id, "First question").await;
             let (_notifs_1, resp_1) =
-                collect_notifs_and_response(&mut events_sub_1, &mut resp_sub_1, 15).await;
+                collect_notifs_and_response(&mut notif_sub_1, &mut resp_sub_1, 15).await;
             assert_eq!(
                 resp_1["stopReason"].as_str(),
                 Some("end_turn"),
@@ -1639,33 +1252,10 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Second prompt — history should now include first exchange.
-            let req_id_2 = "req-hist-2";
-            let events_subject_2 = subjects::prompt_events(prefix, session_id, req_id_2);
-            let mut events_sub_2 = nats.subscribe(events_subject_2).await.unwrap();
-            let mut resp_sub_2 = nats
-                .subscribe(subjects::ext_session_prompt_response(
-                    prefix, session_id, req_id_2,
-                ))
-                .await
-                .unwrap();
-
-            let payload_2 = PromptPayload {
-                req_id: req_id_2.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "Second question".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload_2).unwrap()),
-            )
-            .await
-            .unwrap();
-
+            let (mut notif_sub_2, mut resp_sub_2) =
+                send_text(&nats, prefix, session_id, "Second question").await;
             let (_notifs_2, resp_2) =
-                collect_notifs_and_response(&mut events_sub_2, &mut resp_sub_2, 15).await;
+                collect_notifs_and_response(&mut notif_sub_2, &mut resp_sub_2, 15).await;
             assert_eq!(
                 resp_2["stopReason"].as_str(),
                 Some("end_turn"),
@@ -1673,16 +1263,14 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             );
 
             // The second Anthropic request (matched by body_contains "Second question")
-            // was routed to the second mock — confirming the runner sent a new call
+            // was routed to the second mock — confirming the agent sent a new call
             // that included "Second question" in the body (history + new message).
-            // The fact that the second mock matched (returning "Answer to second question")
-            // validates the runner sent the correct payload with history.
         })
         .await;
 }
 
 /// When the Anthropic response includes a `parent_tool_use_id` on a tool-use
-/// block, the runner publishes a `ToolCallStarted` event carrying that value.
+/// block, the agent publishes a `ToolCall` notification carrying that value.
 #[tokio::test]
 async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
     let (_c, nats, js) = start_nats().await;
@@ -1698,7 +1286,6 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
             .body(end_turn_body("Done"));
     });
     // First call → tool_use with parent_tool_use_id set.
-    // Anthropic returns a nested tool call (sub-agent pattern).
     let nested_tool_body = serde_json::json!({
         "stop_reason": "tool_use",
         "content": [{
@@ -1719,52 +1306,25 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
 
     let prefix = "test-parent-id";
     let session_id = "sess-parent-1";
-    let req_id = "req-parent-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "run nested tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "run nested tool").await;
 
             let (notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // Find the notification for "unknown_tool" and verify parent_tool_use_id is present.
             assert!(
@@ -1790,16 +1350,16 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
 
 // ── Cancel during tool execution ───────────────────────────────────────────────
 
-/// When a cancel message arrives WHILE the runner is executing a tool call
+/// When a cancel message arrives WHILE the agent is executing a tool call
 /// (i.e., waiting for the second Anthropic response after sending tool_result),
-/// the runner should still complete with Done(cancelled) or Done(end_turn).
+/// the agent should still complete with Done(cancelled) or Done(end_turn).
 ///
 /// We simulate this by:
 /// 1. First Anthropic call → tool_use (triggers tool execution)
 /// 2. While waiting for the second Anthropic call, publish cancel message
 /// 3. Second Anthropic call → end_turn (the cancel check is cooperative)
 ///
-/// The runner publishes Done with some stop reason (cancelled or end_turn depending on timing).
+/// The agent publishes Done with some stop reason (cancelled or end_turn depending on timing).
 #[tokio::test]
 async fn runner_cancel_during_tool_execution_completes() {
     let (_c, nats, js) = start_nats().await;
@@ -1826,63 +1386,36 @@ async fn runner_cancel_during_tool_execution_completes() {
 
     let prefix = "test-cancel-tool";
     let session_id = "sess-cancel-tool-1";
-    let req_id = "req-cancel-tool-1";
 
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
-
-    let cancel_subject = subjects::session_cancel(prefix, session_id);
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "use a tool".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
 
             // Wait for the tool call to start, then send cancel
             tokio::time::sleep(Duration::from_millis(50)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // Should complete with some stop_reason (cancelled or end_turn depending on timing)
             assert!(
                 resp.get("stopReason").is_some(),
-                "runner must publish a stop_reason after cancel during tool; got: {resp}"
+                "agent must return a stopReason after cancel during tool; got: {resp}"
             );
         })
         .await;
@@ -1890,10 +1423,7 @@ async fn runner_cancel_during_tool_execution_completes() {
 
 // ── No cancel signal path ──────────────────────────────────────────────────────
 
-/// Verify the runner completes a prompt successfully when no cancel message is sent
-/// (exercises the normal path without cancel race conditions).
-/// This also indirectly documents the handle_prompt happy path
-/// in isolation from concurrent cancel signals.
+/// Verify the agent completes a prompt successfully when no cancel message is sent.
 #[tokio::test]
 async fn runner_completes_prompt_without_any_cancel_signal() {
     let (_c, nats, js) = start_nats().await;
@@ -1908,52 +1438,25 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
 
     let prefix = "test-no-cancel";
     let session_id = "sess-no-cancel-1";
-    let req_id = "req-no-cancel-1";
-
-    let agent = make_agent(&server.base_url());
-    let events_subject = subjects::prompt_events(prefix, session_id, req_id);
-    let mut events_sub = nats.subscribe(events_subject).await.unwrap();
-    let mut resp_sub = nats
-        .subscribe(subjects::ext_session_prompt_response(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .unwrap();
-
-    let runner = Runner::new(
-        nats.clone(),
-        &js,
-        agent,
-        prefix,
-        None,
-        Arc::new(RwLock::new(None)),
-    )
-    .await
-    .unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(async move { runner.run().await });
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            let payload = PromptPayload {
-                req_id: req_id.to_string(),
-                session_id: session_id.to_string(),
-                content: vec![UserContentBlock::Text {
-                    text: "Hello".to_string(),
-                }],
-                user_message: String::new(),
-            };
-            nats.publish(
-                subjects::prompt(prefix, session_id),
-                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
             )
-            .await
-            .unwrap();
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "Hello").await;
 
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut events_sub, &mut resp_sub, 15).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
