@@ -24,8 +24,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "acp-nats-agent"
+version = "0.0.1"
+dependencies = [
+ "acp-nats",
+ "agent-client-protocol",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "acp-nats-stdio"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "acp-nats",
  "acp-telemetry",
