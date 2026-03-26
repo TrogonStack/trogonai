@@ -61,7 +61,7 @@ impl std::fmt::Display for DispatchError {
     }
 }
 
-const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::constants::DEFAULT_OPERATION_TIMEOUT;
 
 pub struct AgentSideNatsConnection<N> {
     nats: N,

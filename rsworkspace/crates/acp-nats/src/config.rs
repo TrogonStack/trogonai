@@ -4,20 +4,13 @@ use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
 use crate::acp_prefix::AcpPrefix;
+use crate::constants::{
+    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
+    DEFAULT_PROMPT_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_OPERATION_TIMEOUT_SECS,
+    ENV_PROMPT_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
+};
 
-const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(7200);
-const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
-
-const MIN_TIMEOUT_SECS: u64 = 1;
-const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
-
-pub const ENV_ACP_PREFIX: &str = "ACP_PREFIX";
-pub const DEFAULT_ACP_PREFIX: &str = "acp";
-
-const ENV_OPERATION_TIMEOUT_SECS: &str = "ACP_OPERATION_TIMEOUT_SECS";
-const ENV_PROMPT_TIMEOUT_SECS: &str = "ACP_PROMPT_TIMEOUT_SECS";
-const ENV_CONNECT_TIMEOUT_SECS: &str = "ACP_NATS_CONNECT_TIMEOUT_SECS";
+pub use crate::constants::{DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX};
 
 #[derive(Clone)]
 pub struct Config {

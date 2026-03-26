@@ -39,6 +39,7 @@
 pub mod auth;
 pub mod client;
 pub mod connect;
+pub mod constants;
 pub mod messaging;
 
 #[cfg(feature = "test-support")]
@@ -48,10 +49,11 @@ pub use async_nats::subject::ToSubject;
 pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
+pub use constants::REQ_ID_HEADER;
 pub use messaging::{
     FlushPolicy, NatsError, PublishOperationError, PublishOptions, PublishOptionsBuilder,
-    REQ_ID_HEADER, RetryPolicy, build_request_headers, headers_with_trace_context,
-    inject_trace_context, publish, request, request_with_timeout,
+    RetryPolicy, build_request_headers, headers_with_trace_context, inject_trace_context, publish,
+    request, request_with_timeout,
 };
 
 #[cfg(feature = "test-support")]
