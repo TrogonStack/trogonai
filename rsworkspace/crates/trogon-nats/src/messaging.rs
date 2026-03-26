@@ -23,9 +23,17 @@ pub fn inject_trace_context(headers: &mut HeaderMap) {
     });
 }
 
+pub const REQ_ID_HEADER: &str = "X-Req-Id";
+
 pub fn headers_with_trace_context() -> HeaderMap {
     let mut headers = HeaderMap::new();
     inject_trace_context(&mut headers);
+    headers
+}
+
+pub fn build_request_headers() -> HeaderMap {
+    let mut headers = headers_with_trace_context();
+    headers.insert(REQ_ID_HEADER, uuid::Uuid::new_v4().to_string().as_str());
     headers
 }
 
@@ -40,7 +48,7 @@ where
     Res: DeserializeOwned,
 {
     let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
-    let headers = headers_with_trace_context();
+    let headers = build_request_headers();
 
     let response = tokio::time::timeout(
         timeout,
