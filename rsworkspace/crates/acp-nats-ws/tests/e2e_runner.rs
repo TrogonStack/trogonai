@@ -1,7 +1,7 @@
-//! End-to-end integration tests: WebSocket bridge + real RpcServer + real NATS.
+//! End-to-end integration tests: WebSocket bridge + real TrogonAgent + real NATS.
 //!
 //! These tests verify the full ACP request-reply flow:
-//!   WS client → acp-nats-ws → NATS → RpcServer (trogon-acp-runner) → back
+//!   WS client → acp-nats-ws → NATS → TrogonAgent (trogon-acp-runner) → back
 //!
 //! Requires Docker (testcontainers starts a NATS server with JetStream).
 //!
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+use acp_nats_agent::AgentSideNatsConnection;
 use acp_nats_ws::upgrade::{ConnectionRequest, UpgradeState};
 use acp_nats_ws::{THREAD_NAME, run_connection_thread, upgrade};
 use async_nats::jetstream;
@@ -22,7 +23,9 @@ use tokio::net::TcpListener;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use trogon_acp_runner::{RpcServer, SessionStore};
+use trogon_acp_runner::{SessionStore, TrogonAgent};
+use trogon_agent_core::agent_loop::AgentLoop;
+use trogon_agent_core::tools::ToolContext;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,12 +59,52 @@ fn make_config(nats_port: u16) -> Config {
     .with_operation_timeout(Duration::from_secs(5))
 }
 
+fn make_agent_loop() -> AgentLoop {
+    let http = reqwest::Client::new();
+    AgentLoop {
+        http_client: http.clone(),
+        proxy_url: String::new(),
+        anthropic_token: String::new(),
+        anthropic_base_url: None,
+        anthropic_extra_headers: vec![],
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 10,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext { http_client: http, proxy_url: String::new() }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        permission_checker: None,
+    }
+}
+
 async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> SessionStore {
     let store = SessionStore::open(&js).await.unwrap();
-    let store_clone = store.clone();
     let gateway_config = Arc::new(RwLock::new(None));
-    let server = RpcServer::new(nats, store_clone, "acp", "claude-opus-4-6", gateway_config);
-    tokio::spawn(async move { server.run().await });
+    let store_clone = store.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+        let ta = TrogonAgent::new(
+            nats.clone(),
+            store_clone,
+            make_agent_loop(),
+            "acp",
+            "claude-opus-4-6",
+            None,
+            gateway_config,
+        );
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let (_, io_task) = AgentSideNatsConnection::new(ta, nats, prefix, |fut| {
+            tokio::task::spawn_local(fut);
+        });
+        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+    });
     tokio::time::sleep(Duration::from_millis(50)).await;
     store
 }

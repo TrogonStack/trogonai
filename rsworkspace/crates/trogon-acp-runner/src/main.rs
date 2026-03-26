@@ -9,11 +9,12 @@
 //!   acp-nats-ws  (dumb pipe: ACP ↔ NATS)
 //!        ↓↑ NATS request-reply / pub-sub
 //!   trogon-acp-runner  [this binary]
-//!     ├─ RpcServer   — initialize / authenticate / new_session / load_session
-//!     │               set_session_mode / set_session_config_option / list_sessions
-//!     │               fork_session / resume_session
-//!     └─ Runner      — prompt / cancel (streaming via PromptEvent pub-sub)
-//!          ↓
+//!     └─ TrogonAgent (implements Agent trait)
+//!          ├─ initialize / authenticate / new_session / load_session
+//!          │  set_session_mode / set_session_config_option / list_sessions
+//!          │  fork_session / resume_session / close_session
+//!          └─ prompt / cancel (streaming via NatsClientProxy)
+//!               ↓
 //!     Anthropic API (via trogon-secret-proxy)
 //! ```
 //!
@@ -31,8 +32,11 @@
 
 use std::sync::Arc;
 
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
 use tokio::sync::RwLock;
+use tokio::task::LocalSet;
 use tracing::info;
 
 use trogon_agent_core::agent_loop::AgentLoop;
@@ -110,31 +114,28 @@ async fn main() -> anyhow::Result<()> {
 
     let store = trogon_acp_runner::SessionStore::open(&js).await?;
 
-    // ── RpcServer (handles all non-prompt ACP methods) ────────────────────────
+    // ── TrogonAgent ───────────────────────────────────────────────────────────
 
-    let rpc_server = trogon_acp_runner::RpcServer::new(
+    let agent = trogon_acp_runner::TrogonAgent::new(
         nats.clone(),
-        store.clone(),
-        acp_prefix.clone(),
-        model.clone(),
-        gateway_config.clone(),
-    );
-    tokio::spawn(async move { rpc_server.run().await });
-
-    // ── Runner (handles prompt / cancel) ─────────────────────────────────────
-
-    let runner = trogon_acp_runner::Runner::new(
-        nats,
-        &js,
+        store,
         agent_loop,
-        acp_prefix,
-        None, // no in-process permission gate — auto-allow all tools
+        acp_prefix.clone(),
+        model,
+        None, // no in-process permission gate
         gateway_config,
-    )
-    .await?;
+    );
+
+    let prefix = AcpPrefix::new(&acp_prefix)?;
+    let (_conn, io_task) =
+        AgentSideNatsConnection::new(agent, nats, prefix, |fut| {
+            tokio::task::spawn_local(fut);
+        });
 
     info!("trogon-acp-runner started");
-    runner.run().await;
+
+    let local = LocalSet::new();
+    local.run_until(io_task).await?;
 
     Ok(())
 }
