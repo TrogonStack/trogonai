@@ -7,10 +7,9 @@
 
 use std::sync::Arc;
 
+use crate::constants::MAX_METHOD_NAME_LENGTH;
 use crate::nats::token;
 use crate::subject_token_violation::SubjectTokenViolation;
-
-const MAX_METHOD_NAME_LENGTH: usize = 128;
 
 /// Error returned when [`ExtMethodName`] validation fails.
 #[derive(Debug, Clone, PartialEq)]

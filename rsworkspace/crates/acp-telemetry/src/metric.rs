@@ -2,11 +2,8 @@ use opentelemetry_otlp::MetricExporter;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use std::sync::OnceLock;
-use std::time::Duration;
 
-/// OTLP periodic reader pushes accumulated metrics at this cadence.
-/// 30 s keeps export volume low while still surfacing near-real-time data.
-const METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(30);
+use crate::constants::METRIC_EXPORT_INTERVAL;
 
 pub(crate) static METER_PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
 

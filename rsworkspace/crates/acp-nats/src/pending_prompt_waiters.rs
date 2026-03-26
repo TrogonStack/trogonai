@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use agent_client_protocol::{PromptResponse, SessionId};
 use tokio::sync::oneshot;
 use trogon_std::time::GetElapsed;
 
-const PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW: Duration = Duration::from_secs(5);
+use crate::constants::PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW;
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct PromptToken(pub u64);

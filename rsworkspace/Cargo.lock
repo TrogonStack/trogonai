@@ -37,6 +37,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
 ]
@@ -2564,6 +2565,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]

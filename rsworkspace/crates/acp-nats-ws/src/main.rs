@@ -1,5 +1,6 @@
 mod config;
 mod connection;
+mod constants;
 mod upgrade;
 
 use tokio::sync::{mpsc, watch};
@@ -82,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(coverage)]
 fn main() {}
 
-const THREAD_NAME: &str = "acp-ws-local";
+use constants::THREAD_NAME;
 
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP

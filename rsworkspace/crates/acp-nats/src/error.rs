@@ -2,9 +2,7 @@ use agent_client_protocol::{Error, ErrorCode};
 use tracing::warn;
 use trogon_nats::NatsError;
 
-/// JSON-RPC reserved range -32001: agent unavailable / overloaded (retryable).
-/// Returned for timeout and request failures; clients should retry with backoff.
-pub const AGENT_UNAVAILABLE: i32 = -32001;
+pub use crate::constants::AGENT_UNAVAILABLE;
 
 pub fn map_nats_error(e: NatsError) -> Error {
     match &e {

@@ -8,9 +8,8 @@
 //! TODO: Consider extracting to `trogon-nats` as a generic `NatsSubject` (or `NatsToken`) type
 //! so prefix, session_id, and other subject tokens share the same validation.
 
+use crate::constants::MAX_SESSION_ID_LENGTH;
 use crate::subject_token_violation::SubjectTokenViolation;
-
-const MAX_SESSION_ID_LENGTH: usize = 128;
 
 /// Error returned when [`AcpSessionId`] validation fails.
 #[derive(Debug, Clone, PartialEq)]

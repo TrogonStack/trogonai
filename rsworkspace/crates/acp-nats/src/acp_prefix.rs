@@ -9,10 +9,9 @@
 
 use std::sync::Arc;
 
+use crate::constants::MAX_PREFIX_LENGTH;
 use crate::nats::token;
 use crate::subject_token_violation::SubjectTokenViolation;
-
-const MAX_PREFIX_LENGTH: usize = 128;
 
 /// Error returned when [`AcpPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
