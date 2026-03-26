@@ -9,7 +9,7 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 
-const DUPLEX_BUFFER_SIZE: usize = 64 * 1024;
+use crate::constants::DUPLEX_BUFFER_SIZE;
 
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
 pub async fn handle<N>(

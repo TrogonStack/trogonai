@@ -1,14 +1,10 @@
 use std::path::PathBuf;
 use trogon_std::env::ReadEnv;
 
-const ENV_NATS_URL: &str = "NATS_URL";
-const ENV_NATS_CREDS: &str = "NATS_CREDS";
-const ENV_NATS_NKEY: &str = "NATS_NKEY";
-const ENV_NATS_USER: &str = "NATS_USER";
-const ENV_NATS_PASSWORD: &str = "NATS_PASSWORD";
-const ENV_NATS_TOKEN: &str = "NATS_TOKEN";
-
-const DEFAULT_NATS_URL: &str = "localhost:4222";
+use crate::constants::{
+    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN,
+    ENV_NATS_URL, ENV_NATS_USER,
+};
 
 /// NATS authentication method.
 ///

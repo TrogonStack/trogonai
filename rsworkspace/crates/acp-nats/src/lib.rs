@@ -3,6 +3,7 @@ pub mod agent;
 pub mod client;
 pub mod client_proxy;
 pub mod config;
+pub mod constants;
 pub mod error;
 pub mod ext_method_name;
 pub(crate) mod in_flight_slot_guard;
