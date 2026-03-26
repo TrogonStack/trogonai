@@ -105,7 +105,7 @@ async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> S
         });
         rt.block_on(local.run_until(async move { io_task.await.ok(); }));
     });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     store
 }
 

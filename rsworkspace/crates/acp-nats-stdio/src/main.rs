@@ -339,7 +339,7 @@ mod tests {
             });
             rt.block_on(local.run_until(async move { ta_io_task.await.ok(); }));
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Build bridge config.
         let config = acp_nats::Config::new(
