@@ -11,7 +11,7 @@ use crate::agent::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
 use crate::session_id::AcpSessionId;
 
-pub const REQ_ID_HEADER: &str = "X-Req-Id";
+pub use trogon_nats::REQ_ID_HEADER;
 
 #[instrument(
     name = "acp.session.prompt",

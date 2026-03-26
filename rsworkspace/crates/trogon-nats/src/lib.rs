@@ -50,8 +50,8 @@ pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
 pub use messaging::{
     FlushPolicy, NatsError, PublishOperationError, PublishOptions, PublishOptionsBuilder,
-    RetryPolicy, headers_with_trace_context, inject_trace_context, publish, request,
-    request_with_timeout,
+    REQ_ID_HEADER, RetryPolicy, build_request_headers, headers_with_trace_context,
+    inject_trace_context, publish, request, request_with_timeout,
 };
 
 #[cfg(feature = "test-support")]
