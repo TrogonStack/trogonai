@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, SetSessionModelRequest, SetSessionModelResponse,
@@ -31,7 +31,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_set_model(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::set_model(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, SetSessionModelRequest, SetSessionModelResponse>(
         nats,
@@ -65,7 +65,7 @@ mod tests {
     async fn set_session_model_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = SetSessionModelResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.set_model", &expected);
+        set_json_response(&mock, "acp.session.s1.agent.set_model", &expected);
 
         let request = SetSessionModelRequest::new("s1", "claude-sonnet-4-6");
         let result = bridge.set_session_model(request).await;
@@ -86,7 +86,7 @@ mod tests {
     #[tokio::test]
     async fn set_session_model_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.set_model", "not json".into());
+        mock.set_response("acp.session.s1.agent.set_model", "not json".into());
 
         let request = SetSessionModelRequest::new("s1", "claude-sonnet-4-6");
         let err = bridge.set_session_model(request).await.unwrap_err();
@@ -109,7 +109,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.set_model",
+            "acp.session.s1.agent.set_model",
             &SetSessionModelResponse::new(),
         );
 

@@ -72,7 +72,7 @@ pub async fn run<
     bridge: Rc<Bridge<N, C>>,
     serializer: S,
 ) {
-    let wildcard = crate::nats::client_subjects::wildcards::all(bridge.config.acp_prefix());
+    let wildcard = crate::nats::session::wildcards::all_client(bridge.config.acp_prefix());
     info!("Starting client proxy - subscribing to {}", wildcard);
 
     let mut subscriber = match nats.subscribe(wildcard).await {
@@ -525,7 +525,7 @@ mod tests {
                     SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
                 );
                 let payload = serde_json::to_vec(&notification).unwrap();
-                let msg = make_msg("acp.sess1.client.session.update", &payload, None);
+                let msg = make_msg("acp.session.sess1.client.session.update", &payload, None);
 
                 let tx = nats.inject_messages();
                 tx.unbounded_send(msg).unwrap();
@@ -564,7 +564,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -604,7 +604,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -645,7 +645,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -727,7 +727,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.create",
+            "acp.session.sess-1.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -765,7 +765,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-a.client.terminal.create",
+            "acp.session.sess-a.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -805,7 +805,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -848,7 +848,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -901,7 +901,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -949,7 +949,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             None,
@@ -987,7 +987,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1031,7 +1031,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1083,7 +1083,7 @@ mod tests {
             serializer: &serializer,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1129,7 +1129,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1176,7 +1176,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1215,7 +1215,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1254,7 +1254,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1293,7 +1293,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1327,7 +1327,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.wait_for_exit",
+            "acp.session.sess-1.client.terminal.wait_for_exit",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1359,7 +1359,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -1390,7 +1390,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -1424,7 +1424,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1459,7 +1459,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1492,7 +1492,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1525,7 +1525,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.create",
+            "acp.session.sess-1.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1561,7 +1561,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1594,7 +1594,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1627,7 +1627,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1664,7 +1664,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1697,7 +1697,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1730,7 +1730,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.create",
+            "acp.session.sess-1.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1766,7 +1766,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1799,7 +1799,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1832,7 +1832,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1869,7 +1869,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1905,7 +1905,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1941,7 +1941,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -1978,7 +1978,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-a.client.terminal.release",
+            "acp.session.sess-a.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -2020,7 +2020,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -2064,7 +2064,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             None,
@@ -2102,7 +2102,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -2141,7 +2141,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2179,7 +2179,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.create",
+            "acp.session.sess-1.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2217,7 +2217,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2255,7 +2255,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2293,7 +2293,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.release",
+            "acp.session.sess-1.client.terminal.release",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -2336,7 +2336,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2374,7 +2374,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2418,7 +2418,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2456,7 +2456,7 @@ mod tests {
             serializer: &serializer,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.output",
+            "acp.session.sess-1.client.terminal.output",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2496,7 +2496,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             None,
@@ -2538,7 +2538,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-a.client.terminal.kill",
+            "acp.session.sess-a.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2586,7 +2586,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2943,7 +2943,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -2996,7 +2996,7 @@ mod tests {
             serializer: &serializer,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3045,7 +3045,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3086,7 +3086,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3128,7 +3128,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3169,7 +3169,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.kill",
+            "acp.session.sess-1.client.terminal.kill",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3205,7 +3205,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -3244,7 +3244,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3281,7 +3281,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.terminal.create",
+            "acp.session.sess-1.client.terminal.create",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3321,7 +3321,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3361,7 +3361,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3402,7 +3402,7 @@ mod tests {
             serializer: &serializer,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3484,7 +3484,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.update",
+            "acp.session.sess-1.client.session.update",
             parsed,
             payload,
             None,
@@ -3522,7 +3522,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.read_text_file",
+            "acp.session.sess-1.client.fs.read_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3567,7 +3567,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3604,7 +3604,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.fs.write_text_file",
+            "acp.session.sess-1.client.fs.write_text_file",
             parsed,
             payload,
             Some("_INBOX.reply".to_string()),
@@ -3649,7 +3649,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -3694,7 +3694,7 @@ mod tests {
             serializer: &StdJsonSerialize,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -3741,7 +3741,7 @@ mod tests {
             serializer: &serializer,
         };
         dispatch_client_method(
-            "acp.sess-1.client.session.request_permission",
+            "acp.session.sess-1.client.session.request_permission",
             parsed,
             payload,
             Some("_INBOX.err".to_string()),
@@ -3803,7 +3803,7 @@ mod tests {
         let client = Rc::new(MockClient::new());
         let in_flight = Rc::new(Cell::new(1usize));
 
-        let msg = make_msg("acp.sess1.client.session.update", b"{}", None);
+        let msg = make_msg("acp.session.sess1.client.session.update", b"{}", None);
         process_message(msg, &nats, client, bridge, &in_flight, 1, &StdJsonSerialize).await;
 
         assert!(nats.published_messages().is_empty());
@@ -3826,7 +3826,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
         let msg = make_msg(
-            "acp.sess1.client.fs.read_text_file",
+            "acp.session.sess1.client.fs.read_text_file",
             &payload,
             Some("_INBOX.reply"),
         );
@@ -3853,7 +3853,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
         let msg = make_msg(
-            "acp.sess1.client.fs.read_text_file",
+            "acp.session.sess1.client.fs.read_text_file",
             &payload,
             Some("_INBOX.reply"),
         );
@@ -3880,7 +3880,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
         let msg = make_msg(
-            "acp.sess1.client.fs.read_text_file",
+            "acp.session.sess1.client.fs.read_text_file",
             &payload,
             Some("_INBOX.reply"),
         );
@@ -3907,7 +3907,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
         let msg = make_msg(
-            "acp.sess1.client.fs.read_text_file",
+            "acp.session.sess1.client.fs.read_text_file",
             &payload,
             Some("_INBOX.reply"),
         );
@@ -3934,7 +3934,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
         let msg = make_msg(
-            "acp.sess1.client.fs.read_text_file",
+            "acp.session.sess1.client.fs.read_text_file",
             &payload,
             Some("_INBOX.reply"),
         );
@@ -3959,7 +3959,7 @@ mod tests {
                 );
                 let payload = serde_json::to_vec(&notification).unwrap();
 
-                let msg = make_msg("acp.sess1.client.session.update", &payload, None);
+                let msg = make_msg("acp.session.sess1.client.session.update", &payload, None);
                 process_message(
                     msg,
                     &nats,
