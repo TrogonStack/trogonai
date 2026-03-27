@@ -1,5 +1,5 @@
 use crate::acp_prefix::AcpPrefix;
-use crate::nats::client_subjects;
+use crate::nats::session;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest,
@@ -70,32 +70,32 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse> {
-        let s = client_subjects::session_request_permission(self.prefix(), self.session_id());
+        let s = session::client::session_request_permission(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
-        let s = client_subjects::session_update(self.prefix(), self.session_id());
+        let s = session::client::session_update(self.prefix(), self.session_id());
         self.notify(&s, &args).await
     }
 
     async fn read_text_file(&self, args: ReadTextFileRequest) -> Result<ReadTextFileResponse> {
-        let s = client_subjects::fs_read_text_file(self.prefix(), self.session_id());
+        let s = session::client::fs_read_text_file(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn write_text_file(&self, args: WriteTextFileRequest) -> Result<WriteTextFileResponse> {
-        let s = client_subjects::fs_write_text_file(self.prefix(), self.session_id());
+        let s = session::client::fs_write_text_file(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn create_terminal(&self, args: CreateTerminalRequest) -> Result<CreateTerminalResponse> {
-        let s = client_subjects::terminal_create(self.prefix(), self.session_id());
+        let s = session::client::terminal_create(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn terminal_output(&self, args: TerminalOutputRequest) -> Result<TerminalOutputResponse> {
-        let s = client_subjects::terminal_output(self.prefix(), self.session_id());
+        let s = session::client::terminal_output(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
@@ -103,7 +103,7 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: ReleaseTerminalRequest,
     ) -> Result<ReleaseTerminalResponse> {
-        let s = client_subjects::terminal_release(self.prefix(), self.session_id());
+        let s = session::client::terminal_release(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
@@ -111,12 +111,12 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: WaitForTerminalExitRequest,
     ) -> Result<WaitForTerminalExitResponse> {
-        let s = client_subjects::terminal_wait_for_exit(self.prefix(), self.session_id());
+        let s = session::client::terminal_wait_for_exit(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
-        let s = client_subjects::terminal_kill(self.prefix(), self.session_id());
+        let s = session::client::terminal_kill(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 }
@@ -145,7 +145,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
         nats.set_response(
-            "acp.s1.client.session.request_permission",
+            "acp.session.s1.client.session.request_permission",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -173,7 +173,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             nats.published_messages(),
-            vec!["acp.s1.client.session.update"]
+            vec!["acp.session.s1.client.session.update"]
         );
     }
 
@@ -182,7 +182,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = ReadTextFileResponse::new("file contents");
         nats.set_response(
-            "acp.s1.client.fs.read_text_file",
+            "acp.session.s1.client.fs.read_text_file",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -214,7 +214,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = agent_client_protocol::WriteTextFileResponse::default();
         nats.set_response(
-            "acp.s1.client.fs.write_text_file",
+            "acp.session.s1.client.fs.write_text_file",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -231,7 +231,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = CreateTerminalResponse::new("t1");
         nats.set_response(
-            "acp.s1.client.terminal.create",
+            "acp.session.s1.client.terminal.create",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -248,7 +248,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = TerminalOutputResponse::new("output", false);
         nats.set_response(
-            "acp.s1.client.terminal.output",
+            "acp.session.s1.client.terminal.output",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -265,7 +265,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = ReleaseTerminalResponse::default();
         nats.set_response(
-            "acp.s1.client.terminal.release",
+            "acp.session.s1.client.terminal.release",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -282,7 +282,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let response = KillTerminalResponse::default();
         nats.set_response(
-            "acp.s1.client.terminal.kill",
+            "acp.session.s1.client.terminal.kill",
             serde_json::to_vec(&response).unwrap().into(),
         );
 
@@ -298,7 +298,7 @@ mod tests {
         let response =
             WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
         nats.set_response(
-            "acp.s1.client.terminal.wait_for_exit",
+            "acp.session.s1.client.terminal.wait_for_exit",
             serde_json::to_vec(&response).unwrap().into(),
         );
 

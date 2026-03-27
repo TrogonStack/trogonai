@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, FlushClient, PublishClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
@@ -34,7 +34,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
         )
     })?;
 
-    let subject = agent::session_cancel(bridge.config.acp_prefix(), &args.session_id.to_string());
+    let subject = session::agent::cancel(bridge.config.acp_prefix(), &args.session_id.to_string());
 
     let publish_result = nats::publish(
         bridge.nats(),
@@ -58,7 +58,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
     }
 
     let cancelled_subject =
-        agent::session_cancelled(bridge.config.acp_prefix(), &args.session_id.to_string());
+        session::agent::cancelled(bridge.config.acp_prefix(), &args.session_id.to_string());
     if let Err(e) = bridge
         .nats()
         .publish_with_headers(
@@ -116,8 +116,8 @@ mod tests {
 
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.s1.agent.session.cancel".to_string()),
-            "expected publish to acp.s1.agent.session.cancel, got: {:?}",
+            published.contains(&"acp.session.s1.agent.cancel".to_string()),
+            "expected publish to acp.session.s1.agent.cancel, got: {:?}",
             published
         );
     }
@@ -130,8 +130,8 @@ mod tests {
 
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.s1.agent.session.cancelled".to_string()),
-            "expected publish to acp.s1.agent.session.cancelled (prompt broadcast), got: {:?}",
+            published.contains(&"acp.session.s1.agent.cancelled".to_string()),
+            "expected publish to acp.session.s1.agent.cancelled (prompt broadcast), got: {:?}",
             published
         );
     }

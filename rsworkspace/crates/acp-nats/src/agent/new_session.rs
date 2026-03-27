@@ -177,8 +177,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.test-session-1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.test-session-1.agent.ext.session.ready, got: {:?}",
+            published.contains(&"acp.session.test-session-1.agent.ext.ready".to_string()),
+            "expected publish to acp.session.test-session-1.agent.ext.ready, got: {:?}",
             published
         );
     }
