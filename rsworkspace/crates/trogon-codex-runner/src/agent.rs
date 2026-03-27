@@ -26,6 +26,18 @@ use uuid::Uuid;
 
 use crate::process::{CodexEvent, CodexProcess};
 
+/// Holds the process mutex lock and derefs directly to `CodexProcess`,
+/// encoding the post-condition of `process()` (always `Some`) in the type
+/// instead of requiring callers to call `.as_ref().unwrap()`.
+struct ProcessGuard(tokio::sync::OwnedMutexGuard<Option<CodexProcess>>);
+
+impl std::ops::Deref for ProcessGuard {
+    type Target = CodexProcess;
+    fn deref(&self) -> &CodexProcess {
+        self.0.as_ref().expect("CodexProcess guaranteed present by process()")
+    }
+}
+
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
@@ -119,12 +131,13 @@ impl CodexAgent {
         }
     }
 
-    /// Ensures the `CodexProcess` is running, spawning (or re-spawning) as needed.
+    /// Ensures the `CodexProcess` is running, spawning (or re-spawning) as needed,
+    /// and returns a guard that holds the mutex and derefs to `&CodexProcess`.
     ///
     /// If the previous process has exited, in-memory sessions are cleared —
     /// Codex thread state is stored in the subprocess, so they cannot be recovered.
-    async fn process(&self) -> Result<&Arc<Mutex<Option<CodexProcess>>>, Error> {
-        let mut guard = self.process.lock().await;
+    async fn process(&self) -> Result<ProcessGuard, Error> {
+        let mut guard = Arc::clone(&self.process).lock_owned().await;
         let needs_spawn = guard.as_ref().is_none_or(|p| !p.is_alive());
         if needs_spawn {
             if guard.is_some() {
@@ -138,8 +151,7 @@ impl CodexAgent {
                 }
             }
         }
-        drop(guard);
-        Ok(&self.process)
+        Ok(ProcessGuard(guard))
     }
 
     fn make_nats_client(
@@ -211,15 +223,8 @@ impl agent_client_protocol::Agent for CodexAgent {
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         let proc = self.process().await?;
-        let thread_id = {
-            let guard = proc.lock().await;
-            guard
-                .as_ref()
-                .unwrap()
-                .thread_start(&cwd)
-                .await
-                .map_err(|e| internal_error(e.to_string()))?
-        };
+        let thread_id = proc.thread_start(&cwd).await.map_err(|e| internal_error(e.to_string()))?;
+        drop(proc); // release process lock before acquiring sessions lock
 
         let session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
@@ -265,13 +270,10 @@ impl agent_client_protocol::Agent for CodexAgent {
         };
 
         let proc = self.process().await?;
-        {
-            let guard = proc.lock().await;
-            // thread/resume is a best-effort hint to Codex; the thread stays alive
-            // in the subprocess regardless, so a failure here is non-fatal.
-            if let Err(e) = guard.as_ref().unwrap().thread_resume(&thread_id).await {
-                warn!(session_id, error = %e, "codex: thread_resume failed (non-fatal)");
-            }
+        // thread/resume is a best-effort hint to Codex; the thread stays alive
+        // in the subprocess regardless, so a failure here is non-fatal.
+        if let Err(e) = proc.thread_resume(&thread_id).await {
+            warn!(session_id, error = %e, "codex: thread_resume failed (non-fatal)");
         }
 
         Ok(ResumeSessionResponse::new())
@@ -293,15 +295,9 @@ impl agent_client_protocol::Agent for CodexAgent {
         };
 
         let proc = self.process().await?;
-        let new_thread_id = {
-            let guard = proc.lock().await;
-            guard
-                .as_ref()
-                .unwrap()
-                .thread_fork(&source_thread_id)
-                .await
-                .map_err(|e| internal_error(e.to_string()))?
-        };
+        let new_thread_id =
+            proc.thread_fork(&source_thread_id).await.map_err(|e| internal_error(e.to_string()))?;
+        drop(proc); // release process lock before acquiring sessions lock
 
         let new_session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
@@ -408,15 +404,11 @@ impl agent_client_protocol::Agent for CodexAgent {
         };
 
         let proc = self.process().await?;
-        let mut event_rx = {
-            let guard = proc.lock().await;
-            guard
-                .as_ref()
-                .unwrap()
-                .turn_start(&thread_id, &user_input, model.as_deref())
-                .await
-                .map_err(|e| internal_error(e.to_string()))?
-        };
+        let mut event_rx = proc
+            .turn_start(&thread_id, &user_input, model.as_deref())
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+        drop(proc); // release process lock before entering the event loop
 
         // Stream Codex events → ACP SessionNotifications.
         let stop_reason = loop {
