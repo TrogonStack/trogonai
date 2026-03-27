@@ -26,10 +26,6 @@ use uuid::Uuid;
 
 use crate::process::{CodexEvent, CodexProcess};
 
-/// Default prompt timeout — matches the workspace default (2 hours).
-/// Override with `CODEX_PROMPT_TIMEOUT_SECS` env var.
-const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(7200);
-
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
@@ -55,22 +51,54 @@ pub struct CodexAgent {
     process: Arc<Mutex<Option<CodexProcess>>>,
     sessions: Arc<Mutex<HashMap<String, CodexSession>>>,
     default_model: String,
+    prompt_timeout: Duration,
+    available_models: Vec<ModelInfo>,
 }
 
 impl CodexAgent {
     /// Create a new `CodexAgent`. The `codex app-server` process is spawned
     /// lazily on the first call that needs it.
+    ///
+    /// Environment variables read once at construction:
+    /// - `CODEX_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 7200)
+    /// - `CODEX_MODELS` — comma-separated `id:label` pairs (default: `o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o`)
     pub fn new(
         nats: async_nats::Client,
         prefix: impl Into<String>,
         default_model: impl Into<String>,
     ) -> Self {
+        let prompt_timeout = std::env::var("CODEX_PROMPT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(7200));
+
+        let available_models = std::env::var("CODEX_MODELS")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .filter_map(|entry| {
+                        let (id, label) = entry.split_once(':')?;
+                        Some(ModelInfo::new(id.trim().to_string(), label.trim().to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                vec![
+                    ModelInfo::new("o4-mini", "o4-mini"),
+                    ModelInfo::new("o3", "o3"),
+                    ModelInfo::new("gpt-4o", "GPT-4o"),
+                ]
+            });
+
         Self {
             nats,
             prefix: prefix.into(),
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             default_model: default_model.into(),
+            prompt_timeout,
+            available_models,
         }
     }
 
@@ -123,14 +151,7 @@ impl CodexAgent {
 
     fn session_model_state(&self, current: Option<&str>) -> SessionModelState {
         let current = current.unwrap_or(&self.default_model).to_string();
-        SessionModelState::new(
-            current,
-            vec![
-                ModelInfo::new("o4-mini", "o4-mini"),
-                ModelInfo::new("o3", "o3"),
-                ModelInfo::new("gpt-4o", "GPT-4o"),
-            ],
-        )
+        SessionModelState::new(current, self.available_models.clone())
     }
 }
 
@@ -366,12 +387,6 @@ impl agent_client_protocol::Agent for CodexAgent {
             (s.thread_id.clone(), s.model.clone())
         };
 
-        let prompt_timeout = std::env::var("CODEX_PROMPT_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(Duration::from_secs)
-            .unwrap_or(DEFAULT_PROMPT_TIMEOUT);
-
         let proc = self.process().await?;
         let mut event_rx = {
             let guard = proc.lock().await;
@@ -385,7 +400,7 @@ impl agent_client_protocol::Agent for CodexAgent {
 
         // Stream Codex events → ACP SessionNotifications.
         let stop_reason = loop {
-            let event = match tokio::time::timeout(prompt_timeout, event_rx.recv()).await {
+            let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
                     warn!(session_id, "codex: prompt timed out");
                     break StopReason::EndTurn;
