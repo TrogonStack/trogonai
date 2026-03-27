@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex as StdMutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,14 +75,14 @@ pub struct CodexProcess {
     pending: PendingMap,
     turn_senders: TurnSenders,
     alive: Arc<AtomicBool>,
-    _child: Arc<Mutex<Child>>,
+    _child: StdMutex<Child>,
 }
 
 impl Drop for CodexProcess {
     fn drop(&mut self) {
         // Best-effort kill: start_kill sends SIGKILL without waiting. If the
         // child has already exited this is a harmless no-op.
-        if let Ok(mut child) = self._child.try_lock() {
+        if let Ok(mut child) = self._child.lock() {
             let _ = child.start_kill();
         }
     }
@@ -115,7 +116,7 @@ impl CodexProcess {
             pending: pending.clone(),
             turn_senders: turn_senders.clone(),
             alive: alive.clone(),
-            _child: Arc::new(Mutex::new(child)),
+            _child: StdMutex::new(child),
         };
 
         // Background task: read stdout and route messages.
