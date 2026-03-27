@@ -78,8 +78,16 @@ impl CodexAgent {
             .map(|s| {
                 s.split(',')
                     .filter_map(|entry| {
-                        let (id, label) = entry.split_once(':')?;
-                        Some(ModelInfo::new(id.trim().to_string(), label.trim().to_string()))
+                        match entry.split_once(':') {
+                            Some((id, label)) => Some(ModelInfo::new(
+                                id.trim().to_string(),
+                                label.trim().to_string(),
+                            )),
+                            None => {
+                                warn!(entry, "CODEX_MODELS: skipping malformed entry (expected 'id:label')");
+                                None
+                            }
+                        }
                     })
                     .collect()
             })
@@ -341,6 +349,10 @@ impl agent_client_protocol::Agent for CodexAgent {
         let session_id = req.session_id.to_string();
         let model_id = req.model_id.to_string();
 
+        if !self.available_models.iter().any(|m| m.model_id.0.as_ref() == model_id) {
+            return Err(internal_error(format!("unknown model: {model_id}")));
+        }
+
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(session) => {
@@ -367,6 +379,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         let nats_client = self.make_nats_client(&req.session_id)?;
 
         // Extract plain text from the prompt content blocks.
+        // Non-text blocks (images, tool results) are not supported by Codex and are dropped.
         let user_input: String = req
             .prompt
             .iter()
@@ -376,6 +389,10 @@ impl agent_client_protocol::Agent for CodexAgent {
             })
             .collect::<Vec<_>>()
             .join("\n");
+
+        if user_input.is_empty() {
+            warn!(session_id, "codex: prompt contains no text blocks; sending empty input to Codex");
+        }
 
         let (thread_id, model) = {
             let sessions = self.sessions.lock().await;
