@@ -67,13 +67,14 @@ impl CodexAgent {
         prefix: impl Into<String>,
         default_model: impl Into<String>,
     ) -> Self {
+        let default_model: String = default_model.into();
         let prompt_timeout = std::env::var("CODEX_PROMPT_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(7200));
 
-        let available_models = std::env::var("CODEX_MODELS")
+        let mut available_models = std::env::var("CODEX_MODELS")
             .ok()
             .map(|s| {
                 s.split(',')
@@ -100,12 +101,19 @@ impl CodexAgent {
                 ]
             });
 
+        // Ensure the default model appears in the list so session_model_state
+        // never reports a current model that the client cannot select.
+        if !available_models.iter().any(|m| m.model_id.0.as_ref() == default_model.as_str()) {
+            warn!(model = %default_model, "default model not in available list; adding it");
+            available_models.push(ModelInfo::new(default_model.clone(), default_model.clone()));
+        }
+
         Self {
             nats,
             prefix: prefix.into(),
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            default_model: default_model.into(),
+            default_model,
             prompt_timeout,
             available_models,
         }
@@ -274,7 +282,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         req: ForkSessionRequest,
     ) -> agent_client_protocol::Result<ForkSessionResponse> {
         let source_id = req.session_id.to_string();
-        let cwd = req.cwd.clone();
+        let cwd = req.cwd.to_string_lossy().into_owned();
 
         let (source_thread_id, inherited_model) = {
             let sessions = self.sessions.lock().await;
@@ -298,11 +306,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         let new_session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
             new_session_id.clone(),
-            CodexSession {
-                thread_id: new_thread_id,
-                cwd: cwd.to_string_lossy().into_owned(),
-                model: inherited_model.clone(),
-            },
+            CodexSession { thread_id: new_thread_id, cwd, model: inherited_model.clone() },
         );
 
         Ok(ForkSessionResponse::new(new_session_id)
@@ -512,5 +516,187 @@ impl agent_client_protocol::Agent for CodexAgent {
         }
 
         Ok(())
+    }
+}
+
+// ── Test helpers (same module scope → access to private fields) ───────────────
+
+#[cfg(test)]
+impl CodexAgent {
+    /// Insert a session directly, bypassing the Codex subprocess.
+    async fn test_insert_session(&self, id: &str, cwd: &str, model: Option<String>) {
+        self.sessions.lock().await.insert(
+            id.to_string(),
+            CodexSession {
+                thread_id: format!("thread-{id}"),
+                cwd: cwd.to_string(),
+                model,
+            },
+        );
+    }
+
+    async fn test_session_model(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
+    }
+
+    async fn test_session_count(&self) -> usize {
+        self.sessions.lock().await.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::{
+        Agent, CloseSessionRequest, ListSessionsRequest, LoadSessionRequest,
+        SetSessionModelRequest,
+    };
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+
+    /// Spin up a minimal fake NATS server and return a connected client.
+    /// The server handles the INFO/CONNECT/PING handshake only; no messages
+    /// are published by the session tests so the connection can idle after that.
+    async fn fake_nats_client() -> async_nats::Client {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let (reader, mut writer) = stream.into_split();
+                writer
+                    .write_all(
+                        b"INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\
+                          \"max_payload\":1048576,\"proto\":1,\"headers\":true}\r\n",
+                    )
+                    .await
+                    .ok();
+                let mut lines = BufReader::new(reader).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.starts_with("PING") {
+                        writer.write_all(b"PONG\r\n").await.ok();
+                    }
+                }
+            }
+        });
+
+        async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
+    }
+
+    async fn make_agent() -> CodexAgent {
+        CodexAgent::new(fake_nats_client().await, "test", "o4-mini")
+    }
+
+    // ── close_session ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn close_session_removes_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s1", "/tmp", None).await;
+        assert_eq!(agent.test_session_count().await, 1);
+
+        agent.close_session(CloseSessionRequest::new("s1")).await.unwrap();
+        assert_eq!(agent.test_session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn close_session_unknown_id_is_noop() {
+        let agent = make_agent().await;
+        // Must not return an error for unknown session ids.
+        agent.close_session(CloseSessionRequest::new("nonexistent")).await.unwrap();
+    }
+
+    // ── load_session ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn load_session_returns_state() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s2", "/home/user", Some("o3".to_string())).await;
+
+        let resp = agent
+            .load_session(LoadSessionRequest::new("s2", "/home/user"))
+            .await
+            .unwrap();
+        assert_eq!(resp.models.unwrap().current_model_id.to_string(), "o3");
+    }
+
+    #[tokio::test]
+    async fn load_session_not_found_returns_error() {
+        let agent = make_agent().await;
+        assert!(agent.load_session(LoadSessionRequest::new("missing", "/")).await.is_err());
+    }
+
+    // ── set_session_model ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_model_updates_model() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s3", "/tmp", None).await;
+
+        agent
+            .set_session_model(SetSessionModelRequest::new("s3", "o3"))
+            .await
+            .unwrap();
+        assert_eq!(agent.test_session_model("s3").await.as_deref(), Some("o3"));
+    }
+
+    #[tokio::test]
+    async fn set_session_model_rejects_unknown_model() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s4", "/tmp", None).await;
+
+        let err = agent
+            .set_session_model(SetSessionModelRequest::new("s4", "gpt-99"))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("unknown model"));
+    }
+
+    #[tokio::test]
+    async fn set_session_model_rejects_unknown_session() {
+        let agent = make_agent().await;
+        assert!(agent
+            .set_session_model(SetSessionModelRequest::new("missing", "o3"))
+            .await
+            .is_err());
+    }
+
+    // ── list_sessions ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_returns_sorted() {
+        let agent = make_agent().await;
+        agent.test_insert_session("zzz", "/c", None).await;
+        agent.test_insert_session("aaa", "/a", None).await;
+        agent.test_insert_session("mmm", "/b", None).await;
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let ids: Vec<_> = resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
+        assert_eq!(ids, vec!["aaa", "mmm", "zzz"]);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_empty() {
+        let agent = make_agent().await;
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        assert!(resp.sessions.is_empty());
+    }
+
+    // ── default_model validation ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn default_model_added_when_not_in_list() {
+        // CODEX_MODELS does not include "custom-model"
+        let nats = fake_nats_client().await;
+        // Build agent with a default model not in the env-derived list.
+        // Since CODEX_MODELS is not set in test env, the agent uses the default
+        // list (o4-mini, o3, gpt-4o); "custom-model" is not among them.
+        let agent = CodexAgent::new(nats, "test", "custom-model");
+
+        // session_model_state should include "custom-model" in available list.
+        let state = agent.session_model_state(None);
+        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        assert!(ids.contains(&"custom-model".to_string()), "available: {ids:?}");
+        assert_eq!(state.current_model_id.to_string(), "custom-model");
     }
 }
