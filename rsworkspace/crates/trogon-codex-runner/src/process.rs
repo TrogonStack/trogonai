@@ -201,7 +201,12 @@ impl CodexProcess {
         if let Some(m) = model {
             params["model"] = Value::String(m.to_string());
         }
-        self.request("turn/start", Some(params)).await?;
+        if let Err(e) = self.request("turn/start", Some(params)).await {
+            // Request failed — remove the sender we just inserted so it doesn't
+            // linger until the next turn_start call for this thread.
+            self.turn_senders.lock().await.remove(thread_id);
+            return Err(e);
+        }
         Ok(rx)
     }
 
