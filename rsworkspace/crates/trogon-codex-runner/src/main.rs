@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats = async_nats::connect(&nats_url).await?;
 
     let acp_prefix = AcpPrefix::new(&prefix)?;
-    let agent = CodexAgent::new(nats.clone(), &prefix, default_model);
+    let agent = CodexAgent::new(nats.clone(), acp_prefix.clone(), default_model);
 
     let local = tokio::task::LocalSet::new();
     let result = local
