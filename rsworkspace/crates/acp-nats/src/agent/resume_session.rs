@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
@@ -31,7 +31,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_resume(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::resume(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, ResumeSessionRequest, ResumeSessionResponse>(
         nats,
@@ -69,7 +69,7 @@ mod tests {
     async fn resume_session_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = ResumeSessionResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.resume", &expected);
+        set_json_response(&mock, "acp.session.s1.agent.resume", &expected);
 
         let request = ResumeSessionRequest::new("s1", ".");
         let result = bridge.resume_session(request).await;
@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn resume_session_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.resume", "not json".into());
+        mock.set_response("acp.session.s1.agent.resume", "not json".into());
 
         let request = ResumeSessionRequest::new("s1", ".");
         let err = bridge.resume_session(request).await.unwrap_err();
@@ -113,7 +113,7 @@ mod tests {
         let (mock, bridge) = mock_bridge();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.resume",
+            "acp.session.s1.agent.resume",
             &ResumeSessionResponse::new(),
         );
 
@@ -124,8 +124,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
+            published.contains(&"acp.session.s1.agent.ext.ready".to_string()),
+            "expected publish to acp.session.s1.agent.ext.ready, got: {:?}",
             published
         );
     }
@@ -135,7 +135,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.resume",
+            "acp.session.s1.agent.resume",
             &ResumeSessionResponse::new(),
         );
 
@@ -176,7 +176,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.resume",
+            "acp.session.s1.agent.resume",
             &ResumeSessionResponse::new(),
         );
         mock.fail_publish_count(4);

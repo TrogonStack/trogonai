@@ -22,9 +22,10 @@ pub const MAX_METHOD_NAME_LENGTH: usize = 128;
 
 pub const AGENT_UNAVAILABLE: i32 = -32001;
 
-pub const AGENT_MARKER: &str = ".agent.";
-pub const AGENT_EXT_PREFIX: &str = "agent.ext.";
-pub const EXT_SUBJECT_PREFIX: &str = "client.ext.";
+pub const SESSION_PREFIX: &str = ".session.";
+pub const SESSION_AGENT_MARKER: &str = ".agent.";
+pub const SESSION_CLIENT_MARKER: &str = ".client.";
+pub const EXT_SUBJECT_PREFIX: &str = "ext.";
 
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
