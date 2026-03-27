@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, SetSessionModeRequest, SetSessionModeResponse,
@@ -31,7 +31,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_set_mode(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::set_mode(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, SetSessionModeRequest, SetSessionModeResponse>(
         nats,
@@ -65,7 +65,7 @@ mod tests {
         let expected = SetSessionModeResponse::new();
         set_json_response(
             &mock,
-            "acp.session-mode-001.agent.session.set_mode",
+            "acp.session.session-mode-001.agent.set_mode",
             &expected,
         );
 
@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn set_session_mode_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.set_mode", "not json".into());
+        mock.set_response("acp.session.s1.agent.set_mode", "not json".into());
 
         let request = SetSessionModeRequest::new("s1", "mode-1");
         let err = bridge.set_session_mode(request).await.unwrap_err();
@@ -111,7 +111,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.set_mode",
+            "acp.session.s1.agent.set_mode",
             &SetSessionModeResponse::new(),
         );
 

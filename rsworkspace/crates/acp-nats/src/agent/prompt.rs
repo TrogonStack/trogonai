@@ -8,7 +8,7 @@ use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
 use crate::agent::Bridge;
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, agent};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
 use crate::session_id::AcpSessionId;
 
 pub use trogon_nats::REQ_ID_HEADER;
@@ -42,19 +42,19 @@ where
     // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
     let mut notifications_sub = bridge
         .nats
-        .subscribe(agent::session_update(prefix, sid, &req_id))
+        .subscribe(session::agent::update(prefix, sid, &req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut response_sub = bridge
         .nats
-        .subscribe(agent::ext_session_prompt_response(prefix, sid, &req_id))
+        .subscribe(session::agent::prompt_response(prefix, sid, &req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut cancel_sub = bridge
         .nats
-        .subscribe(agent::session_cancelled(prefix, sid))
+        .subscribe(session::agent::cancelled(prefix, sid))
         .await
         .map_err(|e| {
             Error::new(
@@ -70,7 +70,7 @@ where
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id.as_str());
 
-    let prompt_subject = agent::session_prompt(prefix, sid);
+    let prompt_subject = session::agent::prompt(prefix, sid);
     bridge
         .nats
         .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
@@ -396,8 +396,8 @@ mod tests {
 
         let subjects = mock.published_messages();
         assert!(
-            subjects.iter().any(|s| s == "acp.s1.agent.session.prompt"),
-            "expected publish to acp.s1.agent.session.prompt, got: {:?}",
+            subjects.iter().any(|s| s == "acp.session.s1.agent.prompt"),
+            "expected publish to acp.session.s1.agent.prompt, got: {:?}",
             subjects
         );
     }
