@@ -3448,26 +3448,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-gateway"
-version = "0.1.0"
+name = "trogon-codex-runner"
+version = "0.0.1"
 dependencies = [
- "acp-telemetry",
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
  "async-nats",
- "axum",
- "clap",
- "confique",
+ "async-trait",
  "serde",
- "tempfile",
+ "serde_json",
  "tokio",
  "tracing",
- "trogon-nats",
- "trogon-source-discord",
- "trogon-source-github",
- "trogon-source-gitlab",
- "trogon-source-linear",
- "trogon-source-slack",
- "trogon-source-telegram",
- "trogon-std",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
