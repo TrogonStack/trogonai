@@ -59,7 +59,7 @@ struct CodexSession {
 /// Re-spawning clears all in-memory sessions since Codex thread state is lost.
 pub struct CodexAgent {
     nats: async_nats::Client,
-    prefix: String,
+    acp_prefix: AcpPrefix,
     process: Arc<Mutex<Option<CodexProcess>>>,
     sessions: Arc<Mutex<HashMap<String, CodexSession>>>,
     default_model: String,
@@ -76,7 +76,7 @@ impl CodexAgent {
     /// - `CODEX_MODELS` — comma-separated `id:label` pairs (default: `o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o`)
     pub fn new(
         nats: async_nats::Client,
-        prefix: impl Into<String>,
+        acp_prefix: AcpPrefix,
         default_model: impl Into<String>,
     ) -> Self {
         let default_model: String = default_model.into();
@@ -122,7 +122,7 @@ impl CodexAgent {
 
         Self {
             nats,
-            prefix: prefix.into(),
+            acp_prefix,
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -158,14 +158,12 @@ impl CodexAgent {
         &self,
         session_id: &SessionId,
     ) -> agent_client_protocol::Result<NatsClientProxy<async_nats::Client>> {
-        let acp_prefix =
-            AcpPrefix::new(&self.prefix).map_err(|e| internal_error(e.to_string()))?;
         let acp_session_id =
             AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
         Ok(NatsClientProxy::new(
             self.nats.clone(),
             acp_session_id,
-            acp_prefix,
+            self.acp_prefix.clone(),
             Duration::from_secs(30),
         ))
     }
@@ -565,7 +563,9 @@ mod tests {
                     .ok();
                 let mut lines = BufReader::new(reader).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if line.starts_with("PING") {
+                    if line.starts_with("CONNECT") {
+                        writer.write_all(b"+OK\r\n").await.ok();
+                    } else if line.starts_with("PING") {
                         writer.write_all(b"PONG\r\n").await.ok();
                     }
                 }
@@ -576,7 +576,8 @@ mod tests {
     }
 
     async fn make_agent() -> CodexAgent {
-        CodexAgent::new(fake_nats_client().await, "test", "o4-mini")
+        let acp_prefix = AcpPrefix::new("test").unwrap();
+        CodexAgent::new(fake_nats_client().await, acp_prefix, "o4-mini")
     }
 
     // ── close_session ─────────────────────────────────────────────────────────
@@ -680,10 +681,11 @@ mod tests {
     async fn default_model_added_when_not_in_list() {
         // CODEX_MODELS does not include "custom-model"
         let nats = fake_nats_client().await;
+        let acp_prefix = AcpPrefix::new("test").unwrap();
         // Build agent with a default model not in the env-derived list.
         // Since CODEX_MODELS is not set in test env, the agent uses the default
         // list (o4-mini, o3, gpt-4o); "custom-model" is not among them.
-        let agent = CodexAgent::new(nats, "test", "custom-model");
+        let agent = CodexAgent::new(nats, acp_prefix, "custom-model");
 
         // session_model_state should include "custom-model" in available list.
         let state = agent.session_model_state(None);
