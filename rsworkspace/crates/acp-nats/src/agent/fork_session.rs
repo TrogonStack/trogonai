@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
@@ -29,7 +29,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_fork(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::fork(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
         nats,
@@ -73,7 +73,7 @@ mod tests {
         let (mock, bridge) = mock_bridge();
         let new_session_id = SessionId::from("forked-session-1");
         let expected = ForkSessionResponse::new(new_session_id.clone());
-        set_json_response(&mock, "acp.s1.agent.session.fork", &expected);
+        set_json_response(&mock, "acp.session.s1.agent.fork", &expected);
 
         let request = ForkSessionRequest::new("s1", ".");
         let result = bridge.fork_session(request).await;
@@ -97,7 +97,7 @@ mod tests {
     #[tokio::test]
     async fn fork_session_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.fork", "not json".into());
+        mock.set_response("acp.session.s1.agent.fork", "not json".into());
 
         let request = ForkSessionRequest::new("s1", ".");
         let err = bridge.fork_session(request).await.unwrap_err();
@@ -121,7 +121,7 @@ mod tests {
         let new_session_id = SessionId::from("forked-session-1");
         set_json_response(
             &mock,
-            "acp.s1.agent.session.fork",
+            "acp.session.s1.agent.fork",
             &ForkSessionResponse::new(new_session_id),
         );
 
@@ -132,8 +132,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.forked-session-1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.forked-session-1.agent.ext.session.ready, got: {:?}",
+            published.contains(&"acp.session.forked-session-1.agent.ext.ready".to_string()),
+            "expected publish to acp.session.forked-session-1.agent.ext.ready, got: {:?}",
             published
         );
     }
@@ -143,7 +143,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.fork",
+            "acp.session.s1.agent.fork",
             &ForkSessionResponse::new("forked-1"),
         );
 
@@ -184,7 +184,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.fork",
+            "acp.session.s1.agent.fork",
             &ForkSessionResponse::new("forked-1"),
         );
         mock.fail_publish_count(4);

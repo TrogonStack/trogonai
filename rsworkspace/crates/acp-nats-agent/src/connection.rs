@@ -115,11 +115,8 @@ where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: Agent + 'static,
 {
-    // TODO: These two wildcards overlap when session_id == "agent", causing duplicate
-    // dispatch. A single {prefix}.> avoids duplicates but consumes client messages.
-    // Revisit the subject topology to eliminate both problems.
     let global_wildcard = acp_nats::nats::agent::wildcards::all(prefix);
-    let session_wildcard = acp_nats::nats::agent::wildcards::all_sessions(prefix);
+    let session_wildcard = acp_nats::nats::session::wildcards::all_agent(prefix);
 
     info!(
         global = %global_wildcard,
@@ -461,8 +458,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_cancel_is_notification_no_reply_published() {
         let (nats, agent) = dispatch(
-            "acp.s1.agent.session.cancel",
-            &CancelNotification::new("sess-1"),
+            "acp.session.s1.agent.cancel",
+            &CancelNotification::new("s1"),
             None,
         )
         .await;
@@ -496,8 +493,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_prompt_returns_stop_reason() {
         let (nats, _) = dispatch(
-            "acp.s1.agent.session.prompt",
-            &PromptRequest::new("sess-1", vec![]),
+            "acp.session.s1.agent.prompt",
+            &PromptRequest::new("s1", vec![]),
             Some("_INBOX.3"),
         )
         .await;
@@ -599,8 +596,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_session_load_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.load",
-            &LoadSessionRequest::new("sess-1", "/tmp"),
+            "acp.session.s1.agent.load",
+            &LoadSessionRequest::new("s1", "/tmp"),
         )
         .await;
     }
@@ -613,8 +610,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_set_session_mode_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.set_mode",
-            &SetSessionModeRequest::new("sess-1", "code"),
+            "acp.session.s1.agent.set_mode",
+            &SetSessionModeRequest::new("s1", "code"),
         )
         .await;
     }
@@ -622,8 +619,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_set_session_config_option_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.set_config_option",
-            &SetSessionConfigOptionRequest::new("sess-1", "key", "val"),
+            "acp.session.s1.agent.set_config_option",
+            &SetSessionConfigOptionRequest::new("s1", "key", "val"),
         )
         .await;
     }
@@ -631,8 +628,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_set_session_model_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.set_model",
-            &SetSessionModelRequest::new("sess-1", "gpt-4"),
+            "acp.session.s1.agent.set_model",
+            &SetSessionModelRequest::new("s1", "gpt-4"),
         )
         .await;
     }
@@ -640,8 +637,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_fork_session_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.fork",
-            &ForkSessionRequest::new("sess-1", "/tmp"),
+            "acp.session.s1.agent.fork",
+            &ForkSessionRequest::new("s1", "/tmp"),
         )
         .await;
     }
@@ -649,8 +646,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_resume_session_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.resume",
-            &ResumeSessionRequest::new("sess-1", "/tmp"),
+            "acp.session.s1.agent.resume",
+            &ResumeSessionRequest::new("s1", "/tmp"),
         )
         .await;
     }
@@ -658,8 +655,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_close_session_publishes_response() {
         assert_dispatch_publishes(
-            "acp.s1.agent.session.close",
-            &CloseSessionRequest::new("sess-1"),
+            "acp.session.s1.agent.close",
+            &CloseSessionRequest::new("s1"),
         )
         .await;
     }
@@ -832,7 +829,7 @@ mod tests {
 
                 let subjects = nats.subscribed_to();
                 assert!(subjects.contains(&"myprefix.agent.>".to_string()));
-                assert!(subjects.contains(&"myprefix.*.agent.>".to_string()));
+                assert!(subjects.contains(&"myprefix.session.*.agent.>".to_string()));
             })
             .await;
     }

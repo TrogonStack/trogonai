@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CloseSessionRequest, CloseSessionResponse, Error, ErrorCode, Result};
 use tracing::{info, instrument};
@@ -29,7 +29,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed>(
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_close(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::close(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, CloseSessionRequest, CloseSessionResponse>(
         nats,
@@ -61,7 +61,7 @@ mod tests {
     async fn close_session_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = CloseSessionResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.close", &expected);
+        set_json_response(&mock, "acp.session.s1.agent.close", &expected);
 
         let request = CloseSessionRequest::new("s1");
         let result = bridge.close_session(request).await;
@@ -82,7 +82,7 @@ mod tests {
     #[tokio::test]
     async fn close_session_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.close", "not json".into());
+        mock.set_response("acp.session.s1.agent.close", "not json".into());
 
         let request = CloseSessionRequest::new("s1");
         let err = bridge.close_session(request).await.unwrap_err();
@@ -105,7 +105,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.close",
+            "acp.session.s1.agent.close",
             &CloseSessionResponse::new(),
         );
 

@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
 use tracing::{info, instrument};
@@ -29,7 +29,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         )
     })?;
     let nats = bridge.nats();
-    let subject = agent::session_load(bridge.config.acp_prefix(), session_id.as_str());
+    let subject = session::agent::load(bridge.config.acp_prefix(), session_id.as_str());
 
     let result = nats::request_with_timeout::<N, LoadSessionRequest, LoadSessionResponse>(
         nats,
@@ -67,7 +67,7 @@ mod tests {
     async fn load_session_forwards_request_and_returns_response() {
         let (mock, bridge) = mock_bridge();
         let expected = LoadSessionResponse::new();
-        set_json_response(&mock, "acp.s1.agent.session.load", &expected);
+        set_json_response(&mock, "acp.session.s1.agent.load", &expected);
 
         let request = LoadSessionRequest::new("s1", ".");
         let result = bridge.load_session(request).await;
@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn load_session_returns_error_when_response_is_invalid_json() {
         let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.s1.agent.session.load", "not json".into());
+        mock.set_response("acp.session.s1.agent.load", "not json".into());
 
         let request = LoadSessionRequest::new("s1", ".");
         let err = bridge.load_session(request).await.unwrap_err();
@@ -104,7 +104,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.load",
+            "acp.session.s1.agent.load",
             &LoadSessionResponse::new(),
         );
 
@@ -153,7 +153,7 @@ mod tests {
         let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.load",
+            "acp.session.s1.agent.load",
             &LoadSessionResponse::new(),
         );
         mock.fail_publish_count(4);
@@ -181,7 +181,7 @@ mod tests {
         let (mock, bridge) = mock_bridge();
         set_json_response(
             &mock,
-            "acp.s1.agent.session.load",
+            "acp.session.s1.agent.load",
             &LoadSessionResponse::new(),
         );
 
@@ -192,8 +192,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let published = mock.published_messages();
         assert!(
-            published.contains(&"acp.s1.agent.ext.session.ready".to_string()),
-            "expected publish to acp.s1.agent.ext.session.ready, got: {:?}",
+            published.contains(&"acp.session.s1.agent.ext.ready".to_string()),
+            "expected publish to acp.session.s1.agent.ext.ready, got: {:?}",
             published
         );
     }
