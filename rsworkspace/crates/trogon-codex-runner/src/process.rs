@@ -329,12 +329,21 @@ impl CodexProcess {
             }
         }
 
-        // Process stdout closed — mark dead and unblock all pending requests.
+        // Process stdout closed — mark dead, unblock pending requests, and signal
+        // all active turns so prompt loops don't hang until their timeout fires.
         alive.store(false, Ordering::Relaxed);
         let mut pending = pending.lock().await;
         for (_, tx) in pending.drain() {
             let _ = tx.send(Err("codex process terminated".to_string()));
         }
+        drop(pending);
+        let mut senders = turn_senders.lock().await;
+        for tx in senders.values() {
+            let _ = tx.send(CodexEvent::Error {
+                message: "codex process terminated".to_string(),
+            });
+        }
+        senders.clear();
     }
 
     fn parse_event(method: &str, params: Option<&Value>) -> Option<(String, CodexEvent)> {
@@ -354,7 +363,7 @@ impl CodexProcess {
                         let content = item.get("content")?.as_array()?;
                         let mut text = String::new();
                         for block in content {
-                            if block.get("type")?.as_str()? == "output_text"
+                            if block.get("type").and_then(|v| v.as_str()) == Some("output_text")
                                 && let Some(t) = block.get("text").and_then(|v| v.as_str())
                             {
                                 text.push_str(t);
