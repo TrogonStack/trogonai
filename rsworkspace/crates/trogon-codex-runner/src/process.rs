@@ -7,7 +7,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, broadcast, oneshot};
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 // ── JSON-RPC wire types ────────────────────────────────────────────────────────
 
@@ -75,6 +75,16 @@ pub struct CodexProcess {
     turn_senders: TurnSenders,
     alive: Arc<AtomicBool>,
     _child: Arc<Mutex<Child>>,
+}
+
+impl Drop for CodexProcess {
+    fn drop(&mut self) {
+        // Best-effort kill: start_kill sends SIGKILL without waiting. If the
+        // child has already exited this is a harmless no-op.
+        if let Ok(mut child) = self._child.try_lock() {
+            let _ = child.start_kill();
+        }
+    }
 }
 
 impl CodexProcess {
@@ -350,6 +360,7 @@ impl CodexProcess {
                             }
                         }
                         if text.is_empty() {
+                            trace!(thread_id, "codex: message item had no output_text blocks; skipping");
                             return None;
                         }
                         CodexEvent::TextDelta { text }
