@@ -395,3 +395,151 @@ impl CodexProcess {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(method: &str, params: serde_json::Value) -> Option<(String, CodexEvent)> {
+        CodexProcess::parse_event(method, Some(&params))
+    }
+
+    #[test]
+    fn text_delta_from_item_updated() {
+        let params = serde_json::json!({
+            "threadId": "t1",
+            "item": {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "hello"}]
+            }
+        });
+        let (tid, event) = parse("item/updated", params).unwrap();
+        assert_eq!(tid, "t1");
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "hello"));
+    }
+
+    #[test]
+    fn text_delta_concatenates_blocks() {
+        let params = serde_json::json!({
+            "threadId": "t2",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "foo"},
+                    {"type": "output_text", "text": "bar"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "foobar"));
+    }
+
+    #[test]
+    fn empty_text_returns_none() {
+        let params = serde_json::json!({
+            "threadId": "t3",
+            "item": {
+                "type": "message",
+                "content": [{"type": "other_type", "text": "ignored"}]
+            }
+        });
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn tool_started_from_item_updated() {
+        let params = serde_json::json!({
+            "threadId": "t4",
+            "item": {
+                "type": "tool_call",
+                "id": "call-1",
+                "name": "bash",
+                "arguments": {"cmd": "ls"}
+            }
+        });
+        let (tid, event) = parse("item/updated", params).unwrap();
+        assert_eq!(tid, "t4");
+        match event {
+            CodexEvent::ToolStarted { id, name, input } => {
+                assert_eq!(id, "call-1");
+                assert_eq!(name, "bash");
+                assert_eq!(input, serde_json::json!({"cmd": "ls"}));
+            }
+            _ => panic!("expected ToolStarted"),
+        }
+    }
+
+    #[test]
+    fn tool_completed_from_item_completed() {
+        let params = serde_json::json!({
+            "threadId": "t5",
+            "item": {
+                "type": "tool_call",
+                "id": "call-2",
+                "output": "done"
+            }
+        });
+        let (tid, event) = parse("item/completed", params).unwrap();
+        assert_eq!(tid, "t5");
+        assert!(matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done"));
+    }
+
+    #[test]
+    fn turn_completed() {
+        let params = serde_json::json!({"threadId": "t6"});
+        let (tid, event) = parse("turn/completed", params).unwrap();
+        assert_eq!(tid, "t6");
+        assert!(matches!(event, CodexEvent::TurnCompleted));
+    }
+
+    #[test]
+    fn error_with_thread_id() {
+        let params = serde_json::json!({"threadId": "t7", "message": "oops"});
+        let (tid, event) = parse("error", params).unwrap();
+        assert_eq!(tid, "t7");
+        assert!(matches!(event, CodexEvent::Error { message } if message == "oops"));
+    }
+
+    #[test]
+    fn error_without_thread_id_broadcasts() {
+        let params = serde_json::json!({"message": "fatal"});
+        let (tid, event) = parse("error", params).unwrap();
+        assert_eq!(tid, "");
+        assert!(matches!(event, CodexEvent::Error { .. }));
+    }
+
+    #[test]
+    fn unknown_method_returns_none() {
+        let params = serde_json::json!({"threadId": "t8"});
+        assert!(parse("unknown/method", params).is_none());
+    }
+
+    #[test]
+    fn missing_thread_id_defaults_to_empty() {
+        let params = serde_json::json!({"threadId": null});
+        let (tid, _) = parse("turn/completed", params).unwrap();
+        assert_eq!(tid, "");
+    }
+
+    #[test]
+    fn command_execution_tool_started() {
+        let params = serde_json::json!({
+            "threadId": "t9",
+            "item": {
+                "type": "command_execution",
+                "id": "exec-1",
+                "command": "git status",
+                "input": {"cwd": "/tmp"}
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { name, .. } if name == "git status"));
+    }
+
+    #[test]
+    fn error_without_message_uses_default() {
+        let params = serde_json::json!({"threadId": "t10"});
+        let (_, event) = parse("error", params).unwrap();
+        assert!(matches!(event, CodexEvent::Error { message } if message == "unknown error"));
+    }
+}
