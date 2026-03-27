@@ -191,7 +191,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         &self,
         req: NewSessionRequest,
     ) -> agent_client_protocol::Result<NewSessionResponse> {
-        let cwd = req.cwd.clone();
+        let cwd = req.cwd.to_string_lossy().into_owned();
 
         let proc = self.process().await?;
         let thread_id = {
@@ -199,7 +199,7 @@ impl agent_client_protocol::Agent for CodexAgent {
             guard
                 .as_ref()
                 .unwrap()
-                .thread_start(&cwd.to_string_lossy())
+                .thread_start(&cwd)
                 .await
                 .map_err(|e| internal_error(e.to_string()))?
         };
@@ -207,11 +207,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         let session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
             session_id.clone(),
-            CodexSession {
-                thread_id,
-                cwd: cwd.to_string_lossy().into_owned(),
-                model: None,
-            },
+            CodexSession { thread_id, cwd, model: None },
         );
 
         info!(session_id, "codex: new session");
@@ -254,12 +250,11 @@ impl agent_client_protocol::Agent for CodexAgent {
         let proc = self.process().await?;
         {
             let guard = proc.lock().await;
-            guard
-                .as_ref()
-                .unwrap()
-                .thread_resume(&thread_id)
-                .await
-                .map_err(|e| internal_error(e.to_string()))?;
+            // thread/resume is a best-effort hint to Codex; the thread stays alive
+            // in the subprocess regardless, so a failure here is non-fatal.
+            if let Err(e) = guard.as_ref().unwrap().thread_resume(&thread_id).await {
+                warn!(session_id, error = %e, "codex: thread_resume failed (non-fatal)");
+            }
         }
 
         Ok(ResumeSessionResponse::new())
@@ -312,6 +307,8 @@ impl agent_client_protocol::Agent for CodexAgent {
     ) -> agent_client_protocol::Result<CloseSessionResponse> {
         let session_id = req.session_id.to_string();
         self.sessions.lock().await.remove(&session_id);
+        // Codex app-server has no thread/close method — the subprocess retains
+        // thread state in memory until it exits or is re-spawned.
         info!(session_id, "codex: session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -321,10 +318,11 @@ impl agent_client_protocol::Agent for CodexAgent {
         _req: ListSessionsRequest,
     ) -> agent_client_protocol::Result<ListSessionsResponse> {
         let sessions = self.sessions.lock().await;
-        let list = sessions
+        let mut list: Vec<_> = sessions
             .iter()
             .map(|(id, s)| SessionInfo::new(id.clone(), s.cwd.clone()))
             .collect();
+        list.sort_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
         Ok(ListSessionsResponse::new(list))
     }
 
