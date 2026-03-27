@@ -91,6 +91,7 @@ impl CodexAgent {
                     })
                     .collect()
             })
+            .filter(|v: &Vec<ModelInfo>| !v.is_empty())
             .unwrap_or_else(|| {
                 vec![
                     ModelInfo::new("o4-mini", "o4-mini"),
@@ -498,11 +499,12 @@ impl agent_client_protocol::Agent for CodexAgent {
             sessions.get(&session_id).map(|s| s.thread_id.clone())
         };
 
-        if let Some(thread_id) = thread_id
-            && let Ok(proc) = self.process().await
-        {
-            let guard = proc.lock().await;
+        // Only interrupt if the process is already alive — do not spawn a new
+        // one just to cancel a turn that can't exist in a dead process.
+        if let Some(thread_id) = thread_id {
+            let guard = self.process.lock().await;
             if let Some(p) = guard.as_ref()
+                && p.is_alive()
                 && let Err(e) = p.turn_interrupt(&thread_id).await
             {
                 warn!(session_id, error = %e, "codex: turn_interrupt failed");
