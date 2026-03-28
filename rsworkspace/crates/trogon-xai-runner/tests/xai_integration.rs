@@ -1549,3 +1549,87 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
     assert!(src_history.iter().all(|m| m.content != "fork-only"));
     assert!(fork_history.iter().all(|m| m.content != "parent-only"));
 }
+
+// ── edge-case tests ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn xai_prompt_timeout_secs_invalid_falls_back_to_default() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::remove_var("XAI_MODELS");
+        std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "not-a-number");
+    }
+    let agent =
+        XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+    assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
+}
+
+#[tokio::test]
+async fn authenticate_non_string_key_in_meta_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_no_key(None).await;
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("XAI_API_KEY".to_string(), serde_json::json!(12345_u64));
+
+    let err = agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("XAI_API_KEY"),
+        "expected error mentioning XAI_API_KEY, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn set_session_mode_unknown_mode_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let err = agent
+        .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(
+            session_id,
+            "nonexistent-mode",
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unknown mode"),
+        "expected 'unknown mode' error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::remove_var("XAI_MODELS");
+        std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0");
+    }
+    let agent =
+        XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+    assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
+}
+
+#[tokio::test]
+async fn xai_models_all_malformed_falls_back_to_defaults() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_with_models("nocolon,alsomalformed").await;
+    // When all entries are malformed the default models are used.
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3"))
+        .await
+        .unwrap();
+    agent
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
+        .await
+        .unwrap();
+}
