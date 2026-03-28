@@ -21,6 +21,9 @@ use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
+#[cfg(not(coverage))]
+#[allow(unused_imports)]
+use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher};
 use trogon_std::time::GetElapsed;
 
 use super::{
@@ -31,8 +34,10 @@ use super::{
 
 use crate::constants::SESSION_READY_DELAY;
 
-pub struct Bridge<N, C: GetElapsed> {
+pub struct Bridge<N, C: GetElapsed, J = ()> {
     pub(crate) nats: N,
+    #[allow(dead_code)] // Used in prompt.rs JetStream path
+    pub(crate) js: Option<J>,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
@@ -51,6 +56,30 @@ impl<N, C: GetElapsed> Bridge<N, C> {
     ) -> Self {
         Self {
             nats,
+            js: None,
+            clock,
+            config,
+            metrics: Metrics::new(meter),
+            notification_sender,
+            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
+            background_tasks: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl<N, C: GetElapsed, J> Bridge<N, C, J> {
+    #[cfg(not(coverage))]
+    pub fn with_jetstream(
+        nats: N,
+        js: J,
+        clock: C,
+        meter: &Meter,
+        config: Config,
+        notification_sender: mpsc::Sender<SessionNotification>,
+    ) -> Self {
+        Self {
+            nats,
+            js: Some(js),
             clock,
             config,
             metrics: Metrics::new(meter),
@@ -62,6 +91,12 @@ impl<N, C: GetElapsed> Bridge<N, C> {
 
     pub(crate) fn nats(&self) -> &N {
         &self.nats
+    }
+
+    #[cfg(not(coverage))]
+    #[allow(dead_code)]
+    pub(crate) fn js(&self) -> Option<&J> {
+        self.js.as_ref()
     }
 
     pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
@@ -76,7 +111,7 @@ impl<N, C: GetElapsed> Bridge<N, C> {
     }
 }
 
-impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed> Bridge<N, C> {
+impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> Bridge<N, C, J> {
     pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
         let nats = self.nats.clone();
         let prefix = self.config.acp_prefix().to_string();
@@ -119,8 +154,8 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed> Agent
-    for Bridge<N, C>
+impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed, J> Agent
+    for Bridge<N, C, J>
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
