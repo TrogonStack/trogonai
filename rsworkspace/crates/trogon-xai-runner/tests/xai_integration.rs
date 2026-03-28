@@ -11,9 +11,10 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    Agent, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SetSessionModelRequest, StopReason, TextContent,
+    Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
+    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionModelRequest, StopReason,
+    TextContent,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -92,6 +93,21 @@ async fn make_agent_with_models(models_env: &str) -> XaiAgent {
         std::env::set_var("XAI_MODELS", models_env);
     }
     XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+}
+
+/// Like `make_agent` but passes an empty api_key (no server-wide key).
+/// Users must authenticate with their own key before sessions can prompt.
+/// Caller must hold `env_lock()`.
+async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
+    }
+    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "")
 }
 
 /// Like `make_agent` but sets `XAI_PROMPT_TIMEOUT_SECS`. Caller must hold `env_lock()`.
@@ -961,4 +977,196 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
     assert_eq!(hist_b.len(), 2);
     assert_eq!(hist_b[0].content, "question-b");
     assert_eq!(hist_b[1].content, "session-reply");
+}
+
+// ── authenticate ──────────────────────────────────────────────────────────────
+
+/// Build a meta map with a single XAI_API_KEY entry (test helper).
+fn api_key_meta(key: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("XAI_API_KEY".to_string(), serde_json::json!(key));
+    m
+}
+
+#[tokio::test]
+async fn initialize_always_advertises_xai_api_key_method() {
+    let _guard = env_lock().lock().unwrap();
+    // Agent with server key — should still expose the per-user method.
+    let agent = make_agent(None).await;
+    let resp = agent.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
+    assert!(
+        resp.auth_methods.iter().any(|m| m.id().to_string() == "xai-api-key"),
+        "expected 'xai-api-key' in auth_methods",
+    );
+}
+
+#[tokio::test]
+async fn initialize_advertises_agent_method_only_when_server_key_configured() {
+    let _guard = env_lock().lock().unwrap();
+
+    // With server key: both methods present.
+    let with_key = make_agent(None).await;
+    let resp = with_key.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
+    assert!(
+        resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
+        "expected 'agent' method when server key is set",
+    );
+
+    // Without server key: only 'xai-api-key' present.
+    let no_key = make_agent_no_key(None).await;
+    let resp = no_key.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
+    assert!(
+        !resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
+        "should not advertise 'agent' method without server key",
+    );
+}
+
+#[tokio::test]
+async fn authenticate_with_user_key_enables_prompt() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse(&["response"]).await;
+    let agent = make_agent_no_key(Some(&url)).await;
+
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-test-key")))
+        .await
+        .unwrap();
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn authenticate_agent_method_uses_server_key() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse(&["response"]).await;
+    let agent = make_agent(Some(&url)).await; // has "fake-key" as server key
+
+    agent
+        .authenticate(AuthenticateRequest::new("agent"))
+        .await
+        .unwrap();
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn authenticate_missing_key_in_meta_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_no_key(None).await;
+
+    // No meta at all.
+    let err = agent
+        .authenticate(AuthenticateRequest::new("xai-api-key"))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
+
+    // Meta present but wrong key name.
+    let mut bad_meta = serde_json::Map::new();
+    bad_meta.insert("WRONG_KEY".to_string(), serde_json::json!("value"));
+    let err = agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(bad_meta))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
+}
+
+#[tokio::test]
+async fn authenticate_agent_method_without_server_key_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_no_key(None).await;
+
+    let err = agent
+        .authenticate(AuthenticateRequest::new("agent"))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("no server API key configured"),
+        "got: {}",
+        err.message,
+    );
+}
+
+#[tokio::test]
+async fn authenticate_unknown_method_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let err = agent
+        .authenticate(AuthenticateRequest::new("oauth2-mystery"))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("unknown method"), "got: {}", err.message);
+}
+
+#[tokio::test]
+async fn prompt_fails_with_clear_error_when_session_has_no_api_key() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_no_key(None).await;
+
+    // Create session without authenticating.
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let err = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("no API key"),
+        "expected 'no API key' in error, got: {}",
+        err.message,
+    );
+}
+
+#[tokio::test]
+async fn forked_session_inherits_api_key_from_parent() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
+    let agent = make_agent_no_key(Some(&url)).await;
+
+    // Authenticate and create parent.
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-key")))
+        .await
+        .unwrap();
+    let parent = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let parent_id = parent.session_id.to_string();
+
+    // Fork — no re-authentication needed; child inherits the parent's key.
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/tmp/fork"))
+        .await
+        .unwrap();
+    let fork_id = fork.session_id.to_string();
+
+    let (r_parent, r_fork) = tokio::join!(
+        agent.prompt(PromptRequest::new(
+            parent_id,
+            vec![ContentBlock::Text(TextContent::new("from parent"))],
+        )),
+        agent.prompt(PromptRequest::new(
+            fork_id,
+            vec![ContentBlock::Text(TextContent::new("from fork"))],
+        )),
+    );
+    assert_eq!(r_parent.unwrap().stop_reason, StopReason::EndTurn);
+    assert_eq!(r_fork.unwrap().stop_reason, StopReason::EndTurn);
 }
