@@ -82,7 +82,7 @@ async fn make_agent(base_url: Option<&str>) -> XaiAgent {
             None => std::env::remove_var("XAI_BASE_URL"),
         }
     }
-    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
 }
 
 /// Like `make_agent` but also sets `XAI_MODELS`. Caller must hold `env_lock()`.
@@ -92,7 +92,7 @@ async fn make_agent_with_models(models_env: &str) -> XaiAgent {
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::set_var("XAI_MODELS", models_env);
     }
-    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
 }
 
 /// Like `make_agent` but passes an empty api_key (no server-wide key).
@@ -107,7 +107,7 @@ async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
             None => std::env::remove_var("XAI_BASE_URL"),
         }
     }
-    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "")
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "")
 }
 
 /// Like `make_agent` but sets `XAI_PROMPT_TIMEOUT_SECS`. Caller must hold `env_lock()`.
@@ -120,7 +120,7 @@ async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> X
             None => std::env::remove_var("XAI_BASE_URL"),
         }
     }
-    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
 }
 
 // ── fake HTTP servers ─────────────────────────────────────────────────────────
@@ -1561,7 +1561,7 @@ async fn xai_prompt_timeout_secs_invalid_falls_back_to_default() {
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "not-a-number");
     }
     let agent =
-        XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+        XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
     assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
 }
 
@@ -1612,7 +1612,7 @@ async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0");
     }
     let agent =
-        XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+        XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
     assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
 }
 

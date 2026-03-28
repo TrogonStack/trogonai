@@ -23,7 +23,7 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_resume",
     "unstable_session_usage",
 ] }
-async-nats      = { workspace = true }
+async-nats      = { workspace = true, features = ["jetstream", "kv"] }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }
 futures-util    = { workspace = true }
