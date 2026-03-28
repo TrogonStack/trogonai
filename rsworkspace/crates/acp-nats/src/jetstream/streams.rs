@@ -13,7 +13,6 @@ pub fn commands_config(prefix: &str) -> Config {
     Config {
         name: stream_name(prefix, "COMMANDS"),
         subjects: vec![
-            format!("{prefix}.agent.>"),
             format!("{prefix}.session.*.agent.prompt"),
             format!("{prefix}.session.*.agent.cancel"),
             format!("{prefix}.session.*.agent.load"),
@@ -23,7 +22,6 @@ pub fn commands_config(prefix: &str) -> Config {
             format!("{prefix}.session.*.agent.fork"),
             format!("{prefix}.session.*.agent.resume"),
             format!("{prefix}.session.*.agent.close"),
-            format!("{prefix}.session.*.agent.ext.>"),
         ],
         storage: StorageType::File,
         retention: RetentionPolicy::Limits,
@@ -101,9 +99,9 @@ mod tests {
     }
 
     #[test]
-    fn commands_subjects_include_global_and_session() {
+    fn commands_subjects_are_session_scoped_only() {
         let config = commands_config("acp");
-        assert!(config.subjects.contains(&"acp.agent.>".to_string()));
+        assert!(!config.subjects.contains(&"acp.agent.>".to_string()));
         assert!(
             config
                 .subjects
@@ -117,8 +115,14 @@ mod tests {
         assert!(
             config
                 .subjects
-                .contains(&"acp.session.*.agent.ext.>".to_string())
+                .contains(&"acp.session.*.agent.close".to_string())
         );
+    }
+
+    #[test]
+    fn commands_excludes_ext_subjects() {
+        let config = commands_config("acp");
+        assert!(!config.subjects.iter().any(|s| s.contains("ext")));
     }
 
     #[test]
