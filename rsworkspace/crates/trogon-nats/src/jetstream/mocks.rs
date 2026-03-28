@@ -1,0 +1,527 @@
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use async_nats::HeaderMap;
+use async_nats::jetstream::consumer::pull;
+use async_nats::jetstream::publish::PublishAck;
+use async_nats::jetstream::stream;
+use bytes::Bytes;
+use futures::channel::mpsc;
+use futures::stream::BoxStream;
+
+use super::message::{JsMessage, JsSignal};
+use super::traits::{
+    JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher,
+};
+use crate::mocks::MockError;
+
+// --- MockJsMessage ---
+
+pub struct MockJsMessage {
+    pub message: async_nats::Message,
+    signals: Arc<Mutex<Vec<JsSignal>>>,
+}
+
+impl MockJsMessage {
+    pub fn new(message: async_nats::Message) -> Self {
+        Self {
+            message,
+            signals: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn signals(&self) -> Vec<JsSignal> {
+        self.signals.lock().unwrap().clone()
+    }
+
+    fn record(&self, signal: JsSignal) {
+        self.signals.lock().unwrap().push(signal);
+    }
+
+    pub fn ack(&self) {
+        self.record(JsSignal::Ack);
+    }
+
+    pub fn double_ack(&self) {
+        self.record(JsSignal::DoubleAck);
+    }
+
+    pub fn nak(&self) {
+        self.record(JsSignal::Nak);
+    }
+
+    pub fn nak_with_delay(&self, delay: Duration) {
+        self.record(JsSignal::NakWithDelay(delay));
+    }
+
+    pub fn term(&self) {
+        self.record(JsSignal::Term);
+    }
+
+    pub fn in_progress(&self) {
+        self.record(JsSignal::Progress);
+    }
+}
+
+// --- MockJetStreamContext ---
+
+#[derive(Clone, Debug)]
+pub struct MockJetStreamContext {
+    created_streams: Arc<Mutex<Vec<stream::Config>>>,
+    should_fail: Arc<Mutex<bool>>,
+}
+
+impl MockJetStreamContext {
+    pub fn new() -> Self {
+        Self {
+            created_streams: Arc::new(Mutex::new(Vec::new())),
+            should_fail: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    pub fn created_streams(&self) -> Vec<stream::Config> {
+        self.created_streams.lock().unwrap().clone()
+    }
+
+    pub fn fail_next(&self) {
+        *self.should_fail.lock().unwrap() = true;
+    }
+}
+
+impl Default for MockJetStreamContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamContext for MockJetStreamContext {
+    type Error = MockError;
+
+    async fn get_or_create_stream(&self, config: stream::Config) -> Result<(), MockError> {
+        let should_fail = {
+            let mut flag = self.should_fail.lock().unwrap();
+            if *flag {
+                *flag = false;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated stream creation failure".to_string()));
+        }
+        self.created_streams.lock().unwrap().push(config);
+        Ok(())
+    }
+}
+
+// --- MockJetStreamPublisher ---
+
+#[derive(Clone, Debug)]
+pub struct MockPublishedJsMessage {
+    pub subject: String,
+    pub headers: HeaderMap,
+    pub payload: Bytes,
+}
+
+#[derive(Clone, Debug)]
+pub struct MockJetStreamPublisher {
+    published: Arc<Mutex<Vec<MockPublishedJsMessage>>>,
+    publish_fail_count: Arc<Mutex<u32>>,
+    next_sequence: Arc<Mutex<u64>>,
+}
+
+impl MockJetStreamPublisher {
+    pub fn new() -> Self {
+        Self {
+            published: Arc::new(Mutex::new(Vec::new())),
+            publish_fail_count: Arc::new(Mutex::new(0)),
+            next_sequence: Arc::new(Mutex::new(1)),
+        }
+    }
+
+    pub fn fail_next_js_publish(&self) {
+        *self.publish_fail_count.lock().unwrap() = 1;
+    }
+
+    pub fn fail_js_publish_count(&self, n: u32) {
+        *self.publish_fail_count.lock().unwrap() = n;
+    }
+
+    pub fn published_subjects(&self) -> Vec<String> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.subject.clone())
+            .collect()
+    }
+
+    pub fn published_payloads(&self) -> Vec<Bytes> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.payload.clone())
+            .collect()
+    }
+}
+
+impl Default for MockJetStreamPublisher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamPublisher for MockJetStreamPublisher {
+    type PublishError = MockError;
+
+    async fn js_publish_with_headers(
+        &self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<PublishAck, MockError> {
+        let should_fail = {
+            let mut count = self.publish_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated js publish failure".to_string()));
+        }
+
+        self.published.lock().unwrap().push(MockPublishedJsMessage {
+            subject,
+            headers,
+            payload,
+        });
+
+        let seq = {
+            let mut seq = self.next_sequence.lock().unwrap();
+            let current = *seq;
+            *seq += 1;
+            current
+        };
+
+        Ok(PublishAck {
+            stream: "mock-stream".to_string(),
+            sequence: seq,
+            domain: String::new(),
+            duplicate: false,
+            value: None,
+        })
+    }
+}
+
+// --- MockJetStreamConsumer ---
+
+pub struct MockJetStreamConsumerFactory {
+    consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
+}
+
+impl Clone for MockJetStreamConsumerFactory {
+    fn clone(&self) -> Self {
+        Self {
+            consumers: self.consumers.clone(),
+        }
+    }
+}
+
+impl MockJetStreamConsumerFactory {
+    pub fn new() -> Self {
+        Self {
+            consumers: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
+    pub fn add_consumer(&self, consumer: MockJetStreamConsumer) {
+        self.consumers.lock().unwrap().push_back(consumer);
+    }
+}
+
+impl Default for MockJetStreamConsumerFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamConsumerFactory for MockJetStreamConsumerFactory {
+    type Error = MockError;
+    type Consumer = MockJetStreamConsumer;
+
+    async fn create_consumer(
+        &self,
+        _stream_name: &str,
+        _config: pull::Config,
+    ) -> Result<MockJetStreamConsumer, MockError> {
+        self.consumers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| MockError("no mock consumer available".to_string()))
+    }
+}
+
+pub struct MockJetStreamConsumer {
+    rx: Mutex<Option<mpsc::UnboundedReceiver<MockJsMessage>>>,
+}
+
+impl MockJetStreamConsumer {
+    pub fn new() -> (Self, mpsc::UnboundedSender<MockJsMessage>) {
+        let (tx, rx) = mpsc::unbounded();
+        (
+            Self {
+                rx: Mutex::new(Some(rx)),
+            },
+            tx,
+        )
+    }
+}
+
+impl JetStreamConsumer for MockJetStreamConsumer {
+    type Error = MockError;
+    type Messages = BoxStream<'static, Result<JsMessage, MockError>>;
+
+    async fn messages(&self) -> Result<Self::Messages, MockError> {
+        // MockJsMessage cannot be converted to JsMessage without a real jetstream::Message.
+        // Tests that need signal assertions should use raw_messages() instead.
+        Err(MockError(
+            "MockJetStreamConsumer.messages() not supported; use raw_messages() instead"
+                .to_string(),
+        ))
+    }
+}
+
+impl MockJetStreamConsumer {
+    pub fn raw_messages(
+        self,
+    ) -> Result<impl futures::Stream<Item = MockJsMessage> + Unpin + Send + 'static, MockError>
+    {
+        let rx = self
+            .rx
+            .into_inner()
+            .unwrap()
+            .ok_or_else(|| MockError("raw_messages() already called".to_string()))?;
+        Ok(rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+
+    fn make_nats_msg(subject: &str, payload: &[u8]) -> async_nats::Message {
+        async_nats::Message {
+            subject: subject.into(),
+            reply: None,
+            payload: Bytes::from(payload.to_vec()),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload.len(),
+        }
+    }
+
+    #[test]
+    fn mock_js_message_records_signals() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b"payload"));
+        msg.ack();
+        msg.in_progress();
+        msg.term();
+        assert_eq!(
+            msg.signals(),
+            vec![JsSignal::Ack, JsSignal::Progress, JsSignal::Term]
+        );
+    }
+
+    #[test]
+    fn mock_js_message_records_nak_with_delay() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b""));
+        msg.nak_with_delay(Duration::from_secs(5));
+        assert_eq!(
+            msg.signals(),
+            vec![JsSignal::NakWithDelay(Duration::from_secs(5))]
+        );
+    }
+
+    #[test]
+    fn mock_js_message_records_double_ack() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b""));
+        msg.double_ack();
+        assert_eq!(msg.signals(), vec![JsSignal::DoubleAck]);
+    }
+
+    #[tokio::test]
+    async fn mock_context_records_stream_creation() {
+        let ctx = MockJetStreamContext::new();
+        let config = stream::Config {
+            name: "TEST_STREAM".to_string(),
+            subjects: vec!["test.>".to_string()],
+            ..Default::default()
+        };
+        ctx.get_or_create_stream(config).await.unwrap();
+        assert_eq!(ctx.created_streams().len(), 1);
+        assert_eq!(ctx.created_streams()[0].name, "TEST_STREAM");
+    }
+
+    #[tokio::test]
+    async fn mock_context_fails_when_configured() {
+        let ctx = MockJetStreamContext::new();
+        ctx.fail_next();
+        let result = ctx.get_or_create_stream(stream::Config::default()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_publisher_records_publishes() {
+        let pub_mock = MockJetStreamPublisher::new();
+        let ack = pub_mock
+            .js_publish_with_headers(
+                "test.subject".to_string(),
+                HeaderMap::new(),
+                Bytes::from("hello"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ack.sequence, 1);
+        assert_eq!(pub_mock.published_subjects(), vec!["test.subject"]);
+        assert_eq!(pub_mock.published_payloads(), vec![Bytes::from("hello")]);
+    }
+
+    #[tokio::test]
+    async fn mock_publisher_increments_sequence() {
+        let pub_mock = MockJetStreamPublisher::new();
+        let ack1 = pub_mock
+            .js_publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
+            .await
+            .unwrap();
+        let ack2 = pub_mock
+            .js_publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+            .await
+            .unwrap();
+        assert_eq!(ack1.sequence, 1);
+        assert_eq!(ack2.sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn mock_publisher_fails_when_configured() {
+        let pub_mock = MockJetStreamPublisher::new();
+        pub_mock.fail_next_js_publish();
+        let result = pub_mock
+            .js_publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
+            .await;
+        assert!(result.is_err());
+
+        let result = pub_mock
+            .js_publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_factory_returns_consumers_in_order() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let (consumer1, _tx1) = MockJetStreamConsumer::new();
+        let (consumer2, _tx2) = MockJetStreamConsumer::new();
+        factory.add_consumer(consumer1);
+        factory.add_consumer(consumer2);
+
+        let _c1 =
+            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
+                .await
+                .unwrap();
+        let _c2 =
+            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
+                .await
+                .unwrap();
+
+        let result =
+            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
+                .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_raw_messages_streams() {
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        let msg = MockJsMessage::new(make_nats_msg("test.subject", b"data"));
+        tx.unbounded_send(msg).unwrap();
+        drop(tx);
+
+        let mut stream = consumer.raw_messages().unwrap();
+        let received = stream.next().await.unwrap();
+        assert_eq!(received.message.subject.as_str(), "test.subject");
+        assert_eq!(received.message.payload.as_ref(), b"data");
+    }
+
+    #[test]
+    fn mock_context_default() {
+        let ctx = MockJetStreamContext::default();
+        assert!(ctx.created_streams().is_empty());
+    }
+
+    #[test]
+    fn mock_publisher_default() {
+        let pub_mock = MockJetStreamPublisher::default();
+        assert!(pub_mock.published_subjects().is_empty());
+    }
+
+    #[test]
+    fn mock_consumer_factory_default() {
+        let _factory = MockJetStreamConsumerFactory::default();
+    }
+
+    #[test]
+    fn mock_js_message_records_nak() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b""));
+        msg.nak();
+        assert_eq!(msg.signals(), vec![JsSignal::Nak]);
+    }
+
+    #[tokio::test]
+    async fn mock_publisher_fail_js_publish_count() {
+        let pub_mock = MockJetStreamPublisher::new();
+        pub_mock.fail_js_publish_count(2);
+        assert!(
+            pub_mock
+                .js_publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
+                .await
+                .is_err()
+        );
+        assert!(
+            pub_mock
+                .js_publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+                .await
+                .is_err()
+        );
+        assert!(
+            pub_mock
+                .js_publish_with_headers("c".to_string(), HeaderMap::new(), Bytes::new())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn mock_consumer_factory_clone() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let (consumer, _tx) = MockJetStreamConsumer::new();
+        factory.add_consumer(consumer);
+        let cloned = factory.clone();
+        assert!(cloned.consumers.lock().unwrap().len() == 1);
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_messages_returns_error() {
+        let (consumer, _tx) = MockJetStreamConsumer::new();
+        let result = JetStreamConsumer::messages(&consumer).await;
+        assert!(result.is_err());
+    }
+}

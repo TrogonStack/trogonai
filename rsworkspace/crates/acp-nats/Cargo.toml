@@ -19,7 +19,7 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_usage",
 ] }
 opentelemetry = { workspace = true }
-async-nats = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
