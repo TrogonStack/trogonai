@@ -1,0 +1,148 @@
+use async_trait::async_trait;
+use futures_util::StreamExt as _;
+use serde::{Deserialize, Serialize};
+use tracing::warn;
+
+use crate::client::Message;
+
+/// Serializable session state persisted in the session store.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct XaiSessionData {
+    pub cwd: String,
+    pub model: Option<String>,
+    pub history: Vec<Message>,
+    /// xAI API key for this session.
+    pub api_key: Option<String>,
+}
+
+/// Persistent store for session data.
+#[async_trait(?Send)]
+pub trait SessionStore {
+    /// Returns `None` if the session does not exist.
+    async fn get(&self, id: &str) -> Option<XaiSessionData>;
+    /// Creates or replaces the session entry.
+    async fn put(&self, id: &str, data: &XaiSessionData);
+    /// Removes the session entry (no-op if absent).
+    async fn delete(&self, id: &str);
+    /// Returns all `(session_id, cwd)` pairs sorted by session_id.
+    async fn list(&self) -> Vec<(String, String)>;
+}
+
+// ── NATS KV implementation ────────────────────────────────────────────────────
+
+pub struct KvSessionStore {
+    kv: async_nats::jetstream::kv::Store,
+}
+
+impl KvSessionStore {
+    /// Opens or creates the KV bucket with the given name.
+    pub async fn open(
+        js: async_nats::jetstream::Context,
+        bucket: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let bucket = bucket.into();
+        let config = async_nats::jetstream::kv::Config {
+            bucket: bucket.clone(),
+            history: 1,
+            ..Default::default()
+        };
+        let kv = match js.create_key_value(config).await {
+            Ok(store) => store,
+            Err(_) => js.get_key_value(&bucket).await?,
+        };
+        Ok(Self { kv })
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionStore for KvSessionStore {
+    async fn get(&self, id: &str) -> Option<XaiSessionData> {
+        match self.kv.get(id).await {
+            Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
+                Ok(data) => Some(data),
+                Err(e) => {
+                    warn!(error = %e, id, "xai: failed to deserialize session");
+                    None
+                }
+            },
+            Ok(None) => None,
+            Err(e) => {
+                warn!(error = %e, id, "xai: KV get error");
+                None
+            }
+        }
+    }
+
+    async fn put(&self, id: &str, data: &XaiSessionData) {
+        match serde_json::to_vec(data) {
+            Ok(bytes) => {
+                if let Err(e) = self.kv.put(id, bytes.into()).await {
+                    warn!(error = %e, id, "xai: KV put error");
+                }
+            }
+            Err(e) => warn!(error = %e, id, "xai: failed to serialize session"),
+        }
+    }
+
+    async fn delete(&self, id: &str) {
+        if let Err(e) = self.kv.delete(id).await {
+            warn!(error = %e, id, "xai: KV delete error");
+        }
+    }
+
+    async fn list(&self) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        match self.kv.keys().await {
+            Ok(mut keys) => {
+                while let Some(item) = keys.next().await {
+                    match item {
+                        Ok(key) => {
+                            if let Some(data) = self.get(&key).await {
+                                result.push((key, data.cwd));
+                            }
+                        }
+                        Err(e) => warn!(error = %e, "xai: KV keys error"),
+                    }
+                }
+            }
+            Err(e) => warn!(error = %e, "xai: failed to list session keys"),
+        }
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
+    }
+}
+
+// ── In-memory implementation (for testing) ───────────────────────────────────
+
+pub struct MemorySessionStore {
+    map: tokio::sync::Mutex<std::collections::HashMap<String, XaiSessionData>>,
+}
+
+impl MemorySessionStore {
+    pub fn new() -> Self {
+        Self { map: tokio::sync::Mutex::new(std::collections::HashMap::new()) }
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionStore for MemorySessionStore {
+    async fn get(&self, id: &str) -> Option<XaiSessionData> {
+        self.map.lock().await.get(id).cloned()
+    }
+
+    async fn put(&self, id: &str, data: &XaiSessionData) {
+        self.map.lock().await.insert(id.to_string(), data.clone());
+    }
+
+    async fn delete(&self, id: &str) {
+        self.map.lock().await.remove(id);
+    }
+
+    async fn list(&self) -> Vec<(String, String)> {
+        let map = self.map.lock().await;
+        let mut result: Vec<_> =
+            map.iter().map(|(k, v)| (k.clone(), v.cwd.clone())).collect();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
+    }
+}
