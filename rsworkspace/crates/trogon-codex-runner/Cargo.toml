@@ -6,6 +6,12 @@ edition = "2024"
 [lints]
 workspace = true
 
+# Test helper: simulates `codex app-server` JSON-RPC protocol.
+# Used via CODEX_BIN env var in integration tests.
+[[bin]]
+name = "mock_codex_server"
+path = "src/bin/mock_codex_server.rs"
+
 [dependencies]
 acp-nats        = { workspace = true }
 acp-nats-agent  = { path = "../acp-nats-agent" }
