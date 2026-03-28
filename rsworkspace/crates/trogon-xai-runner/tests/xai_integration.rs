@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
+    Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
     ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionModelRequest, StopReason,
     TextContent,
@@ -230,6 +230,61 @@ async fn fake_xai_error(status: u16) -> String {
     });
 
     format!("http://127.0.0.1:{port}/v1")
+}
+
+/// Like `fake_xai_sse` but also captures the value of the `Authorization`
+/// header sent by the agent. Returns (base_url, captured_header_value).
+async fn fake_xai_sse_capturing_auth(text_chunks: &[&'static str]) -> (String, Arc<Mutex<Option<String>>>) {
+    let body: String = text_chunks
+        .iter()
+        .map(|t| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"))
+        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+        .collect();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let cap = Arc::clone(&captured);
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() {
+                    break;
+                }
+                let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                if trimmed.is_empty() {
+                    break;
+                }
+                // Preserve original casing of value but compare key case-insensitively.
+                if trimmed.to_lowercase().starts_with("authorization:") {
+                    let colon = trimmed.find(':').unwrap();
+                    *cap.lock().unwrap() = Some(trimmed[colon + 1..].trim().to_string());
+                }
+                if let Some(rest) = trimmed.to_lowercase().strip_prefix("content-length:") {
+                    content_length = rest.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut buf = vec![0u8; content_length];
+                reader.read_exact(&mut buf).await.ok();
+            }
+
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    (format!("http://127.0.0.1:{port}/v1"), captured)
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
@@ -1169,4 +1224,93 @@ async fn forked_session_inherits_api_key_from_parent() {
     );
     assert_eq!(r_parent.unwrap().stop_reason, StopReason::EndTurn);
     assert_eq!(r_fork.unwrap().stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn authenticate_user_key_is_sent_as_bearer_token_to_xai() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, captured_auth) = fake_xai_sse_capturing_auth(&["reply"]).await;
+    let agent = make_agent_no_key(Some(&url)).await;
+
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("my-user-key-123")))
+        .await
+        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let auth = captured_auth.lock().unwrap().clone()
+        .expect("Authorization header was not captured");
+    assert_eq!(auth, "Bearer my-user-key-123");
+}
+
+#[tokio::test]
+async fn pending_api_key_consumed_by_first_new_session() {
+    let _guard = env_lock().lock().unwrap();
+    // Agent with no global key — only the pending key from authenticate.
+    let url = fake_xai_sse(&["reply"]).await;
+    let agent = make_agent_no_key(Some(&url)).await;
+
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-key")))
+        .await
+        .unwrap();
+
+    let sess1 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess2 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+
+    // sess2 was created after the pending key was consumed — no key, no global fallback.
+    let err = agent
+        .prompt(PromptRequest::new(
+            sess2.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("no API key"),
+        "expected 'no API key' for keyless session, got: {}",
+        err.message,
+    );
+
+    // sess1 still has the user key and succeeds (one fake HTTP connection used here).
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess1.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn initialize_env_var_method_advertises_correct_var_name_and_link() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let resp = agent
+        .initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST))
+        .await
+        .unwrap();
+
+    let ev = resp
+        .auth_methods
+        .iter()
+        .find_map(|m| match m {
+            AuthMethod::EnvVar(ev) => Some(ev),
+            _ => None,
+        })
+        .expect("expected an EnvVar auth method in initialize response");
+
+    // Client UIs read `vars` to know which field to prompt for.
+    assert_eq!(ev.vars.len(), 1);
+    assert_eq!(ev.vars[0].name, "XAI_API_KEY");
+    // `link` tells the UI where the user can obtain a key.
+    assert_eq!(ev.link.as_deref(), Some("https://x.ai/api"));
 }
