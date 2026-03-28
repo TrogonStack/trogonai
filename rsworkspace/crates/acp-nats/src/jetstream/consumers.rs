@@ -21,11 +21,11 @@ pub fn prompt_response_consumer(prefix: &str, session_id: &str, req_id: &str) ->
     }
 }
 
-/// Consumer for the COMMANDS stream that receives all commands.
+/// Observer consumer for the COMMANDS stream.
 ///
-/// No filter needed — the COMMANDS stream already contains only command subjects.
-/// The stream-level subject list acts as the filter.
-pub fn runner_commands_consumer() -> Config {
+/// Acks messages for audit persistence. No filter needed — the stream-level
+/// subject list already scopes to session-scoped commands only.
+pub fn commands_observer() -> Config {
     Config {
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
@@ -65,15 +65,15 @@ mod tests {
     }
 
     #[test]
-    fn runner_commands_consumer_delivers_all() {
-        let config = runner_commands_consumer();
+    fn commands_observer_delivers_all() {
+        let config = commands_observer();
         assert_eq!(config.deliver_policy, DeliverPolicy::All);
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
     }
 
     #[test]
-    fn runner_commands_consumer_no_filter() {
-        let config = runner_commands_consumer();
+    fn commands_observer_no_filter() {
+        let config = commands_observer();
         assert_eq!(config.filter_subject, String::new());
     }
 

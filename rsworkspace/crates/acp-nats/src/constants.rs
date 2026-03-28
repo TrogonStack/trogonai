@@ -32,4 +32,3 @@ pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub const SESSION_ID_HEADER: &str = "X-Session-Id";
 pub const CAUSATION_ID_HEADER: &str = "X-Causation-Id";
-pub const ENV_JETSTREAM_ENABLED: &str = "ACP_JETSTREAM_ENABLED";
