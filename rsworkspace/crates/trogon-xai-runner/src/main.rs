@@ -4,7 +4,7 @@ use tracing::{error, info};
 use trogon_xai_runner::XaiAgent;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
     let nats_url =
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats = async_nats::connect(&nats_url).await?;
 
     let acp_prefix = AcpPrefix::new(&prefix)?;
-    let agent = XaiAgent::new(nats.clone(), acp_prefix.clone(), default_model, api_key);
+    let agent = XaiAgent::new(nats.clone(), acp_prefix.clone(), default_model, api_key).await?;
 
     let local = tokio::task::LocalSet::new();
     let result = local
