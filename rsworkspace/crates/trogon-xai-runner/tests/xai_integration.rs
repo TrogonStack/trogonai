@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo test -p trogon-xai-runner --features test-helpers`
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
@@ -72,20 +72,38 @@ async fn fake_nats() -> async_nats::Client {
 ///
 /// Caller must hold `env_lock()`.
 async fn make_agent(base_url: Option<&str>) -> XaiAgent {
-    // Reset to clean defaults so no test leaks state into the next.
-    unsafe { std::env::remove_var("XAI_MODELS") };
-    match base_url {
-        Some(url) => unsafe { std::env::set_var("XAI_BASE_URL", url) },
-        None => unsafe { std::env::remove_var("XAI_BASE_URL") },
+    // Reset ALL env vars to clean defaults so no test leaks state.
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
     }
     XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
 }
 
-/// Like `make_agent` but also sets `XAI_MODELS` before creating the agent.
-/// Caller must hold `env_lock()`.
+/// Like `make_agent` but also sets `XAI_MODELS`. Caller must hold `env_lock()`.
 async fn make_agent_with_models(models_env: &str) -> XaiAgent {
-    unsafe { std::env::remove_var("XAI_BASE_URL") };
-    unsafe { std::env::set_var("XAI_MODELS", models_env) };
+    unsafe {
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::set_var("XAI_MODELS", models_env);
+    }
+    XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+}
+
+/// Like `make_agent` but sets `XAI_PROMPT_TIMEOUT_SECS`. Caller must hold `env_lock()`.
+async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> XaiAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", timeout_secs.to_string());
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
+    }
     XaiAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
 }
 
@@ -660,4 +678,287 @@ async fn xai_models_default_model_auto_added_when_absent_from_list() {
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3"))
         .await
         .expect("auto-added default model must be selectable");
+}
+
+// ── new fake server helpers ───────────────────────────────────────────────────
+
+/// Sends a single SSE data line split across two TCP writes (simulates a
+/// packet boundary inside an SSE line). The assembled content is "Hello".
+/// No Content-Length — streaming response.
+async fn fake_xai_sse_chunked() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+
+            // Headers only — no Content-Length, so reqwest streams bytes as
+            // they arrive rather than waiting for the body to be fully buffered.
+            writer
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+                .await
+                .ok();
+
+            // First write: the SSE line is cut mid-JSON (no trailing newline).
+            writer
+                .write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"Hel")
+                .await
+                .ok();
+            writer.flush().await.ok();
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+
+            // Second write: completes the JSON, adds the line terminator, then DONE.
+            writer.write_all(b"lo\"}}]}\n\ndata: [DONE]\n\n").await.ok();
+            writer.flush().await.ok();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+/// Recording server. Accepts `responses.len()` connections sequentially.
+/// For each connection, reads and parses the request body JSON (stored in
+/// the returned `Arc`), then responds with the Nth list of text chunks.
+async fn fake_xai_sse_recording(
+    responses: Vec<Vec<&'static str>>,
+) -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let bodies_clone = Arc::clone(&bodies);
+
+    tokio::spawn(async move {
+        for chunks in responses {
+            if let Ok((stream, _)) = listener.accept().await {
+                let (reader, mut writer) = stream.into_split();
+                let mut reader = BufReader::new(reader);
+
+                // Read headers and capture Content-Length.
+                let mut content_length: usize = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.is_err() {
+                        break;
+                    }
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some(rest) = trimmed.to_lowercase().strip_prefix("content-length:") {
+                        content_length = rest.trim().parse().unwrap_or(0);
+                    }
+                }
+
+                // Read and parse the body.
+                let body_json = if content_length > 0 {
+                    let mut body = vec![0u8; content_length];
+                    reader.read_exact(&mut body).await.ok();
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null)
+                } else {
+                    serde_json::Value::Null
+                };
+                bodies_clone.lock().unwrap().push(body_json);
+
+                // Respond with SSE chunks.
+                let body: String = chunks
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"
+                        )
+                    })
+                    .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+                    .collect();
+                let http = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body,
+                );
+                writer.write_all(http.as_bytes()).await.ok();
+            }
+        }
+    });
+
+    (format!("http://127.0.0.1:{port}/v1"), bodies)
+}
+
+/// Parallel SSE server: accepts `count` connections, spawning a handler task
+/// per connection so they are served concurrently. All connections receive
+/// the same `text_chunks` response. Returns the base URL.
+async fn fake_xai_sse_multi(count: usize, text_chunks: Vec<&'static str>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let chunks = Arc::new(text_chunks);
+
+    tokio::spawn(async move {
+        for _ in 0..count {
+            if let Ok((stream, _)) = listener.accept().await {
+                let chunks = Arc::clone(&chunks);
+                tokio::spawn(async move {
+                    let (reader, mut writer) = stream.into_split();
+                    let mut reader = BufReader::new(reader);
+                    drain_request(&mut reader).await;
+
+                    let body: String = chunks
+                        .iter()
+                        .map(|t| {
+                            format!(
+                                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"
+                            )
+                        })
+                        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+                        .collect();
+                    let http = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body,
+                    );
+                    writer.write_all(http.as_bytes()).await.ok();
+                });
+            }
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+// ── partial SSE across chunks ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn partial_sse_lines_across_chunks_are_assembled_correctly() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_chunked().await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let content = vec![ContentBlock::Text(TextContent::new("hi"))];
+    let resp = agent
+        .prompt(PromptRequest::new(session_id.clone(), content))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    // The SSE line was split mid-JSON across two TCP writes; the parser must
+    // buffer bytes until a newline and reassemble "Hello" correctly.
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content, "Hello");
+}
+
+// ── prompt timeout ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_times_out_when_server_stops_responding() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_slow("partial").await;
+    // 1-second timeout — well below the server's 30-second hold.
+    let agent = make_agent_with_timeout(Some(&url), 1).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let content = vec![ContentBlock::Text(TextContent::new("hello"))];
+    let start = std::time::Instant::now();
+    let resp = agent
+        .prompt(PromptRequest::new(session_id.clone(), content))
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    // Should finish in roughly 1 second — not 30.
+    assert!(elapsed < Duration::from_secs(5), "timed out too late: {elapsed:?}");
+    assert!(elapsed >= Duration::from_millis(900), "timed out too early: {elapsed:?}");
+
+    // The partial text ("partial") was received before the timeout, so history
+    // must be updated.
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].content, "partial");
+}
+
+// ── history as context ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_includes_history_as_context_on_subsequent_turns() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![
+        vec!["First reply"],
+        vec!["Second reply"],
+    ])
+    .await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    // Turn 1.
+    let c1 = vec![ContentBlock::Text(TextContent::new("first question"))];
+    agent.prompt(PromptRequest::new(session_id.clone(), c1)).await.unwrap();
+
+    // Turn 2.
+    let c2 = vec![ContentBlock::Text(TextContent::new("second question"))];
+    agent.prompt(PromptRequest::new(session_id.clone(), c2)).await.unwrap();
+
+    // Inspect what the agent sent on turn 2: it must include the full history.
+    let captured = bodies.lock().unwrap();
+    assert_eq!(captured.len(), 2, "expected two recorded requests");
+    let msgs = captured[1]["messages"]
+        .as_array()
+        .expect("turn-2 body must have a 'messages' array");
+
+    // user(turn1) + assistant(turn1) + user(turn2) = 3 messages.
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(msgs[0]["content"], "first question");
+    assert_eq!(msgs[1]["role"], "assistant");
+    assert_eq!(msgs[1]["content"], "First reply");
+    assert_eq!(msgs[2]["role"], "user");
+    assert_eq!(msgs[2]["content"], "second question");
+}
+
+// ── concurrent session isolation ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn concurrent_sessions_do_not_cross_contaminate() {
+    let _guard = env_lock().lock().unwrap();
+    // Two connections needed — one per concurrent prompt.
+    let url = fake_xai_sse_multi(2, vec!["session-reply"]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess_a = agent.new_session(NewSessionRequest::new("/tmp/a")).await.unwrap();
+    let sess_b = agent.new_session(NewSessionRequest::new("/tmp/b")).await.unwrap();
+    let id_a = sess_a.session_id.to_string();
+    let id_b = sess_b.session_id.to_string();
+
+    let c_a = vec![ContentBlock::Text(TextContent::new("question-a"))];
+    let c_b = vec![ContentBlock::Text(TextContent::new("question-b"))];
+
+    // XaiAgent is !Send, so use tokio::join! (runs on one thread) instead of
+    // tokio::spawn (which requires Send).
+    let (r_a, r_b) = tokio::join!(
+        agent.prompt(PromptRequest::new(id_a.clone(), c_a)),
+        agent.prompt(PromptRequest::new(id_b.clone(), c_b)),
+    );
+    assert_eq!(r_a.unwrap().stop_reason, StopReason::EndTurn);
+    assert_eq!(r_b.unwrap().stop_reason, StopReason::EndTurn);
+
+    // Each session must hold only its own exchange — no cross-contamination.
+    let hist_a = agent.test_session_history(&id_a).await;
+    let hist_b = agent.test_session_history(&id_b).await;
+
+    assert_eq!(hist_a.len(), 2);
+    assert_eq!(hist_a[0].content, "question-a");
+    assert_eq!(hist_a[1].content, "session-reply");
+
+    assert_eq!(hist_b.len(), 2);
+    assert_eq!(hist_b[0].content, "question-b");
+    assert_eq!(hist_b[1].content, "session-reply");
 }
