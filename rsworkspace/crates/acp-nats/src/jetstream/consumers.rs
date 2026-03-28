@@ -21,6 +21,16 @@ pub fn prompt_response_consumer(prefix: &str, session_id: &str, req_id: &str) ->
     }
 }
 
+pub fn response_consumer(prefix: &str, session_id: &str, req_id: &str) -> Config {
+    Config {
+        filter_subject: format!("{prefix}.session.{session_id}.agent.response.{req_id}"),
+        deliver_policy: DeliverPolicy::All,
+        ack_policy: AckPolicy::Explicit,
+        replay_policy: ReplayPolicy::Instant,
+        ..Default::default()
+    }
+}
+
 /// Observer consumer for the COMMANDS stream.
 ///
 /// Acks messages for audit persistence. No filter needed — the stream-level
@@ -75,6 +85,29 @@ mod tests {
     fn commands_observer_no_filter() {
         let config = commands_observer();
         assert_eq!(config.filter_subject, String::new());
+    }
+
+    #[test]
+    fn response_consumer_filter() {
+        let config = response_consumer("acp", "sess-1", "req-abc");
+        assert_eq!(
+            config.filter_subject,
+            "acp.session.sess-1.agent.response.req-abc"
+        );
+    }
+
+    #[test]
+    fn response_consumer_delivers_all() {
+        let config = response_consumer("acp", "s1", "r1");
+        assert_eq!(config.deliver_policy, DeliverPolicy::All);
+        assert_eq!(config.ack_policy, AckPolicy::Explicit);
+        assert_eq!(config.replay_policy, ReplayPolicy::Instant);
+    }
+
+    #[test]
+    fn response_consumer_custom_prefix() {
+        let config = response_consumer("myapp", "s1", "r1");
+        assert_eq!(config.filter_subject, "myapp.session.s1.agent.response.r1");
     }
 
     #[test]

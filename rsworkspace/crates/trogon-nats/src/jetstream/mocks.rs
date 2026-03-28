@@ -19,14 +19,20 @@ use crate::mocks::MockError;
 // --- MockJsMessage ---
 
 pub struct MockJsMessage {
-    pub message: async_nats::Message,
+    payload: Bytes,
+    subject: String,
+    headers: Option<HeaderMap>,
+    reply: Option<String>,
     signals: Arc<Mutex<Vec<JsSignal>>>,
 }
 
 impl MockJsMessage {
     pub fn new(message: async_nats::Message) -> Self {
         Self {
-            message,
+            payload: message.payload.clone(),
+            subject: message.subject.to_string(),
+            headers: message.headers.clone(),
+            reply: message.reply.as_ref().map(|s| s.to_string()),
             signals: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -38,29 +44,55 @@ impl MockJsMessage {
     fn record(&self, signal: JsSignal) {
         self.signals.lock().unwrap().push(signal);
     }
+}
 
-    pub fn ack(&self) {
+impl JsMessage for MockJsMessage {
+    type Error = MockError;
+
+    fn payload(&self) -> &Bytes {
+        &self.payload
+    }
+
+    fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    fn headers(&self) -> Option<&HeaderMap> {
+        self.headers.as_ref()
+    }
+
+    fn reply(&self) -> Option<&str> {
+        self.reply.as_deref()
+    }
+
+    async fn ack(&self) -> Result<(), MockError> {
         self.record(JsSignal::Ack);
+        Ok(())
     }
 
-    pub fn double_ack(&self) {
+    async fn double_ack(&self) -> Result<(), MockError> {
         self.record(JsSignal::DoubleAck);
+        Ok(())
     }
 
-    pub fn nak(&self) {
+    async fn nak(&self) -> Result<(), MockError> {
         self.record(JsSignal::Nak);
+        Ok(())
     }
 
-    pub fn nak_with_delay(&self, delay: Duration) {
+    async fn nak_with_delay(&self, delay: Duration) -> Result<(), MockError> {
         self.record(JsSignal::NakWithDelay(delay));
+        Ok(())
     }
 
-    pub fn term(&self) {
+    async fn term(&self) -> Result<(), MockError> {
         self.record(JsSignal::Term);
+        Ok(())
     }
 
-    pub fn in_progress(&self) {
+    async fn in_progress(&self) -> Result<(), MockError> {
         self.record(JsSignal::Progress);
+        Ok(())
     }
 }
 
@@ -282,33 +314,28 @@ impl MockJetStreamConsumer {
             tx,
         )
     }
+
+    pub fn failing() -> Self {
+        Self {
+            rx: Mutex::new(None),
+        }
+    }
 }
 
 impl JetStreamConsumer for MockJetStreamConsumer {
     type Error = MockError;
-    type Messages = BoxStream<'static, Result<JsMessage, MockError>>;
+    type Message = MockJsMessage;
+    type Messages = BoxStream<'static, Result<MockJsMessage, MockError>>;
 
     async fn messages(&self) -> Result<Self::Messages, MockError> {
-        // MockJsMessage cannot be converted to JsMessage without a real jetstream::Message.
-        // Tests that need signal assertions should use raw_messages() instead.
-        Err(MockError(
-            "MockJetStreamConsumer.messages() not supported; use raw_messages() instead"
-                .to_string(),
-        ))
-    }
-}
-
-impl MockJetStreamConsumer {
-    pub fn raw_messages(
-        self,
-    ) -> Result<impl futures::Stream<Item = MockJsMessage> + Unpin + Send + 'static, MockError>
-    {
+        use futures::StreamExt;
         let rx = self
             .rx
-            .into_inner()
+            .lock()
             .unwrap()
-            .ok_or_else(|| MockError("raw_messages() already called".to_string()))?;
-        Ok(rx)
+            .take()
+            .ok_or_else(|| MockError("messages() already called".to_string()))?;
+        Ok(rx.map(Ok).boxed())
     }
 }
 
@@ -329,32 +356,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn mock_js_message_records_signals() {
+    #[tokio::test]
+    async fn mock_js_message_records_signals() {
         let msg = MockJsMessage::new(make_nats_msg("test", b"payload"));
-        msg.ack();
-        msg.in_progress();
-        msg.term();
+        msg.ack().await.unwrap();
+        msg.in_progress().await.unwrap();
+        msg.term().await.unwrap();
         assert_eq!(
             msg.signals(),
             vec![JsSignal::Ack, JsSignal::Progress, JsSignal::Term]
         );
     }
 
-    #[test]
-    fn mock_js_message_records_nak_with_delay() {
+    #[tokio::test]
+    async fn mock_js_message_records_nak_with_delay() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.nak_with_delay(Duration::from_secs(5));
+        msg.nak_with_delay(Duration::from_secs(5)).await.unwrap();
         assert_eq!(
             msg.signals(),
             vec![JsSignal::NakWithDelay(Duration::from_secs(5))]
         );
     }
 
-    #[test]
-    fn mock_js_message_records_double_ack() {
+    #[tokio::test]
+    async fn mock_js_message_records_double_ack() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.double_ack();
+        msg.double_ack().await.unwrap();
         assert_eq!(msg.signals(), vec![JsSignal::DoubleAck]);
     }
 
@@ -449,16 +476,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_consumer_raw_messages_streams() {
+    async fn mock_consumer_messages_streams() {
         let (consumer, tx) = MockJetStreamConsumer::new();
         let msg = MockJsMessage::new(make_nats_msg("test.subject", b"data"));
         tx.unbounded_send(msg).unwrap();
         drop(tx);
 
-        let mut stream = consumer.raw_messages().unwrap();
-        let received = stream.next().await.unwrap();
-        assert_eq!(received.message.subject.as_str(), "test.subject");
-        assert_eq!(received.message.payload.as_ref(), b"data");
+        let mut stream = JetStreamConsumer::messages(&consumer).await.unwrap();
+        let received = stream.next().await.unwrap().unwrap();
+        assert_eq!(received.subject(), "test.subject");
+        assert_eq!(received.payload().as_ref(), b"data");
     }
 
     #[test]
@@ -478,10 +505,10 @@ mod tests {
         let _factory = MockJetStreamConsumerFactory::default();
     }
 
-    #[test]
-    fn mock_js_message_records_nak() {
+    #[tokio::test]
+    async fn mock_js_message_records_nak() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.nak();
+        msg.nak().await.unwrap();
         assert_eq!(msg.signals(), vec![JsSignal::Nak]);
     }
 
@@ -510,6 +537,36 @@ mod tests {
     }
 
     #[test]
+    fn mock_js_message_payload_subject_headers_reply() {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Test", "value");
+        let msg = async_nats::Message {
+            subject: "test.subject".into(),
+            reply: Some("_INBOX.reply".into()),
+            payload: Bytes::from("hello"),
+            headers: Some(headers),
+            status: None,
+            description: None,
+            length: 5,
+        };
+        let mock = MockJsMessage::new(msg);
+
+        assert_eq!(mock.payload().as_ref(), b"hello");
+        assert_eq!(mock.subject(), "test.subject");
+        assert!(mock.headers().is_some());
+        assert_eq!(mock.reply(), Some("_INBOX.reply"));
+    }
+
+    #[test]
+    fn mock_js_message_no_headers_no_reply() {
+        let msg = make_nats_msg("sub", b"data");
+        let mock = MockJsMessage::new(msg);
+
+        assert!(mock.headers().is_none());
+        assert_eq!(mock.reply(), None);
+    }
+
+    #[test]
     fn mock_consumer_factory_clone() {
         let factory = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -519,9 +576,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_consumer_messages_returns_error() {
+    async fn mock_consumer_messages_returns_stream() {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         let result = JetStreamConsumer::messages(&consumer).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_messages_called_twice_returns_error() {
+        let (consumer, _tx) = MockJetStreamConsumer::new();
+        let _first = JetStreamConsumer::messages(&consumer).await.unwrap();
+        let second = JetStreamConsumer::messages(&consumer).await;
+        assert!(second.is_err());
     }
 }

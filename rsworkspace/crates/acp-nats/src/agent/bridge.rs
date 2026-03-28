@@ -21,8 +21,6 @@ use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-#[cfg(not(coverage))]
-#[allow(unused_imports)]
 use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher};
 use trogon_std::time::GetElapsed;
 
@@ -36,7 +34,6 @@ use crate::constants::SESSION_READY_DELAY;
 
 pub struct Bridge<N, C: GetElapsed, J = ()> {
     pub(crate) nats: N,
-    #[allow(dead_code)] // Used in prompt.rs JetStream path
     pub(crate) js: Option<J>,
     pub(crate) clock: C,
     pub(crate) config: Config,
@@ -68,7 +65,6 @@ impl<N, C: GetElapsed> Bridge<N, C> {
 }
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
-    #[cfg(not(coverage))]
     pub fn with_jetstream(
         nats: N,
         js: J,
@@ -93,8 +89,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         &self.nats
     }
 
-    #[cfg(not(coverage))]
-    #[allow(dead_code)]
     pub(crate) fn js(&self) -> Option<&J> {
         self.js.as_ref()
     }
@@ -116,8 +110,9 @@ impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> 
         let nats = self.nats.clone();
         let prefix = self.config.acp_prefix().to_string();
         let metrics = self.metrics.clone();
+        let has_jetstream = self.js.is_some();
         let handle = tokio::spawn(async move {
-            publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
+            publish_session_ready(&nats, &prefix, &session_id, &metrics, has_jetstream).await;
         });
         self.spawn_background(handle);
     }
@@ -128,8 +123,11 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
     prefix: &str,
     session_id: &SessionId,
     metrics: &Metrics,
+    has_jetstream: bool,
 ) {
-    tokio::time::sleep(SESSION_READY_DELAY).await;
+    if !has_jetstream {
+        tokio::time::sleep(SESSION_READY_DELAY).await;
+    }
 
     let subject = session::agent::ext_ready(prefix, &session_id.to_string());
     info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
@@ -154,8 +152,11 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed, J> Agent
-    for Bridge<N, C, J>
+impl<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+> Agent for Bridge<N, C, J>
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
