@@ -96,6 +96,7 @@ impl XaiAgent {
         let prompt_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n > 0)
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(300));
 
@@ -364,8 +365,12 @@ impl agent_client_protocol::Agent for XaiAgent {
 
     async fn set_session_mode(
         &self,
-        _req: SetSessionModeRequest,
+        req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
+        let mode_id = req.mode_id.to_string();
+        if mode_id != "default" {
+            return Err(internal_error(format!("unknown mode: {mode_id}")));
+        }
         Ok(SetSessionModeResponse::new())
     }
 
@@ -534,5 +539,9 @@ impl XaiAgent {
 
     pub async fn test_session_model(&self, id: &str) -> Option<String> {
         self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
+    }
+
+    pub fn test_prompt_timeout(&self) -> Duration {
+        self.prompt_timeout
     }
 }
