@@ -13,8 +13,8 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id, mode_id = %args.mode_id)
 )]
-pub async fn handle<N: RequestClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: RequestClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: SetSessionModeRequest,
 ) -> Result<SetSessionModeResponse> {
     let start = bridge.clock.now();
