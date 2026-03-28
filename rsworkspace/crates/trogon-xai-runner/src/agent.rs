@@ -6,9 +6,10 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
-    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode, ForkSessionRequest,
+    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
@@ -35,6 +36,9 @@ struct XaiSession {
     cwd: String,
     model: Option<String>,
     history: Vec<Message>,
+    /// xAI API key for this session. Either the user's own key (from
+    /// `authenticate`) or the server-configured global key.
+    api_key: Option<String>,
     /// Set by `cancel` to interrupt an in-flight `prompt`.
     cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
@@ -54,16 +58,31 @@ pub struct XaiAgent {
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
+    /// Server-wide fallback key (from `XAI_API_KEY` env var at startup).
+    /// May be `None` if no server key is configured; users must then
+    /// authenticate with their own key via `AuthMethodEnvVar`.
+    global_api_key: Option<String>,
+    /// Holds the key extracted from the last `authenticate` call until the
+    /// next `new_session` picks it up. This is a best-effort association: in
+    /// a multi-user environment each user should create sessions promptly after
+    /// authenticating.
+    pending_api_key: Arc<Mutex<Option<String>>>,
 }
 
 impl XaiAgent {
     /// Create a new `XaiAgent`.
     ///
-    /// Environment variables:
-    /// - `XAI_API_KEY` — xAI API key (required at construction)
+    /// Create a new `XaiAgent`.
+    ///
+    /// `api_key` is the server-wide fallback xAI API key. Pass an empty string
+    /// if no server key is configured — users must then authenticate with their
+    /// own key via the `xai-api-key` auth method before creating sessions.
+    ///
+    /// Environment variables read at construction:
     /// - `XAI_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 300)
     /// - `XAI_MODELS` — comma-separated `id:label` pairs
     ///   (default: `grok-3:Grok 3,grok-3-mini:Grok 3 Mini`)
+    /// - `XAI_BASE_URL` — override the xAI API base URL (default: `https://api.x.ai/v1`)
     pub fn new(
         nats: async_nats::Client,
         acp_prefix: AcpPrefix,
@@ -71,6 +90,8 @@ impl XaiAgent {
         api_key: impl Into<String>,
     ) -> Self {
         let default_model: String = default_model.into();
+        let api_key_str: String = api_key.into();
+        let global_api_key = if api_key_str.is_empty() { None } else { Some(api_key_str) };
 
         let prompt_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
             .ok()
@@ -111,11 +132,13 @@ impl XaiAgent {
         Self {
             nats,
             acp_prefix,
-            client: Arc::new(XaiClient::new(api_key)),
+            client: Arc::new(XaiClient::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
+            global_api_key,
+            pending_api_key: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -152,7 +175,26 @@ impl agent_client_protocol::Agent for XaiAgent {
         &self,
         _req: InitializeRequest,
     ) -> agent_client_protocol::Result<InitializeResponse> {
+        // Always offer the user-key method so clients can provide their own key.
+        let mut auth_methods = vec![AuthMethod::EnvVar(
+            AuthMethodEnvVar::new(
+                "xai-api-key",
+                "xAI API Key",
+                vec![AuthEnvVar::new("XAI_API_KEY").label("xAI API Key")],
+            )
+            .link("https://x.ai/api")
+            .description("Your personal xAI API key"),
+        )];
+        // Also offer the server-configured key if one is available.
+        if self.global_api_key.is_some() {
+            auth_methods.push(AuthMethod::Agent(
+                AuthMethodAgent::new("agent", "Use server key")
+                    .description("Use the API key configured on this server"),
+            ));
+        }
+
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
+            .auth_methods(auth_methods)
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
@@ -172,9 +214,39 @@ impl agent_client_protocol::Agent for XaiAgent {
 
     async fn authenticate(
         &self,
-        _req: AuthenticateRequest,
+        req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
-        // Auth is handled via XAI_API_KEY at construction — no per-session auth.
+        let method = req.method_id.0.as_ref();
+        match method {
+            "xai-api-key" => {
+                // The client must include the key in _meta["XAI_API_KEY"].
+                let key = req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("XAI_API_KEY"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        internal_error(
+                            "authenticate: XAI_API_KEY missing from _meta for method 'xai-api-key'",
+                        )
+                    })?;
+                info!("xai: user authenticated with their own API key");
+                *self.pending_api_key.lock().await = Some(key);
+            }
+            "agent" => {
+                // Use the server-configured key. Nothing to store.
+                if self.global_api_key.is_none() {
+                    return Err(internal_error(
+                        "authenticate: no server API key configured; use method 'xai-api-key' instead",
+                    ));
+                }
+                info!("xai: client authenticated using server key");
+            }
+            other => {
+                return Err(internal_error(format!("authenticate: unknown method '{other}'")));
+            }
+        }
         Ok(AuthenticateResponse::new())
     }
 
@@ -185,12 +257,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         let cwd = req.cwd.to_string_lossy().into_owned();
         let session_id = Uuid::new_v4().to_string();
 
+        // Consume the key stored by authenticate(), falling back to the global key.
+        let api_key = self.pending_api_key.lock().await.take()
+            .or_else(|| self.global_api_key.clone());
+
         self.sessions.lock().await.insert(
             session_id.clone(),
             XaiSession {
                 cwd,
                 model: None,
                 history: Vec::new(),
+                api_key,
                 cancel: Arc::new(Mutex::new(None)),
             },
         );
@@ -237,12 +314,12 @@ impl agent_client_protocol::Agent for XaiAgent {
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, cloned_history) = {
+        let (inherited_model, cloned_history, inherited_api_key) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
                 .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
-            (s.model.clone(), s.history.clone())
+            (s.model.clone(), s.history.clone(), s.api_key.clone())
         };
 
         let new_session_id = Uuid::new_v4().to_string();
@@ -252,6 +329,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                 cwd,
                 model: inherited_model.clone(),
                 history: cloned_history,
+                api_key: inherited_api_key,
                 cancel: Arc::new(Mutex::new(None)),
             },
         );
@@ -343,12 +421,17 @@ impl agent_client_protocol::Agent for XaiAgent {
 
         // Pull session state and install a cancel channel — release the lock
         // before streaming so cancel() can acquire it.
-        let (model, history, cancel_arc) = {
+        let (model, history, cancel_arc, api_key) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
-            (s.model.clone(), s.history.clone(), Arc::clone(&s.cancel))
+            let key = s.api_key.clone().ok_or_else(|| {
+                internal_error(
+                    "no API key for this session: authenticate with method 'xai-api-key' first",
+                )
+            })?;
+            (s.model.clone(), s.history.clone(), Arc::clone(&s.cancel), key)
         };
 
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -361,7 +444,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         messages.push(Message { role: "user".to_string(), content: user_input.clone() });
 
         let client = Arc::clone(&self.client);
-        let mut stream = client.chat_stream(&model, &messages).await;
+        let mut stream = client.chat_stream(&model, &messages, &api_key).await;
 
         let mut assistant_text = String::new();
         let mut canceled = false;
