@@ -95,8 +95,13 @@ impl CodexProcess {
     }
 
     /// Spawn `codex app-server` and perform the initialization handshake.
+    ///
+    /// The binary to invoke defaults to `codex` but can be overridden via the
+    /// `CODEX_BIN` environment variable.  Integration tests use this to inject
+    /// a mock server without touching the production code path.
     pub async fn spawn() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let mut child = Command::new("codex")
+        let bin = std::env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
+        let mut child = Command::new(&bin)
             .arg("app-server")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -566,6 +571,74 @@ mod tests {
     fn error_without_message_uses_default() {
         let params = serde_json::json!({"threadId": "t10"});
         let (_, event) = parse("error", params).unwrap();
+        assert!(matches!(event, CodexEvent::Error { message } if message == "unknown error"));
+    }
+
+    // ── function_call item type ───────────────────────────────────────────────
+
+    #[test]
+    fn function_call_tool_started_from_item_updated() {
+        let params = serde_json::json!({
+            "threadId": "t11",
+            "item": {
+                "type": "function_call",
+                "id": "fn-1",
+                "name": "read_file",
+                "arguments": {"path": "/tmp/x"}
+            }
+        });
+        let (tid, event) = parse("item/updated", params).unwrap();
+        assert_eq!(tid, "t11");
+        match event {
+            CodexEvent::ToolStarted { id, name, input } => {
+                assert_eq!(id, "fn-1");
+                assert_eq!(name, "read_file");
+                assert_eq!(input, serde_json::json!({"path": "/tmp/x"}));
+            }
+            _ => panic!("expected ToolStarted"),
+        }
+    }
+
+    #[test]
+    fn function_call_tool_completed_from_item_completed() {
+        let params = serde_json::json!({
+            "threadId": "t12",
+            "item": {
+                "type": "function_call",
+                "id": "fn-2",
+                "output": "file contents"
+            }
+        });
+        let (tid, event) = parse("item/completed", params).unwrap();
+        assert_eq!(tid, "t12");
+        assert!(
+            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "fn-2" && output == "file contents")
+        );
+    }
+
+    // ── None params ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn item_updated_with_no_params_returns_none() {
+        assert!(CodexProcess::parse_event("item/updated", None).is_none());
+    }
+
+    #[test]
+    fn item_completed_with_no_params_returns_none() {
+        assert!(CodexProcess::parse_event("item/completed", None).is_none());
+    }
+
+    #[test]
+    fn turn_completed_with_no_params_returns_empty_thread_id() {
+        let (tid, event) = CodexProcess::parse_event("turn/completed", None).unwrap();
+        assert_eq!(tid, "");
+        assert!(matches!(event, CodexEvent::TurnCompleted));
+    }
+
+    #[test]
+    fn error_with_no_params_returns_default_message() {
+        let (tid, event) = CodexProcess::parse_event("error", None).unwrap();
+        assert_eq!(tid, "");
         assert!(matches!(event, CodexEvent::Error { message } if message == "unknown error"));
     }
 }
