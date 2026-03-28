@@ -1314,3 +1314,131 @@ async fn initialize_env_var_method_advertises_correct_var_name_and_link() {
     // `link` tells the UI where the user can obtain a key.
     assert_eq!(ev.link.as_deref(), Some("https://x.ai/api"));
 }
+
+// ── session usable after cancel ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn session_is_usable_after_cancel() {
+    let _guard = env_lock().lock().unwrap();
+
+    // Two-connection server: first holds (cancelable), second responds normally.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        // Connection 1 — slow, for the canceled prompt.
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            writer.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.ok();
+            writer.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n").await.ok();
+            writer.flush().await.ok();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        // Connection 2 — normal, for the second prompt.
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let body = "data: {\"choices\":[{\"delta\":{\"content\":\"second reply\"}}]}\n\ndata: [DONE]\n\n";
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = std::sync::Arc::new(make_agent(Some(&url)).await);
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    // Prompt 1: cancel it mid-stream.
+    let agent2 = std::sync::Arc::clone(&agent);
+    let sid = session_id.clone();
+    let (r1, _) = tokio::join!(
+        agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("first"))],
+        )),
+        async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            agent2.cancel(CancelNotification::new(sid)).await.unwrap();
+        }
+    );
+    assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
+    assert!(agent.test_session_history(&session_id).await.is_empty(), "canceled turn must not update history");
+
+    // Prompt 2: session must still accept new prompts.
+    let r2 = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("second"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r2.stop_reason, StopReason::EndTurn);
+
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].content, "second");
+    assert_eq!(history[1].content, "second reply");
+}
+
+// ── re-authentication replaces pending key ────────────────────────────────────
+
+#[tokio::test]
+async fn re_authentication_replaces_pending_key() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, captured_auth) = fake_xai_sse_capturing_auth(&["reply"]).await;
+    let agent = make_agent_no_key(Some(&url)).await;
+
+    // Authenticate twice — second key must win.
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("key-first")))
+        .await
+        .unwrap();
+    agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("key-second")))
+        .await
+        .unwrap();
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let auth = captured_auth.lock().unwrap().clone().expect("Authorization header not captured");
+    assert_eq!(auth, "Bearer key-second");
+}
+
+// ── multi-block prompt content ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_multi_block_content_is_joined_with_newline() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let content = vec![
+        ContentBlock::Text(TextContent::new("line one")),
+        ContentBlock::Text(TextContent::new("line two")),
+    ];
+    agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), content))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let user_msg = msgs.last().expect("at least one message");
+    assert_eq!(user_msg["role"], "user");
+    assert_eq!(user_msg["content"], "line one\nline two");
+}
