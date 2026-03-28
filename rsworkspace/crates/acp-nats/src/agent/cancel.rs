@@ -15,8 +15,8 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: CancelNotification,
 ) -> Result<()> {
     let start = bridge.clock.now();

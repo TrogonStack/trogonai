@@ -1,241 +1,208 @@
-use async_nats::jetstream::stream::Config;
+use std::time::Duration;
 
-use crate::acp_prefix::AcpPrefix;
-use crate::nats::AcpStream;
+use async_nats::jetstream::stream::{Config, DiscardPolicy, RetentionPolicy, StorageType};
 
-pub fn notifications_stream_name(prefix: &AcpPrefix) -> String {
-    AcpStream::Notifications.stream_name(prefix)
+const DEFAULT_FILE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60); // 30 days
+const DEFAULT_MEMORY_MAX_AGE: Duration = Duration::from_secs(5 * 60); // 5 minutes
+
+fn stream_name(prefix: &str, suffix: &str) -> String {
+    format!("{}_{}", prefix.to_uppercase(), suffix)
 }
 
-pub fn responses_stream_name(prefix: &AcpPrefix) -> String {
-    AcpStream::Responses.stream_name(prefix)
+pub fn commands_config(prefix: &str) -> Config {
+    Config {
+        name: stream_name(prefix, "COMMANDS"),
+        subjects: vec![
+            format!("{prefix}.agent.>"),
+            format!("{prefix}.session.*.agent.prompt"),
+            format!("{prefix}.session.*.agent.cancel"),
+            format!("{prefix}.session.*.agent.load"),
+            format!("{prefix}.session.*.agent.set_mode"),
+            format!("{prefix}.session.*.agent.set_config_option"),
+            format!("{prefix}.session.*.agent.set_model"),
+            format!("{prefix}.session.*.agent.fork"),
+            format!("{prefix}.session.*.agent.resume"),
+            format!("{prefix}.session.*.agent.close"),
+            format!("{prefix}.session.*.agent.ext.>"),
+        ],
+        storage: StorageType::File,
+        retention: RetentionPolicy::Limits,
+        max_age: DEFAULT_FILE_MAX_AGE,
+        discard: DiscardPolicy::Old,
+        ..Default::default()
+    }
 }
 
-pub fn commands_stream_name(prefix: &AcpPrefix) -> String {
-    AcpStream::Commands.stream_name(prefix)
+pub fn responses_config(prefix: &str) -> Config {
+    Config {
+        name: stream_name(prefix, "RESPONSES"),
+        subjects: vec![
+            format!("{prefix}.session.*.agent.prompt.response.>"),
+            format!("{prefix}.session.*.agent.ext.ready"),
+            format!("{prefix}.session.*.agent.cancelled"),
+        ],
+        storage: StorageType::File,
+        retention: RetentionPolicy::Limits,
+        max_age: DEFAULT_FILE_MAX_AGE,
+        discard: DiscardPolicy::Old,
+        ..Default::default()
+    }
 }
 
-pub fn global_stream_name(prefix: &AcpPrefix) -> String {
-    AcpStream::Global.stream_name(prefix)
+pub fn client_ops_config(prefix: &str) -> Config {
+    Config {
+        name: stream_name(prefix, "CLIENT_OPS"),
+        subjects: vec![format!("{prefix}.session.*.client.>")],
+        storage: StorageType::File,
+        retention: RetentionPolicy::Limits,
+        max_age: DEFAULT_FILE_MAX_AGE,
+        discard: DiscardPolicy::Old,
+        ..Default::default()
+    }
 }
 
-pub fn global_ext_stream_name(prefix: &AcpPrefix) -> String {
-    AcpStream::GlobalExt.stream_name(prefix)
+pub fn notifications_config(prefix: &str) -> Config {
+    Config {
+        name: stream_name(prefix, "NOTIFICATIONS"),
+        subjects: vec![format!("{prefix}.session.*.agent.update.>")],
+        storage: StorageType::Memory,
+        retention: RetentionPolicy::Limits,
+        max_age: DEFAULT_MEMORY_MAX_AGE,
+        discard: DiscardPolicy::Old,
+        ..Default::default()
+    }
 }
 
-pub fn all_configs(prefix: &AcpPrefix) -> [Config; 6] {
-    AcpStream::all_configs(prefix)
+pub fn all_configs(prefix: &str) -> [Config; 4] {
+    [
+        commands_config(prefix),
+        responses_config(prefix),
+        client_ops_config(prefix),
+        notifications_config(prefix),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
-    use async_nats::jetstream::stream::{DiscardPolicy, RetentionPolicy, StorageType};
-
-    use crate::acp_prefix::AcpPrefix;
-    use crate::constants::DEFAULT_STREAM_MAX_AGE;
-    use crate::nats::AcpStream;
-
     use super::*;
-
-    fn p(s: &str) -> AcpPrefix {
-        AcpPrefix::new(s).expect("test prefix")
-    }
 
     #[test]
     fn stream_names_use_uppercase_prefix() {
-        let prefix = p("acp");
-        assert_eq!(AcpStream::Commands.stream_name(&prefix), "ACP_COMMANDS");
-        assert_eq!(AcpStream::Responses.stream_name(&prefix), "ACP_RESPONSES");
-        assert_eq!(AcpStream::ClientOps.stream_name(&prefix), "ACP_CLIENT_OPS");
-        assert_eq!(AcpStream::Notifications.stream_name(&prefix), "ACP_NOTIFICATIONS");
-        assert_eq!(AcpStream::Global.stream_name(&prefix), "ACP_GLOBAL");
-        assert_eq!(AcpStream::GlobalExt.stream_name(&prefix), "ACP_GLOBAL_EXT");
+        assert_eq!(commands_config("acp").name, "ACP_COMMANDS");
+        assert_eq!(responses_config("acp").name, "ACP_RESPONSES");
+        assert_eq!(client_ops_config("acp").name, "ACP_CLIENT_OPS");
+        assert_eq!(notifications_config("acp").name, "ACP_NOTIFICATIONS");
     }
 
     #[test]
     fn stream_names_with_custom_prefix() {
-        let prefix = p("myapp");
-        assert_eq!(AcpStream::Commands.stream_name(&prefix), "MYAPP_COMMANDS");
-        assert_eq!(AcpStream::Responses.stream_name(&prefix), "MYAPP_RESPONSES");
+        assert_eq!(commands_config("myapp").name, "MYAPP_COMMANDS");
+        assert_eq!(responses_config("myapp").name, "MYAPP_RESPONSES");
     }
 
     #[test]
-    fn stream_names_normalize_dots_to_underscores() {
-        let prefix = p("my.multi.part");
-        assert_eq!(AcpStream::Commands.stream_name(&prefix), "MY_MULTI_PART_COMMANDS");
-        assert_eq!(AcpStream::Global.stream_name(&prefix), "MY_MULTI_PART_GLOBAL");
-    }
-
-    #[test]
-    fn commands_subjects_are_session_scoped_only() {
-        let config = AcpStream::Commands.config(&p("acp"));
-        assert!(!config.subjects.contains(&"acp.agent.>".to_string()));
-        assert!(config.subjects.contains(&"acp.session.*.agent.prompt".to_string()));
-        assert!(config.subjects.contains(&"acp.session.*.agent.fork".to_string()));
-        assert!(config.subjects.contains(&"acp.session.*.agent.close".to_string()));
-    }
-
-    #[test]
-    fn commands_excludes_ext_subjects() {
-        let config = AcpStream::Commands.config(&p("acp"));
-        assert!(!config.subjects.iter().any(|s| s.contains("ext")));
+    fn commands_subjects_include_global_and_session() {
+        let config = commands_config("acp");
+        assert!(config.subjects.contains(&"acp.agent.>".to_string()));
+        assert!(
+            config
+                .subjects
+                .contains(&"acp.session.*.agent.prompt".to_string())
+        );
+        assert!(
+            config
+                .subjects
+                .contains(&"acp.session.*.agent.fork".to_string())
+        );
+        assert!(
+            config
+                .subjects
+                .contains(&"acp.session.*.agent.ext.>".to_string())
+        );
     }
 
     #[test]
     fn responses_subjects() {
-        let config = AcpStream::Responses.config(&p("acp"));
+        let config = responses_config("acp");
         assert!(
             config
                 .subjects
                 .contains(&"acp.session.*.agent.prompt.response.>".to_string())
         );
-        assert!(config.subjects.contains(&"acp.session.*.agent.ext.ready".to_string()));
-        assert!(config.subjects.contains(&"acp.session.*.agent.cancelled".to_string()));
+        assert!(
+            config
+                .subjects
+                .contains(&"acp.session.*.agent.ext.ready".to_string())
+        );
+        assert!(
+            config
+                .subjects
+                .contains(&"acp.session.*.agent.cancelled".to_string())
+        );
     }
 
     #[test]
     fn client_ops_subjects() {
-        let config = AcpStream::ClientOps.config(&p("acp"));
+        let config = client_ops_config("acp");
         assert_eq!(config.subjects, vec!["acp.session.*.client.>"]);
     }
 
     #[test]
     fn notifications_subjects() {
-        let config = AcpStream::Notifications.config(&p("acp"));
+        let config = notifications_config("acp");
         assert_eq!(config.subjects, vec!["acp.session.*.agent.update.>"]);
     }
 
     #[test]
-    fn all_streams_use_file_storage() {
-        let prefix = p("acp");
-        for stream in AcpStream::ALL {
-            assert_eq!(stream.config(&prefix).storage, StorageType::File);
-        }
+    fn file_backed_streams_use_file_storage() {
+        assert_eq!(commands_config("acp").storage, StorageType::File);
+        assert_eq!(responses_config("acp").storage, StorageType::File);
+        assert_eq!(client_ops_config("acp").storage, StorageType::File);
     }
 
     #[test]
-    fn all_streams_have_30_day_max_age() {
-        let prefix = p("acp");
-        for stream in AcpStream::ALL {
-            assert_eq!(stream.config(&prefix).max_age, DEFAULT_STREAM_MAX_AGE);
-        }
+    fn notifications_uses_memory_storage() {
+        assert_eq!(notifications_config("acp").storage, StorageType::Memory);
+    }
+
+    #[test]
+    fn file_backed_streams_have_30_day_max_age() {
+        let expected = Duration::from_secs(30 * 24 * 60 * 60);
+        assert_eq!(commands_config("acp").max_age, expected);
+        assert_eq!(responses_config("acp").max_age, expected);
+        assert_eq!(client_ops_config("acp").max_age, expected);
+    }
+
+    #[test]
+    fn notifications_has_5_minute_max_age() {
+        assert_eq!(
+            notifications_config("acp").max_age,
+            Duration::from_secs(5 * 60)
+        );
     }
 
     #[test]
     fn all_streams_use_discard_old() {
-        for config in all_configs(&p("acp")) {
+        for config in all_configs("acp") {
             assert_eq!(config.discard, DiscardPolicy::Old);
         }
     }
 
     #[test]
     fn all_streams_use_limits_retention() {
-        for config in all_configs(&p("acp")) {
+        for config in all_configs("acp") {
             assert_eq!(config.retention, RetentionPolicy::Limits);
         }
     }
 
     #[test]
-    fn notifications_stream_name_formats_correctly() {
-        assert_eq!(notifications_stream_name(&p("acp")), "ACP_NOTIFICATIONS");
-        assert_eq!(notifications_stream_name(&p("myapp")), "MYAPP_NOTIFICATIONS");
-    }
-
-    #[test]
-    fn responses_stream_name_formats_correctly() {
-        assert_eq!(responses_stream_name(&p("acp")), "ACP_RESPONSES");
-        assert_eq!(responses_stream_name(&p("myapp")), "MYAPP_RESPONSES");
-    }
-
-    #[test]
-    fn commands_stream_name_formats_correctly() {
-        assert_eq!(commands_stream_name(&p("acp")), "ACP_COMMANDS");
-        assert_eq!(commands_stream_name(&p("myapp")), "MYAPP_COMMANDS");
-    }
-
-    #[test]
-    fn global_stream_name_formats_correctly() {
-        assert_eq!(global_stream_name(&p("acp")), "ACP_GLOBAL");
-        assert_eq!(global_stream_name(&p("myapp")), "MYAPP_GLOBAL");
-    }
-
-    #[test]
-    fn global_subjects_include_expected() {
-        let config = AcpStream::Global.config(&p("acp"));
-        assert!(config.subjects.contains(&"acp.agent.initialize".to_string()));
-        assert!(config.subjects.contains(&"acp.agent.authenticate".to_string()));
-        assert!(config.subjects.contains(&"acp.agent.logout".to_string()));
-        assert!(config.subjects.contains(&"acp.agent.session.new".to_string()));
-    }
-
-    #[test]
-    fn global_excludes_session_list_and_ext() {
-        let config = AcpStream::Global.config(&p("acp"));
-        assert!(!config.subjects.contains(&"acp.agent.session.list".to_string()));
-        assert!(!config.subjects.contains(&"acp.agent.>".to_string()));
-        assert!(!config.subjects.contains(&"acp.agent.ext.>".to_string()));
-    }
-
-    #[test]
-    fn global_ext_subjects() {
-        let config = AcpStream::GlobalExt.config(&p("acp"));
-        assert_eq!(config.subjects, vec!["acp.agent.ext.>"]);
-    }
-
-    #[test]
-    fn global_ext_stream_name_formats_correctly() {
-        assert_eq!(global_ext_stream_name(&p("acp")), "ACP_GLOBAL_EXT");
-        assert_eq!(global_ext_stream_name(&p("myapp")), "MYAPP_GLOBAL_EXT");
-    }
-
-    #[test]
-    fn all_configs_returns_six_streams() {
-        assert_eq!(all_configs(&p("acp")).len(), 6);
-    }
-
-    fn nats_pattern_matches(pattern: &str, subject: &str) -> bool {
-        let pattern_tokens: Vec<&str> = pattern.split('.').collect();
-        let subject_tokens: Vec<&str> = subject.split('.').collect();
-
-        let mut pi = 0;
-        let mut si = 0;
-        while pi < pattern_tokens.len() && si < subject_tokens.len() {
-            match pattern_tokens[pi] {
-                ">" => return true,
-                "*" => {
-                    pi += 1;
-                    si += 1;
-                }
-                token => {
-                    if token != subject_tokens[si] {
-                        return false;
-                    }
-                    pi += 1;
-                    si += 1;
-                }
-            }
-        }
-        pi == pattern_tokens.len() && si == subject_tokens.len()
-    }
-
-    #[test]
-    fn session_list_not_captured_by_any_stream() {
-        let prefix = p("acp");
-        let session_list_subject = "acp.agent.session.list";
-        for stream in AcpStream::ALL {
-            for pattern in stream.subject_patterns(&prefix) {
-                assert!(
-                    !nats_pattern_matches(&pattern, session_list_subject),
-                    "stream {} pattern {pattern} would capture session.list",
-                    stream
-                );
-            }
-        }
+    fn all_configs_returns_four_streams() {
+        assert_eq!(all_configs("acp").len(), 4);
     }
 
     #[test]
     fn no_subject_overlaps_between_streams() {
-        let configs = all_configs(&p("acp"));
+        let configs = all_configs("acp");
         let all_subjects: Vec<&String> = configs.iter().flat_map(|c| &c.subjects).collect();
 
         for (i, a) in all_subjects.iter().enumerate() {

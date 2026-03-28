@@ -16,6 +16,8 @@ use futures::future::LocalBoxFuture;
 use std::rc::Rc;
 use std::time::Duration;
 use tracing::{info, warn};
+#[cfg(not(coverage))]
+use trogon_nats::jetstream::JsMessage;
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 
 pub enum ConnectionError {
@@ -311,6 +313,137 @@ where
     handler(request)
         .await
         .map_err(DispatchError::NotificationHandler)
+}
+
+/// JetStream-aware dispatch: receives a `JsMessage`, dispatches to the agent,
+/// and signals ack/term based on the outcome.
+///
+/// - Unknown subject → `term()` (no redelivery)
+/// - Deserialize failure → reply error + `term()` (bad payload won't fix itself)
+/// - Handler success → reply + `ack()`
+/// - Handler error → reply error + `ack()` (application-level error, not transient)
+/// - Notification handler → `ack()`
+#[cfg(not(coverage))]
+#[allow(dead_code)] // Will be used when JetStream serve path is wired up
+async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent>(
+    js_msg: &JsMessage,
+    agent: &A,
+    nats: &N,
+) {
+    let msg = js_msg.message();
+    let subject = msg.subject.as_str();
+
+    let parsed = match parse_agent_subject(subject) {
+        Some(p) => p,
+        None => {
+            if let Err(e) = js_msg.term().await {
+                warn!(error = %e, subject, "Failed to term unknown subject");
+            }
+            return;
+        }
+    };
+
+    let result = match parsed.method {
+        AgentMethod::Initialize => {
+            handle_request(msg, nats, |req: InitializeRequest| agent.initialize(req)).await
+        }
+        AgentMethod::Authenticate => {
+            handle_request(msg, nats, |req: AuthenticateRequest| {
+                agent.authenticate(req)
+            })
+            .await
+        }
+        AgentMethod::SessionNew => {
+            handle_request(msg, nats, |req: NewSessionRequest| agent.new_session(req)).await
+        }
+        AgentMethod::SessionList => {
+            handle_request(msg, nats, |req: ListSessionsRequest| {
+                agent.list_sessions(req)
+            })
+            .await
+        }
+        AgentMethod::SessionLoad => {
+            handle_request(msg, nats, |req: LoadSessionRequest| agent.load_session(req)).await
+        }
+        AgentMethod::SessionPrompt => {
+            handle_request(msg, nats, |req: PromptRequest| agent.prompt(req)).await
+        }
+        AgentMethod::SessionCancel => {
+            handle_notification(msg, |req: CancelNotification| agent.cancel(req)).await
+        }
+        AgentMethod::SessionSetMode => {
+            handle_request(msg, nats, |req: SetSessionModeRequest| {
+                agent.set_session_mode(req)
+            })
+            .await
+        }
+        AgentMethod::SessionSetConfigOption => {
+            handle_request(msg, nats, |req: SetSessionConfigOptionRequest| {
+                agent.set_session_config_option(req)
+            })
+            .await
+        }
+        AgentMethod::SessionSetModel => {
+            handle_request(msg, nats, |req: SetSessionModelRequest| {
+                agent.set_session_model(req)
+            })
+            .await
+        }
+        AgentMethod::SessionFork => {
+            handle_request(msg, nats, |req: ForkSessionRequest| agent.fork_session(req)).await
+        }
+        AgentMethod::SessionResume => {
+            handle_request(msg, nats, |req: ResumeSessionRequest| {
+                agent.resume_session(req)
+            })
+            .await
+        }
+        AgentMethod::SessionClose => {
+            handle_request(msg, nats, |req: CloseSessionRequest| {
+                agent.close_session(req)
+            })
+            .await
+        }
+        AgentMethod::Ext(_) => {
+            if msg.reply.is_some() {
+                handle_request(msg, nats, |req: ExtRequest| agent.ext_method(req)).await
+            } else {
+                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+            }
+        }
+    };
+
+    match &result {
+        Ok(()) => {
+            if let Err(e) = js_msg.ack().await {
+                warn!(subject, error = %e, "Failed to ack JetStream message");
+            }
+        }
+        Err(DispatchError::DeserializeRequest(_) | DispatchError::DeserializeNotification(_)) => {
+            if let Err(e) = js_msg.term().await {
+                warn!(subject, error = %e, "Failed to term bad payload");
+            }
+        }
+        Err(DispatchError::NoReplySubject) => {
+            if let Err(e) = js_msg.term().await {
+                warn!(subject, error = %e, "Failed to term missing reply subject");
+            }
+        }
+        Err(_) => {
+            if let Err(e) = js_msg.ack().await {
+                warn!(subject, error = %e, "Failed to ack after handler error");
+            }
+        }
+    }
+
+    if let Err(e) = result {
+        let sid = parsed
+            .session_id
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("-");
+        warn!(subject, session_id = sid, error = %e, "Error handling agent request");
+    }
 }
 
 #[cfg(test)]
