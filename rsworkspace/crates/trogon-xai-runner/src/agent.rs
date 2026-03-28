@@ -27,67 +27,64 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::client::{Message, XaiClient, XaiEvent};
+use crate::session_store::{KvSessionStore, MemorySessionStore, SessionStore, XaiSessionData};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
-struct XaiSession {
-    cwd: String,
-    model: Option<String>,
-    history: Vec<Message>,
-    /// xAI API key for this session. Either the user's own key (from
-    /// `authenticate`) or the server-configured global key.
-    api_key: Option<String>,
-    /// Set by `cancel` to interrupt an in-flight `prompt`.
-    cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
-}
-
 /// ACP Agent implementation backed by xAI's Grok API (OpenAI-compatible REST).
 ///
 /// Each `XaiAgent` manages multiple sessions, each holding its own conversation
-/// history. Prompt calls stream chat completions from `api.x.ai` and forward
-/// text chunks to the ACP client via NATS `SessionNotification`s.
-///
-/// Authentication uses the `XAI_API_KEY` environment variable.
+/// history persisted in NATS KV. Prompt calls stream chat completions from
+/// `api.x.ai` and forward text chunks to the ACP client via NATS
+/// `SessionNotification`s.
 pub struct XaiAgent {
     nats: async_nats::Client,
     acp_prefix: AcpPrefix,
     client: Arc<XaiClient>,
-    sessions: Arc<Mutex<HashMap<String, XaiSession>>>,
+    session_store: Box<dyn SessionStore>,
+    /// In-memory cancel channels — one per active prompt, keyed by session id.
+    cancel_channels: Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>,
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
     /// Server-wide fallback key (from `XAI_API_KEY` env var at startup).
-    /// May be `None` if no server key is configured; users must then
-    /// authenticate with their own key via `AuthMethodEnvVar`.
     global_api_key: Option<String>,
     /// Holds the key extracted from the last `authenticate` call until the
-    /// next `new_session` picks it up. This is a best-effort association: in
-    /// a multi-user environment each user should create sessions promptly after
-    /// authenticating.
+    /// next `new_session` picks it up.
     pending_api_key: Arc<Mutex<Option<String>>>,
 }
 
 impl XaiAgent {
-    /// Create a new `XaiAgent`.
+    /// Create a new `XaiAgent` backed by NATS KV for session persistence.
     ///
-    /// Create a new `XaiAgent`.
+    /// The KV bucket name is read from `XAI_SESSION_BUCKET` (default: `XAI_SESSIONS`).
     ///
-    /// `api_key` is the server-wide fallback xAI API key. Pass an empty string
-    /// if no server key is configured — users must then authenticate with their
-    /// own key via the `xai-api-key` auth method before creating sessions.
-    ///
-    /// Environment variables read at construction:
-    /// - `XAI_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 300)
+    /// Other environment variables:
+    /// - `XAI_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 300; 0 = default)
     /// - `XAI_MODELS` — comma-separated `id:label` pairs
-    ///   (default: `grok-3:Grok 3,grok-3-mini:Grok 3 Mini`)
-    /// - `XAI_BASE_URL` — override the xAI API base URL (default: `https://api.x.ai/v1`)
-    pub fn new(
+    /// - `XAI_BASE_URL` — override the xAI API base URL
+    pub async fn new(
         nats: async_nats::Client,
         acp_prefix: AcpPrefix,
         default_model: impl Into<String>,
         api_key: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let bucket = std::env::var("XAI_SESSION_BUCKET")
+            .unwrap_or_else(|_| "XAI_SESSIONS".to_string());
+        let js = async_nats::jetstream::new(nats.clone());
+        let store = KvSessionStore::open(js, bucket).await?;
+        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+    }
+
+    /// Internal constructor with an injected session store.
+    fn new_with_store(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        session_store: Box<dyn SessionStore>,
     ) -> Self {
         let default_model: String = default_model.into();
         let api_key_str: String = api_key.into();
@@ -134,7 +131,8 @@ impl XaiAgent {
             nats,
             acp_prefix,
             client: Arc::new(XaiClient::new()),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            session_store,
+            cancel_channels: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
@@ -168,6 +166,7 @@ impl XaiAgent {
         let current = current.unwrap_or(&self.default_model).to_string();
         SessionModelState::new(current, self.available_models.clone())
     }
+
 }
 
 #[async_trait(?Send)]
@@ -176,7 +175,6 @@ impl agent_client_protocol::Agent for XaiAgent {
         &self,
         _req: InitializeRequest,
     ) -> agent_client_protocol::Result<InitializeResponse> {
-        // Always offer the user-key method so clients can provide their own key.
         let mut auth_methods = vec![AuthMethod::EnvVar(
             AuthMethodEnvVar::new(
                 "xai-api-key",
@@ -186,7 +184,6 @@ impl agent_client_protocol::Agent for XaiAgent {
             .link("https://x.ai/api")
             .description("Your personal xAI API key"),
         )];
-        // Also offer the server-configured key if one is available.
         if self.global_api_key.is_some() {
             auth_methods.push(AuthMethod::Agent(
                 AuthMethodAgent::new("agent", "Use server key")
@@ -220,7 +217,6 @@ impl agent_client_protocol::Agent for XaiAgent {
         let method = req.method_id.0.as_ref();
         match method {
             "xai-api-key" => {
-                // The client must include the key in _meta["XAI_API_KEY"].
                 let key = req
                     .meta
                     .as_ref()
@@ -236,7 +232,6 @@ impl agent_client_protocol::Agent for XaiAgent {
                 *self.pending_api_key.lock().await = Some(key);
             }
             "agent" => {
-                // Use the server-configured key. Nothing to store.
                 if self.global_api_key.is_none() {
                     return Err(internal_error(
                         "authenticate: no server API key configured; use method 'xai-api-key' instead",
@@ -258,20 +253,15 @@ impl agent_client_protocol::Agent for XaiAgent {
         let cwd = req.cwd.to_string_lossy().into_owned();
         let session_id = Uuid::new_v4().to_string();
 
-        // Consume the key stored by authenticate(), falling back to the global key.
         let api_key = self.pending_api_key.lock().await.take()
             .or_else(|| self.global_api_key.clone());
 
-        self.sessions.lock().await.insert(
-            session_id.clone(),
-            XaiSession {
-                cwd,
-                model: None,
-                history: Vec::new(),
-                api_key,
-                cancel: Arc::new(Mutex::new(None)),
-            },
-        );
+        self.session_store.put(&session_id, &XaiSessionData {
+            cwd,
+            model: None,
+            history: Vec::new(),
+            api_key,
+        }).await;
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
@@ -284,9 +274,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(&session_id)
+        let session = self.session_store.get(&session_id).await
             .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
         let model = session.model.as_deref();
         Ok(LoadSessionResponse::new()
@@ -299,11 +287,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         req: ResumeSessionRequest,
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
-        // Conversation history is in memory — just verify the session exists.
-        self.sessions
-            .lock()
-            .await
-            .get(&session_id)
+        self.session_store.get(&session_id).await
             .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
         Ok(ResumeSessionResponse::new())
     }
@@ -315,25 +299,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, cloned_history, inherited_api_key) = {
-            let sessions = self.sessions.lock().await;
-            let s = sessions
-                .get(&source_id)
-                .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
-            (s.model.clone(), s.history.clone(), s.api_key.clone())
-        };
+        let source = self.session_store.get(&source_id).await
+            .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
 
         let new_session_id = Uuid::new_v4().to_string();
-        self.sessions.lock().await.insert(
-            new_session_id.clone(),
-            XaiSession {
-                cwd,
-                model: inherited_model.clone(),
-                history: cloned_history,
-                api_key: inherited_api_key,
-                cancel: Arc::new(Mutex::new(None)),
-            },
-        );
+        let inherited_model = source.model.clone();
+        self.session_store.put(&new_session_id, &XaiSessionData {
+            cwd,
+            model: inherited_model.clone(),
+            history: source.history,
+            api_key: source.api_key,
+        }).await;
 
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
@@ -345,7 +321,8 @@ impl agent_client_protocol::Agent for XaiAgent {
         req: CloseSessionRequest,
     ) -> agent_client_protocol::Result<CloseSessionResponse> {
         let session_id = req.session_id.to_string();
-        self.sessions.lock().await.remove(&session_id);
+        self.session_store.delete(&session_id).await;
+        self.cancel_channels.lock().await.remove(&session_id);
         info!(session_id, "xai: session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -354,12 +331,10 @@ impl agent_client_protocol::Agent for XaiAgent {
         &self,
         _req: ListSessionsRequest,
     ) -> agent_client_protocol::Result<ListSessionsResponse> {
-        let sessions = self.sessions.lock().await;
-        let mut list: Vec<_> = sessions
-            .iter()
-            .map(|(id, s)| SessionInfo::new(id.clone(), s.cwd.clone()))
+        let list = self.session_store.list().await
+            .into_iter()
+            .map(|(id, cwd)| SessionInfo::new(id, cwd))
             .collect();
-        list.sort_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
         Ok(ListSessionsResponse::new(list))
     }
 
@@ -385,15 +360,13 @@ impl agent_client_protocol::Agent for XaiAgent {
             return Err(internal_error(format!("unknown model: {model_id}")));
         }
 
-        let mut sessions = self.sessions.lock().await;
-        match sessions.get_mut(&session_id) {
-            Some(session) => {
-                session.model = Some(model_id.clone());
-                info!(session_id, model = %model_id, "xai: set_session_model");
-                Ok(SetSessionModelResponse::new())
-            }
-            None => Err(internal_error(format!("session {session_id} not found"))),
-        }
+        let mut session = self.session_store.get(&session_id).await
+            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+        session.model = Some(model_id.clone());
+        self.session_store.put(&session_id, &session).await;
+
+        info!(session_id, model = %model_id, "xai: set_session_model");
+        Ok(SetSessionModelResponse::new())
     }
 
     async fn set_session_config_option(
@@ -424,28 +397,31 @@ impl agent_client_protocol::Agent for XaiAgent {
             warn!(session_id, "xai: prompt contains no text blocks");
         }
 
-        // Pull session state and install a cancel channel — release the lock
-        // before streaming so cancel() can acquire it.
-        let (model, history, cancel_arc, api_key) = {
-            let sessions = self.sessions.lock().await;
-            let s = sessions
-                .get(&session_id)
-                .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
-            let key = s.api_key.clone().ok_or_else(|| {
-                internal_error(
-                    "no API key for this session: authenticate with method 'xai-api-key' first",
-                )
-            })?;
-            (s.model.clone(), s.history.clone(), Arc::clone(&s.cancel), key)
-        };
+        // Read session state.
+        let session = self.session_store.get(&session_id).await
+            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
 
+        let api_key = session.api_key.clone().ok_or_else(|| {
+            internal_error(
+                "no API key for this session: authenticate with method 'xai-api-key' first",
+            )
+        })?;
+
+        let model = session.model.as_deref().unwrap_or(&self.default_model).to_string();
+
+        // Install a cancel channel, releasing the cancel_channels lock before streaming.
+        let cancel_arc = {
+            let mut channels = self.cancel_channels.lock().await;
+            channels
+                .entry(session_id.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone()
+        };
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         cancel_arc.lock().await.replace(cancel_tx);
 
-        let model = model.as_deref().unwrap_or(&self.default_model).to_string();
-
         // Build messages: history + new user turn.
-        let mut messages = history.clone();
+        let mut messages = session.history.clone();
         messages.push(Message { role: "user".to_string(), content: user_input.clone() });
 
         let client = Arc::clone(&self.client);
@@ -495,18 +471,19 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
         };
 
-        // Append exchange to history only on successful (non-canceled) turns.
+        // Append exchange to history on successful (non-canceled) turns with non-empty response.
         if !canceled && !assistant_text.is_empty() {
-            let mut sessions = self.sessions.lock().await;
-            if let Some(session) = sessions.get_mut(&session_id) {
-                session.history.push(Message {
+            // Re-read to preserve any concurrent model changes.
+            if let Some(mut current) = self.session_store.get(&session_id).await {
+                current.history.push(Message {
                     role: "user".to_string(),
                     content: user_input,
                 });
-                session.history.push(Message {
+                current.history.push(Message {
                     role: "assistant".to_string(),
                     content: assistant_text,
                 });
+                self.session_store.put(&session_id, &current).await;
             }
         }
 
@@ -518,11 +495,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         req: CancelNotification,
     ) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
-        let cancel_arc = {
-            let sessions = self.sessions.lock().await;
-            sessions.get(&session_id).map(|s| Arc::clone(&s.cancel))
-        };
-        if let Some(cancel_arc) = cancel_arc {
+        if let Some(cancel_arc) = self.cancel_channels.lock().await.get(&session_id).cloned() {
             if let Some(tx) = cancel_arc.lock().await.take() {
                 let _ = tx.send(());
             }
@@ -533,12 +506,28 @@ impl agent_client_protocol::Agent for XaiAgent {
 
 #[cfg(feature = "test-helpers")]
 impl XaiAgent {
-    pub async fn test_session_history(&self, id: &str) -> Vec<crate::client::Message> {
-        self.sessions.lock().await.get(id).map(|s| s.history.clone()).unwrap_or_default()
+    /// Creates an `XaiAgent` backed by an in-memory session store. For tests only.
+    pub fn new_in_memory(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Self {
+        Self::new_with_store(
+            nats,
+            acp_prefix,
+            default_model,
+            api_key,
+            Box::new(MemorySessionStore::new()),
+        )
+    }
+
+    pub async fn test_session_history(&self, id: &str) -> Vec<Message> {
+        self.session_store.get(id).await.map(|s| s.history).unwrap_or_default()
     }
 
     pub async fn test_session_model(&self, id: &str) -> Option<String> {
-        self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
+        self.session_store.get(id).await.and_then(|s| s.model)
     }
 
     pub fn test_prompt_timeout(&self) -> Duration {
