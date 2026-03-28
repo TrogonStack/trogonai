@@ -23,37 +23,41 @@ pub enum XaiEvent {
 }
 
 /// HTTP client for xAI's OpenAI-compatible chat completions API.
+///
+/// Does not store an API key — callers pass it per-request so sessions can use
+/// individual user keys.
 pub struct XaiClient {
     http: reqwest::Client,
-    api_key: String,
     base_url: String,
 }
 
 impl XaiClient {
-    pub fn new(api_key: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         let base_url = std::env::var("XAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-        Self::with_base_url(api_key, base_url)
+        Self::with_base_url(base_url)
     }
 
     /// Construct with an explicit base URL. Useful for tests and custom proxies.
-    pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
-            api_key: api_key.into(),
             base_url: base_url.into(),
         }
     }
 
     /// Start a streaming chat completion and return a stream of `XaiEvent`s.
+    ///
+    /// `api_key` is the xAI bearer token to use for this specific request.
     pub async fn chat_stream(
         &self,
         model: &str,
         messages: &[Message],
+        api_key: &str,
     ) -> impl Stream<Item = XaiEvent> {
         debug!(model, messages_len = messages.len(), "xai: starting chat stream");
 
-        let result = self.start_request(model, messages).await;
+        let result = self.start_request(model, messages, api_key).await;
         match result {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
             Err(e) => {
@@ -68,6 +72,7 @@ impl XaiClient {
         &self,
         model: &str,
         messages: &[Message],
+        api_key: &str,
     ) -> Result<reqwest::Response, String> {
         let body = serde_json::json!({
             "model": model,
@@ -78,7 +83,7 @@ impl XaiClient {
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
+            .bearer_auth(api_key)
             .json(&body)
             .send()
             .await
