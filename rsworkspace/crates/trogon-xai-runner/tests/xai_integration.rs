@@ -1442,3 +1442,110 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
     assert_eq!(user_msg["role"], "user");
     assert_eq!(user_msg["content"], "line one\nline two");
 }
+
+// ── set_session_model affects HTTP request ────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_model_is_used_in_http_request_to_xai() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id,
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    assert_eq!(captured[0]["model"], "grok-3-mini");
+}
+
+// ── load_session reflects updated model ──────────────────────────────────────
+
+#[tokio::test]
+async fn load_session_reflects_model_after_set_session_model() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
+        .await
+        .unwrap();
+
+    let loaded = agent
+        .load_session(LoadSessionRequest::new(session_id, "/tmp"))
+        .await
+        .unwrap();
+    let models = loaded.models.expect("models should be present");
+    assert_eq!(models.current_model_id.to_string(), "grok-3-mini");
+}
+
+// ── fork history independence ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fork_histories_are_independent_after_diverging_prompts() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    // Create parent and prompt once to build shared history.
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let src_id = src.session_id.to_string();
+    agent
+        .prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("shared"))],
+        ))
+        .await
+        .unwrap();
+
+    // Fork inherits the one-exchange history.
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
+        .await
+        .unwrap();
+    let fork_id = fork.session_id.to_string();
+
+    // Prompt each independently.
+    let (r_src, r_fork) = tokio::join!(
+        agent.prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("parent-only"))],
+        )),
+        agent.prompt(PromptRequest::new(
+            fork_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("fork-only"))],
+        )),
+    );
+    r_src.unwrap();
+    r_fork.unwrap();
+
+    let src_history = agent.test_session_history(&src_id).await;
+    let fork_history = agent.test_session_history(&fork_id).await;
+
+    // Each has: shared exchange + its own exchange = 4 messages.
+    assert_eq!(src_history.len(), 4);
+    assert_eq!(fork_history.len(), 4);
+
+    // The diverging turns must be independent.
+    assert_eq!(src_history[2].content, "parent-only");
+    assert_eq!(fork_history[2].content, "fork-only");
+
+    // The other session must not contain the diverging turn of its sibling.
+    assert!(src_history.iter().all(|m| m.content != "fork-only"));
+    assert!(fork_history.iter().all(|m| m.content != "parent-only"));
+}
