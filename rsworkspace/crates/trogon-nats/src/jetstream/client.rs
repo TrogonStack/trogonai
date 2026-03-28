@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_nats::HeaderMap;
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::pull;
@@ -67,6 +69,78 @@ impl JetStreamPublisher for NatsJetStreamClient {
     }
 }
 
+pub struct NatsJsMessage {
+    inner: jetstream::Message,
+}
+
+impl NatsJsMessage {
+    pub fn new(inner: jetstream::Message) -> Self {
+        Self { inner }
+    }
+}
+
+impl JsMessage for NatsJsMessage {
+    type Error = JetStreamError;
+
+    fn payload(&self) -> &Bytes {
+        &self.inner.payload
+    }
+
+    fn subject(&self) -> &str {
+        self.inner.subject.as_str()
+    }
+
+    fn headers(&self) -> Option<&HeaderMap> {
+        self.inner.headers.as_ref()
+    }
+
+    fn reply(&self) -> Option<&str> {
+        self.inner.reply.as_ref().map(|s| s.as_str())
+    }
+
+    async fn ack(&self) -> Result<(), JetStreamError> {
+        self.inner
+            .ack()
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+
+    async fn double_ack(&self) -> Result<(), JetStreamError> {
+        self.inner
+            .double_ack()
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+
+    async fn nak(&self) -> Result<(), JetStreamError> {
+        self.inner
+            .ack_with(jetstream::AckKind::Nak(None))
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+
+    async fn nak_with_delay(&self, delay: Duration) -> Result<(), JetStreamError> {
+        self.inner
+            .ack_with(jetstream::AckKind::Nak(Some(delay)))
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+
+    async fn term(&self) -> Result<(), JetStreamError> {
+        self.inner
+            .ack_with(jetstream::AckKind::Term)
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+
+    async fn in_progress(&self) -> Result<(), JetStreamError> {
+        self.inner
+            .ack_with(jetstream::AckKind::Progress)
+            .await
+            .map_err(|e| JetStreamError(e.to_string()))
+    }
+}
+
 pub struct NatsJetStreamConsumer {
     inner: jetstream::consumer::Consumer<pull::Config>,
 }
@@ -103,7 +177,8 @@ impl JetStreamConsumerFactory for NatsJetStreamClient {
 
 impl JetStreamConsumer for NatsJetStreamConsumer {
     type Error = JetStreamError;
-    type Messages = futures::stream::BoxStream<'static, Result<JsMessage, JetStreamError>>;
+    type Message = NatsJsMessage;
+    type Messages = futures::stream::BoxStream<'static, Result<NatsJsMessage, JetStreamError>>;
 
     async fn messages(&self) -> Result<Self::Messages, JetStreamError> {
         let messages = self
@@ -115,7 +190,7 @@ impl JetStreamConsumer for NatsJetStreamConsumer {
         Ok(messages
             .map(|result| {
                 result
-                    .map(JsMessage::new)
+                    .map(NatsJsMessage::new)
                     .map_err(|e| JetStreamError(e.to_string()))
             })
             .boxed())

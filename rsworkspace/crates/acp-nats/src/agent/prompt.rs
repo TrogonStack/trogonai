@@ -5,9 +5,14 @@ use bytes::Bytes;
 use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
+use trogon_nats::jetstream::{
+    JetStreamConsumer as _, JetStreamConsumerFactory, JetStreamPublisher, JsMessage as _,
+};
 use trogon_std::JsonSerialize;
 
 use crate::agent::Bridge;
+use crate::constants::SESSION_ID_HEADER;
+use crate::jetstream::{consumers, streams};
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
 use crate::session_id::AcpSessionId;
 
@@ -26,6 +31,7 @@ pub async fn handle<N, C, J, S>(
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: trogon_std::time::GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
     S: JsonSerialize,
 {
     let start = bridge.clock.now();
@@ -39,16 +45,43 @@ where
     let sid = session_id.as_ref();
     let prefix = bridge.config.acp_prefix();
 
+    let result = match bridge.js() {
+        Some(js) => handle_js(bridge, js, &args, serializer, sid, prefix, &req_id).await,
+        None => handle_nats(bridge, &args, serializer, sid, prefix, &req_id).await,
+    };
+
+    bridge.metrics.record_request(
+        "prompt",
+        bridge.clock.elapsed(start).as_secs_f64(),
+        result.is_ok(),
+    );
+
+    result
+}
+
+async fn handle_nats<N, C, J, S>(
+    bridge: &Bridge<N, C, J>,
+    args: &PromptRequest,
+    serializer: &S,
+    sid: &str,
+    prefix: &str,
+    req_id: &str,
+) -> agent_client_protocol::Result<PromptResponse>
+where
+    N: PublishClient + SubscribeClient + FlushClient,
+    C: trogon_std::time::GetElapsed,
+    S: JsonSerialize,
+{
     // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
     let mut notifications_sub = bridge
         .nats
-        .subscribe(session::agent::update(prefix, sid, &req_id))
+        .subscribe(session::agent::update(prefix, sid, req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut response_sub = bridge
         .nats
-        .subscribe(session::agent::prompt_response(prefix, sid, &req_id))
+        .subscribe(session::agent::prompt_response(prefix, sid, req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
@@ -64,11 +97,12 @@ where
         })?;
 
     let payload_bytes = serializer
-        .to_vec(&args)
+        .to_vec(args)
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
+    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(SESSION_ID_HEADER, sid);
 
     let prompt_subject = session::agent::prompt(prefix, sid);
     bridge
@@ -85,7 +119,7 @@ where
 
     let op_timeout = bridge.config.prompt_timeout();
 
-    let result = loop {
+    loop {
         tokio::select! {
             notif = notifications_sub.next() => {
                 let Some(msg) = notif else {
@@ -140,15 +174,177 @@ where
                 break Ok(PromptResponse::new(StopReason::Cancelled));
             }
         }
-    };
+    }
+}
 
-    bridge.metrics.record_request(
-        "prompt",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        result.is_ok(),
-    );
+async fn handle_js<N, C, J, S>(
+    bridge: &Bridge<N, C, J>,
+    js: &J,
+    args: &PromptRequest,
+    serializer: &S,
+    sid: &str,
+    prefix: &str,
+    req_id: &str,
+) -> agent_client_protocol::Result<PromptResponse>
+where
+    N: SubscribeClient,
+    C: trogon_std::time::GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+    S: JsonSerialize,
+{
+    // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
+    // JetStream consumers with DeliverAll replay from stream start, so they'll see the
+    // response even if the runner responds before we start consuming.
+    let notifications_stream = streams::notifications_stream_name(prefix);
+    let notif_config = consumers::prompt_notifications_consumer(prefix, sid, req_id);
+    let notif_consumer: J::Consumer = js
+        .create_consumer(&notifications_stream, notif_config)
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("create notification consumer: {e}"),
+            )
+        })?;
+    let mut notif_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
+        notif_consumer.messages().await.map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("notification messages: {e}"),
+            )
+        })?;
 
-    result
+    let responses_stream = streams::responses_stream_name(prefix);
+    let resp_config = consumers::prompt_response_consumer(prefix, sid, req_id);
+    let resp_consumer: J::Consumer = js
+        .create_consumer(&responses_stream, resp_config)
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("create response consumer: {e}"),
+            )
+        })?;
+    let mut resp_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
+        resp_consumer.messages().await.map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("response messages: {e}"),
+            )
+        })?;
+
+    // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
+    let mut cancel_sub = bridge
+        .nats
+        .subscribe(session::agent::cancelled(prefix, sid))
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("subscribe cancelled: {e}"),
+            )
+        })?;
+
+    // Now publish — consumers are ready, no race condition.
+    let payload_bytes = serializer
+        .to_vec(args)
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(SESSION_ID_HEADER, sid);
+
+    let prompt_subject = session::agent::prompt(prefix, sid);
+    js.js_publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
+
+    let op_timeout = bridge.config.prompt_timeout();
+
+    loop {
+        tokio::select! {
+            notif = notif_messages.next() => {
+                match notif {
+                    None => {
+                        bridge.metrics.record_error("prompt", "notification_stream_closed");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "notification stream closed unexpectedly",
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        bridge.metrics.record_error("prompt", "notification_consumer_error");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            format!("notification consumer: {e}"),
+                        ));
+                    }
+                    Some(Ok(js_msg)) => {
+                        let notification: SessionNotification = match serde_json::from_slice(js_msg.payload()) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                warn!(error = %e, "bad notification payload; skipping");
+                                let _ = js_msg.ack().await;
+                                continue;
+                            }
+                        };
+                        let _ = js_msg.ack().await;
+                        if bridge.notification_sender.send(notification).await.is_err() {
+                            warn!("notification receiver dropped; continuing prompt");
+                        }
+                    }
+                }
+            }
+            resp = timeout(op_timeout, resp_messages.next()) => {
+                match resp {
+                    Ok(Some(Ok(js_msg))) => {
+                        match serde_json::from_slice::<PromptResponse>(js_msg.payload()) {
+                            Ok(response) => {
+                                let _ = js_msg.ack().await;
+                                break Ok(response);
+                            }
+                            Err(_) => {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.payload()) {
+                                    let _ = js_msg.ack().await;
+                                    break Err(agent_err);
+                                }
+                                let _ = js_msg.term().await;
+                                bridge.metrics.record_error("prompt", "bad_response_payload");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    "bad response payload",
+                                ));
+                            }
+                        }
+                    }
+                    Ok(Some(Err(e))) => {
+                        bridge.metrics.record_error("prompt", "response_consumer_error");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            format!("response consumer: {e}"),
+                        ));
+                    }
+                    Ok(None) => {
+                        bridge.metrics.record_error("prompt", "response_stream_closed");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "response stream closed unexpectedly",
+                        ));
+                    }
+                    Err(_elapsed) => {
+                        bridge.metrics.record_error("prompt", "prompt_timeout");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt timed out waiting for runner",
+                        ));
+                    }
+                }
+            }
+            _ = cancel_sub.next() => {
+                break Ok(PromptResponse::new(StopReason::Cancelled));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -372,6 +568,540 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[derive(Clone)]
+    struct MockJs {
+        publisher: trogon_nats::jetstream::MockJetStreamPublisher,
+        consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
+    }
+
+    impl MockJs {
+        fn new() -> Self {
+            Self {
+                publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
+                consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
+            }
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+        type PublishError = trogon_nats::mocks::MockError;
+
+        async fn js_publish_with_headers(
+            &self,
+            subject: String,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<async_nats::jetstream::publish::PublishAck, Self::PublishError> {
+            self.publisher
+                .js_publish_with_headers(subject, headers, payload)
+                .await
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamConsumerFactory for MockJs {
+        type Error = trogon_nats::mocks::MockError;
+        type Consumer = trogon_nats::jetstream::MockJetStreamConsumer;
+
+        async fn create_consumer(
+            &self,
+            stream_name: &str,
+            config: async_nats::jetstream::consumer::pull::Config,
+        ) -> Result<trogon_nats::jetstream::MockJetStreamConsumer, Self::Error> {
+            self.consumer_factory
+                .create_consumer(stream_name, config)
+                .await
+        }
+    }
+
+    fn mock_bridge_with_js() -> (
+        AdvancedMockNatsClient,
+        MockJs,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+    ) {
+        let mock = AdvancedMockNatsClient::new();
+        let js = MockJs::new();
+        let (notification_tx, _notification_rx) =
+            tokio::sync::mpsc::channel::<SessionNotification>(64);
+        let bridge = Bridge::with_jetstream(
+            mock.clone(),
+            js.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("prompt-js-test"),
+            Config::for_test("acp").with_prompt_timeout(std::time::Duration::from_secs(5)),
+            notification_tx,
+        );
+        (mock, js, bridge)
+    }
+
+    #[tokio::test]
+    async fn prompt_js_success() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+
+        // cancel sub for core NATS
+        let _cancel_tx = mock.inject_messages();
+
+        // notification consumer
+        let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        // response consumer
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        let response = PromptResponse::new(StopReason::EndTurn);
+        let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(
+            &serde_json::to_vec(&response).unwrap(),
+        ));
+        resp_tx.unbounded_send(msg).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+
+        drop(notif_tx);
+        assert!(
+            result.is_ok(),
+            "expected Ok, got: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn prompt_js_cancel() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+
+        let cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        cancel_tx.unbounded_send(make_nats_msg(b"")).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn prompt_js_timeout() {
+        let mock = AdvancedMockNatsClient::new();
+        let js = MockJs::new();
+        let (notification_tx, _notification_rx) =
+            tokio::sync::mpsc::channel::<SessionNotification>(64);
+        let bridge = Bridge::with_jetstream(
+            mock.clone(),
+            js.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("prompt-js-timeout-test"),
+            Config::for_test("acp").with_prompt_timeout(std::time::Duration::from_millis(50)),
+            notification_tx,
+        );
+
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn prompt_js_notification_forwarding() {
+        let mock = AdvancedMockNatsClient::new();
+        let js = MockJs::new();
+        let (notification_tx, _notification_rx) =
+            tokio::sync::mpsc::channel::<SessionNotification>(64);
+        let bridge = Bridge::with_jetstream(
+            mock.clone(),
+            js.clone(),
+            trogon_std::time::SystemClock,
+            &opentelemetry::global::meter("prompt-js-notif-test"),
+            Config::for_test("acp").with_prompt_timeout(std::time::Duration::from_secs(5)),
+            notification_tx,
+        );
+
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        let notification = SessionNotification::new(
+            "s1",
+            agent_client_protocol::SessionUpdate::AgentThoughtChunk(
+                agent_client_protocol::ContentChunk::new(
+                    agent_client_protocol::ContentBlock::Text(
+                        agent_client_protocol::TextContent::new("thinking..."),
+                    ),
+                ),
+            ),
+        );
+        let notif_msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(
+            &serde_json::to_vec(&notification).unwrap(),
+        ));
+        notif_tx.unbounded_send(notif_msg).unwrap();
+
+        let response = PromptResponse::new(StopReason::EndTurn);
+        let resp_msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(
+            &serde_json::to_vec(&response).unwrap(),
+        ));
+        resp_tx.unbounded_send(resp_msg).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+
+        drop(notif_tx);
+        assert!(
+            result.is_ok(),
+            "expected Ok, got: {:?}",
+            result.unwrap_err()
+        );
+        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn prompt_js_publish_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+        let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        js.publisher.fail_next_js_publish();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("js publish"));
+    }
+
+    #[tokio::test]
+    async fn prompt_js_bad_response_payload() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(b"not json"));
+        resp_tx.unbounded_send(msg).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("bad response payload"));
+    }
+
+    #[tokio::test]
+    async fn prompt_js_agent_error_response() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        let agent_err = Error::new(ErrorCode::InternalError.into(), "agent blew up");
+        let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(
+            &serde_json::to_vec(&agent_err).unwrap(),
+        ));
+        resp_tx.unbounded_send(msg).unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError);
+        assert!(err.message.contains("agent blew up"));
+    }
+
+    #[tokio::test]
+    async fn prompt_js_response_stream_closed() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        drop(resp_tx);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_js_notif_consumer_creation_failure() {
+        let (mock, _js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+        // Don't add any consumers — first create_consumer call will fail
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("create notification consumer")
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_js_resp_consumer_creation_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+        // Add notif consumer but not response consumer
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("create response consumer")
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_js_cancel_subscribe_failure() {
+        let (_mock, js, bridge) = mock_bridge_with_js();
+        // Don't inject cancel_tx — subscribe will fail (no streams in mock)
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+        let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("subscribe cancelled"));
+    }
+
+    #[tokio::test]
+    async fn prompt_js_notif_messages_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let failing_consumer = trogon_nats::jetstream::MockJetStreamConsumer::failing();
+        js.consumer_factory.add_consumer(failing_consumer);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("notification messages")
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_js_resp_messages_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        let failing_consumer = trogon_nats::jetstream::MockJetStreamConsumer::failing();
+        js.consumer_factory.add_consumer(failing_consumer);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("response messages"));
+    }
+
+    #[tokio::test]
+    async fn prompt_nats_notification_forwarding() {
+        let (mock, bridge) = mock_bridge();
+
+        let notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        let notification = SessionNotification::new(
+            "s1",
+            agent_client_protocol::SessionUpdate::AgentThoughtChunk(
+                agent_client_protocol::ContentChunk::new(
+                    agent_client_protocol::ContentBlock::Text(
+                        agent_client_protocol::TextContent::new("thinking..."),
+                    ),
+                ),
+            ),
+        );
+        notif_tx
+            .unbounded_send(make_nats_msg(&serde_json::to_vec(&notification).unwrap()))
+            .unwrap();
+
+        let response = PromptResponse::new(StopReason::EndTurn);
+        resp_tx
+            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
+            .unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn prompt_nats_notification_stream_closed() {
+        let (mock, bridge) = mock_bridge();
+
+        let notif_tx = mock.inject_messages();
+        let _resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        // Close notification stream immediately
+        drop(notif_tx);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("notification stream closed")
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_nats_bad_notification_payload_skipped() {
+        let (mock, bridge) = mock_bridge();
+
+        let notif_tx = mock.inject_messages();
+        let resp_tx = mock.inject_messages();
+        let _cancel_tx = mock.inject_messages();
+
+        // Send bad notification, then valid response
+        notif_tx.unbounded_send(make_nats_msg(b"not json")).unwrap();
+        let response = PromptResponse::new(StopReason::EndTurn);
+        resp_tx
+            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
+            .unwrap();
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn prompt_js_notification_stream_closed() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+
+        let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+        let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
+        drop(notif_tx);
+
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("notification stream closed")
+        );
     }
 
     #[tokio::test]

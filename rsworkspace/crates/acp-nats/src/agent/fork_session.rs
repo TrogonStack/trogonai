@@ -1,9 +1,11 @@
 use super::Bridge;
+use super::js_request;
 use crate::error::map_nats_error;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
+use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -11,7 +13,11 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id, new_session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J>(
+pub async fn handle<
+    N: RequestClient + PublishClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+>(
     bridge: &Bridge<N, C, J>,
     args: ForkSessionRequest,
 ) -> Result<ForkSessionResponse> {
@@ -28,17 +34,33 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             format!("Invalid session ID: {}", e),
         )
     })?;
-    let nats = bridge.nats();
-    let subject = session::agent::fork(bridge.config.acp_prefix(), session_id.as_str());
+    let prefix = bridge.config.acp_prefix();
+    let subject = session::agent::fork(prefix, session_id.as_str());
 
-    let result = nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
-        nats,
-        &subject,
-        &args,
-        bridge.config.operation_timeout,
-    )
-    .await
-    .map_err(map_nats_error);
+    let result = match bridge.js() {
+        Some(js) => {
+            let req_id = uuid::Uuid::new_v4().to_string();
+            js_request::js_request::<J, _, ForkSessionResponse, _>(
+                js,
+                &subject,
+                &args,
+                &trogon_std::StdJsonSerialize,
+                prefix,
+                session_id.as_str(),
+                &req_id,
+                bridge.config.operation_timeout,
+            )
+            .await
+        }
+        None => nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
+            bridge.nats(),
+            &subject,
+            &args,
+            bridge.config.operation_timeout,
+        )
+        .await
+        .map_err(map_nats_error),
+    };
 
     if let Ok(ref response) = result {
         Span::current().record("new_session_id", response.session_id.to_string().as_str());
