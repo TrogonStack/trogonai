@@ -506,6 +506,19 @@ impl agent_client_protocol::Agent for XaiAgent {
 
 #[cfg(feature = "test-helpers")]
 impl XaiAgent {
+    /// Creates an `XaiAgent` backed by a specific NATS KV bucket. For tests only.
+    pub async fn new_with_kv_bucket(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        bucket: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let js = async_nats::jetstream::new(nats.clone());
+        let store = KvSessionStore::open(js, bucket).await?;
+        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+    }
+
     /// Creates an `XaiAgent` backed by an in-memory session store. For tests only.
     pub fn new_in_memory(
         nats: async_nats::Client,
