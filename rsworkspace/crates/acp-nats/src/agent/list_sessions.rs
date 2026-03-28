@@ -6,8 +6,8 @@ use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
 
 #[instrument(name = "acp.session.list", skip(bridge, args))]
-pub async fn handle<N: RequestClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: RequestClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: ListSessionsRequest,
 ) -> Result<ListSessionsResponse> {
     let start = bridge.clock.now();

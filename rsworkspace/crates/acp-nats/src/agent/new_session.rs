@@ -10,8 +10,8 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: NewSessionRequest,
 ) -> Result<NewSessionResponse> {
     let start = bridge.clock.now();

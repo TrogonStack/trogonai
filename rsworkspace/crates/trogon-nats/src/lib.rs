@@ -40,6 +40,7 @@ pub mod auth;
 pub mod client;
 pub mod connect;
 pub mod constants;
+pub mod jetstream;
 pub mod messaging;
 
 #[cfg(feature = "test-support")]

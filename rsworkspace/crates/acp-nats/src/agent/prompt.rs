@@ -18,8 +18,8 @@ pub use trogon_nats::REQ_ID_HEADER;
     skip(bridge, args, serializer),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N, C, S>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N, C, J, S>(
+    bridge: &Bridge<N, C, J>,
     args: PromptRequest,
     serializer: &S,
 ) -> agent_client_protocol::Result<PromptResponse>

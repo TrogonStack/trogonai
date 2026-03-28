@@ -10,8 +10,8 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(method_id = %args.method_id)
 )]
-pub async fn handle<N: RequestClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: RequestClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: AuthenticateRequest,
 ) -> Result<AuthenticateResponse> {
     let start = bridge.clock.now();

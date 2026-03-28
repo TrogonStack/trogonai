@@ -11,8 +11,8 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(method = %args.method)
 )]
-pub async fn handle<N: RequestClient, C: GetElapsed>(
-    bridge: &Bridge<N, C>,
+pub async fn handle<N: RequestClient, C: GetElapsed, J>(
+    bridge: &Bridge<N, C, J>,
     args: ExtRequest,
 ) -> Result<ExtResponse> {
     let start = bridge.clock.now();
