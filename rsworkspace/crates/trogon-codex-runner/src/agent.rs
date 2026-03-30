@@ -496,7 +496,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         // Only interrupt if the process is already alive — do not spawn a new
         // one just to cancel a turn that can't exist in a dead process.
         if let Some(thread_id) = thread_id {
-            let guard = self.process.lock().await;
+            let guard = Arc::clone(&self.process).lock_owned().await;
             if let Some(p) = guard.as_ref()
                 && p.is_alive()
                 && let Err(e) = p.turn_interrupt(&thread_id).await

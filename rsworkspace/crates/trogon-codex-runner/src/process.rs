@@ -127,8 +127,20 @@ impl CodexProcess {
         // Background task: read stdout and route messages.
         tokio::task::spawn_local(Self::read_loop(stdout, pending, turn_senders, alive));
 
-        // Handshake: initialize.
-        process.initialize().await?;
+        // Handshake: initialize. Timeout is configurable via CODEX_SPAWN_TIMEOUT_SECS
+        // (default 30 s) so tests can set a shorter value without waiting.
+        let spawn_timeout_secs = std::env::var("CODEX_SPAWN_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(30);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(spawn_timeout_secs),
+            process.initialize(),
+        )
+        .await
+        .map_err(|_| {
+            format!("codex app-server handshake timed out after {spawn_timeout_secs} s")
+        })??;
 
         Ok(process)
     }
@@ -312,6 +324,8 @@ impl CodexProcess {
                         Ok(msg.result.unwrap_or(Value::Null))
                     };
                     let _ = tx.send(result);
+                } else {
+                    debug!(id = id_u64, "codex: response arrived for unknown/dropped request");
                 }
             } else if let Some(method) = &msg.method {
                 // It's a server notification — route to the right thread's channel.
