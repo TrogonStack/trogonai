@@ -595,7 +595,7 @@ async fn prompt_sends_accumulated_history_on_second_turn() {
 }
 
 #[tokio::test]
-async fn prompt_with_api_error_returns_end_turn_without_updating_history() {
+async fn prompt_with_api_error_returns_acp_error() {
     let _guard = env_lock().lock().unwrap();
     let url = fake_xai_error(401).await;
     let agent = make_agent(Some(&url)).await;
@@ -604,12 +604,13 @@ async fn prompt_with_api_error_returns_end_turn_without_updating_history() {
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
-    let resp = agent
+    let err = agent
         .prompt(PromptRequest::new(session_id.clone(), content))
         .await
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    // Must propagate as an ACP error, not silently return EndTurn.
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
 
     // History must remain empty — no assistant text was produced.
     let history = agent.test_session_history(&session_id).await;
@@ -2640,3 +2641,4 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
     assert!(content.starts_with("Please review:"), "text block must come first: {content:?}");
     assert!(content.contains("main.rs"), "resource link must be included: {content:?}");
 }
+
