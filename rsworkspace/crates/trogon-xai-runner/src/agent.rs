@@ -450,7 +450,13 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
             other => {
                 warn!(config_id = %other, "xai: set_session_config_option called for unknown option — ignored");
-                Ok(SetSessionConfigOptionResponse::new(vec![]))
+                // Per ACP spec, return the current state of all known options
+                // even when the requested config_id is unknown.
+                let session_id = req.session_id.to_string();
+                let search_mode = self.session_store.get(&session_id).await
+                    .map(|s| s.search_mode.unwrap_or_else(|| "off".to_string()))
+                    .unwrap_or_else(|| "off".to_string());
+                Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(&search_mode)]))
             }
         }
     }

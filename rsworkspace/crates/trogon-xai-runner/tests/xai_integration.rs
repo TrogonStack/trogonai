@@ -2258,3 +2258,43 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         "history must not be updated when only tool calls were produced: {history:?}"
     );
 }
+
+// set_session_config_option with unknown config_id returns current state of
+// all known options (per ACP spec), not an empty list.
+#[tokio::test]
+async fn set_session_config_option_unknown_id_returns_current_state() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Set search_mode to "auto" first so we can verify the current state is returned.
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "auto",
+        ))
+        .await
+        .unwrap();
+
+    // Now call with an unknown config_id.
+    let resp = agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "unknown_option",
+            "value",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.config_options.len(), 1, "should return current state of known options");
+    assert_eq!(resp.config_options[0].id.to_string(), "search_mode");
+    // Current value should reflect the previously set "auto".
+    let current = match &resp.config_options[0].kind {
+        agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+        _ => panic!("expected Select kind"),
+    };
+    assert_eq!(current, "auto");
+}
