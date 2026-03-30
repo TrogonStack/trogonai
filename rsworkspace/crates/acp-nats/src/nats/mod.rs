@@ -5,8 +5,8 @@ pub(crate) mod token;
 
 pub use extensions::ExtSessionReady;
 pub use parsing::{
-    AgentMethod, ClientMethod, ParsedAgentSubject, ParsedClientSubject, parse_agent_subject,
-    parse_client_subject,
+    ClientMethod, GlobalAgentMethod, ParsedAgentSubject, ParsedClientSubject, SessionAgentMethod,
+    parse_agent_subject, parse_client_subject,
 };
 pub use subjects::{agent, session};
 pub use trogon_nats::{
