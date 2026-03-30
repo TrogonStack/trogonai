@@ -6,7 +6,7 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
+    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar, PromptCapabilities,
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode,
     ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
@@ -247,6 +247,9 @@ impl agent_client_protocol::Agent for XaiAgent {
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
+                    .prompt_capabilities(
+                        PromptCapabilities::new().embedded_context(true),
+                    )
                     .session_capabilities(
                         SessionCapabilities::new()
                             .fork(SessionForkCapabilities::new())
