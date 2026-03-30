@@ -16,6 +16,7 @@
 //! | `MOCK_FORK_NO_ID`                | Return result with no `threadId` field for `thread/fork` |
 //! | `MOCK_TURN_START_FAILS`          | Return JSON-RPC error for `turn/start`                    |
 //! | `MOCK_INITIALIZE_FAILS`          | Return JSON-RPC error for `initialize`                    |
+//! | `MOCK_HANG_ON_INITIALIZE`        | Block forever on `initialize` (never respond)             |
 //! | `MOCK_MALFORMED_BEFORE_COMPLETE` | Emit `{INVALID}` line before `turn/completed`             |
 //! | `MOCK_UNKNOWN_ID_BEFORE_COMPLETE`| Emit response with unknown ID before `turn/completed`     |
 //! | `MOCK_NONINT_ID_BEFORE_COMPLETE` | Emit response with non-integer ID before `turn/completed` |
@@ -39,6 +40,7 @@ fn main() {
     let fork_no_id = std::env::var("MOCK_FORK_NO_ID").is_ok();
     let turn_start_fails = std::env::var("MOCK_TURN_START_FAILS").is_ok();
     let initialize_fails = std::env::var("MOCK_INITIALIZE_FAILS").is_ok();
+    let hang_on_initialize = std::env::var("MOCK_HANG_ON_INITIALIZE").is_ok();
     let malformed_before_complete = std::env::var("MOCK_MALFORMED_BEFORE_COMPLETE").is_ok();
     let unknown_id_before_complete = std::env::var("MOCK_UNKNOWN_ID_BEFORE_COMPLETE").is_ok();
     let nonint_id_before_complete = std::env::var("MOCK_NONINT_ID_BEFORE_COMPLETE").is_ok();
@@ -47,6 +49,7 @@ fn main() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
+    let mut thread_counter: u64 = 0;
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -72,7 +75,9 @@ fn main() {
 
         match method {
             "initialize" => {
-                if initialize_fails {
+                if hang_on_initialize {
+                    std::thread::sleep(std::time::Duration::from_secs(300));
+                } else if initialize_fails {
                     respond_error(&mut out, &id, "mock: initialize rejected");
                 } else {
                     respond(&mut out, &id, serde_json::json!({"capabilities": {}}));
@@ -85,7 +90,8 @@ fn main() {
                     // Return a result without the threadId field.
                     respond(&mut out, &id, serde_json::json!({}));
                 } else {
-                    respond(&mut out, &id, serde_json::json!({"threadId": "mock-thread-1"}));
+                    thread_counter += 1;
+                    respond(&mut out, &id, serde_json::json!({"threadId": format!("mock-thread-{thread_counter}")}));
                 }
             }
             "thread/resume" => {
@@ -101,7 +107,8 @@ fn main() {
                 } else if fork_no_id {
                     respond(&mut out, &id, serde_json::json!({}));
                 } else {
-                    respond(&mut out, &id, serde_json::json!({"threadId": "mock-fork-1"}));
+                    thread_counter += 1;
+                    respond(&mut out, &id, serde_json::json!({"threadId": format!("mock-fork-{thread_counter}")}));
                 }
             }
             "turn/start" => {
