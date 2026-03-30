@@ -540,16 +540,10 @@ impl agent_client_protocol::Agent for XaiAgent {
                     // Status is Pending — the runner does not execute tools; the
                     // client is responsible for running the tool and returning the
                     // result as the next prompt turn.
-                    //
-                    // `arguments` is a JSON-encoded string from the API (e.g. `{"q":"test"}`).
-                    // Parse it into a Value so raw_input carries an object, not a
-                    // double-encoded string. Fall back to Value::String on invalid JSON.
-                    let input = serde_json::from_str(&arguments)
-                        .unwrap_or(serde_json::Value::String(arguments));
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::Pending)
                         .kind(ToolKind::Other)
-                        .raw_input(input);
+                        .raw_input(parse_tool_arguments(&arguments));
                     let notif = SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::ToolCall(tool_call),
@@ -608,6 +602,43 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
         }
         Ok(())
+    }
+}
+
+/// Parse the `arguments` string returned by xAI's API into a `serde_json::Value`.
+///
+/// xAI (like OpenAI) encodes tool call arguments as a JSON string
+/// (e.g. `"{\"q\":\"test\"}"`) rather than an inline object. Parsing it here
+/// means `ToolCall::raw_input` carries a proper JSON object instead of a
+/// double-encoded string. Falls back to `Value::String` when the input is not
+/// valid JSON.
+fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
+    serde_json::from_str(arguments)
+        .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tool_arguments_valid_json_returns_object() {
+        let val = parse_tool_arguments(r#"{"q":"test","limit":5}"#);
+        assert!(val.is_object(), "expected object, got {val:?}");
+        assert_eq!(val["q"], "test");
+        assert_eq!(val["limit"], 5);
+    }
+
+    #[test]
+    fn parse_tool_arguments_invalid_json_falls_back_to_string() {
+        let val = parse_tool_arguments("not-json");
+        assert_eq!(val, serde_json::Value::String("not-json".to_string()));
+    }
+
+    #[test]
+    fn parse_tool_arguments_empty_string_falls_back_to_string() {
+        let val = parse_tool_arguments("");
+        assert_eq!(val, serde_json::Value::String(String::new()));
     }
 }
 
