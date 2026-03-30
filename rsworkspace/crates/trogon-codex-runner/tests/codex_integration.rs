@@ -733,6 +733,33 @@ async fn new_session_returns_error_when_initialize_fails() {
     unsafe { std::env::remove_var("MOCK_INITIALIZE_FAILS") };
 }
 
+/// When the `initialize` handshake never receives a response, `spawn()` must
+/// time out and return an error.  We set `CODEX_SPAWN_TIMEOUT_SECS=1` so the
+/// test completes quickly.
+#[tokio::test(flavor = "current_thread")]
+async fn new_session_returns_error_when_initialize_hangs() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_HANG_ON_INITIALIZE", "1") };
+    unsafe { std::env::set_var("CODEX_SPAWN_TIMEOUT_SECS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let err = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap_err();
+            assert!(
+                err.message.contains("timed out"),
+                "expected timeout error, got: {}",
+                err.message
+            );
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_HANG_ON_INITIALIZE") };
+    unsafe { std::env::remove_var("CODEX_SPAWN_TIMEOUT_SECS") };
+}
+
 // ── closed session rejects subsequent operations ──────────────────────────────
 
 /// After `close_session`, `load_session`, `resume_session`, and `prompt` must
@@ -942,6 +969,40 @@ async fn prompt_after_resume_completes() {
                 .unwrap();
 
             assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+}
+// ── concurrent prompts ────────────────────────────────────────────────────────
+
+/// Two sessions prompting simultaneously must each receive their own events
+/// and both complete with `EndTurn`.  This exercises the per-thread broadcast
+/// channel routing in `CodexProcess` under cooperative concurrency.
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_prompts_on_different_sessions_complete_independently() {
+    let _guard = bin_env_lock().lock().unwrap();
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let sess1 = agent.new_session(NewSessionRequest::new("/tmp/s1")).await.unwrap();
+            let sess2 = agent.new_session(NewSessionRequest::new("/tmp/s2")).await.unwrap();
+            let sid1 = sess1.session_id.to_string();
+            let sid2 = sess2.session_id.to_string();
+
+            let (r1, r2) = tokio::join!(
+                agent.prompt(PromptRequest::new(
+                    sid1,
+                    vec![ContentBlock::Text(TextContent::new("hello from session 1"))],
+                )),
+                agent.prompt(PromptRequest::new(
+                    sid2,
+                    vec![ContentBlock::Text(TextContent::new("hello from session 2"))],
+                )),
+            );
+
+            assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
+            assert_eq!(r2.unwrap().stop_reason, StopReason::EndTurn);
         })
         .await;
 }
