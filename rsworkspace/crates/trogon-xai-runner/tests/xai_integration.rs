@@ -1627,6 +1627,22 @@ async fn set_session_mode_unknown_mode_returns_error() {
 }
 
 #[tokio::test]
+async fn set_session_mode_default_succeeds() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(
+            session_id,
+            "default",
+        ))
+        .await
+        .expect("set_session_mode('default') should succeed");
+}
+
+#[tokio::test]
 async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
     let _guard = env_lock().lock().unwrap();
     unsafe {
@@ -2180,25 +2196,38 @@ async fn history_at_exactly_the_limit_is_not_truncated() {
     assert_eq!(history[2].content, "turn 2");
 }
 
-// 4. close_session removes the session from list_sessions.
+// 4. Odd max_history_messages: (excess + 1) & !1 rounds up to the next even
+//    number so full user/assistant pairs are always dropped together.
+//    max=3, 4 messages accumulated → excess=1 → trimmed=2 → 2 remain.
 #[tokio::test]
-async fn close_session_removes_session_from_list() {
+async fn history_truncation_rounds_up_to_even_for_odd_max() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    // max=3 (odd). After 2 turns we have 4 messages (excess=1).
+    // (1 + 1) & !1 = 2, so 2 messages are trimmed and 2 remain.
+    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
+    let agent = make_agent_with_max_history(Some(&url), 3).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    let before = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-    assert_eq!(before.sessions.len(), 1);
+    for i in 1..=2u32 {
+        agent
+            .prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Text(TextContent::new(format!("turn {i}")))],
+            ))
+            .await
+            .unwrap();
+    }
 
-    agent.close_session(CloseSessionRequest::new(sid.clone())).await.unwrap();
-
-    let after = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-    assert!(
-        after.sessions.is_empty(),
-        "session should be removed from list after close: {after:?}"
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(
+        history.len(),
+        2,
+        "odd max=3: excess=1 rounds up to 2 trimmed, 2 messages remain: {history:?}"
     );
+    // Only the last pair (turn 2 user + assistant reply) should survive.
+    assert_eq!(history[0].content, "turn 2");
 }
 
 // 5. Multiple tool calls in one turn: agent handles them without panicking,
