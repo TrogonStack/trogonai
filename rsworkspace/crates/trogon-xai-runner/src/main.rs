@@ -23,6 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n > 0)
         .unwrap_or(20);
+    let session_ttl_secs = std::env::var("XAI_SESSION_TTL_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(7 * 24 * 3600);
 
     info!(
         nats_url,
@@ -30,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         default_model,
         system_prompt_set,
         max_history_messages,
+        session_ttl_secs,
         "xai-runner starting"
     );
 

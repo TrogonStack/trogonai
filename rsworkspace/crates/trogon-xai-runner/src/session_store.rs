@@ -42,14 +42,20 @@ pub struct KvSessionStore {
 
 impl KvSessionStore {
     /// Opens or creates the KV bucket with the given name.
+    ///
+    /// `max_age` sets the TTL for session entries. Use `Duration::ZERO` to
+    /// disable expiry (entries live forever). The default in production is 7
+    /// days (`XAI_SESSION_TTL_SECS` env var).
     pub async fn open(
         js: async_nats::jetstream::Context,
         bucket: impl Into<String>,
+        max_age: std::time::Duration,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let bucket = bucket.into();
         let config = async_nats::jetstream::kv::Config {
             bucket: bucket.clone(),
             history: 1,
+            max_age,
             ..Default::default()
         };
         let kv = match js.create_key_value(config).await {

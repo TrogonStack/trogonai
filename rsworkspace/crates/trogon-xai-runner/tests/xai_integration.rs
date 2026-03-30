@@ -12,9 +12,10 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
     Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
-    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
-    SetSessionModelRequest, StopReason, TextContent,
+    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, InitializeRequest,
+    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    ResumeSessionRequest, ResourceLink, SetSessionConfigOptionRequest, SetSessionModelRequest,
+    StopReason, TextContent, TextResourceContents,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -2508,4 +2509,85 @@ async fn fork_session_inherits_system_prompt() {
         "first message of fork prompt must be system: {fork_msgs:?}"
     );
     assert_eq!(fork_msgs[0]["content"], "Be concise.");
+}
+
+// ── ContentBlock::ResourceLink and ContentBlock::Resource ─────────────────────
+
+// ResourceLink: the URI and name must be forwarded to xAI as text context.
+#[tokio::test]
+async fn resource_link_is_included_as_text_in_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::ResourceLink(
+                ResourceLink::new("README", "file:///project/README.md"),
+            )],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    assert!(
+        content.contains("README") && content.contains("file:///project/README.md"),
+        "ResourceLink must be forwarded as text: {content:?}"
+    );
+}
+
+// EmbeddedResource with text content: the text must be passed through directly.
+#[tokio::test]
+async fn embedded_text_resource_is_included_as_text_in_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
+                ),
+            ))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    assert_eq!(content, "fn main() {}");
+}
+
+// Mixed prompt: Text + ResourceLink blocks are joined with "\n".
+#[tokio::test]
+async fn mixed_text_and_resource_link_blocks_are_joined() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![
+                ContentBlock::Text(TextContent::new("Please review:")),
+                ContentBlock::ResourceLink(ResourceLink::new("main.rs", "file:///src/main.rs")),
+            ],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    assert!(content.starts_with("Please review:"), "text block must come first: {content:?}");
+    assert!(content.contains("main.rs"), "resource link must be included: {content:?}");
 }
