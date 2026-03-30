@@ -2415,3 +2415,97 @@ async fn close_session_unknown_session_is_noop() {
         .await
         .expect("close_session on unknown id should succeed silently");
 }
+
+// Prompt timeout with NO text received before deadline — history must stay empty.
+// Distinct from prompt_times_out_when_server_stops_responding, which sends a
+// text chunk before holding (so that test verifies history IS updated on timeout).
+#[tokio::test]
+async fn prompt_timeout_with_no_text_does_not_update_history() {
+    let _guard = env_lock().lock().unwrap();
+
+    // Server sends headers only — no text chunks, connection held open.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            writer
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+                .await
+                .ok();
+            writer.flush().await.ok();
+            // Hold open without sending any SSE data.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    });
+
+    let agent = make_agent_with_timeout(Some(&url), 1).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    // No text was produced before the timeout — history must remain empty.
+    let history = agent.test_session_history(&session_id).await;
+    assert!(
+        history.is_empty(),
+        "history must not be updated when timeout fires before any text: {history:?}"
+    );
+}
+
+// Fork inherits the parent's system_prompt: subsequent prompts on the forked
+// session must include the system message in the HTTP request body.
+#[tokio::test]
+async fn fork_session_inherits_system_prompt() {
+    let _guard = env_lock().lock().unwrap();
+    // Two connections: one for the parent prompt, one for the fork prompt.
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["parent reply"], vec!["fork reply"]]).await;
+    let agent = make_agent_with_system_prompt(Some(&url), "Be concise.").await;
+
+    // Create parent and prompt once to build history.
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let src_id = src.session_id.to_string();
+    agent
+        .prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("parent question"))],
+        ))
+        .await
+        .unwrap();
+
+    // Fork — must inherit system_prompt from parent session data.
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
+        .await
+        .unwrap();
+    let fork_id = fork.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            fork_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("fork question"))],
+        ))
+        .await
+        .unwrap();
+
+    // Inspect the fork's HTTP request: messages[0] must be the system prompt.
+    let captured = bodies.lock().unwrap();
+    let fork_msgs = captured[1]["messages"].as_array().expect("fork messages array");
+    assert_eq!(
+        fork_msgs[0]["role"], "system",
+        "first message of fork prompt must be system: {fork_msgs:?}"
+    );
+    assert_eq!(fork_msgs[0]["content"], "Be concise.");
+}
