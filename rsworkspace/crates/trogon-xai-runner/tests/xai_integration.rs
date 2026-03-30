@@ -2327,3 +2327,91 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
     };
     assert_eq!(current, "auto");
 }
+
+// ── additional coverage gaps ──────────────────────────────────────────────────
+
+// load_session reflects the current_value after search_mode is changed.
+// (Existing test only checks the option is present, not its value.)
+#[tokio::test]
+async fn load_session_reflects_updated_search_mode() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "on",
+        ))
+        .await
+        .unwrap();
+
+    let loaded = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
+    let opts = loaded.config_options.expect("config_options should be present");
+    assert_eq!(opts.len(), 1);
+    let current = match &opts[0].kind {
+        agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+        _ => panic!("expected Select kind"),
+    };
+    assert_eq!(current, "on", "load_session should reflect the persisted search_mode");
+}
+
+// Explicitly setting search_mode to "off" clears it and subsequent prompts
+// omit search_parameters. This exercises the `if mode == "off" { None }` branch
+// in set_session_config_option, which is distinct from the never-set default.
+#[tokio::test]
+async fn search_mode_explicit_off_clears_search_parameters() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Enable search, then explicitly disable it.
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "auto",
+        ))
+        .await
+        .unwrap();
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "off",
+        ))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("query"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    assert!(
+        captured[0]["search_parameters"].is_null(),
+        "search_parameters must be absent after explicitly setting search_mode=off: {}",
+        captured[0]
+    );
+}
+
+// close_session with an unknown session ID is a no-op — returns Ok.
+#[tokio::test]
+async fn close_session_unknown_session_is_noop() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    agent
+        .close_session(CloseSessionRequest::new("no-such-session"))
+        .await
+        .expect("close_session on unknown id should succeed silently");
+}
