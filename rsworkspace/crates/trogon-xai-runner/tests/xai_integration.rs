@@ -78,6 +78,7 @@ async fn make_agent(base_url: Option<&str>) -> XaiAgent {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -92,6 +93,7 @@ async fn make_agent_with_models(models_env: &str) -> XaiAgent {
         std::env::remove_var("XAI_BASE_URL");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::set_var("XAI_MODELS", models_env);
     }
     XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
@@ -105,6 +107,7 @@ async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -118,6 +121,7 @@ async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> X
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", timeout_secs.to_string());
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
@@ -132,6 +136,7 @@ async fn make_agent_with_system_prompt(base_url: Option<&str>, system_prompt: &s
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::set_var("XAI_SYSTEM_PROMPT", system_prompt);
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
@@ -1991,4 +1996,96 @@ async fn fork_session_inherits_search_mode() {
         _ => panic!("expected Select kind"),
     };
     assert_eq!(current_value, "on", "forked session should inherit search_mode=on");
+}
+
+// ── XAI_MAX_HISTORY_MESSAGES env var ─────────────────────────────────────────
+
+async fn make_agent_with_max_history(base_url: Option<&str>, max: usize) -> XaiAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::set_var("XAI_MAX_HISTORY_MESSAGES", max.to_string());
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
+    }
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+}
+
+#[tokio::test]
+async fn xai_max_history_messages_default_is_40() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    assert_eq!(agent.test_max_history_messages(), 40);
+}
+
+#[tokio::test]
+async fn xai_max_history_messages_zero_falls_back_to_default() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_with_max_history(None, 0).await;
+    assert_eq!(agent.test_max_history_messages(), 40);
+}
+
+#[tokio::test]
+async fn xai_max_history_messages_custom_value_accepted() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_with_max_history(None, 10).await;
+    assert_eq!(agent.test_max_history_messages(), 10);
+}
+
+#[tokio::test]
+async fn history_is_truncated_after_exceeding_max() {
+    let _guard = env_lock().lock().unwrap();
+    // limit = 4 messages (2 exchanges). After 3 exchanges the oldest pair is dropped.
+    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
+    let agent = make_agent_with_max_history(Some(&url), 4).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    for i in 1..=3u32 {
+        agent
+            .prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Text(TextContent::new(format!("turn {i}")))],
+            ))
+            .await
+            .unwrap();
+    }
+
+    // After 3 turns (6 messages), with max=4, only the last 4 should remain.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 4, "expected 4 messages, got {}: {history:?}", history.len());
+    assert_eq!(history[0].content, "turn 2", "oldest pair should have been dropped");
+    assert_eq!(history[2].content, "turn 3");
+}
+
+#[tokio::test]
+async fn history_truncation_drops_oldest_pair_first() {
+    let _guard = env_lock().lock().unwrap();
+    // limit = 2 messages (1 exchange). Each new turn replaces the previous.
+    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
+    let agent = make_agent_with_max_history(Some(&url), 2).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    for i in 1..=3u32 {
+        agent
+            .prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Text(TextContent::new(format!("turn {i}")))],
+            ))
+            .await
+            .unwrap();
+    }
+
+    // Only the last exchange should remain.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].content, "turn 3");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
 }

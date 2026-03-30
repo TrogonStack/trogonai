@@ -65,6 +65,10 @@ pub struct XaiAgent {
     /// Optional system prompt injected at the start of every conversation.
     /// Read from `XAI_SYSTEM_PROMPT` at construction time.
     system_prompt: Option<String>,
+    /// Maximum number of messages kept in history (user + assistant interleaved).
+    /// Oldest messages are trimmed in pairs to preserve user/assistant ordering.
+    /// Configured via `XAI_MAX_HISTORY_MESSAGES` (default: 40 = 20 exchanges).
+    max_history_messages: usize,
 }
 
 impl XaiAgent {
@@ -74,6 +78,7 @@ impl XaiAgent {
     ///
     /// Other environment variables:
     /// - `XAI_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 300; 0 = default)
+    /// - `XAI_MAX_HISTORY_MESSAGES` — max messages kept in history (default: 40; 0 = default)
     /// - `XAI_MODELS` — comma-separated `id:label` pairs
     /// - `XAI_BASE_URL` — override the xAI API base URL
     pub async fn new(
@@ -141,6 +146,12 @@ impl XaiAgent {
         let system_prompt = std::env::var("XAI_SYSTEM_PROMPT").ok()
             .filter(|s| !s.is_empty());
 
+        let max_history_messages = std::env::var("XAI_MAX_HISTORY_MESSAGES")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(40);
+
         Self {
             nats,
             acp_prefix,
@@ -153,6 +164,7 @@ impl XaiAgent {
             global_api_key,
             pending_api_key: Arc::new(Mutex::new(None)),
             system_prompt,
+            max_history_messages,
         }
     }
 
@@ -572,7 +584,6 @@ impl agent_client_protocol::Agent for XaiAgent {
         };
 
         // Append exchange to history on successful (non-canceled) turns with non-empty response.
-        // TODO: truncate history to avoid exceeding the model's context window on long sessions.
         if !canceled && !assistant_text.is_empty() {
             // Re-read to preserve any concurrent model changes.
             if let Some(mut current) = self.session_store.get(&session_id).await {
@@ -584,6 +595,15 @@ impl agent_client_protocol::Agent for XaiAgent {
                     role: "assistant".to_string(),
                     content: assistant_text,
                 });
+
+                // Trim oldest messages to stay within the configured limit.
+                // Round up to even so we always drop complete user/assistant pairs.
+                if current.history.len() > self.max_history_messages {
+                    let excess = current.history.len() - self.max_history_messages;
+                    let trim = (excess + 1) & !1;
+                    current.history.drain(..trim);
+                }
+
                 self.session_store.put(&session_id, &current).await;
             }
         }
@@ -683,5 +703,9 @@ impl XaiAgent {
 
     pub fn test_prompt_timeout(&self) -> Duration {
         self.prompt_timeout
+    }
+
+    pub fn test_max_history_messages(&self) -> usize {
+        self.max_history_messages
     }
 }
