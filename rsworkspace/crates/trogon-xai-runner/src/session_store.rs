@@ -13,6 +13,12 @@ pub struct XaiSessionData {
     pub history: Vec<Message>,
     /// xAI API key for this session.
     pub api_key: Option<String>,
+    /// Optional system prompt injected as the first message of every turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// xAI `search_parameters.mode`: "auto" | "on" | absent (= off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_mode: Option<String>,
 }
 
 /// Persistent store for session data.
@@ -114,16 +120,19 @@ impl SessionStore for KvSessionStore {
 
 // ── In-memory implementation (for testing) ───────────────────────────────────
 
+#[cfg(feature = "test-helpers")]
 pub struct MemorySessionStore {
     map: tokio::sync::Mutex<std::collections::HashMap<String, XaiSessionData>>,
 }
 
+#[cfg(feature = "test-helpers")]
 impl MemorySessionStore {
     pub fn new() -> Self {
         Self { map: tokio::sync::Mutex::new(std::collections::HashMap::new()) }
     }
 }
 
+#[cfg(feature = "test-helpers")]
 #[async_trait(?Send)]
 impl SessionStore for MemorySessionStore {
     async fn get(&self, id: &str) -> Option<XaiSessionData> {
