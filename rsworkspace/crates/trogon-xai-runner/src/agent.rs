@@ -406,6 +406,9 @@ impl agent_client_protocol::Agent for XaiAgent {
         &self,
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
+        let session_id = req.session_id.to_string();
+        self.session_store.get(&session_id).await
+            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
         let mode_id = req.mode_id.to_string();
         if mode_id != "default" {
             return Err(internal_error(format!("unknown mode: {mode_id}")));
@@ -460,12 +463,13 @@ impl agent_client_protocol::Agent for XaiAgent {
             other => {
                 warn!(config_id = %other, "xai: set_session_config_option called for unknown option — ignored");
                 // Per ACP spec, return the current state of all known options
-                // even when the requested config_id is unknown.
+                // even when the requested config_id is unknown — but the session
+                // must still exist.
                 let session_id = req.session_id.to_string();
-                let search_mode = self.session_store.get(&session_id).await
-                    .map(|s| s.search_mode.unwrap_or_else(|| "off".to_string()))
-                    .unwrap_or_else(|| "off".to_string());
-                Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(&search_mode)]))
+                let session = self.session_store.get(&session_id).await
+                    .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+                let search_mode = session.search_mode.as_deref().unwrap_or("off");
+                Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(search_mode)]))
             }
         }
     }
@@ -585,6 +589,13 @@ impl agent_client_protocol::Agent for XaiAgent {
                     // Status is Pending — the runner does not execute tools; the
                     // client is responsible for running the tool and returning the
                     // result as the next prompt turn.
+                    //
+                    // LIMITATION: the tool call round-trip is not fully supported.
+                    // xAI expects tool results as {role:"tool", tool_call_id, content},
+                    // but Message only stores {role, content}. The client's tool
+                    // result will arrive as a plain user message, which breaks the
+                    // structured tool call cycle. For web search, use search_mode
+                    // instead — xAI handles it server-side without tool calls.
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::Pending)
                         .kind(ToolKind::Other)
