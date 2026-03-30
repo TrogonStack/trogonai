@@ -1658,6 +1658,41 @@ async fn set_session_mode_default_succeeds() {
 }
 
 #[tokio::test]
+async fn set_session_mode_unknown_session_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let err = agent
+        .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(
+            "no-such-session",
+            "default",
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("not found"),
+        "expected 'not found' for unknown session, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn set_session_config_option_unknown_id_unknown_session_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let err = agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            "no-such-session",
+            "unknown_option",
+            "value",
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("not found"),
+        "expected 'not found' for unknown session + unknown config_id, got: {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
     let _guard = env_lock().lock().unwrap();
     unsafe {
