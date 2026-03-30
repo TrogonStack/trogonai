@@ -13,7 +13,7 @@ use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
     Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
     EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, InitializeRequest,
-    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
     ResumeSessionRequest, ResourceLink, SetSessionConfigOptionRequest, SetSessionModelRequest,
     StopReason, TextContent, TextResourceContents,
 };
@@ -1065,6 +1065,20 @@ fn api_key_meta(key: &str) -> serde_json::Map<String, serde_json::Value> {
     let mut m = serde_json::Map::new();
     m.insert("XAI_API_KEY".to_string(), serde_json::json!(key));
     m
+}
+
+#[tokio::test]
+async fn initialize_declares_embedded_context_prompt_capability() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+    let resp = agent
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        .await
+        .unwrap();
+    assert!(
+        resp.agent_capabilities.prompt_capabilities.embedded_context,
+        "agent must declare embedded_context=true so clients send ContentBlock::Resource"
+    );
 }
 
 #[tokio::test]
