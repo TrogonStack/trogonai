@@ -67,7 +67,10 @@ pub struct XaiAgent {
     system_prompt: Option<String>,
     /// Maximum number of messages kept in history (user + assistant interleaved).
     /// Oldest messages are trimmed in pairs to preserve user/assistant ordering.
-    /// Configured via `XAI_MAX_HISTORY_MESSAGES` (default: 40 = 20 exchanges).
+    /// Configured via `XAI_MAX_HISTORY_MESSAGES` (default: 20 = 10 exchanges).
+    ///
+    /// Note: truncation is by message count, not tokens. With `search_mode` active,
+    /// messages can be long; lower this value if context window errors occur.
     max_history_messages: usize,
 }
 
@@ -150,7 +153,7 @@ impl XaiAgent {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(40);
+            .unwrap_or(20);
 
         Self {
             nats,

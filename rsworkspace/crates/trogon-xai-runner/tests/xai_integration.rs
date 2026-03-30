@@ -2015,17 +2015,17 @@ async fn make_agent_with_max_history(base_url: Option<&str>, max: usize) -> XaiA
 }
 
 #[tokio::test]
-async fn xai_max_history_messages_default_is_40() {
+async fn xai_max_history_messages_default_is_20() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
-    assert_eq!(agent.test_max_history_messages(), 40);
+    assert_eq!(agent.test_max_history_messages(), 20);
 }
 
 #[tokio::test]
 async fn xai_max_history_messages_zero_falls_back_to_default() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent_with_max_history(None, 0).await;
-    assert_eq!(agent.test_max_history_messages(), 40);
+    assert_eq!(agent.test_max_history_messages(), 20);
 }
 
 #[tokio::test]
