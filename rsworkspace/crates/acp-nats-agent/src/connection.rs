@@ -1,6 +1,8 @@
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
-use acp_nats::nats::{AgentMethod, parse_agent_subject};
+use acp_nats::nats::{
+    GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject,
+};
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
@@ -163,89 +165,107 @@ async fn dispatch_message<N: PublishClient + FlushClient, A: Agent>(
         None => return,
     };
 
-    let result = match parsed.method {
-        AgentMethod::Initialize => {
-            handle_request(&msg, nats, |req: InitializeRequest| agent.initialize(req)).await
+    let (result, session_id) = match parsed {
+        ParsedAgentSubject::Global(method) => {
+            let r = dispatch_global(method, &msg, agent, nats).await;
+            (r, None)
         }
-        AgentMethod::Authenticate => {
-            handle_request(&msg, nats, |req: AuthenticateRequest| {
-                agent.authenticate(req)
-            })
-            .await
-        }
-        AgentMethod::SessionNew => {
-            handle_request(&msg, nats, |req: NewSessionRequest| agent.new_session(req)).await
-        }
-        AgentMethod::SessionList => {
-            handle_request(&msg, nats, |req: ListSessionsRequest| {
-                agent.list_sessions(req)
-            })
-            .await
-        }
-        AgentMethod::SessionLoad => {
-            handle_request(&msg, nats, |req: LoadSessionRequest| {
-                agent.load_session(req)
-            })
-            .await
-        }
-        AgentMethod::SessionPrompt => {
-            handle_request(&msg, nats, |req: PromptRequest| agent.prompt(req)).await
-        }
-        AgentMethod::SessionCancel => {
-            handle_notification(&msg, |req: CancelNotification| agent.cancel(req)).await
-        }
-        AgentMethod::SessionSetMode => {
-            handle_request(&msg, nats, |req: SetSessionModeRequest| {
-                agent.set_session_mode(req)
-            })
-            .await
-        }
-        AgentMethod::SessionSetConfigOption => {
-            handle_request(&msg, nats, |req: SetSessionConfigOptionRequest| {
-                agent.set_session_config_option(req)
-            })
-            .await
-        }
-        AgentMethod::SessionSetModel => {
-            handle_request(&msg, nats, |req: SetSessionModelRequest| {
-                agent.set_session_model(req)
-            })
-            .await
-        }
-        AgentMethod::SessionFork => {
-            handle_request(&msg, nats, |req: ForkSessionRequest| {
-                agent.fork_session(req)
-            })
-            .await
-        }
-        AgentMethod::SessionResume => {
-            handle_request(&msg, nats, |req: ResumeSessionRequest| {
-                agent.resume_session(req)
-            })
-            .await
-        }
-        AgentMethod::SessionClose => {
-            handle_request(&msg, nats, |req: CloseSessionRequest| {
-                agent.close_session(req)
-            })
-            .await
-        }
-        AgentMethod::Ext(_) => {
-            if msg.reply.is_some() {
-                handle_request(&msg, nats, |req: ExtRequest| agent.ext_method(req)).await
-            } else {
-                handle_notification(&msg, |req: ExtNotification| agent.ext_notification(req)).await
-            }
+        ParsedAgentSubject::Session { session_id, method } => {
+            let r = dispatch_session(method, &msg, agent, nats).await;
+            (r, Some(session_id))
         }
     };
 
     if let Err(e) = result {
-        let sid = parsed
-            .session_id
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("-");
+        let sid = session_id.as_ref().map(|s| s.as_str()).unwrap_or("-");
         warn!(subject, session_id = sid, error = %e, "Error handling agent request");
+    }
+}
+
+async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
+    method: GlobalAgentMethod,
+    msg: &Message,
+    agent: &A,
+    nats: &N,
+) -> Result<(), DispatchError> {
+    match method {
+        GlobalAgentMethod::Initialize => {
+            handle_request(msg, nats, |req: InitializeRequest| agent.initialize(req)).await
+        }
+        GlobalAgentMethod::Authenticate => {
+            handle_request(msg, nats, |req: AuthenticateRequest| {
+                agent.authenticate(req)
+            })
+            .await
+        }
+        GlobalAgentMethod::SessionNew => {
+            handle_request(msg, nats, |req: NewSessionRequest| agent.new_session(req)).await
+        }
+        GlobalAgentMethod::SessionList => {
+            handle_request(msg, nats, |req: ListSessionsRequest| {
+                agent.list_sessions(req)
+            })
+            .await
+        }
+        GlobalAgentMethod::Ext(_) => {
+            if msg.reply.is_some() {
+                handle_request(msg, nats, |req: ExtRequest| agent.ext_method(req)).await
+            } else {
+                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+            }
+        }
+    }
+}
+
+async fn dispatch_session<N: PublishClient + FlushClient, A: Agent>(
+    method: SessionAgentMethod,
+    msg: &Message,
+    agent: &A,
+    nats: &N,
+) -> Result<(), DispatchError> {
+    match method {
+        SessionAgentMethod::Load => {
+            handle_request(msg, nats, |req: LoadSessionRequest| agent.load_session(req)).await
+        }
+        SessionAgentMethod::Prompt => {
+            handle_request(msg, nats, |req: PromptRequest| agent.prompt(req)).await
+        }
+        SessionAgentMethod::Cancel => {
+            handle_notification(msg, |req: CancelNotification| agent.cancel(req)).await
+        }
+        SessionAgentMethod::SetMode => {
+            handle_request(msg, nats, |req: SetSessionModeRequest| {
+                agent.set_session_mode(req)
+            })
+            .await
+        }
+        SessionAgentMethod::SetConfigOption => {
+            handle_request(msg, nats, |req: SetSessionConfigOptionRequest| {
+                agent.set_session_config_option(req)
+            })
+            .await
+        }
+        SessionAgentMethod::SetModel => {
+            handle_request(msg, nats, |req: SetSessionModelRequest| {
+                agent.set_session_model(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Fork => {
+            handle_request(msg, nats, |req: ForkSessionRequest| agent.fork_session(req)).await
+        }
+        SessionAgentMethod::Resume => {
+            handle_request(msg, nats, |req: ResumeSessionRequest| {
+                agent.resume_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Close => {
+            handle_request(msg, nats, |req: CloseSessionRequest| {
+                agent.close_session(req)
+            })
+            .await
+        }
     }
 }
 
