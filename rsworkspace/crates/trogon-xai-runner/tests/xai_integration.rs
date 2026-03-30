@@ -2089,3 +2089,172 @@ async fn history_truncation_drops_oldest_pair_first() {
     assert_eq!(history[0].role, "user");
     assert_eq!(history[1].role, "assistant");
 }
+
+// ── coverage gaps ─────────────────────────────────────────────────────────────
+
+// 1. search_mode "on" sends search_parameters in the HTTP request.
+#[tokio::test]
+async fn search_mode_on_adds_search_parameters_to_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "on",
+        ))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    assert_eq!(
+        captured[0]["search_parameters"]["mode"],
+        "on",
+        "search_parameters.mode should be 'on': {}",
+        captured[0]
+    );
+}
+
+// 2. set_session_config_option with an unknown session returns an error.
+#[tokio::test]
+async fn set_session_config_option_unknown_session_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let err = agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            "no-such-session",
+            "search_mode",
+            "auto",
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.message.contains("not found"),
+        "error should mention 'not found': {err:?}"
+    );
+}
+
+// 3. History is NOT truncated when len == max (boundary: exactly at the limit).
+#[tokio::test]
+async fn history_at_exactly_the_limit_is_not_truncated() {
+    let _guard = env_lock().lock().unwrap();
+    // max = 4 messages. After exactly 2 turns (4 messages) nothing should be dropped.
+    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
+    let agent = make_agent_with_max_history(Some(&url), 4).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    for i in 1..=2u32 {
+        agent
+            .prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Text(TextContent::new(format!("turn {i}")))],
+            ))
+            .await
+            .unwrap();
+    }
+
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(
+        history.len(),
+        4,
+        "history should be exactly 4 (no truncation at limit): {history:?}"
+    );
+    assert_eq!(history[0].content, "turn 1");
+    assert_eq!(history[2].content, "turn 2");
+}
+
+// 4. close_session removes the session from list_sessions.
+#[tokio::test]
+async fn close_session_removes_session_from_list() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let before = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    assert_eq!(before.sessions.len(), 1);
+
+    agent.close_session(CloseSessionRequest::new(sid.clone())).await.unwrap();
+
+    let after = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    assert!(
+        after.sessions.is_empty(),
+        "session should be removed from list after close: {after:?}"
+    );
+}
+
+// 5. Multiple tool calls in one turn: agent handles them without panicking,
+//    ends the turn, and does not update history (no assistant text produced).
+#[tokio::test]
+async fn multiple_tool_calls_in_one_turn_do_not_panic() {
+    let _guard = env_lock().lock().unwrap();
+
+    // SSE response with two tool calls at finish_reason: "tool_calls".
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+
+            let body = concat!(
+                // tool call 0 — start
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"web_search\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+                // tool call 0 — arguments
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+                // tool call 1 — start
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+                // tool call 1 — arguments + finish
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"{\\\"expr\\\":\\\"2+2\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: [DONE]\n\n",
+            );
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("use two tools"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    // No text produced → history stays empty.
+    let history = agent.test_session_history(&sid).await;
+    assert!(
+        history.is_empty(),
+        "history must not be updated when only tool calls were produced: {history:?}"
+    );
+}
