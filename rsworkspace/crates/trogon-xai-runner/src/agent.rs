@@ -36,6 +36,18 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+fn not_found(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::ResourceNotFound.into(), msg.into())
+}
+
+fn auth_required(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::AuthRequired.into(), msg.into())
+}
+
+fn invalid_params(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
 /// ACP Agent implementation backed by xAI's Grok API (OpenAI-compatible REST).
 ///
 /// Each `XaiAgent` manages multiple sessions, each holding its own conversation
@@ -278,7 +290,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
                     .ok_or_else(|| {
-                        internal_error(
+                        auth_required(
                             "authenticate: XAI_API_KEY missing from _meta for method 'xai-api-key'",
                         )
                     })?;
@@ -287,14 +299,14 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
             "agent" => {
                 if self.global_api_key.is_none() {
-                    return Err(internal_error(
+                    return Err(auth_required(
                         "authenticate: no server API key configured; use method 'xai-api-key' instead",
                     ));
                 }
                 info!("xai: client authenticated using server key");
             }
             other => {
-                return Err(internal_error(format!("authenticate: unknown method '{other}'")));
+                return Err(invalid_params(format!("authenticate: unknown method '{other}'")));
             }
         }
         Ok(AuthenticateResponse::new())
@@ -332,7 +344,7 @@ impl agent_client_protocol::Agent for XaiAgent {
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
         let session = self.session_store.get(&session_id).await
-            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         let model = session.model.as_deref();
         let search_mode = session.search_mode.as_deref().unwrap_or("off");
         Ok(LoadSessionResponse::new()
@@ -347,7 +359,7 @@ impl agent_client_protocol::Agent for XaiAgent {
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
         self.session_store.get(&session_id).await
-            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         Ok(ResumeSessionResponse::new())
     }
 
@@ -359,7 +371,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         let source = self.session_store.get(&source_id).await
-            .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {source_id} not found")))?;
 
         let new_session_id = Uuid::new_v4().to_string();
         let inherited_model = source.model.clone();
@@ -408,10 +420,10 @@ impl agent_client_protocol::Agent for XaiAgent {
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let session_id = req.session_id.to_string();
         self.session_store.get(&session_id).await
-            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         let mode_id = req.mode_id.to_string();
         if mode_id != "default" {
-            return Err(internal_error(format!("unknown mode: {mode_id}")));
+            return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
         Ok(SetSessionModeResponse::new())
     }
@@ -424,11 +436,11 @@ impl agent_client_protocol::Agent for XaiAgent {
         let model_id = req.model_id.to_string();
 
         if !self.available_models.iter().any(|m| m.model_id.0.as_ref() == model_id) {
-            return Err(internal_error(format!("unknown model: {model_id}")));
+            return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
         let mut session = self.session_store.get(&session_id).await
-            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         session.model = Some(model_id.clone());
         self.session_store.put(&session_id, &session).await;
 
@@ -444,17 +456,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         match config_id.as_str() {
             "search_mode" => {
                 let SessionConfigOptionValue::ValueId { value } = req.value else {
-                    return Err(internal_error("search_mode requires a string value (off/auto/on)"));
+                    return Err(invalid_params("search_mode requires a string value (off/auto/on)"));
                 };
                 let mode = value.to_string();
                 if !["off", "auto", "on"].contains(&mode.as_str()) {
-                    return Err(internal_error(format!(
+                    return Err(invalid_params(format!(
                         "unknown search_mode '{mode}'; expected: off, auto, on"
                     )));
                 }
                 let session_id = req.session_id.to_string();
                 let mut session = self.session_store.get(&session_id).await
-                    .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+                    .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
                 session.search_mode = if mode == "off" { None } else { Some(mode.clone()) };
                 self.session_store.put(&session_id, &session).await;
                 info!(session_id, mode, "xai: search_mode updated");
@@ -467,7 +479,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                 // must still exist.
                 let session_id = req.session_id.to_string();
                 let session = self.session_store.get(&session_id).await
-                    .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+                    .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
                 let search_mode = session.search_mode.as_deref().unwrap_or("off");
                 Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(search_mode)]))
             }
@@ -512,10 +524,10 @@ impl agent_client_protocol::Agent for XaiAgent {
 
         // Read session state.
         let session = self.session_store.get(&session_id).await
-            .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
 
         let api_key = session.api_key.clone().ok_or_else(|| {
-            internal_error(
+            auth_required(
                 "no API key for this session: authenticate with method 'xai-api-key' first",
             )
         })?;
