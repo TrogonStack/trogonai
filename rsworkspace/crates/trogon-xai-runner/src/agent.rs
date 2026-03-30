@@ -62,6 +62,11 @@ pub struct XaiAgent {
     /// In-memory cancel channels — one per active prompt, keyed by session id.
     cancel_channels: Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>,
     default_model: String,
+    /// Per-chunk inactivity timeout for streaming responses.
+    ///
+    /// Applied to each `stream.next()` call — fires if no chunk arrives within
+    /// this duration. A slow but continuously streaming response will NOT be
+    /// cut off. Configured via `XAI_PROMPT_TIMEOUT_SECS` (default: 300s).
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
     /// Server-wide fallback key (from `XAI_API_KEY` env var at startup).
@@ -92,7 +97,7 @@ impl XaiAgent {
     /// The KV bucket name is read from `XAI_SESSION_BUCKET` (default: `XAI_SESSIONS`).
     ///
     /// Other environment variables:
-    /// - `XAI_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 300; 0 = default)
+    /// - `XAI_PROMPT_TIMEOUT_SECS` — per-chunk inactivity timeout in seconds (default: 300; 0 = default)
     /// - `XAI_MAX_HISTORY_MESSAGES` — max messages kept in history (default: 40; 0 = default)
     /// - `XAI_MODELS` — comma-separated `id:label` pairs
     /// - `XAI_BASE_URL` — override the xAI API base URL
@@ -634,7 +639,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                 XaiEvent::Done => break 'turn StopReason::EndTurn,
                 XaiEvent::Error { message } => {
                     tracing::error!(session_id, error = %message, "xai: stream error");
-                    break 'turn StopReason::EndTurn;
+                    return Err(internal_error(message));
                 }
             }
         };
