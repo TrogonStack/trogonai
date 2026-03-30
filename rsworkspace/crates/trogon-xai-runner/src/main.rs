@@ -18,12 +18,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     let system_prompt_set = std::env::var("XAI_SYSTEM_PROMPT").is_ok();
+    let max_history_messages = std::env::var("XAI_MAX_HISTORY_MESSAGES")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(40);
 
     info!(
         nats_url,
         prefix,
         default_model,
         system_prompt_set,
+        max_history_messages,
         "xai-runner starting"
     );
 
