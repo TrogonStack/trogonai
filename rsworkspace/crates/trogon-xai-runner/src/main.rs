@@ -17,7 +17,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         String::new()
     });
 
-    info!(nats_url, prefix, default_model, "xai-runner starting");
+    let system_prompt_set = std::env::var("XAI_SYSTEM_PROMPT").is_ok();
+
+    info!(
+        nats_url,
+        prefix,
+        default_model,
+        system_prompt_set,
+        "xai-runner starting"
+    );
 
     let nats = async_nats::connect(&nats_url).await?;
 

@@ -13,8 +13,8 @@ use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
     Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
     ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionModelRequest, StopReason,
-    TextContent,
+    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
+    SetSessionModelRequest, StopReason, TextContent,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -77,6 +77,7 @@ async fn make_agent(base_url: Option<&str>) -> XaiAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -90,6 +91,7 @@ async fn make_agent_with_models(models_env: &str) -> XaiAgent {
     unsafe {
         std::env::remove_var("XAI_BASE_URL");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::set_var("XAI_MODELS", models_env);
     }
     XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
@@ -102,6 +104,7 @@ async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -114,7 +117,22 @@ async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
 async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> XaiAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", timeout_secs.to_string());
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
+    }
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+}
+
+/// Like `make_agent` but also sets `XAI_SYSTEM_PROMPT`. Caller must hold `env_lock()`.
+async fn make_agent_with_system_prompt(base_url: Option<&str>, system_prompt: &str) -> XaiAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::set_var("XAI_SYSTEM_PROMPT", system_prompt);
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -650,7 +668,7 @@ async fn cancel_interrupts_in_flight_prompt() {
     );
 
     let resp = prompt_result.unwrap();
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_eq!(resp.stop_reason, StopReason::Cancelled);
 
     // History must not be updated for a canceled turn.
     let history = agent.test_session_history(&session_id).await;
@@ -1368,7 +1386,7 @@ async fn session_is_usable_after_cancel() {
             agent2.cancel(CancelNotification::new(sid)).await.unwrap();
         }
     );
-    assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
+    assert_eq!(r1.unwrap().stop_reason, StopReason::Cancelled);
     assert!(agent.test_session_history(&session_id).await.is_empty(), "canceled turn must not update history");
 
     // Prompt 2: session must still accept new prompts.
@@ -1632,4 +1650,345 @@ async fn xai_models_all_malformed_falls_back_to_defaults() {
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
+}
+
+// ── system prompt / usage / tool calls ───────────────────────────────────────
+
+/// SSE server that appends a usage chunk before `[DONE]`.
+async fn fake_xai_sse_with_usage(text_chunks: &[&'static str]) -> String {
+    let usage_chunk =
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n";
+    let body: String = text_chunks
+        .iter()
+        .map(|t| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"))
+        .chain(std::iter::once(usage_chunk.to_string()))
+        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+        .collect();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+/// SSE server that returns a `finish_reason: "tool_calls"` response (no text).
+async fn fake_xai_sse_with_tool_calls() -> String {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_test\",\"type\":\"function\",\"function\":{\"name\":\"web_search\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"rust\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+#[tokio::test]
+async fn system_prompt_injected_as_first_message_in_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent_with_system_prompt(Some(&url), "You are a helpful assistant.").await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+
+    assert_eq!(msgs.len(), 2, "system + user");
+    assert_eq!(msgs[0]["role"], "system");
+    assert_eq!(msgs[0]["content"], "You are a helpful assistant.");
+    assert_eq!(msgs[1]["role"], "user");
+    assert_eq!(msgs[1]["content"], "hello");
+}
+
+#[tokio::test]
+async fn system_prompt_absent_when_env_var_not_set() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let msgs = captured[0]["messages"].as_array().expect("messages array");
+
+    assert_eq!(msgs.len(), 1, "only user message — no system message");
+    assert_eq!(msgs[0]["role"], "user");
+}
+
+#[tokio::test]
+async fn system_prompt_present_in_subsequent_turns() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["reply1"], vec!["reply2"]]).await;
+    let agent = make_agent_with_system_prompt(Some(&url), "Be concise.").await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("turn 1"))]))
+        .await
+        .unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("turn 2"))]))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    // Turn 2: system + user(t1) + assistant(t1) + user(t2)
+    let msgs2 = captured[1]["messages"].as_array().expect("turn-2 messages");
+    assert_eq!(msgs2[0]["role"], "system");
+    assert_eq!(msgs2[0]["content"], "Be concise.");
+    assert_eq!(msgs2.len(), 4);
+}
+
+#[tokio::test]
+async fn usage_chunk_is_handled_and_prompt_completes() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_with_usage(&["Hello"]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("hi"))]))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].content, "Hello");
+}
+
+#[tokio::test]
+async fn tool_call_response_ends_turn_without_updating_history() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_with_tool_calls().await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("search"))]))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    // No text was produced — history stays empty. The tool call is pending
+    // client-side execution; the result arrives as the next user turn.
+    let history = agent.test_session_history(&sid).await;
+    assert!(
+        history.is_empty(),
+        "history should not be updated when the model only requests tool calls: {history:?}"
+    );
+}
+
+// ── search_mode config option ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn new_session_exposes_search_mode_config_option_as_off() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+
+    let opts = resp.config_options.expect("config_options should be present");
+    assert_eq!(opts.len(), 1);
+    assert_eq!(opts[0].id.to_string(), "search_mode");
+    assert_eq!(opts[0].name, "Web Search");
+}
+
+#[tokio::test]
+async fn load_session_exposes_search_mode_config_option() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
+
+    let opts = resp.config_options.expect("config_options should be present");
+    assert_eq!(opts.len(), 1);
+    assert_eq!(opts[0].id.to_string(), "search_mode");
+}
+
+#[tokio::test]
+async fn set_search_mode_auto_persists_and_is_reflected_in_response() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "auto",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.config_options.len(), 1);
+    assert_eq!(resp.config_options[0].id.to_string(), "search_mode");
+}
+
+#[tokio::test]
+async fn set_search_mode_unknown_value_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let err = agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "turbo",
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(err.message.contains("turbo"), "error should mention the bad value: {err:?}");
+}
+
+#[tokio::test]
+async fn search_mode_auto_adds_search_parameters_to_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "search_mode",
+            "auto",
+        ))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search this"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let body = &captured[0];
+    assert_eq!(
+        body["search_parameters"]["mode"],
+        "auto",
+        "search_parameters.mode should be 'auto' in request: {body}"
+    );
+}
+
+#[tokio::test]
+async fn search_mode_off_omits_search_parameters_from_request() {
+    let _guard = env_lock().lock().unwrap();
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Default is off — no explicit set needed.
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("plain query"))],
+        ))
+        .await
+        .unwrap();
+
+    let captured = bodies.lock().unwrap();
+    let body = &captured[0];
+    assert!(
+        body["search_parameters"].is_null(),
+        "search_parameters should be absent when mode is off: {body}"
+    );
+}
+
+#[tokio::test]
+async fn fork_session_inherits_search_mode() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let src_id = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            src_id.clone(),
+            "search_mode",
+            "on",
+        ))
+        .await
+        .unwrap();
+
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(src_id.clone(), "/tmp"))
+        .await
+        .unwrap();
+
+    let opts = fork.config_options.expect("config_options should be present in fork");
+    assert_eq!(opts.len(), 1);
+    let current_value = match &opts[0].kind {
+        agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+        _ => panic!("expected Select kind"),
+    };
+    assert_eq!(current_value, "on", "forked session should inherit search_mode=on");
 }
