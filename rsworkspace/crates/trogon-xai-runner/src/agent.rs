@@ -13,11 +13,12 @@ use agent_client_protocol::{
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
+    SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOption,
     SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode,
     SessionModeState, SessionModelState, SessionNotification, SessionResumeCapabilities,
     SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
-    StopReason,
+    StopReason, ToolCall, ToolCallStatus, ToolKind, UsageUpdate,
 };
 use agent_client_protocol::Client as _;
 use async_trait::async_trait;
@@ -27,7 +28,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::client::{Message, XaiClient, XaiEvent};
-use crate::session_store::{KvSessionStore, MemorySessionStore, SessionStore, XaiSessionData};
+use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
+#[cfg(feature = "test-helpers")]
+use crate::session_store::MemorySessionStore;
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -53,7 +56,15 @@ pub struct XaiAgent {
     global_api_key: Option<String>,
     /// Holds the key extracted from the last `authenticate` call until the
     /// next `new_session` picks it up.
+    ///
+    /// FIXME: single-slot — race if two clients authenticate concurrently before
+    /// calling `new_session`. The second `authenticate` overwrites the first key.
+    /// Fixing this properly requires correlating authenticate→new_session per
+    /// connection, which needs framework support.
     pending_api_key: Arc<Mutex<Option<String>>>,
+    /// Optional system prompt injected at the start of every conversation.
+    /// Read from `XAI_SYSTEM_PROMPT` at construction time.
+    system_prompt: Option<String>,
 }
 
 impl XaiAgent {
@@ -127,6 +138,9 @@ impl XaiAgent {
             available_models.push(ModelInfo::new(default_model.clone(), default_model.clone()));
         }
 
+        let system_prompt = std::env::var("XAI_SYSTEM_PROMPT").ok()
+            .filter(|s| !s.is_empty());
+
         Self {
             nats,
             acp_prefix,
@@ -138,6 +152,7 @@ impl XaiAgent {
             available_models,
             global_api_key,
             pending_api_key: Arc::new(Mutex::new(None)),
+            system_prompt,
         }
     }
 
@@ -165,6 +180,21 @@ impl XaiAgent {
     fn session_model_state(&self, current: Option<&str>) -> SessionModelState {
         let current = current.unwrap_or(&self.default_model).to_string();
         SessionModelState::new(current, self.available_models.clone())
+    }
+
+    /// Build the `search_mode` `SessionConfigOption` with the given current value.
+    fn search_mode_config_option(current: &str) -> SessionConfigOption {
+        SessionConfigOption::select(
+            "search_mode",
+            "Web Search",
+            current.to_string(),
+            vec![
+                SessionConfigSelectOption::new("off", "Off"),
+                SessionConfigSelectOption::new("auto", "Auto"),
+                SessionConfigSelectOption::new("on", "On"),
+            ],
+        )
+        .description("Enable xAI server-side web and X search (no round-trip required)")
     }
 
 }
@@ -261,12 +291,15 @@ impl agent_client_protocol::Agent for XaiAgent {
             model: None,
             history: Vec::new(),
             api_key,
+            system_prompt: self.system_prompt.clone(),
+            search_mode: None,
         }).await;
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
-            .models(self.session_model_state(None)))
+            .models(self.session_model_state(None))
+            .config_options(vec![Self::search_mode_config_option("off")]))
     }
 
     async fn load_session(
@@ -277,9 +310,11 @@ impl agent_client_protocol::Agent for XaiAgent {
         let session = self.session_store.get(&session_id).await
             .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
         let model = session.model.as_deref();
+        let search_mode = session.search_mode.as_deref().unwrap_or("off");
         Ok(LoadSessionResponse::new()
             .modes(self.session_mode_state())
-            .models(self.session_model_state(model)))
+            .models(self.session_model_state(model))
+            .config_options(vec![Self::search_mode_config_option(search_mode)]))
     }
 
     async fn resume_session(
@@ -304,16 +339,21 @@ impl agent_client_protocol::Agent for XaiAgent {
 
         let new_session_id = Uuid::new_v4().to_string();
         let inherited_model = source.model.clone();
+        let inherited_search_mode = source.search_mode.clone();
         self.session_store.put(&new_session_id, &XaiSessionData {
             cwd,
             model: inherited_model.clone(),
             history: source.history,
             api_key: source.api_key,
+            system_prompt: source.system_prompt,
+            search_mode: inherited_search_mode.clone(),
         }).await;
 
+        let search_mode_str = inherited_search_mode.as_deref().unwrap_or("off");
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
-            .models(self.session_model_state(inherited_model.as_deref())))
+            .models(self.session_model_state(inherited_model.as_deref()))
+            .config_options(vec![Self::search_mode_config_option(search_mode_str)]))
     }
 
     async fn close_session(
@@ -371,9 +411,33 @@ impl agent_client_protocol::Agent for XaiAgent {
 
     async fn set_session_config_option(
         &self,
-        _req: SetSessionConfigOptionRequest,
+        req: SetSessionConfigOptionRequest,
     ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
-        Ok(SetSessionConfigOptionResponse::new(vec![]))
+        let config_id = req.config_id.to_string();
+        match config_id.as_str() {
+            "search_mode" => {
+                let SessionConfigOptionValue::ValueId { value } = req.value else {
+                    return Err(internal_error("search_mode requires a string value (off/auto/on)"));
+                };
+                let mode = value.to_string();
+                if !["off", "auto", "on"].contains(&mode.as_str()) {
+                    return Err(internal_error(format!(
+                        "unknown search_mode '{mode}'; expected: off, auto, on"
+                    )));
+                }
+                let session_id = req.session_id.to_string();
+                let mut session = self.session_store.get(&session_id).await
+                    .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+                session.search_mode = if mode == "off" { None } else { Some(mode.clone()) };
+                self.session_store.put(&session_id, &session).await;
+                info!(session_id, mode, "xai: search_mode updated");
+                Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(&mode)]))
+            }
+            other => {
+                warn!(config_id = %other, "xai: set_session_config_option called for unknown option — ignored");
+                Ok(SetSessionConfigOptionResponse::new(vec![]))
+            }
+        }
     }
 
     async fn prompt(
@@ -408,6 +472,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         })?;
 
         let model = session.model.as_deref().unwrap_or(&self.default_model).to_string();
+        let search_mode = session.search_mode.clone();
 
         // Install a cancel channel, releasing the cancel_channels lock before streaming.
         let cancel_arc = {
@@ -420,12 +485,18 @@ impl agent_client_protocol::Agent for XaiAgent {
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         cancel_arc.lock().await.replace(cancel_tx);
 
-        // Build messages: history + new user turn.
-        let mut messages = session.history.clone();
+        // Build messages: optional system prompt + history + new user turn.
+        let mut messages: Vec<Message> = Vec::new();
+        if let Some(sp) = &session.system_prompt {
+            messages.push(Message { role: "system".to_string(), content: sp.clone() });
+        }
+        messages.extend(session.history.clone());
         messages.push(Message { role: "user".to_string(), content: user_input.clone() });
 
         let client = Arc::clone(&self.client);
-        let mut stream = client.chat_stream(&model, &messages, &api_key).await;
+        let mut stream = client
+            .chat_stream(&model, &messages, &api_key, search_mode.as_deref())
+            .await;
 
         let mut assistant_text = String::new();
         let mut canceled = false;
@@ -436,7 +507,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                 _ = &mut cancel_rx => {
                     info!(session_id, "xai: prompt canceled");
                     canceled = true;
-                    break 'turn StopReason::EndTurn;
+                    break 'turn StopReason::Cancelled;
                 }
                 maybe = tokio::time::timeout(self.prompt_timeout, stream.next()) => {
                     match maybe {
@@ -463,15 +534,51 @@ impl agent_client_protocol::Agent for XaiAgent {
                         warn!(session_id, error = %e, "xai: failed to send text notification");
                     }
                 }
+                XaiEvent::ToolCallStart { id, name, arguments } => {
+                    info!(session_id, tool_id = %id, tool_name = %name, "xai: tool call requested");
+                    // Notify the ACP client that the model requested a tool call.
+                    // Status is Pending — the runner does not execute tools; the
+                    // client is responsible for running the tool and returning the
+                    // result as the next prompt turn.
+                    //
+                    // `arguments` is a JSON-encoded string from the API (e.g. `{"q":"test"}`).
+                    // Parse it into a Value so raw_input carries an object, not a
+                    // double-encoded string. Fall back to Value::String on invalid JSON.
+                    let input = serde_json::from_str(&arguments)
+                        .unwrap_or(serde_json::Value::String(arguments));
+                    let tool_call = ToolCall::new(id.clone(), name.clone())
+                        .status(ToolCallStatus::Pending)
+                        .kind(ToolKind::Other)
+                        .raw_input(input);
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::ToolCall(tool_call),
+                    );
+                    if let Err(e) = nats_client.session_notification(notif).await {
+                        warn!(session_id, error = %e, "xai: failed to send tool call notification");
+                    }
+                }
+                XaiEvent::Usage { prompt_tokens, completion_tokens } => {
+                    let total = prompt_tokens.saturating_add(completion_tokens);
+                    info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::UsageUpdate(UsageUpdate::new(total, 0)),
+                    );
+                    if let Err(e) = nats_client.session_notification(notif).await {
+                        warn!(session_id, error = %e, "xai: failed to send usage update");
+                    }
+                }
                 XaiEvent::Done => break 'turn StopReason::EndTurn,
                 XaiEvent::Error { message } => {
-                    warn!(session_id, error = %message, "xai: stream error");
+                    tracing::error!(session_id, error = %message, "xai: stream error");
                     break 'turn StopReason::EndTurn;
                 }
             }
         };
 
         // Append exchange to history on successful (non-canceled) turns with non-empty response.
+        // TODO: truncate history to avoid exceeding the model's context window on long sessions.
         if !canceled && !assistant_text.is_empty() {
             // Re-read to preserve any concurrent model changes.
             if let Some(mut current) = self.session_store.get(&session_id).await {
