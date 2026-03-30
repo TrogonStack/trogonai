@@ -8,8 +8,8 @@ use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode, ForkSessionRequest,
-    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    CloseSessionResponse, ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode,
+    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
@@ -92,8 +92,14 @@ impl XaiAgent {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let bucket = std::env::var("XAI_SESSION_BUCKET")
             .unwrap_or_else(|_| "XAI_SESSIONS".to_string());
+        let session_ttl = std::env::var("XAI_SESSION_TTL_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(7 * 24 * 3600));
         let js = async_nats::jetstream::new(nats.clone());
-        let store = KvSessionStore::open(js, bucket).await?;
+        let store = KvSessionStore::open(js, bucket, session_ttl).await?;
         Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
     }
 
@@ -473,13 +479,28 @@ impl agent_client_protocol::Agent for XaiAgent {
             .iter()
             .filter_map(|block| match block {
                 ContentBlock::Text(t) => Some(t.text.clone()),
+                // ACP spec: all agents MUST support ResourceLink. Include the
+                // reference as text so the model has full context.
+                ContentBlock::ResourceLink(r) => {
+                    Some(format!("[Resource: {} | {}]", r.name, r.uri))
+                }
+                // Embedded resource: include text content directly; note binary
+                // blobs as they cannot be forwarded to a text-only API.
+                ContentBlock::Resource(r) => match &r.resource {
+                    EmbeddedResourceResource::TextResourceContents(t) => Some(t.text.clone()),
+                    EmbeddedResourceResource::BlobResourceContents(b) => {
+                        let mime = b.mime_type.as_deref().unwrap_or("binary");
+                        Some(format!("[Binary resource: {} ({})]", b.uri, mime))
+                    }
+                    _ => None,
+                },
                 _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n");
 
         if user_input.is_empty() {
-            warn!(session_id, "xai: prompt contains no text blocks");
+            warn!(session_id, "xai: prompt contains no text or resource blocks");
         }
 
         // Read session state.
@@ -682,7 +703,7 @@ impl XaiAgent {
         bucket: impl Into<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let js = async_nats::jetstream::new(nats.clone());
-        let store = KvSessionStore::open(js, bucket).await?;
+        let store = KvSessionStore::open(js, bucket, Duration::from_secs(7 * 24 * 3600)).await?;
         Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
     }
 
