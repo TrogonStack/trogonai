@@ -5,25 +5,29 @@ use crate::ext_method_name::ExtMethodName;
 use crate::session_id::AcpSessionId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentMethod {
+pub enum GlobalAgentMethod {
     Initialize,
     Authenticate,
     SessionNew,
     SessionList,
-    SessionLoad,
-    SessionPrompt,
-    SessionCancel,
-    SessionSetMode,
-    SessionSetConfigOption,
-    SessionSetModel,
-    SessionFork,
-    SessionResume,
-    SessionClose,
     Ext(ExtMethodName),
 }
 
-impl AgentMethod {
-    fn from_global_suffix(suffix: &str) -> Option<Self> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionAgentMethod {
+    Load,
+    Prompt,
+    Cancel,
+    SetMode,
+    SetConfigOption,
+    SetModel,
+    Fork,
+    Resume,
+    Close,
+}
+
+impl GlobalAgentMethod {
+    fn from_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "initialize" => Some(Self::Initialize),
             "authenticate" => Some(Self::Authenticate),
@@ -35,27 +39,32 @@ impl AgentMethod {
             }
         }
     }
+}
 
-    fn from_session_suffix(suffix: &str) -> Option<Self> {
+impl SessionAgentMethod {
+    fn from_suffix(suffix: &str) -> Option<Self> {
         match suffix {
-            "load" => Some(Self::SessionLoad),
-            "prompt" => Some(Self::SessionPrompt),
-            "cancel" => Some(Self::SessionCancel),
-            "set_mode" => Some(Self::SessionSetMode),
-            "set_config_option" => Some(Self::SessionSetConfigOption),
-            "set_model" => Some(Self::SessionSetModel),
-            "fork" => Some(Self::SessionFork),
-            "resume" => Some(Self::SessionResume),
-            "close" => Some(Self::SessionClose),
+            "load" => Some(Self::Load),
+            "prompt" => Some(Self::Prompt),
+            "cancel" => Some(Self::Cancel),
+            "set_mode" => Some(Self::SetMode),
+            "set_config_option" => Some(Self::SetConfigOption),
+            "set_model" => Some(Self::SetModel),
+            "fork" => Some(Self::Fork),
+            "resume" => Some(Self::Resume),
+            "close" => Some(Self::Close),
             _ => None,
         }
     }
 }
 
-#[derive(Debug)]
-pub struct ParsedAgentSubject {
-    pub session_id: Option<AcpSessionId>,
-    pub method: AgentMethod,
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParsedAgentSubject {
+    Global(GlobalAgentMethod),
+    Session {
+        session_id: AcpSessionId,
+        method: SessionAgentMethod,
+    },
 }
 
 pub fn parse_agent_subject(subject: &str) -> Option<ParsedAgentSubject> {
@@ -65,11 +74,8 @@ pub fn parse_agent_subject(subject: &str) -> Option<ParsedAgentSubject> {
 
     let agent_pos = subject.rfind(".agent.")?;
     let suffix = &subject[agent_pos + ".agent.".len()..];
-    let method = AgentMethod::from_global_suffix(suffix)?;
-    Some(ParsedAgentSubject {
-        session_id: None,
-        method,
-    })
+    let method = GlobalAgentMethod::from_suffix(suffix)?;
+    Some(ParsedAgentSubject::Global(method))
 }
 
 fn try_parse_session_agent(subject: &str) -> Option<ParsedAgentSubject> {
@@ -79,11 +85,8 @@ fn try_parse_session_agent(subject: &str) -> Option<ParsedAgentSubject> {
             let sid = &after_session[..agent_pos];
             if let Ok(session_id) = AcpSessionId::new(sid) {
                 let method_suffix = &after_session[agent_pos + SESSION_AGENT_MARKER.len()..];
-                if let Some(method) = AgentMethod::from_session_suffix(method_suffix) {
-                    return Some(ParsedAgentSubject {
-                        session_id: Some(session_id),
-                        method,
-                    });
+                if let Some(method) = SessionAgentMethod::from_suffix(method_suffix) {
+                    return Some(ParsedAgentSubject::Session { session_id, method });
                 }
             }
         }
@@ -154,53 +157,64 @@ pub fn parse_client_subject(subject: &str) -> Option<ParsedClientSubject> {
 mod tests {
     use super::*;
 
+    fn session(sid: &str, method: SessionAgentMethod) -> ParsedAgentSubject {
+        ParsedAgentSubject::Session {
+            session_id: AcpSessionId::new(sid).unwrap(),
+            method,
+        }
+    }
+
     // Agent global methods
 
     #[test]
     fn parse_agent_initialize() {
-        let parsed = parse_agent_subject("acp.agent.initialize").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::Initialize);
+        assert_eq!(
+            parse_agent_subject("acp.agent.initialize").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Initialize)
+        );
     }
 
     #[test]
     fn parse_agent_authenticate() {
-        let parsed = parse_agent_subject("acp.agent.authenticate").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::Authenticate);
+        assert_eq!(
+            parse_agent_subject("acp.agent.authenticate").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Authenticate)
+        );
     }
 
     #[test]
     fn parse_agent_session_new() {
-        let parsed = parse_agent_subject("acp.agent.session.new").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::SessionNew);
+        assert_eq!(
+            parse_agent_subject("acp.agent.session.new").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::SessionNew)
+        );
     }
 
     #[test]
     fn parse_agent_session_list() {
-        let parsed = parse_agent_subject("acp.agent.session.list").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::SessionList);
+        assert_eq!(
+            parse_agent_subject("acp.agent.session.list").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::SessionList)
+        );
     }
 
     #[test]
     fn parse_agent_ext() {
-        let parsed = parse_agent_subject("acp.agent.ext.my_tool").unwrap();
-        assert!(parsed.session_id.is_none());
         assert_eq!(
-            parsed.method,
-            AgentMethod::Ext(ExtMethodName::new("my_tool").unwrap())
+            parse_agent_subject("acp.agent.ext.my_tool").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(
+                ExtMethodName::new("my_tool").unwrap()
+            ))
         );
     }
 
     #[test]
     fn parse_agent_ext_dotted() {
-        let parsed = parse_agent_subject("acp.agent.ext.vendor.op").unwrap();
-        assert!(parsed.session_id.is_none());
         assert_eq!(
-            parsed.method,
-            AgentMethod::Ext(ExtMethodName::new("vendor.op").unwrap())
+            parse_agent_subject("acp.agent.ext.vendor.op").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(
+                ExtMethodName::new("vendor.op").unwrap()
+            ))
         );
     }
 
@@ -208,79 +222,90 @@ mod tests {
 
     #[test]
     fn parse_session_agent_load() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.load").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionLoad);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.load").unwrap(),
+            session("s1", SessionAgentMethod::Load)
+        );
     }
 
     #[test]
     fn parse_session_agent_prompt() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.prompt").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionPrompt);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.prompt").unwrap(),
+            session("s1", SessionAgentMethod::Prompt)
+        );
     }
 
     #[test]
     fn parse_session_agent_cancel() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.cancel").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionCancel);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.cancel").unwrap(),
+            session("s1", SessionAgentMethod::Cancel)
+        );
     }
 
     #[test]
     fn parse_session_agent_set_mode() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.set_mode").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionSetMode);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.set_mode").unwrap(),
+            session("s1", SessionAgentMethod::SetMode)
+        );
     }
 
     #[test]
     fn parse_session_agent_set_config_option() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.set_config_option").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionSetConfigOption);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.set_config_option").unwrap(),
+            session("s1", SessionAgentMethod::SetConfigOption)
+        );
     }
 
     #[test]
     fn parse_session_agent_set_model() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.set_model").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionSetModel);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.set_model").unwrap(),
+            session("s1", SessionAgentMethod::SetModel)
+        );
     }
 
     #[test]
     fn parse_session_agent_fork() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.fork").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionFork);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.fork").unwrap(),
+            session("s1", SessionAgentMethod::Fork)
+        );
     }
 
     #[test]
     fn parse_session_agent_resume() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.resume").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionResume);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.resume").unwrap(),
+            session("s1", SessionAgentMethod::Resume)
+        );
     }
 
     #[test]
     fn parse_session_agent_close() {
-        let parsed = parse_agent_subject("acp.session.s1.agent.close").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionClose);
+        assert_eq!(
+            parse_agent_subject("acp.session.s1.agent.close").unwrap(),
+            session("s1", SessionAgentMethod::Close)
+        );
     }
 
     #[test]
     fn parse_agent_custom_prefix() {
-        let parsed = parse_agent_subject("myapp.agent.initialize").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::Initialize);
+        assert_eq!(
+            parse_agent_subject("myapp.agent.initialize").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Initialize)
+        );
     }
 
     #[test]
     fn parse_session_agent_custom_prefix() {
-        let parsed = parse_agent_subject("myapp.session.s1.agent.prompt").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionPrompt);
+        assert_eq!(
+            parse_agent_subject("myapp.session.s1.agent.prompt").unwrap(),
+            session("s1", SessionAgentMethod::Prompt)
+        );
     }
 
     #[test]
@@ -305,9 +330,10 @@ mod tests {
 
     #[test]
     fn parse_agent_no_overlap_with_session_id_agent() {
-        let parsed = parse_agent_subject("acp.session.agent.agent.load").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "agent");
-        assert_eq!(parsed.method, AgentMethod::SessionLoad);
+        assert_eq!(
+            parse_agent_subject("acp.session.agent.agent.load").unwrap(),
+            session("agent", SessionAgentMethod::Load)
+        );
     }
 
     // Client methods
@@ -426,23 +452,26 @@ mod tests {
 
     #[test]
     fn parse_agent_prefix_containing_agent_word() {
-        let parsed = parse_agent_subject("org.agent.app.agent.initialize").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::Initialize);
+        assert_eq!(
+            parse_agent_subject("org.agent.app.agent.initialize").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Initialize)
+        );
     }
 
     #[test]
     fn parse_session_agent_prefix_containing_session_word() {
-        let parsed = parse_agent_subject("my.session.app.session.s1.agent.prompt").unwrap();
-        assert_eq!(parsed.session_id.unwrap().as_str(), "s1");
-        assert_eq!(parsed.method, AgentMethod::SessionPrompt);
+        assert_eq!(
+            parse_agent_subject("my.session.app.session.s1.agent.prompt").unwrap(),
+            session("s1", SessionAgentMethod::Prompt)
+        );
     }
 
     #[test]
     fn parse_agent_prefix_containing_session_falls_through_to_global() {
-        let parsed = parse_agent_subject("my.session.handler.agent.initialize").unwrap();
-        assert!(parsed.session_id.is_none());
-        assert_eq!(parsed.method, AgentMethod::Initialize);
+        assert_eq!(
+            parse_agent_subject("my.session.handler.agent.initialize").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Initialize)
+        );
     }
 
     #[test]
