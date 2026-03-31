@@ -4,6 +4,7 @@ use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::StreamExt;
 
@@ -41,7 +42,10 @@ impl std::error::Error for JetStreamError {}
 impl JetStreamContext for NatsJetStreamClient {
     type Error = JetStreamError;
 
-    async fn get_or_create_stream(&self, config: stream::Config) -> Result<(), JetStreamError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), JetStreamError> {
         self.context
             .get_or_create_stream(config)
             .await
@@ -53,9 +57,9 @@ impl JetStreamContext for NatsJetStreamClient {
 impl JetStreamPublisher for NatsJetStreamClient {
     type PublishError = JetStreamError;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAck, JetStreamError> {

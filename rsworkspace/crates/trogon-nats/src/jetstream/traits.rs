@@ -5,24 +5,25 @@ use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::Stream;
 
 pub trait JetStreamContext: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
 
-    fn get_or_create_stream(
+    fn get_or_create_stream<S: Into<stream::Config> + Send>(
         &self,
-        config: stream::Config,
+        config: S,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
     type PublishError: Error + Send + Sync;
 
-    fn js_publish_with_headers(
+    fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> impl Future<Output = Result<PublishAck, Self::PublishError>> + Send;
@@ -64,9 +65,9 @@ impl Error for NoJetStream {}
 impl JetStreamPublisher for () {
     type PublishError = NoJetStream;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        _subject: String,
+        _subject: S,
         _headers: HeaderMap,
         _payload: Bytes,
     ) -> Result<PublishAck, NoJetStream> {
@@ -193,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn unit_publisher_returns_err() {
-        let result = ().js_publish_with_headers("s".into(), HeaderMap::new(), Bytes::new()).await;
+        let result = ().js_publish_with_headers("s", HeaderMap::new(), Bytes::new()).await;
         assert!(result.is_err());
     }
 
