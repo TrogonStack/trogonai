@@ -7,14 +7,16 @@ pub mod traits;
 pub mod mocks;
 
 #[cfg(not(coverage))]
-pub use client::{JetStreamError, NatsJetStreamClient, NatsJetStreamConsumer, NatsJsMessage};
+pub use client::{
+    JetStreamError, JsPublishAckFuture, NatsJetStreamClient, NatsJetStreamConsumer, NatsJsMessage,
+};
 pub use message::{
     JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef,
     JsRequestMessage,
 };
 pub use traits::{
     JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher, NoJetStream,
-    NoOpConsumer, NoOpMessage,
+    NoOpConsumer, NoOpMessage, ReadyAckFuture,
 };
 
 #[cfg(feature = "test-support")]

@@ -6,6 +6,7 @@ use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
@@ -170,8 +171,13 @@ impl Default for MockJetStreamContext {
 
 impl JetStreamContext for MockJetStreamContext {
     type Error = MockError;
+    type Stream = ();
 
-    async fn get_or_create_stream(&self, config: stream::Config) -> Result<(), MockError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), MockError> {
+        let config = config.into();
         let should_fail = {
             let mut flag = self.should_fail.lock().unwrap();
             if *flag {
@@ -249,13 +255,15 @@ impl Default for MockJetStreamPublisher {
 
 impl JetStreamPublisher for MockJetStreamPublisher {
     type PublishError = MockError;
+    type AckFuture = super::traits::ReadyAckFuture<MockError>;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAck, MockError> {
+    ) -> Result<Self::AckFuture, MockError> {
+        let subject = subject.to_subject().to_string();
         let should_fail = {
             let mut count = self.publish_fail_count.lock().unwrap();
             if *count > 0 {
@@ -282,13 +290,13 @@ impl JetStreamPublisher for MockJetStreamPublisher {
             current
         };
 
-        Ok(PublishAck {
+        Ok(super::traits::ReadyAckFuture::new(Ok(PublishAck {
             stream: "mock-stream".to_string(),
             sequence: seq,
             domain: String::new(),
             duplicate: false,
             value: None,
-        })
+        })))
     }
 }
 
@@ -478,6 +486,8 @@ mod tests {
                 Bytes::from("hello"),
             )
             .await
+            .unwrap()
+            .await
             .unwrap();
         assert_eq!(ack.sequence, 1);
         assert_eq!(pub_mock.published_subjects(), vec!["test.subject"]);
@@ -490,9 +500,13 @@ mod tests {
         let ack1 = pub_mock
             .js_publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
             .await
+            .unwrap()
+            .await
             .unwrap();
         let ack2 = pub_mock
             .js_publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+            .await
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(ack1.sequence, 1);
@@ -596,6 +610,8 @@ mod tests {
         assert!(
             pub_mock
                 .js_publish_with_headers("c".to_string(), HeaderMap::new(), Bytes::new())
+                .await
+                .unwrap()
                 .await
                 .is_ok()
         );

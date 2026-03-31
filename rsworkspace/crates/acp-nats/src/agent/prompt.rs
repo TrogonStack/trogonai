@@ -264,7 +264,9 @@ where
     let prompt_subject = session::agent::prompt(prefix, sid);
     js.js_publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
     let op_timeout = bridge.config.prompt_timeout();
 

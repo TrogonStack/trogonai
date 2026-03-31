@@ -1,31 +1,61 @@
 use std::error::Error;
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::Stream;
 
 pub trait JetStreamContext: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
+    type Stream: Send;
 
-    fn get_or_create_stream(
+    fn get_or_create_stream<S: Into<stream::Config> + Send>(
         &self,
-        config: stream::Config,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+        config: S,
+    ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
 }
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
     type PublishError: Error + Send + Sync;
+    type AckFuture: Future<Output = Result<PublishAck, Self::PublishError>> + Send;
 
-    fn js_publish_with_headers(
+    fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> impl Future<Output = Result<PublishAck, Self::PublishError>> + Send;
+    ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send;
+}
+
+/// Immediately-ready ack future for mocks and no-op impls.
+pub struct ReadyAckFuture<E> {
+    result: Option<Result<PublishAck, E>>,
+}
+
+impl<E> ReadyAckFuture<E> {
+    pub fn new(result: Result<PublishAck, E>) -> Self {
+        Self {
+            result: Some(result),
+        }
+    }
+}
+
+impl<E: Unpin> Future for ReadyAckFuture<E> {
+    type Output = Result<PublishAck, E>;
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(
+            self.result
+                .take()
+                .expect("ReadyAckFuture polled after completion"),
+        )
+    }
 }
 
 pub trait JetStreamConsumerFactory: Send + Sync + Clone + 'static {
@@ -63,13 +93,14 @@ impl Error for NoJetStream {}
 
 impl JetStreamPublisher for () {
     type PublishError = NoJetStream;
+    type AckFuture = ReadyAckFuture<NoJetStream>;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        _subject: String,
+        _subject: S,
         _headers: HeaderMap,
         _payload: Bytes,
-    ) -> Result<PublishAck, NoJetStream> {
+    ) -> Result<Self::AckFuture, NoJetStream> {
         Err(NoJetStream)
     }
 }
@@ -193,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn unit_publisher_returns_err() {
-        let result = ().js_publish_with_headers("s".into(), HeaderMap::new(), Bytes::new()).await;
+        let result = ().js_publish_with_headers("s", HeaderMap::new(), Bytes::new()).await;
         assert!(result.is_err());
     }
 

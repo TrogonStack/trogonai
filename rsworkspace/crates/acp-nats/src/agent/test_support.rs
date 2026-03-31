@@ -41,13 +41,14 @@ impl MockJs {
 
 impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
     type PublishError = trogon_nats::mocks::MockError;
+    type AckFuture = trogon_nats::jetstream::ReadyAckFuture<trogon_nats::mocks::MockError>;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: async_nats::subject::ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
-    ) -> Result<async_nats::jetstream::publish::PublishAck, Self::PublishError> {
+    ) -> Result<Self::AckFuture, Self::PublishError> {
         self.publisher
             .js_publish_with_headers(subject, headers, payload)
             .await

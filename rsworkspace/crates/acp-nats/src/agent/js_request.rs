@@ -64,7 +64,9 @@ where
 
     js.js_publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
     match timeout(operation_timeout, resp_messages.next()).await {
         Ok(Some(Ok(js_msg))) => {

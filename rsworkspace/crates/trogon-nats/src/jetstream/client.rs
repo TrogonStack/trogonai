@@ -1,9 +1,14 @@
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use async_nats::HeaderMap;
 use async_nats::jetstream;
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::StreamExt;
 
@@ -40,31 +45,63 @@ impl std::error::Error for JetStreamError {}
 
 impl JetStreamContext for NatsJetStreamClient {
     type Error = JetStreamError;
+    type Stream = jetstream::stream::Stream;
 
-    async fn get_or_create_stream(&self, config: stream::Config) -> Result<(), JetStreamError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<jetstream::stream::Stream, JetStreamError> {
         self.context
             .get_or_create_stream(config)
             .await
-            .map(|_| ())
             .map_err(|e| JetStreamError(e.to_string()))
+    }
+}
+
+/// Wraps [`async_nats::jetstream::context::PublishAckFuture`] to map its error
+/// to [`JetStreamError`].
+pub struct JsPublishAckFuture {
+    inner: Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        PublishAck,
+                        async_nats::error::Error<async_nats::jetstream::context::PublishErrorKind>,
+                    >,
+                > + Send,
+        >,
+    >,
+}
+
+impl Future for JsPublishAckFuture {
+    type Output = Result<PublishAck, JetStreamError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner
+            .as_mut()
+            .poll(cx)
+            .map(|r| r.map_err(|e| JetStreamError(e.to_string())))
     }
 }
 
 impl JetStreamPublisher for NatsJetStreamClient {
     type PublishError = JetStreamError;
+    type AckFuture = JsPublishAckFuture;
 
-    async fn js_publish_with_headers(
+    async fn js_publish_with_headers<S: ToSubject + Send>(
         &self,
-        subject: String,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAck, JetStreamError> {
-        self.context
+    ) -> Result<JsPublishAckFuture, JetStreamError> {
+        let ack_future = self
+            .context
             .publish_with_headers(subject, headers, payload)
             .await
-            .map_err(|e| JetStreamError(e.to_string()))?
-            .await
-            .map_err(|e| JetStreamError(e.to_string()))
+            .map_err(|e| JetStreamError(e.to_string()))?;
+        Ok(JsPublishAckFuture {
+            inner: ack_future.into_future(),
+        })
     }
 }
 
