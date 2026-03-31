@@ -612,12 +612,10 @@ async fn prompt_with_api_error_returns_acp_error() {
     // Must propagate as an ACP error, not silently return EndTurn.
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
 
-    // The user message was durably persisted before the xAI call; the API error
-    // means there is no assistant reply, so only the user turn survives.
+    // The user message is compensated away on xAI error — same as cancel.
+    // The turn failed with no response; the retry should start from a clean state.
     let history = agent.test_session_history(&session_id).await;
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "ping");
+    assert!(history.is_empty(), "history should be empty after xAI error: {history:?}");
 }
 
 #[tokio::test]
