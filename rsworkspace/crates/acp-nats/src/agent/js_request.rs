@@ -7,15 +7,13 @@ use std::time::Duration;
 use tokio::time::timeout;
 use trogon_nats::REQ_ID_HEADER;
 use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
+    JetStreamConsumer as _, JetStreamConsumerFactory, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
 use trogon_std::JsonSerialize;
 
-use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
-use crate::req_id::ReqId;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn js_request<J, Req, Res, S>(
@@ -23,14 +21,14 @@ pub async fn js_request<J, Req, Res, S>(
     subject: &str,
     request: &Req,
     serializer: &S,
-    prefix: &AcpPrefix,
-    session_id: &crate::session_id::AcpSessionId,
-    req_id: &ReqId,
+    prefix: &str,
+    session_id: &str,
+    req_id: &str,
     operation_timeout: Duration,
 ) -> agent_client_protocol::Result<Res>
 where
-    J: JetStreamPublisher + JetStreamGetStream,
-    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
     Req: serde::Serialize,
     Res: DeserializeOwned,
     S: JsonSerialize,
@@ -39,51 +37,58 @@ where
     // runner responds before we start consuming. DeliverAll replays from stream start.
     let responses_stream = streams::responses_stream_name(prefix);
     let resp_config = consumers::response_consumer(prefix, session_id, req_id);
-    let stream = js
-        .get_stream(&responses_stream)
+    let resp_consumer: J::Consumer = js
+        .create_consumer(&responses_stream, resp_config)
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("get stream: {e}")))?;
-    let resp_consumer = stream.create_consumer(resp_config).await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("create response consumer: {e}"),
-        )
-    })?;
-    let mut resp_messages = resp_consumer
-        .messages()
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("response messages: {e}")))?;
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("create response consumer: {e}"),
+            )
+        })?;
+    let mut resp_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
+        resp_consumer.messages().await.map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("response messages: {e}"),
+            )
+        })?;
 
     let payload_bytes = serializer
         .to_vec(request)
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
-    headers.insert(SESSION_ID_HEADER, session_id.as_str());
+    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(SESSION_ID_HEADER, session_id);
 
-    js.publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
+    js.js_publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
 
     match timeout(operation_timeout, resp_messages.next()).await {
-        Ok(Some(Ok(js_msg))) => match serde_json::from_slice::<Res>(js_msg.message().payload.as_ref()) {
-            Ok(response) => {
-                let _ = js_msg.ack().await;
-                Ok(response)
-            }
-            Err(_) => {
-                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
+        Ok(Some(Ok(js_msg))) => {
+            match serde_json::from_slice::<Res>(js_msg.message().payload.as_ref()) {
+                Ok(response) => {
                     let _ = js_msg.ack().await;
-                    Err(agent_err)
-                } else {
-                    let _ = js_msg.ack_with(AckKind::Term).await;
-                    Err(Error::new(ErrorCode::InternalError.into(), "bad response payload"))
+                    Ok(response)
+                }
+                Err(_) => {
+                    if let Ok(agent_err) =
+                        serde_json::from_slice::<Error>(js_msg.message().payload.as_ref())
+                    {
+                        let _ = js_msg.ack().await;
+                        Err(agent_err)
+                    } else {
+                        let _ = js_msg.ack_with(AckKind::Term).await;
+                        Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "bad response payload",
+                        ))
+                    }
                 }
             }
-        },
+        }
         Ok(Some(Err(e))) => Err(Error::new(
             ErrorCode::InternalError.into(),
             format!("response consumer: {e}"),
@@ -106,16 +111,6 @@ mod tests {
     use trogon_nats::jetstream::mocks::*;
 
     use crate::agent::test_support::MockJs;
-    use crate::req_id::ReqId;
-    use crate::session_id::AcpSessionId;
-
-    fn test_prefix() -> AcpPrefix {
-        AcpPrefix::new("acp").expect("test prefix")
-    }
-
-    fn test_sid(s: &str) -> AcpSessionId {
-        AcpSessionId::new(s).expect("test session id")
-    }
 
     fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
         async_nats::Message {
@@ -144,15 +139,18 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().stop_reason, agent_client_protocol::StopReason::EndTurn);
+        assert_eq!(
+            result.unwrap().stop_reason,
+            agent_client_protocol::StopReason::EndTurn
+        );
     }
 
     #[tokio::test]
@@ -167,9 +165,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
@@ -187,15 +185,20 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("create response consumer"));
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("create response consumer")
+        );
     }
 
     #[tokio::test]
@@ -209,9 +212,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
@@ -234,9 +237,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
@@ -256,9 +259,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_millis(10),
         )
         .await;
@@ -273,8 +276,10 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let agent_err =
-            agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::InternalError.into(), "agent failed");
+        let agent_err = agent_client_protocol::Error::new(
+            agent_client_protocol::ErrorCode::InternalError.into(),
+            "agent failed",
+        );
         let msg = MockJsMessage::new(async_nats::Message {
             subject: "test".into(),
             reply: None,
@@ -291,9 +296,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
@@ -316,15 +321,20 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("response stream closed"));
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("response stream closed")
+        );
     }
 
     #[tokio::test]
@@ -333,17 +343,19 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        tx.unbounded_send(Err(trogon_nats::mocks::MockError("stream error".to_string())))
-            .unwrap();
+        tx.unbounded_send(Err(trogon_nats::mocks::MockError(
+            "stream error".to_string(),
+        )))
+        .unwrap();
 
         let result: agent_client_protocol::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;
@@ -363,9 +375,9 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::FailNextSerialize::new(1),
-            &test_prefix(),
-            &test_sid("s1"),
-            &ReqId::from_test("req-1"),
+            "acp",
+            "s1",
+            "req-1",
             Duration::from_secs(5),
         )
         .await;

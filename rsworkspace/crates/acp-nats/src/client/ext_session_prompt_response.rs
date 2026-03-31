@@ -14,11 +14,12 @@ use trogon_std::time::GetElapsed;
 pub async fn handle<
     N: RequestClient + PublishClient + FlushClient + SubscribeClient,
     C: GetElapsed,
+    J,
 >(
     session_id: &str,
     payload: &[u8],
     reply: Option<&str>,
-    bridge: &Bridge<N, C>,
+    bridge: &Bridge<N, C, J>,
 ) {
     if reply.is_some() {
         warn!(
