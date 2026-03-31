@@ -639,6 +639,56 @@ async fn prompt_with_done_only_response_does_not_update_history() {
     assert_eq!(history[0].content, "ping");
 }
 
+// Retry after a failed put(assistant): history already ends with the user
+// message, so the retry must not duplicate it in the xAI context.
+#[tokio::test]
+async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
+    let _guard = env_lock().lock().unwrap();
+
+    // One connection: the retry is the only prompt call.
+    let (url, bodies) = fake_xai_sse_recording(vec![
+        vec!["the reply"],
+    ]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    // Simulate a crash after put(user) but before put(assistant): manually
+    // plant the user message in history without an assistant reply.
+    {
+        let mut data = agent.test_session_history(&session_id).await;
+        // history is empty; push the user message as if it was persisted before
+        // a crash that lost the assistant reply.
+        data.push(trogon_xai_runner::Message { role: "user".to_string(), content: "hello".to_string() });
+        agent.test_set_session_history(&session_id, data).await;
+    }
+
+    // Retry with the same message. Should be treated as a resume, not a fresh turn.
+    let resp = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    // History should have exactly one user + one assistant — no duplicate user.
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2, "expected user + assistant, got: {history:?}");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "hello");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content, "the reply");
+
+    // The xAI request body must contain exactly one user message — no duplicate.
+    let bodies = bodies.lock().unwrap();
+    let msgs = bodies[0]["messages"].as_array().unwrap();
+    let user_msgs: Vec<_> = msgs.iter().filter(|m| m["role"] == "user").collect();
+    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message: {msgs:?}");
+}
+
 // ── cancel ────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
