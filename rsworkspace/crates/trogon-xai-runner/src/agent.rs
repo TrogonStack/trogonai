@@ -555,9 +555,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         cancel_arc.lock().await.replace(cancel_tx);
 
-        // Persist the user message BEFORE calling xAI so that a crash between
-        // the request and the response cannot silently discard the user's input.
-        {
+        // Idempotency check: if history already ends with the exact user message,
+        // we are resuming after a crash or a failed put(assistant) from a previous
+        // attempt. Skip the write and do not duplicate the message in the xAI
+        // context — history already carries it as the last entry.
+        let resuming = session.history.last()
+            .map(|m| m.role == "user" && m.content == user_input)
+            == Some(true);
+
+        if !resuming {
+            // Persist the user message BEFORE calling xAI so that a crash between
+            // the request and the response cannot silently discard the user's input.
             let mut snapshot = session.clone();
             snapshot.history.push(Message {
                 role: "user".to_string(),
@@ -567,12 +575,16 @@ impl agent_client_protocol::Agent for XaiAgent {
         }
 
         // Build messages: optional system prompt + history + new user turn.
+        // When resuming, history already ends with the user message — do not push
+        // it again or xAI would see two consecutive identical user turns.
         let mut messages: Vec<Message> = Vec::new();
         if let Some(sp) = &session.system_prompt {
             messages.push(Message { role: "system".to_string(), content: sp.clone() });
         }
         messages.extend(session.history.clone());
-        messages.push(Message { role: "user".to_string(), content: user_input.clone() });
+        if !resuming {
+            messages.push(Message { role: "user".to_string(), content: user_input.clone() });
+        }
 
         let client = Arc::clone(&self.client);
         let mut stream = client
@@ -795,6 +807,13 @@ impl XaiAgent {
 
     pub async fn test_session_history(&self, id: &str) -> Vec<Message> {
         self.session_store.get(id).await.map(|s| s.history).unwrap_or_default()
+    }
+
+    pub async fn test_set_session_history(&self, id: &str, history: Vec<Message>) {
+        if let Some(mut data) = self.session_store.get(id).await {
+            data.history = history;
+            self.session_store.put(id, &data).await.expect("test_set_session_history: put failed");
+        }
     }
 
     pub async fn test_session_model(&self, id: &str) -> Option<String> {
