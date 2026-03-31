@@ -736,6 +736,35 @@ async fn cancel_interrupts_in_flight_prompt() {
     assert!(history.is_empty(), "canceled prompt must not update history");
 }
 
+// cancel_channels entry is removed after prompt completes (no memory leak when
+// sessions expire via TTL without an explicit close_session).
+#[tokio::test]
+async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse(&["hello"]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    assert_eq!(agent.test_cancel_channels_len().await, 0);
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hi"))],
+        ))
+        .await
+        .unwrap();
+
+    // Entry must be removed after prompt completes — no leak for TTL-expired sessions.
+    assert_eq!(
+        agent.test_cancel_channels_len().await,
+        0,
+        "cancel_channels must be empty after prompt completes"
+    );
+}
+
 // ── XAI_MODELS env var ────────────────────────────────────────────────────────
 
 #[tokio::test]
