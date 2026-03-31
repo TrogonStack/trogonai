@@ -82,6 +82,7 @@ impl Config {
             auth: trogon_nats::NatsAuth::None,
         };
         Self::new(AcpPrefix::new(acp_prefix.to_string()).unwrap(), nats)
+            .with_prompt_timeout(crate::constants::TEST_PROMPT_TIMEOUT)
     }
 }
 

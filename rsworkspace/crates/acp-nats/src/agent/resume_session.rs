@@ -1,11 +1,11 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
+use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
 };
 use tracing::{info, instrument};
+use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -13,10 +13,17 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J>(
+pub async fn handle<
+    N: RequestClient + PublishClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+>(
     bridge: &Bridge<N, C, J>,
     args: ResumeSessionRequest,
-) -> Result<ResumeSessionResponse> {
+) -> Result<ResumeSessionResponse>
+where
+    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+{
     let start = bridge.clock.now();
 
     info!(session_id = %args.session_id, "Resume session request");
@@ -30,17 +37,16 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             format!("Invalid session ID: {}", e),
         )
     })?;
-    let nats = bridge.nats();
-    let subject = session::agent::resume(bridge.config.acp_prefix(), session_id.as_str());
+    let prefix = bridge.config.acp_prefix();
+    let subject = session::agent::resume(prefix, session_id.as_str());
 
-    let result = nats::request_with_timeout::<N, ResumeSessionRequest, ResumeSessionResponse>(
-        nats,
-        &subject,
-        &args,
-        bridge.config.operation_timeout,
-    )
-    .await
-    .map_err(map_nats_error);
+    let result = bridge
+        .session_request::<ResumeSessionRequest, ResumeSessionResponse>(
+            &subject,
+            &args,
+            session_id.as_str(),
+        )
+        .await;
 
     if result.is_ok() {
         bridge.schedule_session_ready(args.session_id.clone());

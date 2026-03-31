@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use async_nats::HeaderMap;
+use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
@@ -10,7 +10,7 @@ use bytes::Bytes;
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
 
-use super::message::{JsMessage, JsSignal};
+use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
     JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher,
 };
@@ -19,48 +19,121 @@ use crate::mocks::MockError;
 // --- MockJsMessage ---
 
 pub struct MockJsMessage {
-    pub message: async_nats::Message,
-    signals: Arc<Mutex<Vec<JsSignal>>>,
+    inner: async_nats::Message,
+    signals: Arc<Mutex<Vec<AckKindSnapshot>>>,
+    fail_signals: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AckKindSnapshot {
+    Ack,
+    AckWith(AckKindValue),
+    DoubleAck,
+    DoubleAckWith(AckKindValue),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AckKindValue {
+    Ack,
+    Nak(Option<std::time::Duration>),
+    Progress,
+    Next,
+    Term,
+}
+
+impl From<AckKind> for AckKindValue {
+    fn from(kind: AckKind) -> Self {
+        match kind {
+            AckKind::Ack => AckKindValue::Ack,
+            AckKind::Nak(d) => AckKindValue::Nak(d),
+            AckKind::Progress => AckKindValue::Progress,
+            AckKind::Next => AckKindValue::Next,
+            AckKind::Term => AckKindValue::Term,
+        }
+    }
 }
 
 impl MockJsMessage {
     pub fn new(message: async_nats::Message) -> Self {
         Self {
-            message,
+            inner: message,
             signals: Arc::new(Mutex::new(Vec::new())),
+            fail_signals: false,
         }
     }
 
-    pub fn signals(&self) -> Vec<JsSignal> {
+    pub fn with_failing_signals(message: async_nats::Message) -> Self {
+        Self {
+            inner: message,
+            signals: Arc::new(Mutex::new(Vec::new())),
+            fail_signals: true,
+        }
+    }
+
+    pub fn signals(&self) -> Vec<AckKindSnapshot> {
         self.signals.lock().unwrap().clone()
     }
 
-    fn record(&self, signal: JsSignal) {
+    fn record(&self, signal: AckKindSnapshot) {
         self.signals.lock().unwrap().push(signal);
     }
+}
 
-    pub fn ack(&self) {
-        self.record(JsSignal::Ack);
+impl JsMessageRef for MockJsMessage {
+    fn message(&self) -> &async_nats::Message {
+        &self.inner
     }
+}
 
-    pub fn double_ack(&self) {
-        self.record(JsSignal::DoubleAck);
+impl JsAck for MockJsMessage {
+    type Error = MockError;
+
+    async fn ack(&self) -> Result<(), MockError> {
+        self.record(AckKindSnapshot::Ack);
+        if self.fail_signals {
+            Err(MockError("ack failed".into()))
+        } else {
+            Ok(())
+        }
     }
+}
 
-    pub fn nak(&self) {
-        self.record(JsSignal::Nak);
+impl JsAckWith for MockJsMessage {
+    type Error = MockError;
+
+    async fn ack_with(&self, kind: AckKind) -> Result<(), MockError> {
+        self.record(AckKindSnapshot::AckWith(kind.into()));
+        if self.fail_signals {
+            Err(MockError("ack_with failed".into()))
+        } else {
+            Ok(())
+        }
     }
+}
 
-    pub fn nak_with_delay(&self, delay: Duration) {
-        self.record(JsSignal::NakWithDelay(delay));
+impl JsDoubleAck for MockJsMessage {
+    type Error = MockError;
+
+    async fn double_ack(&self) -> Result<(), MockError> {
+        self.record(AckKindSnapshot::DoubleAck);
+        if self.fail_signals {
+            Err(MockError("double_ack failed".into()))
+        } else {
+            Ok(())
+        }
     }
+}
 
-    pub fn term(&self) {
-        self.record(JsSignal::Term);
-    }
+impl JsDoubleAckWith for MockJsMessage {
+    type Error = MockError;
 
-    pub fn in_progress(&self) {
-        self.record(JsSignal::Progress);
+    async fn double_ack_with(&self, kind: AckKind) -> Result<(), MockError> {
+        self.record(AckKindSnapshot::DoubleAckWith(kind.into()));
+        if self.fail_signals {
+            Err(MockError("double_ack_with failed".into()))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -269,11 +342,14 @@ impl JetStreamConsumerFactory for MockJetStreamConsumerFactory {
 }
 
 pub struct MockJetStreamConsumer {
-    rx: Mutex<Option<mpsc::UnboundedReceiver<MockJsMessage>>>,
+    rx: Mutex<Option<mpsc::UnboundedReceiver<Result<MockJsMessage, MockError>>>>,
 }
 
 impl MockJetStreamConsumer {
-    pub fn new() -> (Self, mpsc::UnboundedSender<MockJsMessage>) {
+    pub fn new() -> (
+        Self,
+        mpsc::UnboundedSender<Result<MockJsMessage, MockError>>,
+    ) {
         let (tx, rx) = mpsc::unbounded();
         (
             Self {
@@ -282,33 +358,28 @@ impl MockJetStreamConsumer {
             tx,
         )
     }
+
+    pub fn failing() -> Self {
+        Self {
+            rx: Mutex::new(None),
+        }
+    }
 }
 
 impl JetStreamConsumer for MockJetStreamConsumer {
     type Error = MockError;
-    type Messages = BoxStream<'static, Result<JsMessage, MockError>>;
+    type Message = MockJsMessage;
+    type Messages = BoxStream<'static, Result<MockJsMessage, MockError>>;
 
     async fn messages(&self) -> Result<Self::Messages, MockError> {
-        // MockJsMessage cannot be converted to JsMessage without a real jetstream::Message.
-        // Tests that need signal assertions should use raw_messages() instead.
-        Err(MockError(
-            "MockJetStreamConsumer.messages() not supported; use raw_messages() instead"
-                .to_string(),
-        ))
-    }
-}
-
-impl MockJetStreamConsumer {
-    pub fn raw_messages(
-        self,
-    ) -> Result<impl futures::Stream<Item = MockJsMessage> + Unpin + Send + 'static, MockError>
-    {
+        use futures::StreamExt;
         let rx = self
             .rx
-            .into_inner()
+            .lock()
             .unwrap()
-            .ok_or_else(|| MockError("raw_messages() already called".to_string()))?;
-        Ok(rx)
+            .take()
+            .ok_or_else(|| MockError("messages() already called".to_string()))?;
+        Ok(rx.boxed())
     }
 }
 
@@ -329,33 +400,51 @@ mod tests {
         }
     }
 
-    #[test]
-    fn mock_js_message_records_signals() {
+    #[tokio::test]
+    async fn mock_js_message_records_signals() {
         let msg = MockJsMessage::new(make_nats_msg("test", b"payload"));
-        msg.ack();
-        msg.in_progress();
-        msg.term();
+        msg.ack().await.unwrap();
+        msg.ack_with(AckKind::Progress).await.unwrap();
+        msg.ack_with(AckKind::Term).await.unwrap();
         assert_eq!(
             msg.signals(),
-            vec![JsSignal::Ack, JsSignal::Progress, JsSignal::Term]
+            vec![
+                AckKindSnapshot::Ack,
+                AckKindSnapshot::AckWith(AckKindValue::Progress),
+                AckKindSnapshot::AckWith(AckKindValue::Term),
+            ]
         );
     }
 
-    #[test]
-    fn mock_js_message_records_nak_with_delay() {
+    #[tokio::test]
+    async fn mock_js_message_records_nak_with_delay() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.nak_with_delay(Duration::from_secs(5));
+        msg.ack_with(AckKind::Nak(Some(std::time::Duration::from_secs(5))))
+            .await
+            .unwrap();
         assert_eq!(
             msg.signals(),
-            vec![JsSignal::NakWithDelay(Duration::from_secs(5))]
+            vec![AckKindSnapshot::AckWith(AckKindValue::Nak(Some(
+                std::time::Duration::from_secs(5)
+            )))]
         );
     }
 
-    #[test]
-    fn mock_js_message_records_double_ack() {
+    #[tokio::test]
+    async fn mock_js_message_records_double_ack() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.double_ack();
-        assert_eq!(msg.signals(), vec![JsSignal::DoubleAck]);
+        msg.double_ack().await.unwrap();
+        assert_eq!(msg.signals(), vec![AckKindSnapshot::DoubleAck]);
+    }
+
+    #[tokio::test]
+    async fn mock_js_message_records_double_ack_with() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b""));
+        msg.double_ack_with(AckKind::Ack).await.unwrap();
+        assert_eq!(
+            msg.signals(),
+            vec![AckKindSnapshot::DoubleAckWith(AckKindValue::Ack)]
+        );
     }
 
     #[tokio::test]
@@ -449,16 +538,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_consumer_raw_messages_streams() {
+    async fn mock_consumer_messages_streams() {
         let (consumer, tx) = MockJetStreamConsumer::new();
         let msg = MockJsMessage::new(make_nats_msg("test.subject", b"data"));
-        tx.unbounded_send(msg).unwrap();
+        tx.unbounded_send(Ok(msg)).unwrap();
         drop(tx);
 
-        let mut stream = consumer.raw_messages().unwrap();
-        let received = stream.next().await.unwrap();
-        assert_eq!(received.message.subject.as_str(), "test.subject");
-        assert_eq!(received.message.payload.as_ref(), b"data");
+        let mut stream = JetStreamConsumer::messages(&consumer).await.unwrap();
+        let received = stream.next().await.unwrap().unwrap();
+        assert_eq!(received.message().subject.as_str(), "test.subject");
+        assert_eq!(received.message().payload.as_ref(), b"data");
     }
 
     #[test]
@@ -478,11 +567,14 @@ mod tests {
         let _factory = MockJetStreamConsumerFactory::default();
     }
 
-    #[test]
-    fn mock_js_message_records_nak() {
+    #[tokio::test]
+    async fn mock_js_message_records_nak() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
-        msg.nak();
-        assert_eq!(msg.signals(), vec![JsSignal::Nak]);
+        msg.ack_with(AckKind::Nak(None)).await.unwrap();
+        assert_eq!(
+            msg.signals(),
+            vec![AckKindSnapshot::AckWith(AckKindValue::Nak(None))]
+        );
     }
 
     #[tokio::test]
@@ -510,6 +602,41 @@ mod tests {
     }
 
     #[test]
+    fn mock_js_message_payload_subject_headers_reply() {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Test", "value");
+        let msg = async_nats::Message {
+            subject: "test.subject".into(),
+            reply: Some("_INBOX.reply".into()),
+            payload: Bytes::from("hello"),
+            headers: Some(headers),
+            status: None,
+            description: None,
+            length: 5,
+        };
+        let mock = MockJsMessage::new(msg);
+
+        let inner = mock.message();
+        assert_eq!(inner.payload.as_ref(), b"hello");
+        assert_eq!(inner.subject.as_str(), "test.subject");
+        assert!(inner.headers.is_some());
+        assert_eq!(
+            inner.reply.as_ref().map(|s| s.as_str()),
+            Some("_INBOX.reply")
+        );
+    }
+
+    #[test]
+    fn mock_js_message_no_headers_no_reply() {
+        let msg = make_nats_msg("sub", b"data");
+        let mock = MockJsMessage::new(msg);
+
+        let inner = mock.message();
+        assert!(inner.headers.is_none());
+        assert!(inner.reply.is_none());
+    }
+
+    #[test]
     fn mock_consumer_factory_clone() {
         let factory = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -519,9 +646,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_consumer_messages_returns_error() {
+    async fn mock_js_message_failing_signals() {
+        let msg = MockJsMessage::with_failing_signals(make_nats_msg("test", b""));
+        assert!(msg.ack().await.is_err());
+        assert!(msg.ack_with(AckKind::Term).await.is_err());
+        assert!(msg.double_ack().await.is_err());
+        assert!(msg.double_ack_with(AckKind::Ack).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_messages_returns_stream() {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         let result = JetStreamConsumer::messages(&consumer).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_messages_called_twice_returns_error() {
+        let (consumer, _tx) = MockJetStreamConsumer::new();
+        let _first = JetStreamConsumer::messages(&consumer).await.unwrap();
+        let second = JetStreamConsumer::messages(&consumer).await;
+        assert!(second.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_js_message_ack_with_next() {
+        let msg = MockJsMessage::new(make_nats_msg("test", b""));
+        msg.ack_with(AckKind::Next).await.unwrap();
+        assert_eq!(
+            msg.signals(),
+            vec![AckKindSnapshot::AckWith(AckKindValue::Next)]
+        );
     }
 }

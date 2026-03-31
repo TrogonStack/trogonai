@@ -86,6 +86,13 @@ pub mod session {
                 prefix, session_id, req_id
             )
         }
+
+        pub fn response(prefix: &str, session_id: &str, req_id: &str) -> String {
+            format!(
+                "{}.session.{}.agent.response.{}",
+                prefix, session_id, req_id
+            )
+        }
     }
 
     pub mod client {
@@ -150,6 +157,10 @@ pub mod session {
 
         pub fn all_client(prefix: &str) -> String {
             format!("{}.session.*.client.>", prefix)
+        }
+
+        pub fn all_agent_ext(prefix: &str) -> String {
+            format!("{}.session.*.agent.ext.>", prefix)
         }
 
         pub fn one_agent(prefix: &str, session_id: &str) -> String {
@@ -310,6 +321,14 @@ mod tests {
         assert_eq!(
             session::agent::prompt_response("acp", "s1", "req-abc"),
             "acp.session.s1.agent.prompt.response.req-abc"
+        );
+    }
+
+    #[test]
+    fn session_agent_response() {
+        assert_eq!(
+            session::agent::response("acp", "s1", "req-abc"),
+            "acp.session.s1.agent.response.req-abc"
         );
     }
 

@@ -24,6 +24,51 @@ pub fn mock_bridge() -> (
     (mock, bridge)
 }
 
+#[derive(Clone)]
+pub struct MockJs {
+    pub publisher: trogon_nats::jetstream::MockJetStreamPublisher,
+    pub consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
+}
+
+impl MockJs {
+    pub fn new() -> Self {
+        Self {
+            publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
+            consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
+        }
+    }
+}
+
+impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+    type PublishError = trogon_nats::mocks::MockError;
+
+    async fn js_publish_with_headers(
+        &self,
+        subject: String,
+        headers: async_nats::HeaderMap,
+        payload: bytes::Bytes,
+    ) -> Result<async_nats::jetstream::publish::PublishAck, Self::PublishError> {
+        self.publisher
+            .js_publish_with_headers(subject, headers, payload)
+            .await
+    }
+}
+
+impl trogon_nats::jetstream::JetStreamConsumerFactory for MockJs {
+    type Error = trogon_nats::mocks::MockError;
+    type Consumer = trogon_nats::jetstream::MockJetStreamConsumer;
+
+    async fn create_consumer(
+        &self,
+        stream_name: &str,
+        config: async_nats::jetstream::consumer::pull::Config,
+    ) -> Result<trogon_nats::jetstream::MockJetStreamConsumer, Self::Error> {
+        self.consumer_factory
+            .create_consumer(stream_name, config)
+            .await
+    }
+}
+
 pub fn mock_bridge_with_metrics() -> (
     AdvancedMockNatsClient,
     Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,

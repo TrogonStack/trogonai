@@ -61,11 +61,12 @@ pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client + 'static,
     C: GetElapsed + 'static,
+    J: 'static,
     S: Clone + JsonSerialize + 'static,
 >(
     nats: N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C>>,
+    bridge: Rc<Bridge<N, C, J>>,
     serializer: S,
 ) {
     let wildcard = crate::nats::session::wildcards::all_client(bridge.config.acp_prefix());
@@ -102,12 +103,13 @@ async fn process_message<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client + 'static,
     C: GetElapsed + 'static,
+    J: 'static,
     S: Clone + JsonSerialize + 'static,
 >(
     msg: Message,
     nats: &N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C>>,
+    bridge: Rc<Bridge<N, C, J>>,
     in_flight: &Rc<Cell<usize>>,
     max_concurrent: usize,
     serializer: &S,
@@ -159,14 +161,14 @@ async fn process_message<
     });
 }
 
-struct DispatchContext<'a, N, Cl, C, S>
+struct DispatchContext<'a, N, Cl, C, J, S>
 where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     C: GetElapsed + 'static,
 {
     nats: &'a N,
     client: &'a Cl,
-    bridge: &'a Bridge<N, C>,
+    bridge: &'a Bridge<N, C, J>,
     serializer: &'a S,
 }
 
@@ -175,13 +177,14 @@ async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client,
     C: GetElapsed + 'static,
+    J: 'static,
     S: JsonSerialize,
 >(
     subject: &str,
     parsed: crate::nats::ParsedClientSubject,
     payload: Bytes,
     reply: Option<String>,
-    ctx: &DispatchContext<'_, N, Cl, C, S>,
+    ctx: &DispatchContext<'_, N, Cl, C, J, S>,
 ) {
     Span::current().record("session_id", parsed.session_id.as_str());
 
