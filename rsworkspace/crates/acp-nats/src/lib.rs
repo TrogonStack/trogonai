@@ -25,6 +25,9 @@ pub use config::{
 pub use error::AGENT_UNAVAILABLE;
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use session_id::AcpSessionId;
+#[cfg(not(coverage))]
+pub use trogon_nats::jetstream::NatsJetStreamClient;
+pub use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher};
 pub use trogon_nats::{NatsAuth, NatsConfig};
 pub use trogon_std::StdJsonSerialize;
 

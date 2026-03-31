@@ -6,6 +6,7 @@ mod ext_method;
 mod ext_notification;
 mod fork_session;
 mod initialize;
+pub(crate) mod js_request;
 mod list_sessions;
 mod load_session;
 mod new_session;

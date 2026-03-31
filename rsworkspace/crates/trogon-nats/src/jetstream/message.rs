@@ -1,79 +1,41 @@
-use std::time::Duration;
+use std::fmt;
+use std::future::Future;
 
-use async_nats::jetstream;
+use async_nats::jetstream::AckKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JsSignal {
-    Ack,
-    DoubleAck,
-    Nak,
-    NakWithDelay(Duration),
-    Progress,
-    Term,
+pub trait JsMessageRef: Send + 'static {
+    fn message(&self) -> &async_nats::Message;
 }
 
-pub struct JsMessage {
-    #[cfg_attr(coverage, allow(dead_code))]
-    inner: jetstream::Message,
+pub trait JsAck: Send + 'static {
+    type Error: fmt::Display + fmt::Debug + Send + Sync;
+
+    fn ack(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-#[cfg(not(coverage))]
-impl JsMessage {
-    pub fn new(inner: jetstream::Message) -> Self {
-        Self { inner }
-    }
+pub trait JsAckWith: Send + 'static {
+    type Error: fmt::Display + fmt::Debug + Send + Sync;
 
-    pub fn into_inner(self) -> jetstream::Message {
-        self.inner
-    }
-
-    pub fn message(&self) -> &async_nats::Message {
-        &self.inner.message
-    }
-
-    pub fn payload(&self) -> &bytes::Bytes {
-        &self.inner.payload
-    }
-
-    pub fn subject(&self) -> &str {
-        self.inner.subject.as_str()
-    }
-
-    pub fn headers(&self) -> Option<&async_nats::HeaderMap> {
-        self.inner.headers.as_ref()
-    }
-
-    pub fn reply(&self) -> Option<&async_nats::Subject> {
-        self.inner.reply.as_ref()
-    }
-
-    pub async fn ack(&self) -> Result<(), async_nats::Error> {
-        self.inner.ack().await
-    }
-
-    pub async fn double_ack(&self) -> Result<(), async_nats::Error> {
-        self.inner.double_ack().await
-    }
-
-    pub async fn nak(&self) -> Result<(), async_nats::Error> {
-        self.inner.ack_with(jetstream::AckKind::Nak(None)).await
-    }
-
-    pub async fn nak_with_delay(&self, delay: Duration) -> Result<(), async_nats::Error> {
-        self.inner
-            .ack_with(jetstream::AckKind::Nak(Some(delay)))
-            .await
-    }
-
-    pub async fn term(&self) -> Result<(), async_nats::Error> {
-        self.inner.ack_with(jetstream::AckKind::Term).await
-    }
-
-    pub async fn in_progress(&self) -> Result<(), async_nats::Error> {
-        self.inner.ack_with(jetstream::AckKind::Progress).await
-    }
-
-    pub fn info(&self) -> Result<jetstream::message::Info<'_>, async_nats::Error> {
-        self.inner.info()
-    }
+    fn ack_with(&self, kind: AckKind) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
+
+pub trait JsDoubleAck: Send + 'static {
+    type Error: fmt::Display + fmt::Debug + Send + Sync;
+
+    fn double_ack(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait JsDoubleAckWith: Send + 'static {
+    type Error: fmt::Display + fmt::Debug + Send + Sync;
+
+    fn double_ack_with(
+        &self,
+        kind: AckKind,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait JsRequestMessage: JsMessageRef + JsAck + JsAckWith {}
+impl<T: JsMessageRef + JsAck + JsAckWith> JsRequestMessage for T {}
+
+pub trait JsDispatchMessage: JsMessageRef + JsAck + JsAckWith {}
+impl<T: JsMessageRef + JsAck + JsAckWith> JsDispatchMessage for T {}
