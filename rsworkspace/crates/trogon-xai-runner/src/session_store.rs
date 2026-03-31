@@ -16,9 +16,15 @@ pub struct XaiSessionData {
     /// Optional system prompt injected as the first message of every turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    /// xAI `search_parameters.mode`: "auto" | "on" | absent (= off).
+    /// Server-side tools enabled for this session (Responses API `tools` array).
+    /// E.g. `["web_search", "x_search", "code_interpreter"]`.
+    #[serde(default)]
+    pub enabled_tools: Vec<String>,
+    /// ID of the last response from xAI, used as `previous_response_id` on the
+    /// next turn to avoid re-sending full history. Cleared when the session is
+    /// forked (fork starts fresh without prior context reference).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub search_mode: Option<String>,
+    pub last_response_id: Option<String>,
 }
 
 /// Persistent store for session data.

@@ -1,28 +1,32 @@
 //! HTTP client for xAI's OpenAI-compatible REST API.
 //!
-//! ## REST vs gRPC — decision record
+//! ## Endpoint choice — decision record
 //!
-//! xAI exposes two API surfaces:
-//! - **OpenAI-compatible REST** at `api.x.ai/v1/chat/completions`
+//! xAI exposes two REST surfaces and one gRPC surface:
+//! - **Responses API** at `api.x.ai/v1/responses` ← used here
+//! - **OpenAI-compatible** at `api.x.ai/v1/chat/completions`
 //! - **Native gRPC** defined in [`xai-org/xai-proto`](https://github.com/xai-org/xai-proto)
 //!
-//! This crate uses the REST endpoint for the following reasons:
+//! This crate uses the **Responses API** for the following reasons:
 //!
-//! 1. **Feature parity**: REST and gRPC both support streaming chat, tool/function
-//!    calling, vision, and reasoning. REST additionally exposes code interpreter and
-//!    file search, which are not in the current gRPC surface.
+//! 1. **Server-side tools**: `web_search`, `x_search`, `code_interpreter`, and
+//!    `file_search` are only available on the Responses API.
+//!    Chat Completions supports custom function calling only.
 //!
-//! 2. **No Rust gRPC SDK**: using the proto requires `tonic` + `prost` codegen via
-//!    `build.rs`, adding build complexity and an unofficial crate dependency for no
-//!    functional gain in the current chat-agent use case.
+//! 2. **Stateful multi-turn**: `previous_response_id` lets subsequent requests
+//!    reference prior context without re-sending the full history, reducing token
+//!    usage and latency.
 //!
-//! 3. **Simplicity**: the OpenAI-compatible endpoint keeps the client minimal and
-//!    portable across OpenAI-compatible providers.
+//! 3. **Agentic design**: the Responses API is purpose-built for agentic loops —
+//!    the model can call tools, receive results, and continue in one logical turn.
 //!
-//! Revisit if xAI-exclusive features become necessary (deferred completions,
-//! fine-grained `search_parameters`, or the native batch API).
+//! 4. **No Rust gRPC SDK**: gRPC requires `tonic` + `prost` codegen with no
+//!    functional gain for the current chat-agent use case.
+//!
+//! Revisit gRPC only if xAI-exclusive features (Batch API, `agent_count`,
+//! `use_encrypted_content`) become necessary.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use bytes::Bytes;
 use futures_util::stream::StreamExt as _;
@@ -30,23 +34,149 @@ use futures_util::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
+/// A function called by the model within a tool call message.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+/// A tool call entry within an `assistant` message's `tool_calls` array.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MessageToolCall {
+    pub id: String,
+    /// Always `"function"` for xAI function calls.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: ToolCallFunction,
+}
+
 /// A single message in the conversation history.
+///
+/// Supports all xAI message roles:
+/// - `user` / `system` — always have `content`
+/// - `assistant` — has `content` (text) or `tool_calls` (function calls) or both
+/// - `tool` — has `content` and `tool_call_id` (result of a function call)
+///
+/// All fields except `role` are `Option` so that:
+/// 1. Messages without a given field serialize without a `null` placeholder
+///    (`skip_serializing_if = "Option::is_none"`).
+/// 2. Legacy sessions stored as `{"role":"user","content":"hello"}` deserialize
+///    correctly — `#[serde(default)]` fills missing fields with `None`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
     pub role: String,
-    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<MessageToolCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
-/// An event emitted by the streaming chat completions endpoint.
+impl Message {
+    pub fn user(text: impl Into<String>) -> Self {
+        Self { role: "user".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
+    }
+
+    pub fn system(text: impl Into<String>) -> Self {
+        Self { role: "system".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
+    }
+
+    pub fn assistant_text(text: impl Into<String>) -> Self {
+        Self { role: "assistant".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
+    }
+
+    pub fn assistant_tool_calls(tool_calls: Vec<MessageToolCall>) -> Self {
+        Self { role: "assistant".to_string(), content: None, tool_calls: Some(tool_calls), tool_call_id: None }
+    }
+
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self { role: "tool".to_string(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(tool_call_id.into()) }
+    }
+
+    /// Returns the text content of this message, or `""` if none.
+    pub fn content_str(&self) -> &str {
+        self.content.as_deref().unwrap_or("")
+    }
+}
+
+/// An item in the `input` array sent to the Responses API.
+///
+/// Three variants map to the three kinds of items the Responses API accepts:
+/// - `Message` — user / system / assistant text turns
+/// - `FunctionCall` — assistant tool call recorded from a previous response
+/// - `FunctionCallOutput` — result of executing a function call
+#[derive(Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum InputItem {
+    Message {
+        role: String,
+        content: String,
+    },
+    FunctionCall {
+        #[serde(rename = "type")]
+        kind: String,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        #[serde(rename = "type")]
+        kind: String,
+        call_id: String,
+        output: String,
+    },
+}
+
+impl InputItem {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self::Message { role: "user".to_string(), content: content.into() }
+    }
+
+    pub fn system(content: impl Into<String>) -> Self {
+        Self::Message { role: "system".to_string(), content: content.into() }
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self::Message { role: "assistant".to_string(), content: content.into() }
+    }
+
+    pub fn function_call(
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+    ) -> Self {
+        Self::FunctionCall {
+            kind: "function_call".to_string(),
+            call_id: call_id.into(),
+            name: name.into(),
+            arguments: arguments.into(),
+        }
+    }
+
+    pub fn function_call_output(call_id: impl Into<String>, output: impl Into<String>) -> Self {
+        Self::FunctionCallOutput {
+            kind: "function_call_output".to_string(),
+            call_id: call_id.into(),
+            output: output.into(),
+        }
+    }
+}
+
+/// An event emitted by the Responses API streaming endpoint.
 #[derive(Debug, Clone)]
 pub enum XaiEvent {
     /// A text chunk from the model.
     TextDelta { text: String },
-    /// The model requested a tool call (accumulated from `delta.tool_calls`
-    /// deltas; emitted when `finish_reason` is `"tool_calls"`).
-    ToolCallStart { id: String, name: String, arguments: String },
-    /// Token usage reported in the final usage chunk
-    /// (`stream_options: {include_usage: true}`).
+    /// The model requested a function call.
+    ///
+    /// In the Responses API, function calls are delivered as a complete chunk
+    /// (not streamed in deltas like Chat Completions).
+    FunctionCall { call_id: String, name: String, arguments: String },
+    /// The `id` of this response — used as `previous_response_id` next turn.
+    ResponseId { id: String },
+    /// Token usage from the `response.completed` event.
     Usage { prompt_tokens: u64, completion_tokens: u64 },
     /// The stream ended normally (`[DONE]`).
     Done,
@@ -78,24 +208,30 @@ impl XaiClient {
         }
     }
 
-    /// Start a streaming chat completion and return a stream of `XaiEvent`s.
+    /// Start a streaming Responses API call and return a stream of `XaiEvent`s.
     ///
-    /// `api_key` is the xAI bearer token to use for this specific request.
-    ///
-    /// `search_mode` controls xAI server-side web/X search:
-    /// - `None` or `Some("off")` — no search (default)
-    /// - `Some("auto")` — model decides when to search
-    /// - `Some("on")` — always search
+    /// - `input` — items for this turn (user message, or tool results for follow-up turns)
+    /// - `api_key` — xAI bearer token for this request
+    /// - `tools` — server-side tool names to enable, e.g. `["web_search", "x_search"]`
+    /// - `previous_response_id` — ID from the prior response; enables stateful
+    ///   multi-turn without re-sending full history
     pub async fn chat_stream(
         &self,
         model: &str,
-        messages: &[Message],
+        input: &[InputItem],
         api_key: &str,
-        search_mode: Option<&str>,
-    ) -> impl Stream<Item = XaiEvent> {
-        debug!(model, messages_len = messages.len(), search_mode, "xai: starting chat stream");
+        tools: &[String],
+        previous_response_id: Option<&str>,
+    ) -> impl Stream<Item = XaiEvent> + use<> {
+        debug!(
+            model,
+            input_len = input.len(),
+            tools = ?tools,
+            has_prev_response = previous_response_id.is_some(),
+            "xai: starting responses stream"
+        );
 
-        let result = self.start_request(model, messages, api_key, search_mode).await;
+        let result = self.start_request(model, input, api_key, tools, previous_response_id).await;
         match result {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
             Err(e) => {
@@ -109,27 +245,32 @@ impl XaiClient {
     async fn start_request(
         &self,
         model: &str,
-        messages: &[Message],
+        input: &[InputItem],
         api_key: &str,
-        search_mode: Option<&str>,
+        tools: &[String],
+        previous_response_id: Option<&str>,
     ) -> Result<reqwest::Response, String> {
         let mut body = serde_json::json!({
             "model": model,
-            "messages": messages,
+            "input": input,
             "stream": true,
-            "stream_options": { "include_usage": true }
         });
 
-        // Inject search_parameters when mode is "auto" or "on".
-        // Absent / "off" means no search — omit the field entirely so older
-        // API versions that don't know the parameter are not affected.
-        if let Some(mode) = search_mode.filter(|m| *m != "off") {
-            body["search_parameters"] = serde_json::json!({ "mode": mode });
+        if !tools.is_empty() {
+            let tools_json: Vec<serde_json::Value> = tools
+                .iter()
+                .map(|t| serde_json::json!({ "type": t }))
+                .collect();
+            body["tools"] = serde_json::Value::Array(tools_json);
+        }
+
+        if let Some(prev_id) = previous_response_id {
+            body["previous_response_id"] = serde_json::Value::String(prev_id.to_string());
         }
 
         let response = self
             .http
-            .post(format!("{}/chat/completions", self.base_url))
+            .post(format!("{}/responses", self.base_url.trim_end_matches('/')))
             .bearer_auth(api_key)
             .json(&body)
             .send()
@@ -147,31 +288,18 @@ impl XaiClient {
     }
 }
 
-// ── Stateful SSE parser ───────────────────────────────────────────────────────
-
-/// Accumulated state for a single tool call while streaming deltas.
-#[derive(Default)]
-struct ToolCallAcc {
-    id: String,
-    name: String,
-    arguments: String,
-}
+// ── Stateful SSE parser (Responses API) ──────────────────────────────────────
 
 struct SseState {
     stream: futures_util::stream::LocalBoxStream<'static, Result<Bytes, reqwest::Error>>,
     buf: String,
-    /// Tool call fragments indexed by `delta.tool_calls[].index`.
-    tool_calls: HashMap<usize, ToolCallAcc>,
+    /// Set to true once a `ResponseId` event has been emitted for this stream.
+    response_id_emitted: bool,
     /// Events ready to be yielded before pulling more bytes.
     pending: VecDeque<XaiEvent>,
 }
 
-/// Parse a raw SSE byte stream into `XaiEvent`s.
-///
-/// Maintains state across chunks to:
-/// - accumulate partial lines split across TCP segments
-/// - accumulate `delta.tool_calls` fragments until `finish_reason: "tool_calls"`
-/// - capture the trailing usage chunk emitted by `stream_options.include_usage`
+/// Parse a raw SSE byte stream from the Responses API into `XaiEvent`s.
 fn parse_sse(
     bytes: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
 ) -> impl Stream<Item = XaiEvent> {
@@ -179,25 +307,22 @@ fn parse_sse(
         SseState {
             stream: bytes.boxed_local(),
             buf: String::new(),
-            tool_calls: HashMap::new(),
+            response_id_emitted: false,
             pending: VecDeque::new(),
         },
         |mut state| async move {
             loop {
-                // Yield any buffered events before reading more bytes.
                 if let Some(ev) = state.pending.pop_front() {
                     return Some((ev, state));
                 }
 
-                // Consume one complete line from the text buffer.
                 if let Some(nl) = state.buf.find('\n') {
                     let line = state.buf[..nl].trim_end_matches('\r').to_string();
                     state.buf = state.buf[nl + 1..].to_string();
-                    process_sse_line(&line, &mut state.tool_calls, &mut state.pending);
+                    process_sse_line(&line, &mut state.response_id_emitted, &mut state.pending);
                     continue;
                 }
 
-                // Need more bytes from the network.
                 match state.stream.next().await {
                     Some(Ok(chunk)) => {
                         state.buf.push_str(&String::from_utf8_lossy(&chunk));
@@ -207,11 +332,10 @@ fn parse_sse(
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
                     None => {
-                        // Flush any remaining unterminated line.
                         let remaining = std::mem::take(&mut state.buf);
                         let line = remaining.trim();
                         if !line.is_empty() {
-                            process_sse_line(line, &mut state.tool_calls, &mut state.pending);
+                            process_sse_line(line, &mut state.response_id_emitted, &mut state.pending);
                         }
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
@@ -221,13 +345,19 @@ fn parse_sse(
     )
 }
 
-/// Process one `data: ...` SSE line, pushing resulting events into `pending`.
+/// Process one `data: ...` SSE line from the Responses API.
 ///
-/// Tool call deltas are accumulated in `tool_calls`; the completed tool calls
-/// are flushed to `pending` when `finish_reason` is `"tool_calls"`.
+/// Responses API event types:
+/// - `message.delta` with `delta.type == "output_text"` → `TextDelta`
+/// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
+/// - `response.completed` → `Usage`
+/// - `[DONE]` → `Done`
+///
+/// The top-level `id` field present on most events is used to emit `ResponseId`
+/// exactly once per stream (the first time it appears).
 fn process_sse_line(
     line: &str,
-    tool_calls: &mut HashMap<usize, ToolCallAcc>,
+    response_id_emitted: &mut bool,
     pending: &mut VecDeque<XaiEvent>,
 ) {
     let data = match line.strip_prefix("data: ") {
@@ -248,56 +378,43 @@ fn process_sse_line(
         }
     };
 
-    // Usage chunk: `{"choices": [], "usage": {...}}` — emitted last when
-    // `stream_options.include_usage` is true.
-    if val["choices"].as_array().map(|c| c.is_empty()).unwrap_or(false) {
-        let p = val["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
-        let c = val["usage"]["completion_tokens"].as_u64().unwrap_or(0);
-        if p > 0 || c > 0 {
-            pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
-        }
-        return;
-    }
-
-    let choice = &val["choices"][0];
-    let delta = &choice["delta"];
-    let finish_reason = choice["finish_reason"].as_str();
-
-    // Text content delta.
-    if let Some(text) = delta["content"].as_str() {
-        if !text.is_empty() {
-            pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
+    // Emit the response ID once (the first chunk that carries it).
+    if !*response_id_emitted {
+        if let Some(id) = val["id"].as_str() {
+            pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+            *response_id_emitted = true;
         }
     }
 
-    // Accumulate tool call fragments.
-    if let Some(tc_arr) = delta["tool_calls"].as_array() {
-        for tc in tc_arr {
-            let index = tc["index"].as_u64().unwrap_or(0) as usize;
-            let acc = tool_calls.entry(index).or_default();
-            if let Some(id) = tc["id"].as_str() {
-                acc.id = id.to_string();
-            }
-            if let Some(name) = tc["function"]["name"].as_str() {
-                acc.name.push_str(name);
-            }
-            if let Some(args) = tc["function"]["arguments"].as_str() {
-                acc.arguments.push_str(args);
-            }
-        }
-    }
+    let event_type = val["type"].as_str().unwrap_or("");
 
-    // Flush accumulated tool calls when the model signals it's done calling tools.
-    if finish_reason == Some("tool_calls") {
-        let mut sorted: Vec<_> = tool_calls.drain().collect();
-        sorted.sort_by_key(|(idx, _)| *idx);
-        for (_, acc) in sorted {
-            pending.push_back(XaiEvent::ToolCallStart {
-                id: acc.id,
-                name: acc.name,
-                arguments: acc.arguments,
-            });
+    match event_type {
+        "message.delta" => {
+            // {"type":"message.delta","delta":{"type":"output_text","text":"..."}}
+            if let Some(text) = val["delta"]["text"].as_str() {
+                if !text.is_empty() {
+                    pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
+                }
+            }
         }
+        "function_call" => {
+            // {"type":"function_call","function_call":{"call_id":"...","name":"...","arguments":"..."}}
+            let fc = &val["function_call"];
+            let call_id = fc["call_id"].as_str().unwrap_or("").to_string();
+            let name = fc["name"].as_str().unwrap_or("").to_string();
+            let arguments = fc["arguments"].as_str().unwrap_or("").to_string();
+            if !call_id.is_empty() || !name.is_empty() {
+                pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+            }
+        }
+        "response.completed" | "response.done" => {
+            let p = val["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
+            let c = val["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+            if p > 0 || c > 0 {
+                pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
+            }
+        }
+        _ => {}
     }
 }
 
@@ -308,23 +425,18 @@ mod tests {
     /// Test helper: run `process_sse_line` with fresh state and return the
     /// first pending event (ignores any extras for simplicity).
     fn parse_line(line: &str) -> Option<XaiEvent> {
-        let mut tool_calls = HashMap::new();
+        let mut emitted = false;
         let mut pending = VecDeque::new();
-        process_sse_line(line, &mut tool_calls, &mut pending);
+        process_sse_line(line, &mut emitted, &mut pending);
         pending.pop_front()
     }
 
-    fn chunk(text: &str) -> String {
-        format!(
-            r#"data: {{"choices":[{{"delta":{{"content":"{text}"}}}}]}}"#
-        )
-    }
-
-    #[test]
-    fn text_delta() {
-        let line = chunk("hello");
-        let event = parse_line(&line).unwrap();
-        assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
+    /// Parse a line and return ALL emitted events.
+    fn parse_line_all(line: &str) -> Vec<XaiEvent> {
+        let mut emitted = false;
+        let mut pending = VecDeque::new();
+        process_sse_line(line, &mut emitted, &mut pending);
+        pending.into_iter().collect()
     }
 
     #[test]
@@ -341,31 +453,59 @@ mod tests {
     }
 
     #[test]
-    fn empty_content_returns_none() {
-        let line = r#"data: {"choices":[{"delta":{"content":""}}]}"#;
-        assert!(parse_line(line).is_none());
-    }
-
-    #[test]
-    fn missing_content_field_returns_none() {
-        let line = r#"data: {"choices":[{"delta":{}}]}"#;
-        assert!(parse_line(line).is_none());
-    }
-
-    #[test]
     fn invalid_json_returns_none() {
         assert!(parse_line("data: {not valid json}").is_none());
     }
 
     #[test]
-    fn role_only_delta_returns_none() {
-        let line = r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#;
+    fn text_delta_responses_api() {
+        let line = r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
+    }
+
+    #[test]
+    fn empty_text_delta_returns_none() {
+        let line = r#"data: {"type":"message.delta","delta":{"type":"output_text","text":""}}"#;
         assert!(parse_line(line).is_none());
     }
 
     #[test]
-    fn usage_chunk_emits_usage_event() {
-        let line = r#"data: {"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}"#;
+    fn response_id_emitted_once() {
+        let line = r#"data: {"id":"resp_123","type":"message.delta","delta":{"type":"output_text","text":"hi"}}"#;
+        let events = parse_line_all(line);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], XaiEvent::ResponseId { id } if id == "resp_123"));
+        assert!(matches!(&events[1], XaiEvent::TextDelta { text } if text == "hi"));
+
+        // Second call with same id must NOT emit ResponseId again.
+        let mut emitted = true; // already emitted
+        let mut pending = VecDeque::new();
+        process_sse_line(line, &mut emitted, &mut pending);
+        let events2: Vec<_> = pending.into_iter().collect();
+        assert!(
+            !events2.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            "ResponseId must not be emitted twice: {events2:?}"
+        );
+    }
+
+    #[test]
+    fn function_call_event() {
+        let line = r#"data: {"type":"function_call","function_call":{"call_id":"call_1","name":"web_search","arguments":"{\"q\":\"test\"}"}}"#;
+        let event = parse_line(line).unwrap();
+        match event {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
+                assert_eq!(call_id, "call_1");
+                assert_eq!(name, "web_search");
+                assert_eq!(arguments, r#"{"q":"test"}"#);
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn usage_event_from_response_completed() {
+        let line = r#"data: {"type":"response.completed","usage":{"prompt_tokens":42,"completion_tokens":7}}"#;
         let event = parse_line(line).unwrap();
         assert!(
             matches!(event, XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 }),
@@ -374,41 +514,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_accumulated_on_finish_reason() {
-        let mut tool_calls = HashMap::new();
-        let mut pending = VecDeque::new();
-
-        // First delta: id + function name start
-        process_sse_line(
-            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"web_se","arguments":""}}]},"finish_reason":null}]}"#,
-            &mut tool_calls,
-            &mut pending,
-        );
-        assert!(pending.is_empty(), "no event yet — still accumulating");
-
-        // Second delta: name + arguments
-        process_sse_line(
-            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"arch","arguments":"{\"q\":"}}]},"finish_reason":null}]}"#,
-            &mut tool_calls,
-            &mut pending,
-        );
-        assert!(pending.is_empty());
-
-        // Final delta: finish_reason = "tool_calls"
-        process_sse_line(
-            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"test\"}"}}]},"finish_reason":"tool_calls"}]}"#,
-            &mut tool_calls,
-            &mut pending,
-        );
-
-        let event = pending.pop_front().unwrap();
-        match event {
-            XaiEvent::ToolCallStart { id, name, arguments } => {
-                assert_eq!(id, "call_1");
-                assert_eq!(name, "web_search");
-                assert_eq!(arguments, r#"{"q":"test"}"#);
-            }
-            other => panic!("expected ToolCallStart, got {other:?}"),
-        }
+    fn unknown_event_type_returns_none() {
+        let line = r#"data: {"type":"some.unknown.event","foo":"bar"}"#;
+        assert!(parse_line(line).is_none());
     }
 }

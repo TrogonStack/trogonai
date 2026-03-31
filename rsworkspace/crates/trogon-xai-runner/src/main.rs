@@ -28,13 +28,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&n| n > 0)
         .unwrap_or(7 * 24 * 3600);
-
+    let prompt_timeout_secs = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(300);
+    let models = std::env::var("XAI_MODELS")
+        .unwrap_or_else(|_| "grok-3:Grok 3,grok-3-mini:Grok 3 Mini".to_string());
     info!(
         nats_url,
         prefix,
         default_model,
+        models,
         system_prompt_set,
         max_history_messages,
+        prompt_timeout_secs,
         session_ttl_secs,
         "xai-runner starting"
     );

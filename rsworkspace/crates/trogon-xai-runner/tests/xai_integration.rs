@@ -80,6 +80,7 @@ async fn make_agent(base_url: Option<&str>) -> XaiAgent {
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -95,6 +96,7 @@ async fn make_agent_with_models(models_env: &str) -> XaiAgent {
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
         std::env::set_var("XAI_MODELS", models_env);
     }
     XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
@@ -109,6 +111,7 @@ async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
             None => std::env::remove_var("XAI_BASE_URL"),
@@ -123,6 +126,7 @@ async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> X
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", timeout_secs.to_string());
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
@@ -138,6 +142,7 @@ async fn make_agent_with_system_prompt(base_url: Option<&str>, system_prompt: &s
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
         std::env::set_var("XAI_SYSTEM_PROMPT", system_prompt);
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
@@ -173,12 +178,12 @@ async fn drain_request(
     }
 }
 
-/// One-shot SSE server: each `text_chunks` string becomes a `data:` event,
-/// followed by `[DONE]`. Returns the base URL.
+/// One-shot SSE server: each `text_chunks` string becomes a Responses API
+/// `message.delta` event, followed by `[DONE]`. Returns the base URL.
 async fn fake_xai_sse(text_chunks: &[&'static str]) -> String {
     let body: String = text_chunks
         .iter()
-        .map(|t| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"))
+        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
         .chain(std::iter::once("data: [DONE]\n\n".to_string()))
         .collect();
 
@@ -219,7 +224,7 @@ async fn fake_xai_sse_slow(first_chunk: &'static str) -> String {
             let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n";
             writer.write_all(header.as_bytes()).await.ok();
             let chunk = format!(
-                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{first_chunk}\"}}}}]}}\n\n"
+                "data: {{\"id\":\"resp_partial\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{first_chunk}\"}}}}\n\n"
             );
             writer.write_all(chunk.as_bytes()).await.ok();
             writer.flush().await.ok();
@@ -261,7 +266,7 @@ async fn fake_xai_error(status: u16) -> String {
 async fn fake_xai_sse_capturing_auth(text_chunks: &[&'static str]) -> (String, Arc<Mutex<Option<String>>>) {
     let body: String = text_chunks
         .iter()
-        .map(|t| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"))
+        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
         .chain(std::iter::once("data: [DONE]\n\n".to_string()))
         .collect();
 
@@ -535,7 +540,7 @@ async fn fork_session_clones_conversation_history() {
     let fork_history = agent.test_session_history(&fork_id).await;
     assert_eq!(src_history.len(), 2, "source: user + assistant");
     assert_eq!(fork_history.len(), 2, "fork should inherit history");
-    assert_eq!(fork_history[0].content, src_history[0].content);
+    assert_eq!(fork_history[0].content_str(), src_history[0].content_str());
 }
 
 // ── prompt ────────────────────────────────────────────────────────────────────
@@ -572,9 +577,9 @@ async fn prompt_returns_end_turn_and_updates_history() {
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2, "user + assistant messages");
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "ping");
+    assert_eq!(history[0].content_str(), "ping");
     assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[1].content, "Hello world");
+    assert_eq!(history[1].content_str(), "Hello world");
 }
 
 #[tokio::test]
@@ -590,8 +595,8 @@ async fn prompt_sends_accumulated_history_on_second_turn() {
 
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].content, "first turn");
-    assert_eq!(history[1].content, "First reply");
+    assert_eq!(history[0].content_str(), "first turn");
+    assert_eq!(history[1].content_str(), "First reply");
 }
 
 #[tokio::test]
@@ -636,7 +641,7 @@ async fn prompt_with_done_only_response_does_not_update_history() {
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "ping");
+    assert_eq!(history[0].content_str(), "ping");
 }
 
 // Retry after a failed put(assistant): history already ends with the user
@@ -660,7 +665,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
         let mut data = agent.test_session_history(&session_id).await;
         // history is empty; push the user message as if it was persisted before
         // a crash that lost the assistant reply.
-        data.push(trogon_xai_runner::Message { role: "user".to_string(), content: "hello".to_string() });
+        data.push(trogon_xai_runner::Message::user("hello"));
         agent.test_set_session_history(&session_id, data).await;
     }
 
@@ -678,15 +683,15 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2, "expected user + assistant, got: {history:?}");
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "hello");
+    assert_eq!(history[0].content_str(), "hello");
     assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[1].content, "the reply");
+    assert_eq!(history[1].content_str(), "the reply");
 
     // The xAI request body must contain exactly one user message — no duplicate.
     let bodies = bodies.lock().unwrap();
-    let msgs = bodies[0]["messages"].as_array().unwrap();
-    let user_msgs: Vec<_> = msgs.iter().filter(|m| m["role"] == "user").collect();
-    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message: {msgs:?}");
+    let input = bodies[0]["input"].as_array().unwrap();
+    let user_msgs: Vec<_> = input.iter().filter(|m| m["role"] == "user").collect();
+    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message: {input:?}");
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -883,7 +888,7 @@ async fn fake_xai_sse_chunked() -> String {
 
             // First write: the SSE line is cut mid-JSON (no trailing newline).
             writer
-                .write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"Hel")
+                .write_all(b"data: {\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Hel")
                 .await
                 .ok();
             writer.flush().await.ok();
@@ -891,7 +896,7 @@ async fn fake_xai_sse_chunked() -> String {
             tokio::time::sleep(Duration::from_millis(20)).await;
 
             // Second write: completes the JSON, adds the line terminator, then DONE.
-            writer.write_all(b"lo\"}}]}\n\ndata: [DONE]\n\n").await.ok();
+            writer.write_all(b"lo\"}}\n\ndata: [DONE]\n\n").await.ok();
             writer.flush().await.ok();
         }
     });
@@ -940,14 +945,18 @@ async fn fake_xai_sse_recording(
                 } else {
                     serde_json::Value::Null
                 };
+                // Capture the index before pushing so resp_id matches the index
+                // in the bodies array (resp_0 → bodies[0], resp_1 → bodies[1], …).
+                let resp_idx = bodies_clone.lock().unwrap().len();
                 bodies_clone.lock().unwrap().push(body_json);
 
-                // Respond with SSE chunks.
+                // Respond with SSE chunks (Responses API format).
+                let resp_id = format!("resp_{resp_idx}");
                 let body: String = chunks
                     .iter()
                     .map(|t| {
                         format!(
-                            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"
+                            "data: {{\"id\":\"{resp_id}\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"
                         )
                     })
                     .chain(std::iter::once("data: [DONE]\n\n".to_string()))
@@ -986,7 +995,7 @@ async fn fake_xai_sse_multi(count: usize, text_chunks: Vec<&'static str>) -> Str
                         .iter()
                         .map(|t| {
                             format!(
-                                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"
+                                "data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"
                             )
                         })
                         .chain(std::iter::once("data: [DONE]\n\n".to_string()))
@@ -1028,7 +1037,7 @@ async fn partial_sse_lines_across_chunks_are_assembled_correctly() {
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[1].content, "Hello");
+    assert_eq!(history[1].content_str(), "Hello");
 }
 
 // ── prompt timeout ────────────────────────────────────────────────────────────
@@ -1060,7 +1069,7 @@ async fn prompt_times_out_when_server_stops_responding() {
     // must be updated.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[1].content, "partial");
+    assert_eq!(history[1].content_str(), "partial");
 }
 
 // ── history as context ────────────────────────────────────────────────────────
@@ -1086,21 +1095,26 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
     let c2 = vec![ContentBlock::Text(TextContent::new("second question"))];
     agent.prompt(PromptRequest::new(session_id.clone(), c2)).await.unwrap();
 
-    // Inspect what the agent sent on turn 2: it must include the full history.
     let captured = bodies.lock().unwrap();
     assert_eq!(captured.len(), 2, "expected two recorded requests");
-    let msgs = captured[1]["messages"]
-        .as_array()
-        .expect("turn-2 body must have a 'messages' array");
 
-    // user(turn1) + assistant(turn1) + user(turn2) = 3 messages.
-    assert_eq!(msgs.len(), 3);
-    assert_eq!(msgs[0]["role"], "user");
-    assert_eq!(msgs[0]["content"], "first question");
-    assert_eq!(msgs[1]["role"], "assistant");
-    assert_eq!(msgs[1]["content"], "First reply");
-    assert_eq!(msgs[2]["role"], "user");
-    assert_eq!(msgs[2]["content"], "second question");
+    // Turn 1: full history (just the user message — no prior context).
+    let t1_input = captured[0]["input"].as_array()
+        .expect("turn-1 body must have an 'input' array");
+    assert_eq!(t1_input.len(), 1, "turn 1 should have exactly one input item");
+    assert_eq!(t1_input[0]["role"], "user");
+    assert_eq!(t1_input[0]["content"], "first question");
+    assert!(captured[0]["previous_response_id"].is_null(), "turn 1 must not send previous_response_id");
+
+    // Turn 2: stateful via previous_response_id — only the new user message.
+    let t2_input = captured[1]["input"].as_array()
+        .expect("turn-2 body must have an 'input' array");
+    assert_eq!(t2_input.len(), 1, "turn 2 should send only the new user message (context held server-side)");
+    assert_eq!(t2_input[0]["role"], "user");
+    assert_eq!(t2_input[0]["content"], "second question");
+    // The agent must reference the turn-1 response id so the server knows the context.
+    assert_eq!(captured[1]["previous_response_id"], "resp_0",
+        "turn 2 must reference turn 1's response id");
 }
 
 // ── concurrent session isolation ─────────────────────────────────────────────
@@ -1134,12 +1148,12 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
     let hist_b = agent.test_session_history(&id_b).await;
 
     assert_eq!(hist_a.len(), 2);
-    assert_eq!(hist_a[0].content, "question-a");
-    assert_eq!(hist_a[1].content, "session-reply");
+    assert_eq!(hist_a[0].content_str(), "question-a");
+    assert_eq!(hist_a[1].content_str(), "session-reply");
 
     assert_eq!(hist_b.len(), 2);
-    assert_eq!(hist_b[0].content, "question-b");
-    assert_eq!(hist_b[1].content, "session-reply");
+    assert_eq!(hist_b[0].content_str(), "question-b");
+    assert_eq!(hist_b[1].content_str(), "session-reply");
 }
 
 // ── authenticate ──────────────────────────────────────────────────────────────
@@ -1262,6 +1276,20 @@ async fn authenticate_missing_key_in_meta_returns_error() {
         .await
         .unwrap_err();
     assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
+}
+
+#[tokio::test]
+async fn authenticate_empty_key_returns_error() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent_no_key(None).await;
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
+    let err = agent
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("must not be empty"), "got: {}", err.message);
 }
 
 #[tokio::test]
@@ -1455,7 +1483,7 @@ async fn session_is_usable_after_cancel() {
             let mut reader = BufReader::new(reader);
             drain_request(&mut reader).await;
             writer.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.ok();
-            writer.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n").await.ok();
+            writer.write_all(b"data: {\"id\":\"resp_1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"partial\"}}\n\n").await.ok();
             writer.flush().await.ok();
             tokio::time::sleep(Duration::from_secs(30)).await;
         }
@@ -1464,7 +1492,7 @@ async fn session_is_usable_after_cancel() {
             let (reader, mut writer) = stream.into_split();
             let mut reader = BufReader::new(reader);
             drain_request(&mut reader).await;
-            let body = "data: {\"choices\":[{\"delta\":{\"content\":\"second reply\"}}]}\n\ndata: [DONE]\n\n";
+            let body = "data: {\"id\":\"resp_2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"second reply\"}}\n\ndata: [DONE]\n\n";
             let http = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(), body,
@@ -1505,8 +1533,8 @@ async fn session_is_usable_after_cancel() {
 
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].content, "second");
-    assert_eq!(history[1].content, "second reply");
+    assert_eq!(history[0].content_str(), "second");
+    assert_eq!(history[1].content_str(), "second reply");
 }
 
 // ── re-authentication replaces pending key ────────────────────────────────────
@@ -1559,8 +1587,8 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
-    let user_msg = msgs.last().expect("at least one message");
+    let input = captured[0]["input"].as_array().expect("input array");
+    let user_msg = input.last().expect("at least one input item");
     assert_eq!(user_msg["role"], "user");
     assert_eq!(user_msg["content"], "line one\nline two");
 }
@@ -1664,12 +1692,12 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
     assert_eq!(fork_history.len(), 4);
 
     // The diverging turns must be independent.
-    assert_eq!(src_history[2].content, "parent-only");
-    assert_eq!(fork_history[2].content, "fork-only");
+    assert_eq!(src_history[2].content_str(), "parent-only");
+    assert_eq!(fork_history[2].content_str(), "fork-only");
 
     // The other session must not contain the diverging turn of its sibling.
-    assert!(src_history.iter().all(|m| m.content != "fork-only"));
-    assert!(fork_history.iter().all(|m| m.content != "parent-only"));
+    assert!(src_history.iter().all(|m| m.content_str() != "fork-only"));
+    assert!(fork_history.iter().all(|m| m.content_str() != "parent-only"));
 }
 
 // ── edge-case tests ───────────────────────────────────────────────────────────
@@ -1812,10 +1840,10 @@ async fn xai_models_all_malformed_falls_back_to_defaults() {
 /// SSE server that appends a usage chunk before `[DONE]`.
 async fn fake_xai_sse_with_usage(text_chunks: &[&'static str]) -> String {
     let usage_chunk =
-        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n";
+        "data: {\"type\":\"response.completed\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n";
     let body: String = text_chunks
         .iter()
-        .map(|t| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{t}\"}}}}]}}\n\n"))
+        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
         .chain(std::iter::once(usage_chunk.to_string()))
         .chain(std::iter::once("data: [DONE]\n\n".to_string()))
         .collect();
@@ -1840,11 +1868,15 @@ async fn fake_xai_sse_with_usage(text_chunks: &[&'static str]) -> String {
     format!("http://127.0.0.1:{port}/v1")
 }
 
-/// SSE server that returns a `finish_reason: "tool_calls"` response (no text).
+/// SSE server that emits a Responses API `function_call` event (server-side tool
+/// invocation) followed immediately by `[DONE]` with no text.
+///
+/// Server-side tools (web_search, x_search, code_interpreter) execute on the
+/// xAI backend — the runner receives the function_call event for observability
+/// and then the stream ends normally in one connection. No client round-trip.
 async fn fake_xai_sse_with_tool_calls() -> String {
     let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_test\",\"type\":\"function\",\"function\":{\"name\":\"web_search\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"rust\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: {\"id\":\"resp_tool\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_test\",\"name\":\"web_search\",\"arguments\":\"{\\\"query\\\":\\\"rust\\\"}\"}}\n\n",
         "data: [DONE]\n\n",
     );
 
@@ -1884,13 +1916,13 @@ async fn system_prompt_injected_as_first_message_in_request() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let input = captured[0]["input"].as_array().expect("input array");
 
-    assert_eq!(msgs.len(), 2, "system + user");
-    assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[0]["content"], "You are a helpful assistant.");
-    assert_eq!(msgs[1]["role"], "user");
-    assert_eq!(msgs[1]["content"], "hello");
+    assert_eq!(input.len(), 2, "system + user");
+    assert_eq!(input[0]["role"], "system");
+    assert_eq!(input[0]["content"], "You are a helpful assistant.");
+    assert_eq!(input[1]["role"], "user");
+    assert_eq!(input[1]["content"], "hello");
 }
 
 #[tokio::test]
@@ -1909,10 +1941,10 @@ async fn system_prompt_absent_when_env_var_not_set() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
+    let input = captured[0]["input"].as_array().expect("input array");
 
-    assert_eq!(msgs.len(), 1, "only user message — no system message");
-    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(input.len(), 1, "only user message — no system message");
+    assert_eq!(input[0]["role"], "user");
 }
 
 #[tokio::test]
@@ -1934,11 +1966,19 @@ async fn system_prompt_present_in_subsequent_turns() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    // Turn 2: system + user(t1) + assistant(t1) + user(t2)
-    let msgs2 = captured[1]["messages"].as_array().expect("turn-2 messages");
-    assert_eq!(msgs2[0]["role"], "system");
-    assert_eq!(msgs2[0]["content"], "Be concise.");
-    assert_eq!(msgs2.len(), 4);
+    // Turn 1: system + user message (full history, no previous_response_id).
+    let input1 = captured[0]["input"].as_array().expect("turn-1 input");
+    assert_eq!(input1.len(), 2, "system + user");
+    assert_eq!(input1[0]["role"], "system");
+    assert_eq!(input1[0]["content"], "Be concise.");
+
+    // Turn 2: stateful — only the new user message, plus previous_response_id.
+    // The system prompt is already part of the xAI server's prior context.
+    let input2 = captured[1]["input"].as_array().expect("turn-2 input");
+    assert_eq!(input2.len(), 1, "only new user message on turn 2");
+    assert_eq!(input2[0]["role"], "user");
+    assert_eq!(input2[0]["content"], "turn 2");
+    assert!(!captured[1]["previous_response_id"].is_null(), "turn 2 must have previous_response_id");
 }
 
 #[tokio::test]
@@ -1958,7 +1998,7 @@ async fn usage_chunk_is_handled_and_prompt_completes() {
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[1].content, "Hello");
+    assert_eq!(history[1].content_str(), "Hello");
 }
 
 #[tokio::test]
@@ -1982,26 +2022,36 @@ async fn tool_call_response_ends_turn_without_updating_history() {
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "search");
+    assert_eq!(history[0].content_str(), "search");
 }
 
-// ── search_mode config option ─────────────────────────────────────────────────
+// ── tool config options ───────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn new_session_exposes_search_mode_config_option_as_off() {
+async fn new_session_exposes_all_tool_config_options_as_off() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
     let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 1);
-    assert_eq!(opts[0].id.to_string(), "search_mode");
-    assert_eq!(opts[0].name, "Web Search");
+    assert_eq!(opts.len(), 3, "expected 3 tool toggles: {opts:?}");
+    let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
+    assert!(ids.contains(&"web_search".to_string()));
+    assert!(ids.contains(&"x_search".to_string()));
+    assert!(ids.contains(&"code_interpreter".to_string()));
+    // All off by default.
+    for opt in &opts {
+        let current = match &opt.kind {
+            agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => panic!("expected Select kind"),
+        };
+        assert_eq!(current, "off", "tool {} should be off by default", opt.id);
+    }
 }
 
 #[tokio::test]
-async fn load_session_exposes_search_mode_config_option() {
+async fn load_session_exposes_tool_config_options() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
@@ -2011,12 +2061,11 @@ async fn load_session_exposes_search_mode_config_option() {
     let resp = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 1);
-    assert_eq!(opts[0].id.to_string(), "search_mode");
+    assert_eq!(opts.len(), 3, "expected 3 tool toggle options");
 }
 
 #[tokio::test]
-async fn set_search_mode_auto_persists_and_is_reflected_in_response() {
+async fn enable_web_search_persists_and_is_reflected_in_response() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
@@ -2026,18 +2075,24 @@ async fn set_search_mode_auto_persists_and_is_reflected_in_response() {
     let resp = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
-            "auto",
+            "web_search",
+            "on",
         ))
         .await
         .unwrap();
 
-    assert_eq!(resp.config_options.len(), 1);
-    assert_eq!(resp.config_options[0].id.to_string(), "search_mode");
+    assert_eq!(resp.config_options.len(), 3);
+    let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
+        .expect("web_search option must be present");
+    let current = match &ws.kind {
+        agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+        _ => panic!("expected Select kind"),
+    };
+    assert_eq!(current, "on");
 }
 
 #[tokio::test]
-async fn set_search_mode_unknown_value_returns_error() {
+async fn set_tool_unknown_value_returns_error() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
@@ -2047,7 +2102,7 @@ async fn set_search_mode_unknown_value_returns_error() {
     let err = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
+            "web_search",
             "turbo",
         ))
         .await
@@ -2057,7 +2112,7 @@ async fn set_search_mode_unknown_value_returns_error() {
 }
 
 #[tokio::test]
-async fn search_mode_auto_adds_search_parameters_to_request() {
+async fn enabled_tools_are_sent_in_request_tools_array() {
     let _guard = env_lock().lock().unwrap();
     let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
     let agent = make_agent(Some(&url)).await;
@@ -2068,8 +2123,8 @@ async fn search_mode_auto_adds_search_parameters_to_request() {
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
-            "auto",
+            "web_search",
+            "on",
         ))
         .await
         .unwrap();
@@ -2084,15 +2139,16 @@ async fn search_mode_auto_adds_search_parameters_to_request() {
 
     let captured = bodies.lock().unwrap();
     let body = &captured[0];
-    assert_eq!(
-        body["search_parameters"]["mode"],
-        "auto",
-        "search_parameters.mode should be 'auto' in request: {body}"
+    let tools = body["tools"].as_array()
+        .expect("tools array must be present when web_search is enabled");
+    assert!(
+        tools.iter().any(|t| t["type"] == "web_search"),
+        "web_search must be in tools array: {tools:?}"
     );
 }
 
 #[tokio::test]
-async fn search_mode_off_omits_search_parameters_from_request() {
+async fn no_tools_omits_tools_field_from_request() {
     let _guard = env_lock().lock().unwrap();
     let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
     let agent = make_agent(Some(&url)).await;
@@ -2100,7 +2156,7 @@ async fn search_mode_off_omits_search_parameters_from_request() {
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Default is off — no explicit set needed.
+    // No tools enabled — default state.
     agent
         .prompt(PromptRequest::new(
             sid.clone(),
@@ -2112,13 +2168,13 @@ async fn search_mode_off_omits_search_parameters_from_request() {
     let captured = bodies.lock().unwrap();
     let body = &captured[0];
     assert!(
-        body["search_parameters"].is_null(),
-        "search_parameters should be absent when mode is off: {body}"
+        body["tools"].is_null(),
+        "tools field should be absent when no tools are enabled: {body}"
     );
 }
 
 #[tokio::test]
-async fn fork_session_inherits_search_mode() {
+async fn fork_session_inherits_enabled_tools() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
@@ -2128,7 +2184,7 @@ async fn fork_session_inherits_search_mode() {
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             src_id.clone(),
-            "search_mode",
+            "web_search",
             "on",
         ))
         .await
@@ -2140,12 +2196,13 @@ async fn fork_session_inherits_search_mode() {
         .unwrap();
 
     let opts = fork.config_options.expect("config_options should be present in fork");
-    assert_eq!(opts.len(), 1);
-    let current_value = match &opts[0].kind {
+    let ws = opts.iter().find(|o| o.id.to_string() == "web_search")
+        .expect("web_search option must be present");
+    let current = match &ws.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };
-    assert_eq!(current_value, "on", "forked session should inherit search_mode=on");
+    assert_eq!(current, "on", "forked session should inherit web_search=on");
 }
 
 // ── XAI_MAX_HISTORY_MESSAGES env var ─────────────────────────────────────────
@@ -2155,6 +2212,7 @@ async fn make_agent_with_max_history(base_url: Option<&str>, max: usize) -> XaiA
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_TURNS");
         std::env::set_var("XAI_MAX_HISTORY_MESSAGES", max.to_string());
         match base_url {
             Some(url) => std::env::set_var("XAI_BASE_URL", url),
@@ -2208,8 +2266,8 @@ async fn history_is_truncated_after_exceeding_max() {
     // After 3 turns (6 messages), with max=4, only the last 4 should remain.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 4, "expected 4 messages, got {}: {history:?}", history.len());
-    assert_eq!(history[0].content, "turn 2", "oldest pair should have been dropped");
-    assert_eq!(history[2].content, "turn 3");
+    assert_eq!(history[0].content_str(), "turn 2", "oldest pair should have been dropped");
+    assert_eq!(history[2].content_str(), "turn 3");
 }
 
 #[tokio::test]
@@ -2235,16 +2293,16 @@ async fn history_truncation_drops_oldest_pair_first() {
     // Only the last exchange should remain.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].content, "turn 3");
+    assert_eq!(history[0].content_str(), "turn 3");
     assert_eq!(history[0].role, "user");
     assert_eq!(history[1].role, "assistant");
 }
 
 // ── coverage gaps ─────────────────────────────────────────────────────────────
 
-// 1. search_mode "on" sends search_parameters in the HTTP request.
+// 1. x_search tool enabled sends it in the tools array.
 #[tokio::test]
-async fn search_mode_on_adds_search_parameters_to_request() {
+async fn x_search_tool_enabled_is_included_in_tools_array() {
     let _guard = env_lock().lock().unwrap();
     let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
     let agent = make_agent(Some(&url)).await;
@@ -2255,7 +2313,7 @@ async fn search_mode_on_adds_search_parameters_to_request() {
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
+            "x_search",
             "on",
         ))
         .await
@@ -2264,17 +2322,17 @@ async fn search_mode_on_adds_search_parameters_to_request() {
     agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("search"))],
+            vec![ContentBlock::Text(TextContent::new("search X"))],
         ))
         .await
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    assert_eq!(
-        captured[0]["search_parameters"]["mode"],
-        "on",
-        "search_parameters.mode should be 'on': {}",
-        captured[0]
+    let tools = captured[0]["tools"].as_array()
+        .expect("tools array must be present when x_search is enabled");
+    assert!(
+        tools.iter().any(|t| t["type"] == "x_search"),
+        "x_search must be in tools array: {tools:?}"
     );
 }
 
@@ -2287,8 +2345,8 @@ async fn set_session_config_option_unknown_session_returns_error() {
     let err = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             "no-such-session",
-            "search_mode",
-            "auto",
+            "web_search",
+            "on",
         ))
         .await
         .unwrap_err();
@@ -2326,8 +2384,8 @@ async fn history_at_exactly_the_limit_is_not_truncated() {
         4,
         "history should be exactly 4 (no truncation at limit): {history:?}"
     );
-    assert_eq!(history[0].content, "turn 1");
-    assert_eq!(history[2].content, "turn 2");
+    assert_eq!(history[0].content_str(), "turn 1");
+    assert_eq!(history[2].content_str(), "turn 2");
 }
 
 // 4. Odd max_history_messages: trim removes complete pairs, so with max=3 and
@@ -2360,16 +2418,23 @@ async fn history_truncation_rounds_up_to_even_for_odd_max() {
         "odd max=3: oldest pair dropped, 2 messages remain: {history:?}"
     );
     // Only the last pair (turn 2 user + assistant reply) should survive.
-    assert_eq!(history[0].content, "turn 2");
+    assert_eq!(history[0].content_str(), "turn 2");
 }
 
-// 5. Multiple tool calls in one turn: agent handles them without panicking,
-//    ends the turn, and does not update history (no assistant text produced).
+// 5. Multiple function_call events in one turn: agent handles them without
+//    panicking, ends the turn, and does not update history (no text produced).
 #[tokio::test]
 async fn multiple_tool_calls_in_one_turn_do_not_panic() {
     let _guard = env_lock().lock().unwrap();
 
-    // SSE response with two tool calls at finish_reason: "tool_calls".
+    // Responses API: two function_call events, then [DONE] — no text.
+    // Server-side tools are handled on the xAI backend; single connection.
+    let body = concat!(
+        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_a\",\"name\":\"web_search\",\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}\n\n",
+        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_b\",\"name\":\"code_interpreter\",\"arguments\":\"{\\\"code\\\":\\\"2+2\\\"}\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let url = format!("http://127.0.0.1:{port}/v1");
@@ -2379,18 +2444,6 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
             let (reader, mut writer) = stream.into_split();
             let mut reader = BufReader::new(reader);
             drain_request(&mut reader).await;
-
-            let body = concat!(
-                // tool call 0 — start
-                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"web_search\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
-                // tool call 0 — arguments
-                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
-                // tool call 1 — start
-                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
-                // tool call 1 — arguments + finish
-                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"{\\\"expr\\\":\\\"2+2\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
-                "data: [DONE]\n\n",
-            );
             let http = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(),
@@ -2413,12 +2466,11 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    // The user message is durably persisted before the xAI call. No text was
-    // produced — only the user turn survives in history.
+    // No text was produced — only the user turn survives in history.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "use two tools");
+    assert_eq!(history[0].content_str(), "use two tools");
 }
 
 // set_session_config_option with unknown config_id returns current state of
@@ -2431,12 +2483,12 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Set search_mode to "auto" first so we can verify the current state is returned.
+    // Enable web_search so we can verify the current state is returned.
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
-            "auto",
+            "web_search",
+            "on",
         ))
         .await
         .unwrap();
@@ -2451,22 +2503,22 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
         .await
         .unwrap();
 
-    assert_eq!(resp.config_options.len(), 1, "should return current state of known options");
-    assert_eq!(resp.config_options[0].id.to_string(), "search_mode");
-    // Current value should reflect the previously set "auto".
-    let current = match &resp.config_options[0].kind {
+    // Should return all 3 known tool options.
+    assert_eq!(resp.config_options.len(), 3, "should return current state of all known tool options");
+    let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
+        .expect("web_search option must be present");
+    let current = match &ws.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };
-    assert_eq!(current, "auto");
+    assert_eq!(current, "on", "web_search should still be 'on'");
 }
 
 // ── additional coverage gaps ──────────────────────────────────────────────────
 
-// load_session reflects the current_value after search_mode is changed.
-// (Existing test only checks the option is present, not its value.)
+// load_session reflects the current_value after a tool is enabled.
 #[tokio::test]
-async fn load_session_reflects_updated_search_mode() {
+async fn load_session_reflects_updated_tool_state() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(None).await;
 
@@ -2476,7 +2528,7 @@ async fn load_session_reflects_updated_search_mode() {
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "search_mode",
+            "code_interpreter",
             "on",
         ))
         .await
@@ -2484,19 +2536,19 @@ async fn load_session_reflects_updated_search_mode() {
 
     let loaded = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
     let opts = loaded.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 1);
-    let current = match &opts[0].kind {
+    assert_eq!(opts.len(), 3);
+    let ci = opts.iter().find(|o| o.id.to_string() == "code_interpreter")
+        .expect("code_interpreter option must be present");
+    let current = match &ci.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };
-    assert_eq!(current, "on", "load_session should reflect the persisted search_mode");
+    assert_eq!(current, "on", "load_session should reflect the persisted tool state");
 }
 
-// Explicitly setting search_mode to "off" clears it and subsequent prompts
-// omit search_parameters. This exercises the `if mode == "off" { None }` branch
-// in set_session_config_option, which is distinct from the never-set default.
+// Enabling then disabling a tool removes it from the tools array in subsequent requests.
 #[tokio::test]
-async fn search_mode_explicit_off_clears_search_parameters() {
+async fn disabling_tool_removes_it_from_request() {
     let _guard = env_lock().lock().unwrap();
     let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
     let agent = make_agent(Some(&url)).await;
@@ -2504,21 +2556,13 @@ async fn search_mode_explicit_off_clears_search_parameters() {
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Enable search, then explicitly disable it.
+    // Enable web_search, then disable it.
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "search_mode",
-            "auto",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "search_mode",
-            "off",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "off"))
         .await
         .unwrap();
 
@@ -2532,10 +2576,42 @@ async fn search_mode_explicit_off_clears_search_parameters() {
 
     let captured = bodies.lock().unwrap();
     assert!(
-        captured[0]["search_parameters"].is_null(),
-        "search_parameters must be absent after explicitly setting search_mode=off: {}",
+        captured[0]["tools"].is_null(),
+        "tools must be absent after disabling all tools: {}",
         captured[0]
     );
+}
+
+// close_session cancels an in-flight prompt and the session is deleted.
+#[tokio::test]
+async fn close_session_cancels_in_flight_prompt() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_slow("partial").await;
+    let agent = std::sync::Arc::new(make_agent(Some(&url)).await);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let agent2 = std::sync::Arc::clone(&agent);
+    let sid = session_id.clone();
+
+    let (prompt_result, _) = tokio::join!(
+        agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("test"))],
+        )),
+        async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            agent2.close_session(CloseSessionRequest::new(sid)).await.unwrap();
+        }
+    );
+
+    // Prompt must have been cancelled (not a timeout or error).
+    assert_eq!(prompt_result.unwrap().stop_reason, StopReason::Cancelled);
+
+    // Session must be gone.
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    assert!(list.sessions.is_empty(), "session must be deleted by close_session");
 }
 
 // close_session with an unknown session ID is a no-op — returns Ok.
@@ -2595,7 +2671,7 @@ async fn prompt_timeout_with_no_text_does_not_update_history() {
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content, "hello");
+    assert_eq!(history[0].content_str(), "hello");
 }
 
 // Fork inherits the parent's system_prompt: subsequent prompts on the forked
@@ -2633,14 +2709,16 @@ async fn fork_session_inherits_system_prompt() {
         .await
         .unwrap();
 
-    // Inspect the fork's HTTP request: messages[0] must be the system prompt.
+    // Fork clears last_response_id (fork starts fresh), so the fork's first prompt
+    // sends full history. Inspect the fork's HTTP request: input[0] must be the
+    // system prompt, followed by the inherited history + the new user message.
     let captured = bodies.lock().unwrap();
-    let fork_msgs = captured[1]["messages"].as_array().expect("fork messages array");
+    let fork_input = captured[1]["input"].as_array().expect("fork input array");
     assert_eq!(
-        fork_msgs[0]["role"], "system",
-        "first message of fork prompt must be system: {fork_msgs:?}"
+        fork_input[0]["role"], "system",
+        "first input item of fork prompt must be system: {fork_input:?}"
     );
-    assert_eq!(fork_msgs[0]["content"], "Be concise.");
+    assert_eq!(fork_input[0]["content"], "Be concise.");
 }
 
 // ── ContentBlock::ResourceLink and ContentBlock::Resource ─────────────────────
@@ -2664,8 +2742,8 @@ async fn resource_link_is_included_as_text_in_request() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
-    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    let input = captured[0]["input"].as_array().expect("input array");
+    let content = input.last().unwrap()["content"].as_str().unwrap();
     assert!(
         content.contains("README") && content.contains("file:///project/README.md"),
         "ResourceLink must be forwarded as text: {content:?}"
@@ -2693,8 +2771,8 @@ async fn embedded_text_resource_is_included_as_text_in_request() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
-    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    let input = captured[0]["input"].as_array().expect("input array");
+    let content = input.last().unwrap()["content"].as_str().unwrap();
     assert_eq!(content, "fn main() {}");
 }
 
@@ -2718,8 +2796,8 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
         .unwrap();
 
     let captured = bodies.lock().unwrap();
-    let msgs = captured[0]["messages"].as_array().expect("messages array");
-    let content = msgs.last().unwrap()["content"].as_str().unwrap();
+    let input = captured[0]["input"].as_array().expect("input array");
+    let content = input.last().unwrap()["content"].as_str().unwrap();
     assert!(content.starts_with("Please review:"), "text block must come first: {content:?}");
     assert!(content.contains("main.rs"), "resource link must be included: {content:?}");
 }
