@@ -27,7 +27,14 @@ pub trait SessionStore {
     /// Returns `None` if the session does not exist.
     async fn get(&self, id: &str) -> Option<XaiSessionData>;
     /// Creates or replaces the session entry.
-    async fn put(&self, id: &str, data: &XaiSessionData);
+    ///
+    /// Returns an error if the data could not be persisted. Callers must
+    /// propagate this error — silent discard leads to message loss.
+    async fn put(
+        &self,
+        id: &str,
+        data: &XaiSessionData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     /// Removes the session entry (no-op if absent).
     async fn delete(&self, id: &str);
     /// Returns all `(session_id, cwd)` pairs sorted by session_id.
@@ -85,15 +92,14 @@ impl SessionStore for KvSessionStore {
         }
     }
 
-    async fn put(&self, id: &str, data: &XaiSessionData) {
-        match serde_json::to_vec(data) {
-            Ok(bytes) => {
-                if let Err(e) = self.kv.put(id, bytes.into()).await {
-                    warn!(error = %e, id, "xai: KV put error");
-                }
-            }
-            Err(e) => warn!(error = %e, id, "xai: failed to serialize session"),
-        }
+    async fn put(
+        &self,
+        id: &str,
+        data: &XaiSessionData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let bytes = serde_json::to_vec(data)?;
+        self.kv.put(id, bytes.into()).await?;
+        Ok(())
     }
 
     async fn delete(&self, id: &str) {
@@ -145,8 +151,13 @@ impl SessionStore for MemorySessionStore {
         self.map.lock().await.get(id).cloned()
     }
 
-    async fn put(&self, id: &str, data: &XaiSessionData) {
+    async fn put(
+        &self,
+        id: &str,
+        data: &XaiSessionData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.map.lock().await.insert(id.to_string(), data.clone());
+        Ok(())
     }
 
     async fn delete(&self, id: &str) {
