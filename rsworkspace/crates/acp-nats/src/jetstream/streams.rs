@@ -1,9 +1,6 @@
-use std::time::Duration;
-
 use async_nats::jetstream::stream::{Config, DiscardPolicy, RetentionPolicy, StorageType};
 
-const DEFAULT_FILE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60); // 30 days
-const DEFAULT_MEMORY_MAX_AGE: Duration = Duration::from_secs(5 * 60); // 5 minutes
+use crate::constants::DEFAULT_STREAM_MAX_AGE;
 
 fn stream_name(prefix: &str, suffix: &str) -> String {
     format!("{}_{}", prefix.to_uppercase(), suffix)
@@ -37,7 +34,7 @@ pub fn commands_config(prefix: &str) -> Config {
         ],
         storage: StorageType::File,
         retention: RetentionPolicy::Limits,
-        max_age: DEFAULT_FILE_MAX_AGE,
+        max_age: DEFAULT_STREAM_MAX_AGE,
         discard: DiscardPolicy::Old,
         ..Default::default()
     }
@@ -54,7 +51,7 @@ pub fn responses_config(prefix: &str) -> Config {
         ],
         storage: StorageType::File,
         retention: RetentionPolicy::Limits,
-        max_age: DEFAULT_FILE_MAX_AGE,
+        max_age: DEFAULT_STREAM_MAX_AGE,
         discard: DiscardPolicy::Old,
         ..Default::default()
     }
@@ -66,7 +63,7 @@ pub fn client_ops_config(prefix: &str) -> Config {
         subjects: vec![format!("{prefix}.session.*.client.>")],
         storage: StorageType::File,
         retention: RetentionPolicy::Limits,
-        max_age: DEFAULT_FILE_MAX_AGE,
+        max_age: DEFAULT_STREAM_MAX_AGE,
         discard: DiscardPolicy::Old,
         ..Default::default()
     }
@@ -76,9 +73,9 @@ pub fn notifications_config(prefix: &str) -> Config {
     Config {
         name: stream_name(prefix, "NOTIFICATIONS"),
         subjects: vec![format!("{prefix}.session.*.agent.update.>")],
-        storage: StorageType::Memory,
+        storage: StorageType::File,
         retention: RetentionPolicy::Limits,
-        max_age: DEFAULT_MEMORY_MAX_AGE,
+        max_age: DEFAULT_STREAM_MAX_AGE,
         discard: DiscardPolicy::Old,
         ..Default::default()
     }
@@ -171,31 +168,19 @@ mod tests {
     }
 
     #[test]
-    fn file_backed_streams_use_file_storage() {
+    fn all_streams_use_file_storage() {
         assert_eq!(commands_config("acp").storage, StorageType::File);
         assert_eq!(responses_config("acp").storage, StorageType::File);
         assert_eq!(client_ops_config("acp").storage, StorageType::File);
+        assert_eq!(notifications_config("acp").storage, StorageType::File);
     }
 
     #[test]
-    fn notifications_uses_memory_storage() {
-        assert_eq!(notifications_config("acp").storage, StorageType::Memory);
-    }
-
-    #[test]
-    fn file_backed_streams_have_30_day_max_age() {
-        let expected = Duration::from_secs(30 * 24 * 60 * 60);
-        assert_eq!(commands_config("acp").max_age, expected);
-        assert_eq!(responses_config("acp").max_age, expected);
-        assert_eq!(client_ops_config("acp").max_age, expected);
-    }
-
-    #[test]
-    fn notifications_has_5_minute_max_age() {
-        assert_eq!(
-            notifications_config("acp").max_age,
-            Duration::from_secs(5 * 60)
-        );
+    fn all_streams_have_30_day_max_age() {
+        assert_eq!(commands_config("acp").max_age, DEFAULT_STREAM_MAX_AGE);
+        assert_eq!(responses_config("acp").max_age, DEFAULT_STREAM_MAX_AGE);
+        assert_eq!(client_ops_config("acp").max_age, DEFAULT_STREAM_MAX_AGE);
+        assert_eq!(notifications_config("acp").max_age, DEFAULT_STREAM_MAX_AGE);
     }
 
     #[test]
