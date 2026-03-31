@@ -581,6 +581,10 @@ impl agent_client_protocol::Agent for XaiAgent {
 
         let mut assistant_text = String::new();
         let mut canceled = false;
+        // Set when xAI returns an error event. We break out of the loop instead
+        // of returning immediately so the compensation path below can remove the
+        // orphaned user message before we propagate the error.
+        let mut stream_error: Option<Error> = None;
 
         let stop_reason = 'turn: loop {
             let event = tokio::select! {
@@ -654,17 +658,18 @@ impl agent_client_protocol::Agent for XaiAgent {
                 XaiEvent::Done => break 'turn StopReason::EndTurn,
                 XaiEvent::Error { message } => {
                     tracing::error!(session_id, error = %message, "xai: stream error");
-                    return Err(internal_error(message));
+                    stream_error = Some(internal_error(message));
+                    break 'turn StopReason::EndTurn;
                 }
             }
         };
 
-        if canceled {
-            // Cancel compensation: the user message was persisted before the xAI
-            // call to survive crashes, but if the prompt was canceled before any
-            // response was produced we remove it so the history stays clean.
-            // This is best-effort — a crash here leaves an orphaned user message,
-            // which is acceptable (the message was sent; the turn was just cut short).
+        // Compensation: remove the orphaned user message when the turn did not
+        // produce a persisted assistant reply. Covers both cancel and xAI errors.
+        // This is best-effort — a crash here leaves an orphaned user message,
+        // which is acceptable (the message was sent; the turn was just cut short).
+        let needs_compensation = canceled || stream_error.is_some();
+        if needs_compensation {
             if let Some(mut current) = self.session_store.get(&session_id).await {
                 if current.history.last().map(|m| m.role == "user" && m.content == user_input)
                     == Some(true)
@@ -676,6 +681,11 @@ impl agent_client_protocol::Agent for XaiAgent {
         } else if !assistant_text.is_empty() {
             // Re-read to preserve any concurrent model/config changes, then append
             // the assistant reply. The user message is already in the store.
+            //
+            // Note: a crash between here and the put below would leave the user
+            // message in history without a corresponding assistant reply. This
+            // window is inherent to the streaming-then-persist design — the
+            // assistant text lives in memory until this write completes.
             if let Some(mut current) = self.session_store.get(&session_id).await {
                 current.history.push(Message {
                     role: "assistant".to_string(),
@@ -692,6 +702,10 @@ impl agent_client_protocol::Agent for XaiAgent {
 
                 self.session_store.put(&session_id, &current).await.map_err(store_error)?;
             }
+        }
+
+        if let Some(e) = stream_error {
+            return Err(e);
         }
 
         Ok(PromptResponse::new(stop_reason))
