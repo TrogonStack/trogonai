@@ -544,16 +544,12 @@ impl agent_client_protocol::Agent for XaiAgent {
         let model = session.model.as_deref().unwrap_or(&self.default_model).to_string();
         let search_mode = session.search_mode.clone();
 
-        // Install a cancel channel, releasing the cancel_channels lock before streaming.
-        let cancel_arc = {
-            let mut channels = self.cancel_channels.lock().await;
-            channels
-                .entry(session_id.clone())
-                .or_insert_with(|| Arc::new(Mutex::new(None)))
-                .clone()
-        };
+        // Install a fresh cancel channel for this prompt. Each prompt owns its
+        // own Arc so the ptr_eq cleanup at the end can safely distinguish it
+        // from a concurrent prompt that may have replaced the HashMap entry.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
-        cancel_arc.lock().await.replace(cancel_tx);
+        let cancel_arc = Arc::new(Mutex::new(Some(cancel_tx)));
+        self.cancel_channels.lock().await.insert(session_id.clone(), cancel_arc.clone());
 
         // Idempotency check: if history already ends with the exact user message,
         // we are resuming after a crash or a failed put(assistant) from a previous
@@ -707,6 +703,19 @@ impl agent_client_protocol::Agent for XaiAgent {
                 trim_history(&mut current.history, self.max_history_messages);
 
                 self.session_store.put(&session_id, &current).await.map_err(store_error)?;
+            }
+        }
+
+        // Release the cancel channel entry now that the prompt is done.
+        // Using ptr_eq so that a concurrent prompt (outside the ACP contract,
+        // but possible) that already replaced our Arc is not accidentally removed.
+        {
+            let mut channels = self.cancel_channels.lock().await;
+            if channels.get(&session_id)
+                .map(|a| Arc::ptr_eq(a, &cancel_arc))
+                .unwrap_or(false)
+            {
+                channels.remove(&session_id);
             }
         }
 
@@ -939,5 +948,9 @@ impl XaiAgent {
 
     pub fn test_max_history_messages(&self) -> usize {
         self.max_history_messages
+    }
+
+    pub async fn test_cancel_channels_len(&self) -> usize {
+        self.cancel_channels.lock().await.len()
     }
 }
