@@ -21,22 +21,19 @@ use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-#[cfg(not(coverage))]
-#[allow(unused_imports)]
-use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher};
+use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 use super::{
     authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize,
-    list_sessions, load_session, new_session, prompt, resume_session, set_session_config_option,
-    set_session_mode, set_session_model,
+    js_request, list_sessions, load_session, new_session, prompt, resume_session,
+    set_session_config_option, set_session_mode, set_session_model,
 };
 
 use crate::constants::SESSION_READY_DELAY;
 
 pub struct Bridge<N, C: GetElapsed, J = ()> {
     pub(crate) nats: N,
-    #[allow(dead_code)] // Used in prompt.rs JetStream path
     pub(crate) js: Option<J>,
     pub(crate) clock: C,
     pub(crate) config: Config,
@@ -68,7 +65,6 @@ impl<N, C: GetElapsed> Bridge<N, C> {
 }
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
-    #[cfg(not(coverage))]
     pub fn with_jetstream(
         nats: N,
         js: J,
@@ -93,8 +89,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         &self.nats
     }
 
-    #[cfg(not(coverage))]
-    #[allow(dead_code)]
     pub(crate) fn js(&self) -> Option<&J> {
         self.js.as_ref()
     }
@@ -153,9 +147,61 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
     }
 }
 
+impl<
+    N: RequestClient + PublishClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+> Bridge<N, C, J>
+where
+    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+{
+    pub(crate) async fn session_request<Req, Res>(
+        &self,
+        subject: &str,
+        args: &Req,
+        session_id: &str,
+    ) -> Result<Res>
+    where
+        Req: serde::Serialize,
+        Res: serde::de::DeserializeOwned,
+    {
+        use crate::error::map_nats_error;
+
+        match self.js() {
+            Some(js) => {
+                let req_id = uuid::Uuid::new_v4().to_string();
+                js_request::js_request::<J, _, Res, _>(
+                    js,
+                    subject,
+                    args,
+                    &trogon_std::StdJsonSerialize,
+                    self.config.acp_prefix(),
+                    session_id,
+                    &req_id,
+                    self.config.operation_timeout,
+                )
+                .await
+            }
+            None => nats::request_with_timeout::<N, Req, Res>(
+                self.nats(),
+                subject,
+                args,
+                self.config.operation_timeout,
+            )
+            .await
+            .map_err(map_nats_error),
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + SubscribeClient + FlushClient, C: GetElapsed, J> Agent
-    for Bridge<N, C, J>
+impl<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+> Agent for Bridge<N, C, J>
+where
+    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await

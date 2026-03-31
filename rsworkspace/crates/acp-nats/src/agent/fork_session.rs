@@ -1,9 +1,9 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, session};
+use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
+use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -11,10 +11,17 @@ use trogon_std::time::GetElapsed;
     skip(bridge, args),
     fields(session_id = %args.session_id, new_session_id = tracing::field::Empty)
 )]
-pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J>(
+pub async fn handle<
+    N: RequestClient + PublishClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamConsumerFactory,
+>(
     bridge: &Bridge<N, C, J>,
     args: ForkSessionRequest,
-) -> Result<ForkSessionResponse> {
+) -> Result<ForkSessionResponse>
+where
+    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+{
     let start = bridge.clock.now();
 
     info!(session_id = %args.session_id, "Fork session request");
@@ -28,17 +35,16 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
             format!("Invalid session ID: {}", e),
         )
     })?;
-    let nats = bridge.nats();
-    let subject = session::agent::fork(bridge.config.acp_prefix(), session_id.as_str());
+    let prefix = bridge.config.acp_prefix();
+    let subject = session::agent::fork(prefix, session_id.as_str());
 
-    let result = nats::request_with_timeout::<N, ForkSessionRequest, ForkSessionResponse>(
-        nats,
-        &subject,
-        &args,
-        bridge.config.operation_timeout,
-    )
-    .await
-    .map_err(map_nats_error);
+    let result = bridge
+        .session_request::<ForkSessionRequest, ForkSessionResponse>(
+            &subject,
+            &args,
+            session_id.as_str(),
+        )
+        .await;
 
     if let Ok(ref response) = result {
         Span::current().record("new_session_id", response.session_id.to_string().as_str());

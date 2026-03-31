@@ -9,6 +9,18 @@ fn stream_name(prefix: &str, suffix: &str) -> String {
     format!("{}_{}", prefix.to_uppercase(), suffix)
 }
 
+pub fn notifications_stream_name(prefix: &str) -> String {
+    stream_name(prefix, "NOTIFICATIONS")
+}
+
+pub fn responses_stream_name(prefix: &str) -> String {
+    stream_name(prefix, "RESPONSES")
+}
+
+pub fn commands_stream_name(prefix: &str) -> String {
+    stream_name(prefix, "COMMANDS")
+}
+
 pub fn commands_config(prefix: &str) -> Config {
     Config {
         name: stream_name(prefix, "COMMANDS"),
@@ -36,6 +48,7 @@ pub fn responses_config(prefix: &str) -> Config {
         name: stream_name(prefix, "RESPONSES"),
         subjects: vec![
             format!("{prefix}.session.*.agent.prompt.response.>"),
+            format!("{prefix}.session.*.agent.response.>"),
             format!("{prefix}.session.*.agent.ext.ready"),
             format!("{prefix}.session.*.agent.cancelled"),
         ],
@@ -197,6 +210,24 @@ mod tests {
         for config in all_configs("acp") {
             assert_eq!(config.retention, RetentionPolicy::Limits);
         }
+    }
+
+    #[test]
+    fn notifications_stream_name_formats_correctly() {
+        assert_eq!(notifications_stream_name("acp"), "ACP_NOTIFICATIONS");
+        assert_eq!(notifications_stream_name("myapp"), "MYAPP_NOTIFICATIONS");
+    }
+
+    #[test]
+    fn responses_stream_name_formats_correctly() {
+        assert_eq!(responses_stream_name("acp"), "ACP_RESPONSES");
+        assert_eq!(responses_stream_name("myapp"), "MYAPP_RESPONSES");
+    }
+
+    #[test]
+    fn commands_stream_name_formats_correctly() {
+        assert_eq!(commands_stream_name("acp"), "ACP_COMMANDS");
+        assert_eq!(commands_stream_name("myapp"), "MYAPP_COMMANDS");
     }
 
     #[test]

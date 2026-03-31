@@ -1,12 +1,13 @@
 use async_nats::HeaderMap;
 use async_nats::jetstream;
+use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use super::message::JsMessage;
+use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
     JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher,
 };
@@ -67,6 +68,54 @@ impl JetStreamPublisher for NatsJetStreamClient {
     }
 }
 
+pub struct NatsJsMessage {
+    inner: jetstream::Message,
+}
+
+impl NatsJsMessage {
+    pub fn new(inner: jetstream::Message) -> Self {
+        Self { inner }
+    }
+}
+
+impl JsMessageRef for NatsJsMessage {
+    fn message(&self) -> &async_nats::Message {
+        &self.inner.message
+    }
+}
+
+impl JsAck for NatsJsMessage {
+    type Error = async_nats::Error;
+
+    async fn ack(&self) -> Result<(), async_nats::Error> {
+        self.inner.ack().await
+    }
+}
+
+impl JsAckWith for NatsJsMessage {
+    type Error = async_nats::Error;
+
+    async fn ack_with(&self, kind: AckKind) -> Result<(), async_nats::Error> {
+        self.inner.ack_with(kind).await
+    }
+}
+
+impl JsDoubleAck for NatsJsMessage {
+    type Error = async_nats::Error;
+
+    async fn double_ack(&self) -> Result<(), async_nats::Error> {
+        self.inner.double_ack().await
+    }
+}
+
+impl JsDoubleAckWith for NatsJsMessage {
+    type Error = async_nats::Error;
+
+    async fn double_ack_with(&self, kind: AckKind) -> Result<(), async_nats::Error> {
+        self.inner.double_ack_with(kind).await
+    }
+}
+
 pub struct NatsJetStreamConsumer {
     inner: jetstream::consumer::Consumer<pull::Config>,
 }
@@ -103,7 +152,8 @@ impl JetStreamConsumerFactory for NatsJetStreamClient {
 
 impl JetStreamConsumer for NatsJetStreamConsumer {
     type Error = JetStreamError;
-    type Messages = futures::stream::BoxStream<'static, Result<JsMessage, JetStreamError>>;
+    type Message = NatsJsMessage;
+    type Messages = futures::stream::BoxStream<'static, Result<NatsJsMessage, JetStreamError>>;
 
     async fn messages(&self) -> Result<Self::Messages, JetStreamError> {
         let messages = self
@@ -115,7 +165,7 @@ impl JetStreamConsumer for NatsJetStreamConsumer {
         Ok(messages
             .map(|result| {
                 result
-                    .map(JsMessage::new)
+                    .map(NatsJsMessage::new)
                     .map_err(|e| JetStreamError(e.to_string()))
             })
             .boxed())
