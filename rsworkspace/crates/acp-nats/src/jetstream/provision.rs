@@ -34,10 +34,10 @@ mod tests {
     use trogon_nats::jetstream::MockJetStreamContext;
 
     #[tokio::test]
-    async fn provision_creates_four_streams() {
+    async fn provision_creates_five_streams() {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, "acp").await.unwrap();
-        assert_eq!(ctx.created_streams().len(), 4);
+        assert_eq!(ctx.created_streams().len(), 5);
     }
 
     #[tokio::test]
@@ -53,6 +53,7 @@ mod tests {
         assert!(names.contains(&"ACP_RESPONSES".to_string()));
         assert!(names.contains(&"ACP_CLIENT_OPS".to_string()));
         assert!(names.contains(&"ACP_NOTIFICATIONS".to_string()));
+        assert!(names.contains(&"ACP_GLOBAL".to_string()));
     }
 
     #[tokio::test]
@@ -81,6 +82,6 @@ mod tests {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, "acp").await.unwrap();
         provision_streams(&ctx, "acp").await.unwrap();
-        assert_eq!(ctx.created_streams().len(), 8);
+        assert_eq!(ctx.created_streams().len(), 10);
     }
 }
