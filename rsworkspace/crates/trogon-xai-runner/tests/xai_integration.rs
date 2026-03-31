@@ -2301,14 +2301,13 @@ async fn history_at_exactly_the_limit_is_not_truncated() {
     assert_eq!(history[2].content, "turn 2");
 }
 
-// 4. Odd max_history_messages: (excess + 1) & !1 rounds up to the next even
-//    number so full user/assistant pairs are always dropped together.
-//    max=3, 4 messages accumulated → excess=1 → trimmed=2 → 2 remain.
+// 4. Odd max_history_messages: trim removes complete pairs, so with max=3 and
+//    4 messages accumulated, one full pair is dropped and 2 messages remain.
 #[tokio::test]
 async fn history_truncation_rounds_up_to_even_for_odd_max() {
     let _guard = env_lock().lock().unwrap();
-    // max=3 (odd). After 2 turns we have 4 messages (excess=1).
-    // (1 + 1) & !1 = 2, so 2 messages are trimmed and 2 remain.
+    // max=3 (odd). After 2 turns we have 4 messages. trim_history removes the
+    // oldest complete user/assistant pair, leaving 2 messages.
     let url = fake_xai_sse_multi(2, vec!["reply"]).await;
     let agent = make_agent_with_max_history(Some(&url), 3).await;
 
@@ -2329,7 +2328,7 @@ async fn history_truncation_rounds_up_to_even_for_odd_max() {
     assert_eq!(
         history.len(),
         2,
-        "odd max=3: excess=1 rounds up to 2 trimmed, 2 messages remain: {history:?}"
+        "odd max=3: oldest pair dropped, 2 messages remain: {history:?}"
     );
     // Only the last pair (turn 2 user + assistant reply) should survive.
     assert_eq!(history[0].content, "turn 2");
