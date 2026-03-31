@@ -48,6 +48,10 @@ fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
 }
 
+fn store_error(e: impl std::fmt::Display) -> Error {
+    internal_error(format!("session store error: {e}"))
+}
+
 /// ACP Agent implementation backed by xAI's Grok API (OpenAI-compatible REST).
 ///
 /// Each `XaiAgent` manages multiple sessions, each holding its own conversation
@@ -334,7 +338,7 @@ impl agent_client_protocol::Agent for XaiAgent {
             api_key,
             system_prompt: self.system_prompt.clone(),
             search_mode: None,
-        }).await;
+        }).await.map_err(store_error)?;
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
@@ -388,7 +392,7 @@ impl agent_client_protocol::Agent for XaiAgent {
             api_key: source.api_key,
             system_prompt: source.system_prompt,
             search_mode: inherited_search_mode.clone(),
-        }).await;
+        }).await.map_err(store_error)?;
 
         let search_mode_str = inherited_search_mode.as_deref().unwrap_or("off");
         Ok(ForkSessionResponse::new(new_session_id)
@@ -447,7 +451,7 @@ impl agent_client_protocol::Agent for XaiAgent {
         let mut session = self.session_store.get(&session_id).await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         session.model = Some(model_id.clone());
-        self.session_store.put(&session_id, &session).await;
+        self.session_store.put(&session_id, &session).await.map_err(store_error)?;
 
         info!(session_id, model = %model_id, "xai: set_session_model");
         Ok(SetSessionModelResponse::new())
@@ -473,7 +477,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                 let mut session = self.session_store.get(&session_id).await
                     .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
                 session.search_mode = if mode == "off" { None } else { Some(mode.clone()) };
-                self.session_store.put(&session_id, &session).await;
+                self.session_store.put(&session_id, &session).await.map_err(store_error)?;
                 info!(session_id, mode, "xai: search_mode updated");
                 Ok(SetSessionConfigOptionResponse::new(vec![Self::search_mode_config_option(&mode)]))
             }
@@ -550,6 +554,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         };
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         cancel_arc.lock().await.replace(cancel_tx);
+
+        // Persist the user message BEFORE calling xAI so that a crash between
+        // the request and the response cannot silently discard the user's input.
+        {
+            let mut snapshot = session.clone();
+            snapshot.history.push(Message {
+                role: "user".to_string(),
+                content: user_input.clone(),
+            });
+            self.session_store.put(&session_id, &snapshot).await.map_err(store_error)?;
+        }
 
         // Build messages: optional system prompt + history + new user turn.
         let mut messages: Vec<Message> = Vec::new();
@@ -644,14 +659,24 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
         };
 
-        // Append exchange to history on successful (non-canceled) turns with non-empty response.
-        if !canceled && !assistant_text.is_empty() {
-            // Re-read to preserve any concurrent model changes.
+        if canceled {
+            // Cancel compensation: the user message was persisted before the xAI
+            // call to survive crashes, but if the prompt was canceled before any
+            // response was produced we remove it so the history stays clean.
+            // This is best-effort — a crash here leaves an orphaned user message,
+            // which is acceptable (the message was sent; the turn was just cut short).
             if let Some(mut current) = self.session_store.get(&session_id).await {
-                current.history.push(Message {
-                    role: "user".to_string(),
-                    content: user_input,
-                });
+                if current.history.last().map(|m| m.role == "user" && m.content == user_input)
+                    == Some(true)
+                {
+                    current.history.pop();
+                    let _ = self.session_store.put(&session_id, &current).await;
+                }
+            }
+        } else if !assistant_text.is_empty() {
+            // Re-read to preserve any concurrent model/config changes, then append
+            // the assistant reply. The user message is already in the store.
+            if let Some(mut current) = self.session_store.get(&session_id).await {
                 current.history.push(Message {
                     role: "assistant".to_string(),
                     content: assistant_text,
@@ -665,7 +690,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                     current.history.drain(..trim);
                 }
 
-                self.session_store.put(&session_id, &current).await;
+                self.session_store.put(&session_id, &current).await.map_err(store_error)?;
             }
         }
 
