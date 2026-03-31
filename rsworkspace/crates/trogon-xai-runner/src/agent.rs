@@ -704,13 +704,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                     content: assistant_text,
                 });
 
-                // Trim oldest messages to stay within the configured limit.
-                // Round up to even so we always drop complete user/assistant pairs.
-                if current.history.len() > self.max_history_messages {
-                    let excess = current.history.len() - self.max_history_messages;
-                    let trim = (excess + 1) & !1;
-                    current.history.drain(..trim);
-                }
+                trim_history(&mut current.history, self.max_history_messages);
 
                 self.session_store.put(&session_id, &current).await.map_err(store_error)?;
             }
@@ -734,6 +728,35 @@ impl agent_client_protocol::Agent for XaiAgent {
             }
         }
         Ok(())
+    }
+}
+
+/// Trim `history` in-place so it contains at most `max` messages.
+///
+/// Messages are removed from the front in structure-aware increments:
+/// - A leading `user` + `assistant` pair is removed together (2 at a time).
+/// - A leading orphaned `user` message (no corresponding assistant — left over
+///   from a timed-out or crashed turn) is removed individually (1 at a time).
+/// - Any other leading role (malformed state) stops trimming immediately.
+///
+/// This avoids the blind "round up to even" approach, which could leave an
+/// `assistant` message without a preceding `user` when orphaned user messages
+/// accumulate from consecutive timed-out turns.
+fn trim_history(history: &mut Vec<Message>, max: usize) {
+    while history.len() > max {
+        match (
+            history.first().map(|m| m.role.as_str()),
+            history.get(1).map(|m| m.role.as_str()),
+        ) {
+            (Some("user"), Some("assistant")) => {
+                history.drain(..2);
+            }
+            (Some("user"), _) => {
+                // Orphaned user message (followed by another user, or last in list).
+                history.drain(..1);
+            }
+            _ => break, // Unexpected structure — stop to avoid corruption.
+        }
     }
 }
 
@@ -771,6 +794,96 @@ mod tests {
     fn parse_tool_arguments_empty_string_falls_back_to_string() {
         let val = parse_tool_arguments("");
         assert_eq!(val, serde_json::Value::String(String::new()));
+    }
+
+    // ── trim_history ──────────────────────────────────────────────────────────
+
+    fn msg(role: &str, content: &str) -> Message {
+        Message { role: role.to_string(), content: content.to_string() }
+    }
+
+    fn roles(history: &[Message]) -> Vec<&str> {
+        history.iter().map(|m| m.role.as_str()).collect()
+    }
+
+    #[test]
+    fn trim_history_no_op_when_at_or_below_max() {
+        let mut h = vec![msg("user", "a"), msg("assistant", "b")];
+        trim_history(&mut h, 2);
+        assert_eq!(h.len(), 2);
+        trim_history(&mut h, 4);
+        assert_eq!(h.len(), 2);
+    }
+
+    #[test]
+    fn trim_history_removes_oldest_pair() {
+        // [u1,a1, u2,a2, u3,a3], max=4 → remove first pair → [u2,a2, u3,a3]
+        let mut h = vec![
+            msg("user","u1"), msg("assistant","a1"),
+            msg("user","u2"), msg("assistant","a2"),
+            msg("user","u3"), msg("assistant","a3"),
+        ];
+        trim_history(&mut h, 4);
+        assert_eq!(h.len(), 4);
+        assert_eq!(h[0].content, "u2");
+    }
+
+    #[test]
+    fn trim_history_odd_max_removes_full_pair() {
+        // max=3, 4 messages → excess=1 → remove one pair → 2 remain (not 3)
+        let mut h = vec![
+            msg("user","u1"), msg("assistant","a1"),
+            msg("user","u2"), msg("assistant","a2"),
+        ];
+        trim_history(&mut h, 3);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].content, "u2");
+        assert_eq!(h[1].content, "a2");
+    }
+
+    #[test]
+    fn trim_history_orphaned_user_removed_individually() {
+        // [user_orphan, user_new, assistant_new], max=2
+        // → remove orphan → [user_new, assistant_new]
+        let mut h = vec![
+            msg("user","orphan"),
+            msg("user","new"),
+            msg("assistant","reply"),
+        ];
+        trim_history(&mut h, 2);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].content, "new");
+        assert_eq!(h[1].content, "reply");
+    }
+
+    #[test]
+    fn trim_history_multiple_orphans_then_pair() {
+        // [orphan1, orphan2, user, assistant], max=2
+        // → remove orphan1 → remove orphan2 → [user, assistant]
+        let mut h = vec![
+            msg("user","orphan1"),
+            msg("user","orphan2"),
+            msg("user","new"),
+            msg("assistant","reply"),
+        ];
+        trim_history(&mut h, 2);
+        assert_eq!(roles(&h), vec!["user", "assistant"]);
+        assert_eq!(h[0].content, "new");
+    }
+
+    #[test]
+    fn trim_history_stops_on_unexpected_leading_role() {
+        // assistant at front (malformed) — do not touch
+        let mut h = vec![msg("assistant","a"), msg("user","u")];
+        trim_history(&mut h, 1);
+        assert_eq!(h.len(), 2, "should not trim malformed leading assistant");
+    }
+
+    #[test]
+    fn trim_history_empty_is_noop() {
+        let mut h: Vec<Message> = vec![];
+        trim_history(&mut h, 0);
+        assert!(h.is_empty());
     }
 }
 
