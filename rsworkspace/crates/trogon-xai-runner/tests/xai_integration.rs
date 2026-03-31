@@ -612,9 +612,12 @@ async fn prompt_with_api_error_returns_acp_error() {
     // Must propagate as an ACP error, not silently return EndTurn.
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
 
-    // History must remain empty — no assistant text was produced.
+    // The user message was durably persisted before the xAI call; the API error
+    // means there is no assistant reply, so only the user turn survives.
     let history = agent.test_session_history(&session_id).await;
-    assert!(history.is_empty(), "history should not be updated on API error");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "ping");
 }
 
 #[tokio::test]
@@ -630,9 +633,12 @@ async fn prompt_with_done_only_response_does_not_update_history() {
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
     agent.prompt(PromptRequest::new(session_id.clone(), content)).await.unwrap();
 
-    // No assistant text → history stays empty.
+    // The user message is durably persisted before the xAI call. No assistant
+    // text was produced, so only the user turn survives in history.
     let history = agent.test_session_history(&session_id).await;
-    assert!(history.is_empty(), "history should not be updated when assistant produces no text");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "ping");
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -1893,13 +1899,13 @@ async fn tool_call_response_ends_turn_without_updating_history() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    // No text was produced — history stays empty. The tool call is pending
+    // The user message is durably persisted before the xAI call. No text was
+    // produced — only the user turn survives. The tool call is pending
     // client-side execution; the result arrives as the next user turn.
     let history = agent.test_session_history(&sid).await;
-    assert!(
-        history.is_empty(),
-        "history should not be updated when the model only requests tool calls: {history:?}"
-    );
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "search");
 }
 
 // ── search_mode config option ─────────────────────────────────────────────────
@@ -2331,12 +2337,12 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    // No text produced → history stays empty.
+    // The user message is durably persisted before the xAI call. No text was
+    // produced — only the user turn survives in history.
     let history = agent.test_session_history(&sid).await;
-    assert!(
-        history.is_empty(),
-        "history must not be updated when only tool calls were produced: {history:?}"
-    );
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "use two tools");
 }
 
 // set_session_config_option with unknown config_id returns current state of
@@ -2508,12 +2514,12 @@ async fn prompt_timeout_with_no_text_does_not_update_history() {
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
-    // No text was produced before the timeout — history must remain empty.
+    // The user message is durably persisted before the xAI call. No text was
+    // produced before the timeout — only the user turn survives in history.
     let history = agent.test_session_history(&session_id).await;
-    assert!(
-        history.is_empty(),
-        "history must not be updated when timeout fires before any text: {history:?}"
-    );
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content, "hello");
 }
 
 // Fork inherits the parent's system_prompt: subsequent prompts on the forked
