@@ -115,67 +115,61 @@ impl RetryPolicy {
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<(), PublishOperationError>>,
     {
-        let mut attempts = 0;
-        let mut last_error: Option<PublishOperationError> = None;
+        let mut last_error = match operation().await {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
 
-        while attempts <= self.max_retries {
-            attempts += 1;
+        for attempt in 1..=self.max_retries {
+            let exp = (attempt - 1).min(31);
+            let delay = self.initial_retry_delay * (1u32 << exp);
+            tracing::debug!(
+                error = %last_error,
+                operation = operation_name,
+                subject = %subject,
+                attempt,
+                max_retries = self.max_retries,
+                delay_ms = delay.as_millis(),
+                "Operation failed, retrying"
+            );
+            tokio::time::sleep(delay).await;
+
             match operation().await {
                 Ok(()) => {
-                    if attempts > 1 {
-                        tracing::info!(
-                            operation = operation_name,
-                            subject = %subject,
-                            attempts,
-                            "Operation succeeded after retries"
-                        );
-                    }
+                    tracing::info!(
+                        operation = operation_name,
+                        subject = %subject,
+                        attempts = attempt + 1,
+                        "Operation succeeded after retries"
+                    );
                     return Ok(());
                 }
-                Err(e) => {
-                    last_error = Some(e);
-                    if attempts <= self.max_retries {
-                        let exp = (attempts - 1).min(31);
-                        let delay = self.initial_retry_delay * (1u32 << exp);
-                        tracing::debug!(
-                            error = %last_error.as_ref().unwrap(),
-                            operation = operation_name,
-                            subject = %subject,
-                            attempt = attempts,
-                            max_retries = self.max_retries,
-                            delay_ms = delay.as_millis(),
-                            "Operation failed, retrying"
-                        );
-                        tokio::time::sleep(delay).await;
-                    }
-                }
+                Err(e) => last_error = e,
             }
         }
 
-        let final_error = last_error.unwrap_or_else(|| {
-            PublishOperationError("No error recorded in retry loop".to_string())
-        });
+        let attempts = self.max_retries + 1;
         if self.max_retries > 0 {
             tracing::warn!(
-                error = %final_error,
+                error = %last_error,
                 operation = operation_name,
                 subject = %subject,
                 total_attempts = attempts,
                 "Operation failed after all retry attempts"
             );
             Err(NatsError::PublishOperationExhausted {
-                error: final_error,
+                error: last_error,
                 subject: subject.to_string(),
                 attempts,
             })
         } else {
             tracing::warn!(
-                error = %final_error,
+                error = %last_error,
                 operation = operation_name,
                 subject = %subject,
                 "Operation failed"
             );
-            Err(NatsError::PublishOperation(final_error))
+            Err(NatsError::PublishOperation(last_error))
         }
     }
 }
@@ -291,12 +285,12 @@ where
         .execute(
             || {
                 let client = client.clone();
-                Box::pin(async move {
+                async move {
                     client
                         .flush()
                         .await
                         .map_err(|e| PublishOperationError(e.to_string()))
-                })
+                }
             },
             "flush",
             subject,
@@ -705,6 +699,7 @@ mod tests {
     async fn test_retry_policy_execute_success_after_retries() {
         use std::sync::{Arc, Mutex};
 
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
@@ -739,6 +734,7 @@ mod tests {
     async fn test_retry_policy_execute_exhausted() {
         use std::sync::{Arc, Mutex};
 
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let policy = RetryPolicy::standard();
         let call_count = Arc::new(Mutex::new(0));
 
