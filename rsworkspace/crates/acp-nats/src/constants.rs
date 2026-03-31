@@ -13,6 +13,8 @@ pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 pub const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 pub const MIN_TIMEOUT_SECS: u64 = 1;
 
+// TODO: replace with Duration::from_days(30) once duration_constructors is stable
+pub const DEFAULT_STREAM_MAX_AGE: Duration = Duration::from_hours(30 * 24);
 pub const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 pub const PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW: Duration = Duration::from_secs(5);
 pub const TEST_PROMPT_TIMEOUT: Duration = Duration::from_secs(5);
