@@ -10,11 +10,5 @@ pub trait SessionCommand: std::fmt::Display {}
 /// Subject used with .subscribe() calls.
 pub trait Subscribable: std::fmt::Display {}
 
-/// Subject used by the client proxy for agent->bridge operations.
+/// Subject used by the client proxy for agent->bridge request/reply.
 pub trait ClientRequestable: std::fmt::Display {}
-
-/// Subject used by the client proxy for agent->bridge notifications.
-pub trait ClientPublishable: std::fmt::Display {}
-
-impl<T: ClientRequestable> Requestable for T {}
-impl<T: ClientPublishable> Publishable for T {}

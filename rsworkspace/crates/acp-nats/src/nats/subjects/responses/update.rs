@@ -1,21 +1,21 @@
-/// Agent -> bridge async notification.
+/// Agent -> bridge async notification. Stream: NOTIFICATIONS.
 #[derive(Debug)]
 pub struct UpdateSubject {
     prefix: crate::acp_prefix::AcpPrefix,
     session_id: crate::session_id::AcpSessionId,
-    req_id: crate::req_id::ReqId,
+    req_id: String,
 }
 
 impl UpdateSubject {
     pub fn new(
         prefix: &crate::acp_prefix::AcpPrefix,
         session_id: &crate::session_id::AcpSessionId,
-        req_id: &crate::req_id::ReqId,
+        req_id: &str,
     ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
-            req_id: req_id.clone(),
+            req_id: req_id.to_string(),
         }
     }
 }
@@ -39,10 +39,3 @@ impl async_nats::subject::ToSubject for UpdateSubject {
 }
 
 impl super::super::markers::Subscribable for UpdateSubject {}
-
-impl super::super::stream::StreamAssignment for UpdateSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Notifications);
-}
-
-#[cfg(test)]
-mod tests;

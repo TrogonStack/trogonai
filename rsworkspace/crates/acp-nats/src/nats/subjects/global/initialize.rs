@@ -1,4 +1,4 @@
-/// Core NATS request/reply.
+/// Core NATS request/reply. Stream: GLOBAL (observability).
 #[derive(Debug)]
 pub struct InitializeSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -6,7 +6,9 @@ pub struct InitializeSubject {
 
 impl InitializeSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self { prefix: prefix.clone() }
+        Self {
+            prefix: prefix.clone(),
+        }
     }
 }
 
@@ -17,7 +19,3 @@ impl std::fmt::Display for InitializeSubject {
 }
 
 impl super::super::markers::Requestable for InitializeSubject {}
-
-impl super::super::stream::StreamAssignment for InitializeSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Global);
-}

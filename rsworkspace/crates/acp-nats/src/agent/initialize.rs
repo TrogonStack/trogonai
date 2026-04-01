@@ -25,7 +25,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!(client = %client_name, "Initialize request");
 
     let nats = bridge.nats();
-    let subject = agent::initialize(bridge.config.acp_prefix());
+    let subject = agent::InitializeSubject::new(bridge.config.acp_prefix_ref());
 
     let result = nats::request_with_timeout::<N, InitializeRequest, InitializeResponse>(
         nats,
