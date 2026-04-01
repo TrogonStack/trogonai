@@ -31,7 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
-    acp_nats::jetstream::provision::provision_streams(&js_client, config.acp_prefix_ref()).await?;
 
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());

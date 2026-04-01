@@ -34,8 +34,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
-    acp_nats::jetstream::provision::provision_streams(&js_client, ws_config.acp.acp_prefix_ref())
-        .await?;
 
     let (shutdown_tx, _) = watch::channel(false);
     let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
