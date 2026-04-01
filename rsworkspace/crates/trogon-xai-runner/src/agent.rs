@@ -27,7 +27,7 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::client::{InputItem, Message, XaiClient, XaiEvent};
+use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
 #[cfg(feature = "test-helpers")]
 use crate::session_store::MemorySessionStore;
@@ -201,7 +201,8 @@ impl XaiAgent {
         let max_turns = std::env::var("XAI_MAX_TURNS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
-            .filter(|&n| n > 0);
+            .filter(|&n| n > 0)
+            .or(Some(10));
 
         Self {
             nats,
@@ -626,46 +627,17 @@ impl agent_client_protocol::Agent for XaiAgent {
         //
         // When there is no `last_response_id` (new session, forked session, or
         // first turn), send the complete history converted to `InputItem`s.
-        let (initial_input, previous_response_id) =
+        //
+        // These are `mut` because Gap 3 (stale-ID retry) and Gap 4 (Incomplete
+        // continuation) may update them across outer loop iterations.
+        let (mut current_input, mut current_prev_response_id) =
             if let Some(prev_id) = &session.last_response_id {
                 // Stateful path: one item for this turn + server-held context.
                 (vec![InputItem::user(user_input.clone())], Some(prev_id.clone()))
             } else {
                 // Full-history path: reconstruct the Responses API input from
                 // the stored Message history.
-                let mut items: Vec<InputItem> = Vec::new();
-                if let Some(sp) = &session.system_prompt {
-                    items.push(InputItem::system(sp.clone()));
-                }
-                for msg in &session.history {
-                    match msg.role.as_str() {
-                        "user" => items.push(InputItem::user(msg.content_str())),
-                        "assistant" => {
-                            if let Some(tcs) = &msg.tool_calls {
-                                for tc in tcs {
-                                    items.push(InputItem::function_call(
-                                        &tc.id,
-                                        &tc.function.name,
-                                        &tc.function.arguments,
-                                    ));
-                                }
-                            } else {
-                                items.push(InputItem::assistant(msg.content_str()));
-                            }
-                        }
-                        "tool" => {
-                            if let Some(tid) = &msg.tool_call_id {
-                                items.push(InputItem::function_call_output(tid, msg.content_str()));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                // When resuming, the user message is already the last item in history.
-                if !resuming {
-                    items.push(InputItem::user(user_input.clone()));
-                }
-                (items, None)
+                (build_full_history_input(&session, &user_input, resuming), None)
             };
 
         let client = Arc::clone(&self.client);
@@ -678,95 +650,164 @@ impl agent_client_protocol::Agent for XaiAgent {
         // ID returned by xAI for this response; saved as `last_response_id` so
         // subsequent turns can use stateful multi-turn via `previous_response_id`.
         let mut current_response_id: Option<String> = None;
+        // Gap 3: set after the first stale-ID retry to prevent infinite retries.
+        let mut stale_retry_done = false;
+        // Gap 4: counts client-driven continuation requests for Incomplete responses.
+        let mut continuations: u32 = 0;
+        const MAX_CONTINUATIONS: u32 = 5;
 
-        // Stream the response. Server-side tools (web_search, x_search,
-        // code_interpreter) are executed by xAI internally — the stream
-        // continues naturally after each tool call without a client round-trip.
-        // max_turns is passed in the request to cap the server-side agentic loop.
-        let mut stream = client
-            .chat_stream(
-                &model,
-                &initial_input,
-                &api_key,
-                &enabled_tools,
-                previous_response_id.as_deref(),
-                self.max_turns,
-            )
-            .await;
+        // Outer loop — normally executes once. Re-runs when:
+        //   Gap 3: a stale `previous_response_id` causes an error → retry with
+        //          full history and no ID (transparent recovery).
+        //   Gap 4: the model response is Incomplete → send a follow-up request
+        //          referencing the partial response so the model continues.
+        let stop_reason = 'outer: loop {
+            let mut stream = client
+                .chat_stream(
+                    &model,
+                    &current_input,
+                    &api_key,
+                    &enabled_tools,
+                    current_prev_response_id.as_deref(),
+                    self.max_turns,
+                )
+                .await;
 
-        let stop_reason = loop {
-            let event = tokio::select! {
-                biased;
-                _ = &mut cancel_rx => {
-                    info!(session_id, "xai: prompt canceled");
-                    canceled = true;
-                    break StopReason::Cancelled;
-                }
-                maybe = tokio::time::timeout(self.prompt_timeout, stream.next()) => {
-                    match maybe {
-                        Err(_elapsed) => {
-                            warn!(session_id, "xai: prompt timed out");
-                            break StopReason::EndTurn;
+            // Tracks whether the last Finished event signalled Incomplete.
+            let mut needs_continuation = false;
+            // Accumulates (call_id, name) for every tool call opened this turn.
+            // Resolved as Completed when the stream ends — server-side tools never
+            // emit an explicit completion event visible to the client.
+            let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
+
+            let inner_stop = loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = &mut cancel_rx => {
+                        info!(session_id, "xai: prompt canceled");
+                        canceled = true;
+                        break 'outer StopReason::Cancelled;
+                    }
+                    maybe = tokio::time::timeout(self.prompt_timeout, stream.next()) => {
+                        match maybe {
+                            Err(_elapsed) => {
+                                warn!(session_id, "xai: prompt timed out");
+                                canceled = true;
+                                break 'outer StopReason::EndTurn;
+                            }
+                            Ok(Some(e)) => e,
+                            Ok(None) => break StopReason::EndTurn,
                         }
-                        Ok(Some(e)) => e,
-                        Ok(None) => break StopReason::EndTurn,
+                    }
+                };
+
+                match event {
+                    XaiEvent::TextDelta { text } => {
+                        assistant_text.push_str(&text);
+                        let notif = SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                ContentBlock::from(text),
+                            )),
+                        );
+                        if let Err(e) = nats_client.session_notification(notif).await {
+                            warn!(session_id, error = %e, "xai: failed to send text notification");
+                        }
+                    }
+                    XaiEvent::ResponseId { id } => {
+                        current_response_id = Some(id);
+                    }
+                    XaiEvent::FunctionCall { call_id, name, arguments } => {
+                        info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
+                        // Track for resolution at stream end (see XaiEvent::Done).
+                        pending_tool_calls.push((call_id.clone(), name.clone()));
+                        // Notify the ACP client for observability. Server-side tools
+                        // are executed by xAI; the stream continues after completion.
+                        let tool_call = ToolCall::new(call_id.clone(), name.clone())
+                            .status(ToolCallStatus::Pending)
+                            .kind(ToolKind::Other)
+                            .raw_input(parse_tool_arguments(&arguments));
+                        let notif = SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::ToolCall(tool_call),
+                        );
+                        if let Err(e) = nats_client.session_notification(notif).await {
+                            warn!(session_id, error = %e, "xai: failed to send tool call notification");
+                        }
+                    }
+                    XaiEvent::Finished { reason } => {
+                        info!(session_id, reason = ?reason, "xai: finish reason");
+                        // Gap 4: mark for continuation — the outer loop will send
+                        // a follow-up request after this stream ends.
+                        if reason == FinishReason::Incomplete {
+                            needs_continuation = true;
+                        }
+                    }
+                    XaiEvent::Usage { prompt_tokens, completion_tokens } => {
+                        let total = prompt_tokens.saturating_add(completion_tokens);
+                        info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
+                        let notif = SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::UsageUpdate(UsageUpdate::new(total, 0)),
+                        );
+                        if let Err(e) = nats_client.session_notification(notif).await {
+                            warn!(session_id, error = %e, "xai: failed to send usage update");
+                        }
+                    }
+                    XaiEvent::Done => {
+                        // Close the lifecycle of every tool call opened this turn.
+                        // Server-side tools complete internally — no explicit
+                        // completion event is emitted, so the client would otherwise
+                        // see a Pending tool call that never resolves.
+                        for (call_id, name) in pending_tool_calls.drain(..) {
+                            let notif = SessionNotification::new(
+                                session_id.clone(),
+                                SessionUpdate::ToolCall(
+                                    ToolCall::new(call_id, name)
+                                        .status(ToolCallStatus::Completed)
+                                        .kind(ToolKind::Other),
+                                ),
+                            );
+                            if let Err(e) = nats_client.session_notification(notif).await {
+                                warn!(session_id, error = %e, "xai: failed to resolve tool call");
+                            }
+                        }
+                        break StopReason::EndTurn;
+                    }
+                    XaiEvent::Error { message } => {
+                        // Gap 3: if we used previous_response_id and get an error on
+                        // the first attempt, retry without it using full history.
+                        // This transparently recovers from stale or expired response IDs.
+                        if current_prev_response_id.is_some() && !stale_retry_done {
+                            warn!(session_id, error = %message,
+                                "xai: error with previous_response_id — retrying with full history");
+                            stale_retry_done = true;
+                            current_prev_response_id = None;
+                            current_input = build_full_history_input(&session, &user_input, resuming);
+                            continue 'outer;
+                        }
+                        tracing::error!(session_id, error = %message, "xai: stream error");
+                        stream_error = Some(internal_error(message));
+                        break StopReason::EndTurn;
                     }
                 }
             };
 
-            match event {
-                XaiEvent::TextDelta { text } => {
-                    assistant_text.push_str(&text);
-                    let notif = SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                            ContentBlock::from(text),
-                        )),
-                    );
-                    if let Err(e) = nats_client.session_notification(notif).await {
-                        warn!(session_id, error = %e, "xai: failed to send text notification");
-                    }
-                }
-                XaiEvent::ResponseId { id } => {
-                    current_response_id = Some(id);
-                }
-                XaiEvent::FunctionCall { call_id, name, arguments } => {
-                    info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
-                    // Notify the ACP client for observability. Server-side tools
-                    // are executed by xAI; the stream continues after completion.
-                    let tool_call = ToolCall::new(call_id.clone(), name.clone())
-                        .status(ToolCallStatus::Pending)
-                        .kind(ToolKind::Other)
-                        .raw_input(parse_tool_arguments(&arguments));
-                    let notif = SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::ToolCall(tool_call),
-                    );
-                    if let Err(e) = nats_client.session_notification(notif).await {
-                        warn!(session_id, error = %e, "xai: failed to send tool call notification");
-                    }
-                }
-                XaiEvent::Finished { reason } => {
-                    info!(session_id, reason = ?reason, "xai: finish reason");
-                }
-                XaiEvent::Usage { prompt_tokens, completion_tokens } => {
-                    let total = prompt_tokens.saturating_add(completion_tokens);
-                    info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
-                    let notif = SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::UsageUpdate(UsageUpdate::new(total, 0)),
-                    );
-                    if let Err(e) = nats_client.session_notification(notif).await {
-                        warn!(session_id, error = %e, "xai: failed to send usage update");
-                    }
-                }
-                XaiEvent::Done => break StopReason::EndTurn,
-                XaiEvent::Error { message } => {
-                    tracing::error!(session_id, error = %message, "xai: stream error");
-                    stream_error = Some(internal_error(message));
-                    break StopReason::EndTurn;
+            // Gap 4: if the model was cut short, send a follow-up request so it
+            // continues from where it stopped. The server holds the full context
+            // via previous_response_id — no history re-send needed.
+            if needs_continuation && continuations < MAX_CONTINUATIONS {
+                if let Some(resp_id) = current_response_id.clone() {
+                    info!(session_id, continuations, "xai: response incomplete — sending continuation request");
+                    current_prev_response_id = Some(resp_id);
+                    // Empty input — context is carried by previous_response_id.
+                    current_input = vec![];
+                    continuations += 1;
+                    continue 'outer;
                 }
             }
+
+            break 'outer inner_stop;
         };
 
         // Compensation: remove the orphaned user message when the turn did not
@@ -835,6 +876,51 @@ impl agent_client_protocol::Agent for XaiAgent {
         }
         Ok(())
     }
+}
+
+/// Build the full `input` array for a Responses API request from stored session history.
+///
+/// Used when there is no `previous_response_id` (new session, forked session, or
+/// fallback after a stale-ID error). Prepends the system prompt if present, then
+/// converts each `Message` in history to the corresponding `InputItem` variant.
+fn build_full_history_input(
+    session: &crate::session_store::XaiSessionData,
+    user_input: &str,
+    resuming: bool,
+) -> Vec<InputItem> {
+    let mut items: Vec<InputItem> = Vec::new();
+    if let Some(sp) = &session.system_prompt {
+        items.push(InputItem::system(sp.clone()));
+    }
+    for msg in &session.history {
+        match msg.role.as_str() {
+            "user" => items.push(InputItem::user(msg.content_str())),
+            "assistant" => {
+                if let Some(tcs) = &msg.tool_calls {
+                    for tc in tcs {
+                        items.push(InputItem::function_call(
+                            &tc.id,
+                            &tc.function.name,
+                            &tc.function.arguments,
+                        ));
+                    }
+                } else {
+                    items.push(InputItem::assistant(msg.content_str()));
+                }
+            }
+            "tool" => {
+                if let Some(tid) = &msg.tool_call_id {
+                    items.push(InputItem::function_call_output(tid, msg.content_str()));
+                }
+            }
+            _ => {}
+        }
+    }
+    // When resuming, the user message is already the last item in history.
+    if !resuming {
+        items.push(InputItem::user(user_input.to_string()));
+    }
+    items
 }
 
 /// Trim `history` in-place so it contains at most `max` messages.
