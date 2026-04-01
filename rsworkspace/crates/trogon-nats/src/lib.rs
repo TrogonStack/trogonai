@@ -42,6 +42,9 @@ pub mod connect;
 pub mod constants;
 pub mod jetstream;
 pub mod messaging;
+pub mod nats_token;
+pub mod subject_token_violation;
+pub(crate) mod token;
 
 #[cfg(feature = "test-support")]
 pub mod mocks;
@@ -56,6 +59,8 @@ pub use messaging::{
     RetryPolicy, build_request_headers, headers_with_trace_context, inject_trace_context, publish,
     request, request_with_timeout,
 };
+pub use nats_token::{DottedNatsToken, NatsToken};
+pub use subject_token_violation::SubjectTokenViolation;
 
 #[cfg(feature = "test-support")]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};
