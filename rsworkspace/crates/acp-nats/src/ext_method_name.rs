@@ -5,11 +5,8 @@
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `vendor.operation`) but rejects
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.
 
-use std::sync::Arc;
-
-use crate::constants::MAX_METHOD_NAME_LENGTH;
-use crate::nats::token;
-use crate::subject_token_violation::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolation;
+use trogon_nats::DottedNatsToken;
 
 /// Error returned when [`ExtMethodName`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,32 +32,17 @@ impl std::error::Error for ExtMethodNameError {}
 ///
 /// Rejects empty, too-long, wildcard, whitespace, and malformed dotted names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ExtMethodName(Arc<str>);
+pub struct ExtMethodName(DottedNatsToken);
 
 impl ExtMethodName {
     pub fn new(method: impl AsRef<str>) -> Result<Self, ExtMethodNameError> {
-        let s = method.as_ref();
-        if s.is_empty() {
-            return Err(ExtMethodNameError(SubjectTokenViolation::Empty));
-        }
-        if s.len() > MAX_METHOD_NAME_LENGTH {
-            return Err(ExtMethodNameError(SubjectTokenViolation::TooLong(s.len())));
-        }
-        if let Some(ch) = token::has_wildcards_or_whitespace(s) {
-            return Err(ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(
-                ch,
-            )));
-        }
-        if token::has_consecutive_or_boundary_dots(s) {
-            return Err(ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(
-                '.',
-            )));
-        }
-        Ok(Self(s.into()))
+        DottedNatsToken::new(method)
+            .map(Self)
+            .map_err(ExtMethodNameError)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 

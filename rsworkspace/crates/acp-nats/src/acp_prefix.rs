@@ -7,11 +7,8 @@
 //! malformed dots (consecutive, leading, trailing). Max 128 bytes. Validity is guaranteed at
 //! construction.
 
-use std::sync::Arc;
-
-use crate::constants::MAX_PREFIX_LENGTH;
-use crate::nats::token;
-use crate::subject_token_violation::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolation;
+use trogon_nats::DottedNatsToken;
 
 /// Error returned when [`AcpPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,28 +32,16 @@ impl std::error::Error for AcpPrefixError {}
 
 /// NATS-safe ACP prefix. Guarantees validity at construction—invalid instances are unrepresentable.
 #[derive(Clone, Debug)]
-pub struct AcpPrefix(Arc<str>);
+pub struct AcpPrefix(DottedNatsToken);
 
 impl AcpPrefix {
     pub fn new(s: impl Into<String>) -> Result<Self, AcpPrefixError> {
         let s = s.into();
-        if s.is_empty() {
-            return Err(AcpPrefixError(SubjectTokenViolation::Empty));
-        }
-        if let Some(ch) = token::has_wildcards_or_whitespace(&s) {
-            return Err(AcpPrefixError(SubjectTokenViolation::InvalidCharacter(ch)));
-        }
-        if token::has_consecutive_or_boundary_dots(&s) {
-            return Err(AcpPrefixError(SubjectTokenViolation::InvalidCharacter('.')));
-        }
-        if s.len() > MAX_PREFIX_LENGTH {
-            return Err(AcpPrefixError(SubjectTokenViolation::TooLong(s.len())));
-        }
-        Ok(Self(s.into()))
+        DottedNatsToken::new(s).map(Self).map_err(AcpPrefixError)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 

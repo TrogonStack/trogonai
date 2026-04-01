@@ -13,3 +13,5 @@ pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 pub const MIN_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
+
+pub const MAX_NATS_TOKEN_LENGTH: usize = 128;
