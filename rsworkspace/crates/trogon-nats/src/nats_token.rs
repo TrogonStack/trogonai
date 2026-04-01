@@ -13,8 +13,6 @@ use crate::constants::MAX_NATS_TOKEN_LENGTH;
 use crate::subject_token_violation::SubjectTokenViolation;
 use crate::token;
 
-// ── NatsToken (single, ASCII-only) ─────────────────────────────────────
-
 /// A validated single NATS subject token.
 ///
 /// Rejects empty, non-ASCII, dots, wildcards (`*`, `>`), and whitespace.
@@ -66,8 +64,6 @@ impl AsRef<str> for NatsToken {
         &self.0
     }
 }
-
-// ── DottedNatsToken (multi-segment, UTF-8) ─────────────────────────────
 
 /// A validated dotted NATS subject segment.
 ///
@@ -125,8 +121,6 @@ impl AsRef<str> for DottedNatsToken {
 mod tests {
     use super::*;
 
-    // ── NatsToken (single, ASCII-only) ─────────────────────────────────
-
     #[test]
     fn single_valid() {
         assert!(NatsToken::new("valid-session-123").is_ok());
@@ -178,8 +172,6 @@ mod tests {
             Err(SubjectTokenViolation::InvalidCharacter('é'))
         );
     }
-
-    // ── DottedNatsToken (multi-segment, UTF-8) ─────────────────────────
 
     #[test]
     fn dotted_valid_simple() {
@@ -241,8 +233,6 @@ mod tests {
     fn dotted_accepts_non_ascii() {
         assert!(DottedNatsToken::new("préfixe").is_ok());
     }
-
-    // ── Shared trait impls ─────────────────────────────────────────────
 
     #[test]
     fn single_display_and_deref() {
