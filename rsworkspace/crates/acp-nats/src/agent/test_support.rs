@@ -41,31 +41,30 @@ impl MockJs {
 
 impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
     type PublishError = trogon_nats::mocks::MockError;
+    type AckFuture =
+        std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
-    async fn js_publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+    async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
         &self,
         subject: S,
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
-    ) -> Result<async_nats::jetstream::publish::PublishAck, Self::PublishError> {
+    ) -> Result<Self::AckFuture, Self::PublishError> {
         self.publisher
-            .js_publish_with_headers(subject, headers, payload)
+            .publish_with_headers(subject, headers, payload)
             .await
     }
 }
 
-impl trogon_nats::jetstream::JetStreamConsumerFactory for MockJs {
+impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
     type Error = trogon_nats::mocks::MockError;
-    type Consumer = trogon_nats::jetstream::MockJetStreamConsumer;
+    type Stream = trogon_nats::jetstream::MockJetStreamStream;
 
-    async fn create_consumer(
+    async fn get_stream<T: AsRef<str> + Send>(
         &self,
-        stream_name: &str,
-        config: async_nats::jetstream::consumer::pull::Config,
-    ) -> Result<trogon_nats::jetstream::MockJetStreamConsumer, Self::Error> {
-        self.consumer_factory
-            .create_consumer(stream_name, config)
-            .await
+        stream_name: T,
+    ) -> Result<trogon_nats::jetstream::MockJetStreamStream, Self::Error> {
+        self.consumer_factory.get_stream(stream_name).await
     }
 }
 
