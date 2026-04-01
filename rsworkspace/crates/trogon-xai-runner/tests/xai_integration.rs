@@ -2923,3 +2923,188 @@ async fn api_401_error_surfaces_as_acp_error_without_retry() {
     assert!(history.is_empty(), "history must be empty after 401 error: {history:?}");
 }
 
+// ── Incomplete continuation ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn incomplete_max_output_tokens_continues_and_assembles_text() {
+    // Exercises the outer agentic loop continuation path:
+    //   1st request → incomplete (max_output_tokens) with partial text
+    //   2nd request → continuation with empty input + previous_response_id
+    // Verifies: exactly 2 HTTP requests, second carries previous_response_id and
+    // empty input array, and the assembled assistant text is saved in history.
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_clone = Arc::clone(&captured);
+
+    tokio::spawn(async move {
+        // First connection: partial text, then incomplete.
+        let first = concat!(
+            "data: {\"id\":\"resp_part\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Hello \"}}\n\n",
+            "data: {\"id\":\"resp_part\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_part\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                first.len(), first,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Second connection: continuation text, then complete.
+        let second = concat!(
+            "data: {\"id\":\"resp_cont\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"world\"}}\n\n",
+            "data: {\"id\":\"resp_cont\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cont\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                second.len(), second,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("say hello world"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 2, "expected exactly 2 HTTP requests");
+
+    // First request has a user message and no previous_response_id.
+    let first_input = reqs[0]["input"].as_array().expect("input must be array");
+    assert!(
+        first_input.iter().any(|item| item["role"].as_str() == Some("user")),
+        "first request must carry the user message"
+    );
+    assert!(
+        reqs[0].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
+        "first request must not have previous_response_id"
+    );
+
+    // Continuation: empty input + previous_response_id from the incomplete response.
+    let second_input = reqs[1]["input"].as_array().expect("second input must be array");
+    assert!(
+        second_input.is_empty(),
+        "max_output_tokens continuation must send empty input, got {second_input:?}"
+    );
+    assert_eq!(
+        reqs[1]["previous_response_id"].as_str(),
+        Some("resp_part"),
+        "continuation must reference the incomplete response's ID"
+    );
+
+    // History: user turn + assembled assistant text from both streams.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content_str(), "Hello world", "assembled text must concatenate both chunks");
+}
+
+// ── tool-call → Failed on stream error ───────────────────────────────────────
+
+#[tokio::test]
+async fn tool_call_then_response_failed_compensates_history() {
+    // Verifies 121ce6c: when response.failed arrives after a function_call event,
+    // the agent must return an error and compensate the orphaned user message.
+    // Tool call notifications sent to NATS are fire-and-forget and cannot be
+    // observed here (fake_nats drops PUBs), but the history/error contract can.
+    let _guard = env_lock().lock().unwrap();
+
+    let body = concat!(
+        "data: {\"id\":\"resp_toolerr\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_1\",\"name\":\"web_search\",\"arguments\":\"{}\"}}\n\n",
+        "data: {\"id\":\"resp_toolerr\",\"type\":\"response.failed\"}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("search for something"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
+    // Orphaned user message must be compensated — turn failed after tool call.
+    let history = agent.test_session_history(&session_id).await;
+    assert!(
+        history.is_empty(),
+        "history must be empty after response.failed during tool call: {history:?}"
+    );
+}
+
