@@ -60,6 +60,7 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[
     ("web_search", "Web Search"),
     ("x_search", "X Search"),
     ("code_interpreter", "Code Interpreter"),
+    ("file_search", "File Search"),
 ];
 
 /// ACP Agent implementation backed by xAI's Grok API (OpenAI-compatible REST).
@@ -628,8 +629,8 @@ impl agent_client_protocol::Agent for XaiAgent {
         // When there is no `last_response_id` (new session, forked session, or
         // first turn), send the complete history converted to `InputItem`s.
         //
-        // These are `mut` because Gap 3 (stale-ID retry) and Gap 4 (Incomplete
-        // continuation) may update them across outer loop iterations.
+        // These are `mut` because the stale-ID retry and Incomplete continuation
+        // may update them across outer loop iterations.
         let (mut current_input, mut current_prev_response_id) =
             if let Some(prev_id) = &session.last_response_id {
                 // Stateful path: one item for this turn + server-held context.
@@ -650,17 +651,23 @@ impl agent_client_protocol::Agent for XaiAgent {
         // ID returned by xAI for this response; saved as `last_response_id` so
         // subsequent turns can use stateful multi-turn via `previous_response_id`.
         let mut current_response_id: Option<String> = None;
-        // Gap 3: set after the first stale-ID retry to prevent infinite retries.
+        // Set after the first stale-ID retry to prevent infinite retries.
         let mut stale_retry_done = false;
-        // Gap 4: counts client-driven continuation requests for Incomplete responses.
+        // Set when the outer loop is executing a continuation request (Incomplete
+        // response). Disables the stale-ID retry for that iteration: an error
+        // during continuation should surface to the user, not silently restart
+        // the model from scratch with full history.
+        let mut continuation_in_progress = false;
+        // Counts client-driven continuation requests for Incomplete responses.
         let mut continuations: u32 = 0;
         const MAX_CONTINUATIONS: u32 = 5;
 
         // Outer loop — normally executes once. Re-runs when:
-        //   Gap 3: a stale `previous_response_id` causes an error → retry with
-        //          full history and no ID (transparent recovery).
-        //   Gap 4: the model response is Incomplete → send a follow-up request
-        //          referencing the partial response so the model continues.
+        //   Stale-ID retry: a stale `previous_response_id` causes an error →
+        //          retry with full history and no ID (transparent recovery).
+        //   Incomplete continuation: the model response is Incomplete → send a
+        //          follow-up request referencing the partial response so the
+        //          model continues.
         let stop_reason = 'outer: loop {
             let mut stream = client
                 .chat_stream(
@@ -675,6 +682,12 @@ impl agent_client_protocol::Agent for XaiAgent {
 
             // Tracks whether the last Finished event signalled Incomplete.
             let mut needs_continuation = false;
+            // The `incomplete_details.reason` from the last Finished(Incomplete)
+            // event. Drives the continuation input strategy:
+            // - "max_output_tokens" → empty input (model resumes its own text)
+            // - "max_turns" / other → re-send user question (model has tool
+            //   results in context but hasn't produced the final answer yet)
+            let mut last_incomplete_reason: Option<String> = None;
             // Accumulates (call_id, name) for every tool call opened this turn.
             // Resolved as Completed when the stream ends — server-side tools never
             // emit an explicit completion event visible to the client.
@@ -735,12 +748,22 @@ impl agent_client_protocol::Agent for XaiAgent {
                             warn!(session_id, error = %e, "xai: failed to send tool call notification");
                         }
                     }
-                    XaiEvent::Finished { reason } => {
-                        info!(session_id, reason = ?reason, "xai: finish reason");
-                        // Gap 4: mark for continuation — the outer loop will send
-                        // a follow-up request after this stream ends.
-                        if reason == FinishReason::Incomplete {
-                            needs_continuation = true;
+                    XaiEvent::Finished { reason, incomplete_reason } => {
+                        info!(session_id, reason = ?reason, incomplete_reason = ?incomplete_reason, "xai: finish reason");
+                        match reason {
+                            FinishReason::Incomplete => {
+                                needs_continuation = true;
+                                last_incomplete_reason = incomplete_reason;
+                            }
+                            FinishReason::Failed => {
+                                // The model itself failed (not a network error).
+                                // Surface as a stream error so the compensation
+                                // path removes the orphaned user message and the
+                                // ACP client receives an explicit error instead
+                                // of a silent empty response.
+                                stream_error = Some(internal_error("xAI response failed"));
+                            }
+                            _ => {}
                         }
                     }
                     XaiEvent::Usage { prompt_tokens, completion_tokens } => {
@@ -775,13 +798,24 @@ impl agent_client_protocol::Agent for XaiAgent {
                         break StopReason::EndTurn;
                     }
                     XaiEvent::Error { message } => {
-                        // Gap 3: if we used previous_response_id and get an error on
-                        // the first attempt, retry without it using full history.
-                        // This transparently recovers from stale or expired response IDs.
-                        if current_prev_response_id.is_some() && !stale_retry_done {
+                        // If we used a session-carried previous_response_id (not a
+                        // continuation ID) and get an error on the first attempt,
+                        // retry transparently with full history — the stored ID may
+                        // have expired. Only fires once and never during continuations:
+                        // `continuation_in_progress` ensures a continuation error
+                        // surfaces to the caller instead of silently restarting the
+                        // model from scratch with a different response.
+                        if current_prev_response_id.is_some()
+                            && !stale_retry_done
+                            && !continuation_in_progress
+                        {
                             warn!(session_id, error = %message,
                                 "xai: error with previous_response_id — retrying with full history");
                             stale_retry_done = true;
+                            // Clear any text accumulated before the error (e.g. from a
+                            // partial Incomplete turn) — the retry produces a fresh response
+                            // and must not be concatenated with the truncated text.
+                            assistant_text.clear();
                             current_prev_response_id = None;
                             current_input = build_full_history_input(&session, &user_input, resuming);
                             continue 'outer;
@@ -793,17 +827,58 @@ impl agent_client_protocol::Agent for XaiAgent {
                 }
             };
 
-            // Gap 4: if the model was cut short, send a follow-up request so it
-            // continues from where it stopped. The server holds the full context
-            // via previous_response_id — no history re-send needed.
-            if needs_continuation && continuations < MAX_CONTINUATIONS {
+            // Resolve any tool calls that were left open because the stream ended
+            // without a [DONE] event (network cut, server truncation) or because
+            // a stream error fired before [DONE] arrived. In the normal path,
+            // XaiEvent::Done already drained this vec — this is a no-op there.
+            // cancel/timeout break via 'outer and never reach here; those are
+            // abrupt interruptions where leaving tool calls unresolved is acceptable.
+            for (call_id, name) in pending_tool_calls.drain(..) {
+                let notif = SessionNotification::new(
+                    session_id.clone(),
+                    SessionUpdate::ToolCall(
+                        ToolCall::new(call_id, name)
+                            .status(ToolCallStatus::Completed)
+                            .kind(ToolKind::Other),
+                    ),
+                );
+                if let Err(e) = nats_client.session_notification(notif).await {
+                    warn!(session_id, error = %e, "xai: failed to resolve orphaned tool call");
+                }
+            }
+
+            // If the model was cut short, send a follow-up request so it
+            // continues. The server holds the full context via previous_response_id.
+            //
+            // Continuation input depends on WHY the response was incomplete:
+            // - "max_output_tokens": the model was truncated mid-text. Send an
+            //   empty input so the model resumes exactly where it stopped.
+            //   Re-sending the user question would make the model restart.
+            // - "max_turns" (or unknown): tool-call iterations were exhausted.
+            //   The model has all tool results in context but hasn't answered yet.
+            //   Re-send the original question so the model produces the final answer.
+            if needs_continuation && continuations < MAX_CONTINUATIONS && stream_error.is_none() {
                 if let Some(resp_id) = current_response_id.clone() {
-                    info!(session_id, continuations, "xai: response incomplete — sending continuation request");
+                    info!(
+                        session_id,
+                        continuations,
+                        incomplete_reason = ?last_incomplete_reason,
+                        "xai: response incomplete — sending continuation request"
+                    );
                     current_prev_response_id = Some(resp_id);
-                    // Empty input — context is carried by previous_response_id.
-                    current_input = vec![];
+                    current_input = match last_incomplete_reason.as_deref() {
+                        Some("max_output_tokens") => vec![],
+                        _ => vec![InputItem::user(user_input.clone())],
+                    };
                     continuations += 1;
+                    continuation_in_progress = true;
                     continue 'outer;
+                } else {
+                    warn!(
+                        session_id,
+                        incomplete_reason = ?last_incomplete_reason,
+                        "xai: response incomplete but no response_id received — cannot continue, returning truncated response"
+                    );
                 }
             }
 
@@ -814,7 +889,12 @@ impl agent_client_protocol::Agent for XaiAgent {
         // produce a persisted assistant reply. Covers both cancel and xAI errors.
         // This is best-effort — a crash here leaves an orphaned user message,
         // which is acceptable (the message was sent; the turn was just cut short).
-        let needs_compensation = canceled || stream_error.is_some();
+        //
+        // Only compensate when this call actually wrote the user message (!resuming).
+        // When resuming=true the message was already in history from a prior call
+        // that crashed — this call did not write it, so popping it would silently
+        // discard a message that belongs to the previous turn.
+        let needs_compensation = !resuming && (canceled || stream_error.is_some());
         if needs_compensation {
             if let Some(mut current) = self.session_store.get(&session_id).await {
                 if current.history.last().map(|m| m.role == "user" && m.content_str() == user_input)
@@ -824,21 +904,27 @@ impl agent_client_protocol::Agent for XaiAgent {
                     let _ = self.session_store.put(&session_id, &current).await;
                 }
             }
-        } else if !assistant_text.is_empty() {
-            // Re-read to preserve any concurrent model/config changes, then append
-            // the assistant reply and update `last_response_id` for the next turn.
+        } else if !assistant_text.is_empty() || current_response_id.is_some() {
+            // Re-read to preserve any concurrent model/config changes, then:
+            // - append the assistant reply to history (only when text was produced)
+            // - always update last_response_id when we received one
+            //
+            // These two concerns are intentionally separated: a turn that only
+            // executes server-side tools may produce no text but still yields a
+            // valid response ID. Discarding the ID would force the next turn to
+            // re-send the full history, losing the tool-execution context.
             //
             // Note: a crash between here and the put below would leave the user
             // message in history without a corresponding assistant reply. This
             // window is inherent to the streaming-then-persist design — the
             // assistant text lives in memory until this write completes.
             if let Some(mut current) = self.session_store.get(&session_id).await {
-                current.history.push(Message::assistant_text(assistant_text));
-                trim_history(&mut current.history, self.max_history_messages);
-                // Update last_response_id so the next turn can use stateful multi-turn
-                // without re-sending the full history.
-                if current_response_id.is_some() {
-                    current.last_response_id = current_response_id;
+                if !assistant_text.is_empty() {
+                    current.history.push(Message::assistant_text(assistant_text));
+                    trim_history(&mut current.history, self.max_history_messages);
+                }
+                if let Some(resp_id) = current_response_id {
+                    current.last_response_id = Some(resp_id);
                 }
                 self.session_store.put(&session_id, &current).await.map_err(store_error)?;
             }

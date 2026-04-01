@@ -208,7 +208,11 @@ pub enum XaiEvent {
     /// Token usage from the `response.completed` event.
     Usage { prompt_tokens: u64, completion_tokens: u64 },
     /// Why the model stopped — included in the `response.completed` event.
-    Finished { reason: FinishReason },
+    ///
+    /// `incomplete_reason` is set when `reason == Incomplete` and carries the
+    /// value of `incomplete_details.reason` from the API (e.g. `"max_output_tokens"`
+    /// or `"max_turns"`). Used by the agent to choose the right continuation strategy.
+    Finished { reason: FinishReason, incomplete_reason: Option<String> },
     /// The stream ended normally (`[DONE]`).
     Done,
     /// A network or API error.
@@ -302,8 +306,13 @@ impl XaiClient {
             body["previous_response_id"] = serde_json::Value::String(prev_id.to_string());
         }
 
-        if let Some(turns) = max_turns {
-            body["max_turns"] = serde_json::Value::Number(turns.into());
+        // max_turns is only meaningful when tools are present — the server uses
+        // it to cap tool-calling iterations. Skip it for tool-less requests to
+        // avoid sending a parameter that has no effect.
+        if !tools.is_empty() {
+            if let Some(turns) = max_turns {
+                body["max_turns"] = serde_json::Value::Number(turns.into());
+            }
         }
 
         let response = self
@@ -390,8 +399,14 @@ fn parse_sse(
 ///   Both names are accepted: `message.delta` is the documented xAI name;
 ///   `response.output_text.delta` is the OpenAI Responses API spec name.
 ///   The `delta` field may be an object `{"text":"..."}` or a bare string.
+///   A `delta.reasoning_content` field (emitted by reasoning models such as
+///   grok-3-mini) is logged at debug level and discarded — the ACP protocol
+///   has no dedicated reasoning block type.
+/// - `response.reasoning_summary_text.delta` → logged at debug level, discarded
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
 /// - `response.completed` / `response.done` → `Usage` + `Finished`
+///   When `status == "incomplete"`, the `incomplete_details.reason` field is
+///   extracted and forwarded in `Finished::incomplete_reason`.
 /// - `[DONE]` → `Done`
 ///
 /// The top-level `id` field present on most events is used to emit `ResponseId`
@@ -433,6 +448,9 @@ fn process_sse_line(
         // Accept both documented xAI name ("message.delta") and OpenAI spec name
         // ("response.output_text.delta"). The delta payload may be an object with
         // a "text" field or a bare string — try both.
+        // Reasoning models (e.g. grok-3-mini) may also include a
+        // "reasoning_content" field in the same delta object; it is logged and
+        // discarded since the ACP protocol has no dedicated reasoning block type.
         "message.delta" | "response.output_text.delta" => {
             if let Some(text) = val["delta"]["text"].as_str()
                 .or_else(|| val["delta"].as_str())
@@ -440,6 +458,18 @@ fn process_sse_line(
                 if !text.is_empty() {
                     pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
                 }
+            }
+            if let Some(rc) = val["delta"]["reasoning_content"].as_str() {
+                if !rc.is_empty() {
+                    debug!(reasoning_len = rc.len(), "xai: reasoning_content chunk (not forwarded to client)");
+                }
+            }
+        }
+        // OpenAI Responses API reasoning summary events — log and discard.
+        "response.reasoning_summary_text.delta" => {
+            let rc = val["delta"].as_str().unwrap_or("");
+            if !rc.is_empty() {
+                debug!(reasoning_len = rc.len(), "xai: reasoning summary chunk (not forwarded to client)");
             }
         }
         "function_call" => {
@@ -463,11 +493,22 @@ fn process_sse_line(
             }
             // Emit the finish reason from response.status (Responses API field).
             // Falls back to checking top-level status for xAI-specific deviations.
+            // When status is "incomplete", also extract incomplete_details.reason
+            // (e.g. "max_output_tokens" or "max_turns") so the agent can choose
+            // the right continuation strategy.
             let status = val["response"]["status"].as_str()
                 .or_else(|| val["status"].as_str());
             if let Some(s) = status {
+                let incomplete_reason = if s == "incomplete" {
+                    val["response"]["incomplete_details"]["reason"].as_str()
+                        .or_else(|| val["incomplete_details"]["reason"].as_str())
+                        .map(str::to_string)
+                } else {
+                    None
+                };
                 pending.push_back(XaiEvent::Finished {
                     reason: FinishReason::from_status(s),
+                    incomplete_reason,
                 });
             }
         }
@@ -591,7 +632,7 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"completed"},"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason } if *reason == FinishReason::Completed)),
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
             "expected Finished(Completed) in {events:?}"
         );
     }
@@ -601,8 +642,54 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"incomplete"}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason } if *reason == FinishReason::Incomplete)),
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Incomplete)),
             "expected Finished(Incomplete) in {events:?}"
+        );
+    }
+
+    #[test]
+    fn finished_incomplete_reason_max_output_tokens() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Finished { reason, incomplete_reason }
+                    if *reason == FinishReason::Incomplete
+                    && incomplete_reason.as_deref() == Some("max_output_tokens")
+            )),
+            "expected Finished(Incomplete, max_output_tokens) in {events:?}"
+        );
+    }
+
+    #[test]
+    fn finished_incomplete_reason_max_turns() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"incomplete","incomplete_details":{"reason":"max_turns"}}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Finished { reason, incomplete_reason }
+                    if *reason == FinishReason::Incomplete
+                    && incomplete_reason.as_deref() == Some("max_turns")
+            )),
+            "expected Finished(Incomplete, max_turns) in {events:?}"
+        );
+    }
+
+    #[test]
+    fn finished_incomplete_top_level_reason() {
+        // xAI may put incomplete_details at the top level instead of nested in response.
+        let line = r#"data: {"type":"response.completed","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Finished { reason, incomplete_reason }
+                    if *reason == FinishReason::Incomplete
+                    && incomplete_reason.as_deref() == Some("max_output_tokens")
+            )),
+            "expected Finished(Incomplete, max_output_tokens) from top-level in {events:?}"
         );
     }
 
