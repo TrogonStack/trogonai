@@ -35,6 +35,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or(300);
     let models = std::env::var("XAI_MODELS")
         .unwrap_or_else(|_| "grok-3:Grok 3,grok-3-mini:Grok 3 Mini".to_string());
+    let max_turns = std::env::var("XAI_MAX_TURNS")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(10);
     info!(
         nats_url,
         prefix,
@@ -42,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         models,
         system_prompt_set,
         max_history_messages,
+        max_turns,
         prompt_timeout_secs,
         session_ttl_secs,
         "xai-runner starting"

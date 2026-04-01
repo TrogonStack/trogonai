@@ -164,6 +164,35 @@ impl InputItem {
     }
 }
 
+/// Why the model stopped generating.
+///
+/// Mapped from the Responses API `response.status` field in `response.completed`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FinishReason {
+    /// Normal end of turn — response is complete.
+    Completed,
+    /// Generation stopped before completion (e.g. max_output_tokens reached).
+    Incomplete,
+    /// Generation failed with an error.
+    Failed,
+    /// Generation was cancelled.
+    Cancelled,
+    /// Unknown / other status.
+    Other(String),
+}
+
+impl FinishReason {
+    fn from_status(s: &str) -> Self {
+        match s {
+            "completed" => Self::Completed,
+            "incomplete" => Self::Incomplete,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
 /// An event emitted by the Responses API streaming endpoint.
 #[derive(Debug, Clone)]
 pub enum XaiEvent {
@@ -178,6 +207,8 @@ pub enum XaiEvent {
     ResponseId { id: String },
     /// Token usage from the `response.completed` event.
     Usage { prompt_tokens: u64, completion_tokens: u64 },
+    /// Why the model stopped — included in the `response.completed` event.
+    Finished { reason: FinishReason },
     /// The stream ended normally (`[DONE]`).
     Done,
     /// A network or API error.
@@ -215,6 +246,7 @@ impl XaiClient {
     /// - `tools` — server-side tool names to enable, e.g. `["web_search", "x_search"]`
     /// - `previous_response_id` — ID from the prior response; enables stateful
     ///   multi-turn without re-sending full history
+    /// - `max_turns` — maximum agentic tool-call iterations the server may perform
     pub async fn chat_stream(
         &self,
         model: &str,
@@ -222,6 +254,7 @@ impl XaiClient {
         api_key: &str,
         tools: &[String],
         previous_response_id: Option<&str>,
+        max_turns: Option<u32>,
     ) -> impl Stream<Item = XaiEvent> + use<> {
         debug!(
             model,
@@ -231,7 +264,7 @@ impl XaiClient {
             "xai: starting responses stream"
         );
 
-        let result = self.start_request(model, input, api_key, tools, previous_response_id).await;
+        let result = self.start_request(model, input, api_key, tools, previous_response_id, max_turns).await;
         match result {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
             Err(e) => {
@@ -249,6 +282,7 @@ impl XaiClient {
         api_key: &str,
         tools: &[String],
         previous_response_id: Option<&str>,
+        max_turns: Option<u32>,
     ) -> Result<reqwest::Response, String> {
         let mut body = serde_json::json!({
             "model": model,
@@ -266,6 +300,10 @@ impl XaiClient {
 
         if let Some(prev_id) = previous_response_id {
             body["previous_response_id"] = serde_json::Value::String(prev_id.to_string());
+        }
+
+        if let Some(turns) = max_turns {
+            body["max_turns"] = serde_json::Value::Number(turns.into());
         }
 
         let response = self
@@ -408,10 +446,22 @@ fn process_sse_line(
             }
         }
         "response.completed" | "response.done" => {
-            let p = val["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
-            let c = val["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+            // Usage may be top-level (xAI extension) or nested inside the
+            // response object (per OpenAI Responses API spec).
+            let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
+            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
+            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
+            }
+            // Emit the finish reason from response.status (Responses API field).
+            // Falls back to checking top-level status for xAI-specific deviations.
+            let status = val["response"]["status"].as_str()
+                .or_else(|| val["status"].as_str());
+            if let Some(s) = status {
+                pending.push_back(XaiEvent::Finished {
+                    reason: FinishReason::from_status(s),
+                });
             }
         }
         _ => {}
@@ -510,6 +560,26 @@ mod tests {
         assert!(
             matches!(event, XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 }),
             "unexpected event: {event:?}"
+        );
+    }
+
+    #[test]
+    fn finished_event_from_response_status() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"completed"},"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason } if *reason == FinishReason::Completed)),
+            "expected Finished(Completed) in {events:?}"
+        );
+    }
+
+    #[test]
+    fn finished_event_incomplete_status() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"incomplete"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason } if *reason == FinishReason::Incomplete)),
+            "expected Finished(Incomplete) in {events:?}"
         );
     }
 

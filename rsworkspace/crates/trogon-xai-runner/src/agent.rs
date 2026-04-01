@@ -103,6 +103,12 @@ pub struct XaiAgent {
     /// Note: truncation is by message count, not tokens. With `search_mode` active,
     /// messages can be long; lower this value if context window errors occur.
     max_history_messages: usize,
+    /// Maximum agentic tool-call turns per prompt.
+    ///
+    /// Passed as `max_turns` in the Responses API request when tools are enabled.
+    /// The xAI server caps its internal tool-calling loop at this value.
+    /// Configured via `XAI_MAX_TURNS` (default: 10; 0 = use server default).
+    max_turns: Option<u32>,
 }
 
 impl XaiAgent {
@@ -192,6 +198,11 @@ impl XaiAgent {
             .filter(|&n| n > 0)
             .unwrap_or(20);
 
+        let max_turns = std::env::var("XAI_MAX_TURNS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .filter(|&n| n > 0);
+
         Self {
             nats,
             acp_prefix,
@@ -205,6 +216,7 @@ impl XaiAgent {
             pending_api_key: Arc::new(Mutex::new(None)),
             system_prompt,
             max_history_messages,
+            max_turns,
         }
     }
 
@@ -667,6 +679,10 @@ impl agent_client_protocol::Agent for XaiAgent {
         // subsequent turns can use stateful multi-turn via `previous_response_id`.
         let mut current_response_id: Option<String> = None;
 
+        // Stream the response. Server-side tools (web_search, x_search,
+        // code_interpreter) are executed by xAI internally — the stream
+        // continues naturally after each tool call without a client round-trip.
+        // max_turns is passed in the request to cap the server-side agentic loop.
         let mut stream = client
             .chat_stream(
                 &model,
@@ -674,12 +690,10 @@ impl agent_client_protocol::Agent for XaiAgent {
                 &api_key,
                 &enabled_tools,
                 previous_response_id.as_deref(),
+                self.max_turns,
             )
             .await;
 
-        // Process the streaming response. Server-side tools (web_search, x_search,
-        // code_interpreter) are executed by xAI internally — the stream continues
-        // naturally after tool execution without a client round-trip.
         let stop_reason = loop {
             let event = tokio::select! {
                 biased;
@@ -717,9 +731,9 @@ impl agent_client_protocol::Agent for XaiAgent {
                     current_response_id = Some(id);
                 }
                 XaiEvent::FunctionCall { call_id, name, arguments } => {
-                    info!(session_id, call_id = %call_id, tool_name = %name, "xai: server-side tool call");
+                    info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
                     // Notify the ACP client for observability. Server-side tools
-                    // execute on the xAI backend; the stream continues after completion.
+                    // are executed by xAI; the stream continues after completion.
                     let tool_call = ToolCall::new(call_id.clone(), name.clone())
                         .status(ToolCallStatus::Pending)
                         .kind(ToolKind::Other)
@@ -731,6 +745,9 @@ impl agent_client_protocol::Agent for XaiAgent {
                     if let Err(e) = nats_client.session_notification(notif).await {
                         warn!(session_id, error = %e, "xai: failed to send tool call notification");
                     }
+                }
+                XaiEvent::Finished { reason } => {
+                    info!(session_id, reason = ?reason, "xai: finish reason");
                 }
                 XaiEvent::Usage { prompt_tokens, completion_tokens } => {
                     let total = prompt_tokens.saturating_add(completion_tokens);
