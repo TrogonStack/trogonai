@@ -213,9 +213,9 @@ pub enum XaiEvent {
     /// value of `incomplete_details.reason` from the API (e.g. `"max_output_tokens"`
     /// or `"max_turns"`). Used by the agent to choose the right continuation strategy.
     Finished { reason: FinishReason, incomplete_reason: Option<String> },
-    /// A server-side search call (web_search, x_search) finished on xAI's
-    /// infrastructure. Emitted from `response.web_search_call.completed` /
-    /// `response.x_search_call.completed`.
+    /// A server-side tool call (web_search, x_search, code_interpreter, file_search)
+    /// finished on xAI's infrastructure. Emitted from `response.*_call.completed`
+    /// for all four built-in tool types.
     ///
     /// Carries the tool `name` (`"web_search"` or `"x_search"`) so the agent
     /// can match against `pending_tool_calls` by name (FIFO). The `item_id`
@@ -420,10 +420,11 @@ fn parse_sse(
 ///   has no dedicated reasoning block type.
 /// - `response.reasoning_summary_text.delta` → logged at debug level, discarded
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
-/// - `response.web_search_call.completed` / `response.x_search_call.completed`
-///   → `SearchCallCompleted` (search finished; agent advances tool to Completed)
-/// - `response.web_search_call.in_progress` / `.searching` and the equivalent
-///   `x_search_call.*` events → explicit no-op (informational; no state change)
+/// - `response.web_search_call.completed` / `response.x_search_call.completed` /
+///   `response.code_interpreter_call.completed` / `response.file_search_call.completed`
+///   → `SearchCallCompleted` (tool finished; agent advances tool to Completed)
+/// - `*.in_progress` / `*.searching` / `*.interpreting` variants for all four
+///   built-in tools → explicit no-op (informational; no state change)
 /// - `response.completed` / `response.done` → `Usage` + `Finished`
 ///   When `status == "incomplete"`, the `incomplete_details.reason` field is
 ///   extracted and forwarded in `Finished::incomplete_reason`.
@@ -567,10 +568,20 @@ fn process_sse_line(
         "response.x_search_call.completed" => {
             pending.push_back(XaiEvent::SearchCallCompleted { name: "x_search".to_string() });
         }
+        "response.code_interpreter_call.completed" => {
+            pending.push_back(XaiEvent::SearchCallCompleted { name: "code_interpreter".to_string() });
+        }
+        "response.file_search_call.completed" => {
+            pending.push_back(XaiEvent::SearchCallCompleted { name: "file_search".to_string() });
+        }
         "response.web_search_call.in_progress"
         | "response.web_search_call.searching"
         | "response.x_search_call.in_progress"
-        | "response.x_search_call.searching" => {}
+        | "response.x_search_call.searching"
+        | "response.code_interpreter_call.in_progress"
+        | "response.code_interpreter_call.interpreting"
+        | "response.file_search_call.in_progress"
+        | "response.file_search_call.searching" => {}
         "response.failed" => {
             // OpenAI Responses API defines response.failed as a distinct event
             // type (not nested under response.completed). Map it to Failed so the
@@ -1010,5 +1021,49 @@ mod tests {
             parse_line(line).is_none(),
             "x_search_call.searching must produce no event"
         );
+    }
+
+    #[test]
+    fn code_interpreter_call_completed_emits_search_call_completed() {
+        let line = r#"data: {"type":"response.code_interpreter_call.completed","item_id":"ci_abc","output_index":0}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "code_interpreter"),
+            "expected SearchCallCompleted(code_interpreter), got {event:?}"
+        );
+    }
+
+    #[test]
+    fn code_interpreter_call_in_progress_is_silent() {
+        let line = r#"data: {"type":"response.code_interpreter_call.in_progress","item_id":"ci_abc","output_index":0}"#;
+        assert!(parse_line(line).is_none(), "code_interpreter_call.in_progress must produce no event");
+    }
+
+    #[test]
+    fn code_interpreter_call_interpreting_is_silent() {
+        let line = r#"data: {"type":"response.code_interpreter_call.interpreting","item_id":"ci_abc","output_index":0}"#;
+        assert!(parse_line(line).is_none(), "code_interpreter_call.interpreting must produce no event");
+    }
+
+    #[test]
+    fn file_search_call_completed_emits_search_call_completed() {
+        let line = r#"data: {"type":"response.file_search_call.completed","item_id":"fs_abc","output_index":0}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "file_search"),
+            "expected SearchCallCompleted(file_search), got {event:?}"
+        );
+    }
+
+    #[test]
+    fn file_search_call_in_progress_is_silent() {
+        let line = r#"data: {"type":"response.file_search_call.in_progress","item_id":"fs_abc","output_index":0}"#;
+        assert!(parse_line(line).is_none(), "file_search_call.in_progress must produce no event");
+    }
+
+    #[test]
+    fn file_search_call_searching_is_silent() {
+        let line = r#"data: {"type":"response.file_search_call.searching","item_id":"fs_abc","output_index":0}"#;
+        assert!(parse_line(line).is_none(), "file_search_call.searching must produce no event");
     }
 }
