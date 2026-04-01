@@ -19,10 +19,6 @@ pub const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 pub const PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW: Duration = Duration::from_secs(5);
 pub const TEST_PROMPT_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub const MAX_PREFIX_LENGTH: usize = 128;
-pub const MAX_SESSION_ID_LENGTH: usize = 128;
-pub const MAX_METHOD_NAME_LENGTH: usize = 128;
-
 pub const AGENT_UNAVAILABLE: i32 = -32001;
 
 pub const SESSION_PREFIX: &str = ".session.";
