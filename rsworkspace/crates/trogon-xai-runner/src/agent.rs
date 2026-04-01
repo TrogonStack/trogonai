@@ -63,7 +63,7 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[
     ("file_search", "File Search"),
 ];
 
-/// ACP Agent implementation backed by xAI's Grok API (OpenAI-compatible REST).
+/// ACP Agent implementation backed by xAI's Grok API (Responses API).
 ///
 /// Each `XaiAgent` manages multiple sessions, each holding its own conversation
 /// history persisted in NATS KV. Prompt calls stream chat completions from
@@ -101,8 +101,9 @@ pub struct XaiAgent {
     /// Oldest messages are trimmed in pairs to preserve user/assistant ordering.
     /// Configured via `XAI_MAX_HISTORY_MESSAGES` (default: 20 = 10 exchanges).
     ///
-    /// Note: truncation is by message count, not tokens. With `search_mode` active,
-    /// messages can be long; lower this value if context window errors occur.
+    /// Note: truncation is by message count, not tokens. With server-side tools
+    /// (`enabled_tools`) active, messages can be long; lower this value if
+    /// context window errors occur.
     max_history_messages: usize,
     /// Maximum agentic tool-call turns per prompt.
     ///
@@ -755,8 +756,8 @@ impl agent_client_protocol::Agent for XaiAgent {
                             warn!(session_id, error = %e, "xai: failed to send tool call notification");
                         }
                     }
-                    XaiEvent::SearchCallCompleted { name } => {
-                        // A server-side search finished on xAI's infrastructure.
+                    XaiEvent::ServerToolCompleted { name } => {
+                        // A server-side built-in tool finished on xAI's infrastructure.
                         // Advance the matching pending tool call to Completed now —
                         // before the model starts streaming its text answer — so the
                         // ACP client gets real-time status instead of waiting up to
@@ -767,7 +768,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                         // in the `function_call` event. xAI executes server-side
                         // tool calls sequentially so FIFO order is always correct.
                         // If no matching entry exists (e.g. the server sent a
-                        // SearchCallCompleted without a prior FunctionCall for some
+                        // ServerToolCompleted without a prior FunctionCall for some
                         // reason), this is a silent no-op — not an error.
                         if let Some(pos) = pending_tool_calls.iter().position(|(_, n)| *n == name) {
                             let (call_id, tc_name) = pending_tool_calls.remove(pos);
@@ -816,11 +817,14 @@ impl agent_client_protocol::Agent for XaiAgent {
                         }
                     }
                     XaiEvent::Usage { prompt_tokens, completion_tokens } => {
-                        let total = prompt_tokens.saturating_add(completion_tokens);
                         info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
+                        // UsageUpdate(used, size): used = tokens currently in context
+                        // (prompt_tokens from xAI = full input sent this turn);
+                        // size = 0 because the model's context window limit is not
+                        // returned by the Responses API.
                         let notif = SessionNotification::new(
                             session_id.clone(),
-                            SessionUpdate::UsageUpdate(UsageUpdate::new(total, 0)),
+                            SessionUpdate::UsageUpdate(UsageUpdate::new(prompt_tokens, 0)),
                         );
                         if let Err(e) = nats_client.session_notification(notif).await {
                             warn!(session_id, error = %e, "xai: failed to send usage update");
@@ -1072,24 +1076,7 @@ fn build_full_history_input(
     for msg in &session.history {
         match msg.role.as_str() {
             "user" => items.push(InputItem::user(msg.content_str())),
-            "assistant" => {
-                if let Some(tcs) = &msg.tool_calls {
-                    for tc in tcs {
-                        items.push(InputItem::function_call(
-                            &tc.id,
-                            &tc.function.name,
-                            &tc.function.arguments,
-                        ));
-                    }
-                } else {
-                    items.push(InputItem::assistant(msg.content_str()));
-                }
-            }
-            "tool" => {
-                if let Some(tid) = &msg.tool_call_id {
-                    items.push(InputItem::function_call_output(tid, msg.content_str()));
-                }
-            }
+            "assistant" => items.push(InputItem::assistant(msg.content_str())),
             _ => {}
         }
     }
@@ -1168,7 +1155,7 @@ mod tests {
     // ── trim_history ──────────────────────────────────────────────────────────
 
     fn msg(role: &str, content: &str) -> Message {
-        Message { role: role.to_string(), content: Some(content.to_string()), tool_calls: None, tool_call_id: None }
+        Message { role: role.to_string(), content: Some(content.to_string()) }
     }
 
     fn roles(history: &[Message]) -> Vec<&str> {
