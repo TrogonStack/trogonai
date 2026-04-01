@@ -1,3 +1,70 @@
+//! # ACP NATS Subject Hierarchy
+//!
+//! Every ACP subject, its transport, and why.
+//!
+//! ## Core NATS (request/reply or fire-and-forget)
+//!
+//! Stateless operations where the agent must be online now and the response
+//! is immediate. No session state to recover on failure — just retry.
+//!
+//! | Subject                              | Pattern          | Rationale                                    |
+//! |--------------------------------------|------------------|----------------------------------------------|
+//! | `agent.initialize`                   | request/reply    | Handshake, agent must be alive               |
+//! | `agent.authenticate`                 | request/reply    | Auth, agent must be alive                    |
+//! | `agent.session.list`                 | request/reply    | Read-only query, no state change             |
+//! | `agent.ext.>`                        | request/reply    | Stateless global extension calls             |
+//! | `session.{id}.client.*`              | request/reply    | Agent-to-bridge ops (fs, terminal, perms)    |
+//!
+//! ## JetStream (durable delivery via streams)
+//!
+//! Commands that create or mutate session state. Durable delivery means the
+//! agent receives the command even after a restart, and the bridge can replay
+//! responses on reconnect.
+//!
+//! | Subject                                      | Stream          | Rationale                                  |
+//! |----------------------------------------------|-----------------|--------------------------------------------|
+//! | `agent.session.new`                           | GLOBAL          | Creates session state                      |
+//! | `session.*.agent.cancel`                      | COMMANDS        | Must survive agent reconnect               |
+//! | `session.*.agent.prompt`                      | COMMANDS        | Long-running, must survive restarts        |
+//! | `session.*.agent.load`                        | COMMANDS        | Loads session into agent, mutates state    |
+//! | `session.*.agent.close`                       | COMMANDS        | Ends session lifecycle                     |
+//! | `session.*.agent.set_mode`                    | COMMANDS        | Mutates session config                     |
+//! | `session.*.agent.set_config_option`           | COMMANDS        | Mutates session config                     |
+//! | `session.*.agent.set_model`                   | COMMANDS        | Mutates session config                     |
+//! | `session.*.agent.fork`                        | COMMANDS        | Creates new session from existing          |
+//! | `session.*.agent.resume`                      | COMMANDS        | Resumes session, mutates state             |
+//! | `session.*.agent.prompt.response.>`           | RESPONSES       | Streamed prompt responses                  |
+//! | `session.*.agent.response.>`                  | RESPONSES       | One-shot command responses                 |
+//! | `session.*.agent.ext.ready`                   | RESPONSES       | Extension ready signal                     |
+//! | `session.*.agent.cancelled`                   | RESPONSES       | Cancellation confirmation                  |
+//! | `session.*.agent.update.>`                    | NOTIFICATIONS   | Async streaming updates                    |
+//!
+//! ## JetStream Streams on Core NATS Subjects
+//!
+//! The Core NATS subjects above also have JetStream streams configured on
+//! them. NATS is pub/sub — when a message is published, every subscriber
+//! gets a copy, and a JetStream stream is just another subscriber. The
+//! stream persists a copy of every message that matches its subject filter.
+//!
+//! The bridge doesn't use these streams for the request/reply flow — it
+//! uses Core NATS directly. But the streams are there, capturing every
+//! message for observability: audit logs, metrics, debugging replay,
+//! alerting. Create consumers on these streams after the fact to read them.
+//!
+//! | Subject                 | Stream     |
+//! |-------------------------|------------|
+//! | `agent.initialize`      | GLOBAL     |
+//! | `agent.authenticate`    | GLOBAL     |
+//! | `agent.session.new`     | GLOBAL     |
+//! | `agent.ext.>`           | GLOBAL_EXT |
+//!
+//! ## Not in JetStream
+//!
+//! | Subject                | Reason                                                    |
+//! |------------------------|-----------------------------------------------------------|
+//! | `agent.session.list`   | Pure read, no state change, no audit value                |
+//! | `session.*.client.>`   | Agent-to-bridge ops, bridge IS the process, no disconnect |
+
 pub mod client_ops;
 pub mod commands;
 pub mod global;
