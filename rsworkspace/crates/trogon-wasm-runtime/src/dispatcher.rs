@@ -1,4 +1,4 @@
-use crate::runtime::WasmRuntime;
+use trogon_wasm_runtime::WasmRuntime;
 use acp_nats::nats::{ClientMethod, parse_client_subject};
 use agent_client_protocol::{
     CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,

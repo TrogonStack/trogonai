@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "ACP execution runtime backed by wasmtime — sandboxed terminals and filesystem per session"
 
+[lib]
+name = "trogon_wasm_runtime"
+path = "src/lib.rs"
+
 [[bin]]
 name = "trogon-wasm-runtime"
 path = "src/main.rs"
@@ -23,8 +27,12 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+anyhow = "=1.0.98"
 wasmtime = { version = "=30.0.2", default-features = false, features = ["cranelift", "runtime"] }
 wasmtime-wasi = { version = "=30.0.2" }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
 
 [lints]
 workspace = true
