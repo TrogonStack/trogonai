@@ -4,12 +4,9 @@
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.
-//!
-//! TODO: Consider extracting to `trogon-nats` as a generic `NatsSubject` (or `NatsToken`) type
-//! so prefix, session_id, and other subject tokens share the same validation.
 
-use crate::constants::MAX_SESSION_ID_LENGTH;
-use crate::subject_token_violation::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolation;
+use trogon_nats::NatsToken;
 
 /// Error returned when [`AcpSessionId`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,32 +33,15 @@ impl std::error::Error for SessionIdError {}
 /// Follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 /// ASCII only; rejects `.`, `*`, `>`, and whitespace. Max 128 characters.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AcpSessionId(std::sync::Arc<str>);
+pub struct AcpSessionId(NatsToken);
 
 impl AcpSessionId {
     pub fn new(s: impl AsRef<str>) -> Result<Self, SessionIdError> {
-        let s = s.as_ref();
-        if s.is_empty() {
-            return Err(SessionIdError(SubjectTokenViolation::Empty));
-        }
-        let mut char_count = 0;
-        for ch in s.chars() {
-            char_count += 1;
-            if char_count > MAX_SESSION_ID_LENGTH {
-                return Err(SessionIdError(SubjectTokenViolation::TooLong(char_count)));
-            }
-            if !ch.is_ascii() {
-                return Err(SessionIdError(SubjectTokenViolation::InvalidCharacter(ch)));
-            }
-            if ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
-                return Err(SessionIdError(SubjectTokenViolation::InvalidCharacter(ch)));
-            }
-        }
-        Ok(Self(s.into()))
+        NatsToken::new(s).map(Self).map_err(SessionIdError)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
