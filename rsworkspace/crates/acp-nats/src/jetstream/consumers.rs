@@ -1,9 +1,12 @@
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
-pub fn prompt_notifications_consumer(prefix: &str, session_id: &str, req_id: &str) -> Config {
+use crate::acp_prefix::AcpPrefix;
+
+pub fn prompt_notifications_consumer(prefix: &AcpPrefix, session_id: &str, req_id: &str) -> Config {
+    let pfx = prefix.as_str();
     Config {
-        filter_subject: format!("{prefix}.session.{session_id}.agent.update.{req_id}"),
+        filter_subject: format!("{pfx}.session.{session_id}.agent.update.{req_id}"),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -11,9 +14,10 @@ pub fn prompt_notifications_consumer(prefix: &str, session_id: &str, req_id: &st
     }
 }
 
-pub fn prompt_response_consumer(prefix: &str, session_id: &str, req_id: &str) -> Config {
+pub fn prompt_response_consumer(prefix: &AcpPrefix, session_id: &str, req_id: &str) -> Config {
+    let pfx = prefix.as_str();
     Config {
-        filter_subject: format!("{prefix}.session.{session_id}.agent.prompt.response.{req_id}"),
+        filter_subject: format!("{pfx}.session.{session_id}.agent.prompt.response.{req_id}"),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -21,9 +25,10 @@ pub fn prompt_response_consumer(prefix: &str, session_id: &str, req_id: &str) ->
     }
 }
 
-pub fn response_consumer(prefix: &str, session_id: &str, req_id: &str) -> Config {
+pub fn response_consumer(prefix: &AcpPrefix, session_id: &str, req_id: &str) -> Config {
+    let pfx = prefix.as_str();
     Config {
-        filter_subject: format!("{prefix}.session.{session_id}.agent.response.{req_id}"),
+        filter_subject: format!("{pfx}.session.{session_id}.agent.response.{req_id}"),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -48,9 +53,13 @@ pub fn commands_observer() -> Config {
 mod tests {
     use super::*;
 
+    fn p(s: &str) -> AcpPrefix {
+        AcpPrefix::new(s).expect("test prefix")
+    }
+
     #[test]
     fn prompt_notifications_consumer_filter() {
-        let config = prompt_notifications_consumer("acp", "sess-1", "req-abc");
+        let config = prompt_notifications_consumer(&p("acp"), "sess-1", "req-abc");
         assert_eq!(
             config.filter_subject,
             "acp.session.sess-1.agent.update.req-abc"
@@ -59,7 +68,7 @@ mod tests {
 
     #[test]
     fn prompt_notifications_consumer_delivers_all() {
-        let config = prompt_notifications_consumer("acp", "s1", "r1");
+        let config = prompt_notifications_consumer(&p("acp"), "s1", "r1");
         assert_eq!(config.deliver_policy, DeliverPolicy::All);
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
         assert_eq!(config.replay_policy, ReplayPolicy::Instant);
@@ -67,7 +76,7 @@ mod tests {
 
     #[test]
     fn prompt_response_consumer_filter() {
-        let config = prompt_response_consumer("acp", "sess-1", "req-abc");
+        let config = prompt_response_consumer(&p("acp"), "sess-1", "req-abc");
         assert_eq!(
             config.filter_subject,
             "acp.session.sess-1.agent.prompt.response.req-abc"
@@ -89,7 +98,7 @@ mod tests {
 
     #[test]
     fn response_consumer_filter() {
-        let config = response_consumer("acp", "sess-1", "req-abc");
+        let config = response_consumer(&p("acp"), "sess-1", "req-abc");
         assert_eq!(
             config.filter_subject,
             "acp.session.sess-1.agent.response.req-abc"
@@ -98,7 +107,7 @@ mod tests {
 
     #[test]
     fn response_consumer_delivers_all() {
-        let config = response_consumer("acp", "s1", "r1");
+        let config = response_consumer(&p("acp"), "s1", "r1");
         assert_eq!(config.deliver_policy, DeliverPolicy::All);
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
         assert_eq!(config.replay_policy, ReplayPolicy::Instant);
@@ -106,13 +115,13 @@ mod tests {
 
     #[test]
     fn response_consumer_custom_prefix() {
-        let config = response_consumer("myapp", "s1", "r1");
+        let config = response_consumer(&p("myapp"), "s1", "r1");
         assert_eq!(config.filter_subject, "myapp.session.s1.agent.response.r1");
     }
 
     #[test]
     fn custom_prefix_in_consumers() {
-        let config = prompt_response_consumer("myapp", "s1", "r1");
+        let config = prompt_response_consumer(&p("myapp"), "s1", "r1");
         assert_eq!(
             config.filter_subject,
             "myapp.session.s1.agent.prompt.response.r1"

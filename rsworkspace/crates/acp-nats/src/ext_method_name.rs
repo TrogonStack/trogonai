@@ -5,8 +5,8 @@
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `vendor.operation`) but rejects
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.
 
-use trogon_nats::SubjectTokenViolation;
 use trogon_nats::DottedNatsToken;
+use trogon_nats::SubjectTokenViolation;
 
 /// Error returned when [`ExtMethodName`] validation fails.
 #[derive(Debug, Clone, PartialEq)]

@@ -1,4 +1,4 @@
-/// Resume session. Stream: COMMANDS.
+/// Resume session.
 #[derive(Debug)]
 pub struct ResumeSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for ResumeSubject {
 }
 
 impl super::super::markers::SessionCommand for ResumeSubject {}
+
+impl super::super::stream::StreamAssignment for ResumeSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}
