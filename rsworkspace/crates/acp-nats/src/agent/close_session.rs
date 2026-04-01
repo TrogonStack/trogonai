@@ -3,7 +3,7 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CloseSessionRequest, CloseSessionResponse, Error, ErrorCode, Result};
 use tracing::{info, instrument};
-use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -14,13 +14,13 @@ use trogon_std::time::GetElapsed;
 pub async fn handle<
     N: RequestClient + PublishClient + FlushClient,
     C: GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
+    J: JetStreamPublisher + JetStreamGetStream,
 >(
     bridge: &Bridge<N, C, J>,
     args: CloseSessionRequest,
 ) -> Result<CloseSessionResponse>
 where
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
 {
     let start = bridge.clock.now();
 
