@@ -38,7 +38,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
         )
     })?;
 
-    let subject = agent::ext(bridge.config.acp_prefix(), method_name.as_str());
+    let subject =
+        agent::ExtNotifySubject::new(bridge.config.acp_prefix_ref(), method_name.as_str());
 
     let publish_result = nats::publish(
         bridge.nats(),

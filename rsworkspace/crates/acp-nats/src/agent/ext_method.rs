@@ -35,7 +35,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     })?;
 
     let nats = bridge.nats();
-    let subject = agent::ext(bridge.config.acp_prefix(), method_name.as_str());
+    let subject = agent::ExtSubject::new(bridge.config.acp_prefix_ref(), method_name.as_str());
 
     let result = nats::request_with_timeout::<N, ExtRequest, ExtResponse>(
         nats,
