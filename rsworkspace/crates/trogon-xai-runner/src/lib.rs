@@ -3,4 +3,4 @@ mod client;
 mod session_store;
 
 pub use agent::XaiAgent;
-pub use client::{Message, MessageToolCall, ToolCallFunction};
+pub use client::Message;

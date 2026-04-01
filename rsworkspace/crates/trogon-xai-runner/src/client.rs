@@ -1,4 +1,4 @@
-//! HTTP client for xAI's OpenAI-compatible REST API.
+//! HTTP client for xAI's Responses API.
 //!
 //! ## Endpoint choice — decision record
 //!
@@ -7,24 +7,37 @@
 //! - **OpenAI-compatible** at `api.x.ai/v1/chat/completions`
 //! - **Native gRPC** defined in [`xai-org/xai-proto`](https://github.com/xai-org/xai-proto)
 //!
-//! This crate uses the **Responses API** for the following reasons:
+//! The gRPC proto (`xai-org/xai-proto`) is more capable than its name suggests.
+//! `chat.proto` defines a full `Chat` service: `GetCompletionChunk` for streaming,
+//! `GetCompletionsRequest` with `previous_response_id` (field 22), `max_turns`
+//! (field 25), `search_parameters`, `agent_count`, `use_encrypted_content`, and
+//! `store_messages`. It is NOT limited to `SampleText`/`SampleTextStreaming`.
 //!
-//! 1. **Server-side tools**: `web_search`, `x_search`, `code_interpreter`, and
-//!    `file_search` are only available on the Responses API.
-//!    Chat Completions supports custom function calling only.
+//! **Key difference from the Responses API**: gRPC tools use the client-side
+//! round-trip model — the streaming `Delta.tool_calls` field asks the *client* to
+//! execute function calls and return results. Server-side search is requested via
+//! `SearchParameters` in the request body; the model streams the answer with
+//! citations but does not emit discrete tool lifecycle events. The Responses API
+//! executes tools server-side and notifies the client via SSE events
+//! (`response.web_search_call.completed`, etc.) without requiring a round-trip.
 //!
-//! 2. **Stateful multi-turn**: `previous_response_id` lets subsequent requests
-//!    reference prior context without re-sending the full history, reducing token
-//!    usage and latency.
+//! This crate uses the **Responses API** for pragmatic reasons:
 //!
-//! 3. **Agentic design**: the Responses API is purpose-built for agentic loops —
-//!    the model can call tools, receive results, and continue in one logical turn.
+//! 1. **SSE streaming already implemented**: the Responses API SSE parser is in
+//!    production with 50+ unit tests and 104 integration tests. Switching to gRPC
+//!    would require replacing it entirely with `tonic` + `prost` codegen and a new
+//!    streaming layer — significant effort for no functional gain at this time.
 //!
-//! 4. **No Rust gRPC SDK**: gRPC requires `tonic` + `prost` codegen with no
-//!    functional gain for the current chat-agent use case.
+//! 2. **No official Rust gRPC SDK**: there is no xAI-maintained Rust client for
+//!    the gRPC surface. The REST Responses API is the primary documented interface.
 //!
-//! Revisit gRPC only if xAI-exclusive features (Batch API, `agent_count`,
-//! `use_encrypted_content`) become necessary.
+//! 3. **Simpler dependency surface**: the Responses API requires only `reqwest` +
+//!    `serde_json`; gRPC would add `tonic`, `prost`, `protoc`, and codegen steps.
+//!
+//! Revisit gRPC if xAI-exclusive features not available on the Responses API become
+//! necessary: `agent_count` (multi-agent models), `use_encrypted_content` (encrypted
+//! thinking), `store_messages`, or more granular `SearchParameters` (region, allowed
+//! domains, safe mode, date ranges).
 
 use std::collections::{HashMap, VecDeque};
 
@@ -34,32 +47,13 @@ use futures_util::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-/// A function called by the model within a tool call message.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ToolCallFunction {
-    pub name: String,
-    pub arguments: String,
-}
-
-/// A tool call entry within an `assistant` message's `tool_calls` array.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct MessageToolCall {
-    pub id: String,
-    /// Always `"function"` for xAI function calls.
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub function: ToolCallFunction,
-}
-
 /// A single message in the conversation history.
 ///
-/// Supports all xAI message roles:
-/// - `user` / `system` — always have `content`
-/// - `assistant` — has `content` (text) or `tool_calls` (function calls) or both
-/// - `tool` — has `content` and `tool_call_id` (result of a function call)
+/// Only `user`, `system`, and `assistant` (text) roles are stored — all tool
+/// execution is server-side and does not produce client-visible history entries.
 ///
-/// All fields except `role` are `Option` so that:
-/// 1. Messages without a given field serialize without a `null` placeholder
+/// `content` is `Option` so that:
+/// 1. Messages serialize without a `null` placeholder
 ///    (`skip_serializing_if = "Option::is_none"`).
 /// 2. Legacy sessions stored as `{"role":"user","content":"hello"}` deserialize
 ///    correctly — `#[serde(default)]` fills missing fields with `None`.
@@ -68,31 +62,19 @@ pub struct Message {
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<MessageToolCall>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
 }
 
 impl Message {
     pub fn user(text: impl Into<String>) -> Self {
-        Self { role: "user".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
+        Self { role: "user".to_string(), content: Some(text.into()) }
     }
 
     pub fn system(text: impl Into<String>) -> Self {
-        Self { role: "system".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
+        Self { role: "system".to_string(), content: Some(text.into()) }
     }
 
     pub fn assistant_text(text: impl Into<String>) -> Self {
-        Self { role: "assistant".to_string(), content: Some(text.into()), tool_calls: None, tool_call_id: None }
-    }
-
-    pub fn assistant_tool_calls(tool_calls: Vec<MessageToolCall>) -> Self {
-        Self { role: "assistant".to_string(), content: None, tool_calls: Some(tool_calls), tool_call_id: None }
-    }
-
-    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { role: "tool".to_string(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(tool_call_id.into()) }
+        Self { role: "assistant".to_string(), content: Some(text.into()) }
     }
 
     /// Returns the text content of this message, or `""` if none.
@@ -103,64 +85,25 @@ impl Message {
 
 /// An item in the `input` array sent to the Responses API.
 ///
-/// Three variants map to the three kinds of items the Responses API accepts:
-/// - `Message` — user / system / assistant text turns
-/// - `FunctionCall` — assistant tool call recorded from a previous response
-/// - `FunctionCallOutput` — result of executing a function call
+/// Only text roles are needed: tool execution is server-side and never recorded
+/// as history entries that need to be replayed in the input array.
 #[derive(Serialize, Clone, Debug)]
-#[serde(untagged)]
-pub enum InputItem {
-    Message {
-        role: String,
-        content: String,
-    },
-    FunctionCall {
-        #[serde(rename = "type")]
-        kind: String,
-        call_id: String,
-        name: String,
-        arguments: String,
-    },
-    FunctionCallOutput {
-        #[serde(rename = "type")]
-        kind: String,
-        call_id: String,
-        output: String,
-    },
+pub struct InputItem {
+    pub role: String,
+    pub content: String,
 }
 
 impl InputItem {
     pub fn user(content: impl Into<String>) -> Self {
-        Self::Message { role: "user".to_string(), content: content.into() }
+        Self { role: "user".to_string(), content: content.into() }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self::Message { role: "system".to_string(), content: content.into() }
+        Self { role: "system".to_string(), content: content.into() }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self::Message { role: "assistant".to_string(), content: content.into() }
-    }
-
-    pub fn function_call(
-        call_id: impl Into<String>,
-        name: impl Into<String>,
-        arguments: impl Into<String>,
-    ) -> Self {
-        Self::FunctionCall {
-            kind: "function_call".to_string(),
-            call_id: call_id.into(),
-            name: name.into(),
-            arguments: arguments.into(),
-        }
-    }
-
-    pub fn function_call_output(call_id: impl Into<String>, output: impl Into<String>) -> Self {
-        Self::FunctionCallOutput {
-            kind: "function_call_output".to_string(),
-            call_id: call_id.into(),
-            output: output.into(),
-        }
+        Self { role: "assistant".to_string(), content: content.into() }
     }
 }
 
@@ -221,7 +164,7 @@ pub enum XaiEvent {
     /// can match against `pending_tool_calls` by name (FIFO). The `item_id`
     /// in the API event differs from the `call_id` in the `function_call`
     /// event, so ID-based matching is not possible without additional state.
-    SearchCallCompleted { name: String },
+    ServerToolCompleted { name: String },
     /// The stream ended normally (`[DONE]`).
     Done,
     /// A network or API error.
@@ -422,14 +365,19 @@ fn parse_sse(
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
 /// - `response.web_search_call.completed` / `response.x_search_call.completed` /
 ///   `response.code_interpreter_call.completed` / `response.file_search_call.completed`
-///   → `SearchCallCompleted` (tool finished; agent advances tool to Completed)
+///   → `ServerToolCompleted` (tool finished; agent advances tool to Completed)
 /// - `*.in_progress` / `*.searching` / `*.interpreting` variants for all four
 ///   built-in tools → explicit no-op (informational; no state change)
 /// - `response.completed` / `response.done` → `Usage` + `Finished`
-///   When `status == "incomplete"`, the `incomplete_details.reason` field is
-///   extracted and forwarded in `Finished::incomplete_reason`.
-///   When `status == "cancelled"`, the agent surfaces this as a stream error.
+///   These are the normal-completion events. The `status` field is parsed for
+///   robustness (xAI may deviate from spec), but the primary path for
+///   non-completed terminal states uses the distinct event types below.
+/// - `response.incomplete` → `ResponseId` (fallback) + `Usage` + `Finished { Incomplete }`
+///   Distinct event type per spec (parallel to `response.failed`). Carries
+///   `incomplete_details.reason` for the continuation strategy.
 /// - `response.failed` → `Finished { reason: Failed }`
+/// - `response.cancelled` → `Finished { reason: Cancelled }`
+///   Server-initiated cancellation (safety filter, content policy, quota).
 /// - `response.error` → `Error` (mid-stream error: policy violation, safety filter)
 /// - `[DONE]` → `Done`
 ///
@@ -551,11 +499,11 @@ fn process_sse_line(
                 pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
             }
         }
-        // ── Server-side search call lifecycle events ─────────────────────────
-        // xAI emits these while its infrastructure executes a web_search or
-        // x_search tool call that the model requested. The `.completed` event
+        // ── Server-side tool call lifecycle events ───────────────────────────
+        // xAI emits these while its infrastructure executes a built-in tool
+        // (web_search, x_search, code_interpreter, file_search). The `.completed` event
         // fires as soon as the search finishes — before the model begins
-        // streaming its text answer. Emit SearchCallCompleted so the agent
+        // streaming its text answer. Emit ServerToolCompleted so the agent
         // can advance the tool call to Completed mid-stream rather than
         // waiting for [DONE] (which may arrive 10–20 s later after text gen).
         //
@@ -563,16 +511,16 @@ fn process_sse_line(
         // carry no actionable data for the agent so they are dropped explicitly
         // (preferred over falling through to `_ => {}` for clarity).
         "response.web_search_call.completed" => {
-            pending.push_back(XaiEvent::SearchCallCompleted { name: "web_search".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted { name: "web_search".to_string() });
         }
         "response.x_search_call.completed" => {
-            pending.push_back(XaiEvent::SearchCallCompleted { name: "x_search".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted { name: "x_search".to_string() });
         }
         "response.code_interpreter_call.completed" => {
-            pending.push_back(XaiEvent::SearchCallCompleted { name: "code_interpreter".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted { name: "code_interpreter".to_string() });
         }
         "response.file_search_call.completed" => {
-            pending.push_back(XaiEvent::SearchCallCompleted { name: "file_search".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted { name: "file_search".to_string() });
         }
         "response.web_search_call.in_progress"
         | "response.web_search_call.searching"
@@ -589,6 +537,51 @@ fn process_sse_line(
             // with no Finished event and the client sees an empty success.
             pending.push_back(XaiEvent::Finished {
                 reason: FinishReason::Failed,
+                incomplete_reason: None,
+            });
+        }
+        "response.incomplete" => {
+            // Distinct event type per OpenAI Responses API spec (parallel to
+            // response.failed). Emitted when the response was truncated before
+            // completion — e.g. max_output_tokens or max_turns reached.
+            //
+            // Without this handler the event falls through to `_ => {}`:
+            // `needs_continuation` never fires and the partial text is returned
+            // to the ACP client as a successful complete turn.
+            //
+            // Extract the response ID (same fallback as response.completed) so
+            // that the continuation request can reference this partial response
+            // via `previous_response_id` without re-sending the full history.
+            if !*response_id_emitted {
+                if let Some(id) = val["response"]["id"].as_str() {
+                    pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+                    *response_id_emitted = true;
+                }
+            }
+            let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
+            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
+            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
+            if p > 0 || c > 0 {
+                pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
+            }
+            let incomplete_reason = val["response"]["incomplete_details"]["reason"].as_str()
+                .or_else(|| val["incomplete_details"]["reason"].as_str())
+                .map(str::to_string);
+            pending.push_back(XaiEvent::Finished {
+                reason: FinishReason::Incomplete,
+                incomplete_reason,
+            });
+        }
+        "response.cancelled" => {
+            // Distinct event type per OpenAI Responses API spec. Emitted when the
+            // server cancels a response (safety filter, content policy, quota).
+            // Note: this is server-initiated cancellation, not the client-side
+            // cancel triggered by XaiAgent::cancel(). Without this handler the
+            // event falls through to `_ => {}` and the prompt completes silently
+            // with whatever partial text was accumulated — the ACP client would
+            // see a success instead of an error.
+            pending.push_back(XaiEvent::Finished {
+                reason: FinishReason::Cancelled,
                 incomplete_reason: None,
             });
         }
@@ -914,6 +907,49 @@ mod tests {
     }
 
     #[test]
+    fn response_incomplete_event_emits_finished_incomplete() {
+        let line = r#"data: {"type":"response.incomplete","response":{"id":"resp_trunc","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"prompt_tokens":10,"completion_tokens":50}}}"#;
+        let events = parse_line_all(line);
+        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
+            XaiEvent::ResponseId { id } => Some(id.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(id_events, vec!["resp_trunc"], "response.incomplete must emit ResponseId");
+        let usage_event = events.iter().find(|e| matches!(e, XaiEvent::Usage { .. }));
+        assert!(usage_event.is_some(), "response.incomplete must emit Usage");
+        let finished = events.iter().find_map(|e| match e {
+            XaiEvent::Finished { reason, incomplete_reason } => Some((reason.clone(), incomplete_reason.clone())),
+            _ => None,
+        });
+        let (reason, inc_reason) = finished.expect("response.incomplete must emit Finished");
+        assert_eq!(reason, FinishReason::Incomplete);
+        assert_eq!(inc_reason.as_deref(), Some("max_output_tokens"));
+    }
+
+    #[test]
+    fn response_incomplete_event_no_incomplete_details() {
+        let line = r#"data: {"type":"response.incomplete","response":{"id":"resp_2","status":"incomplete"}}"#;
+        let events = parse_line_all(line);
+        let finished = events.iter().find_map(|e| match e {
+            XaiEvent::Finished { reason, incomplete_reason } => Some((reason.clone(), incomplete_reason.clone())),
+            _ => None,
+        });
+        let (reason, inc_reason) = finished.expect("response.incomplete must emit Finished");
+        assert_eq!(reason, FinishReason::Incomplete);
+        assert!(inc_reason.is_none(), "no incomplete_details → None");
+    }
+
+    #[test]
+    fn response_cancelled_event_emits_finished_cancelled() {
+        let line = r#"data: {"type":"response.cancelled","response":{"id":"resp_x","status":"cancelled"}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::Finished { ref reason, .. } if *reason == FinishReason::Cancelled),
+            "expected Finished(Cancelled), got {event:?}"
+        );
+    }
+
+    #[test]
     fn response_error_event_emits_error() {
         // Mid-stream error (policy violation, safety filter, etc.).
         let line = r#"data: {"type":"response.error","error":{"code":"content_policy","message":"Request blocked by content policy"}}"#;
@@ -972,8 +1008,8 @@ mod tests {
         let line = r#"data: {"type":"response.web_search_call.completed","item_id":"ws_abc","output_index":0,"sequence_number":5}"#;
         let event = parse_line(line).unwrap();
         assert!(
-            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "web_search"),
-            "expected SearchCallCompleted(web_search), got {event:?}"
+            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "web_search"),
+            "expected ServerToolCompleted(web_search), got {event:?}"
         );
     }
 
@@ -982,8 +1018,8 @@ mod tests {
         let line = r#"data: {"type":"response.x_search_call.completed","item_id":"xs_abc","output_index":0,"sequence_number":5}"#;
         let event = parse_line(line).unwrap();
         assert!(
-            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "x_search"),
-            "expected SearchCallCompleted(x_search), got {event:?}"
+            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "x_search"),
+            "expected ServerToolCompleted(x_search), got {event:?}"
         );
     }
 
@@ -1028,8 +1064,8 @@ mod tests {
         let line = r#"data: {"type":"response.code_interpreter_call.completed","item_id":"ci_abc","output_index":0}"#;
         let event = parse_line(line).unwrap();
         assert!(
-            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "code_interpreter"),
-            "expected SearchCallCompleted(code_interpreter), got {event:?}"
+            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "code_interpreter"),
+            "expected ServerToolCompleted(code_interpreter), got {event:?}"
         );
     }
 
@@ -1050,8 +1086,8 @@ mod tests {
         let line = r#"data: {"type":"response.file_search_call.completed","item_id":"fs_abc","output_index":0}"#;
         let event = parse_line(line).unwrap();
         assert!(
-            matches!(event, XaiEvent::SearchCallCompleted { ref name } if name == "file_search"),
-            "expected SearchCallCompleted(file_search), got {event:?}"
+            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "file_search"),
+            "expected ServerToolCompleted(file_search), got {event:?}"
         );
     }
 
