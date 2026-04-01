@@ -414,6 +414,9 @@ fn parse_sse(
 /// - `response.completed` / `response.done` → `Usage` + `Finished`
 ///   When `status == "incomplete"`, the `incomplete_details.reason` field is
 ///   extracted and forwarded in `Finished::incomplete_reason`.
+///   When `status == "cancelled"`, the agent surfaces this as a stream error.
+/// - `response.failed` → `Finished { reason: Failed }`
+/// - `response.error` → `Error` (mid-stream error: policy violation, safety filter)
 /// - `[DONE]` → `Done`
 ///
 /// The top-level `id` field present on most events is used to emit `ResponseId`
@@ -543,6 +546,18 @@ fn process_sse_line(
                 reason: FinishReason::Failed,
                 incomplete_reason: None,
             });
+        }
+        "response.error" => {
+            // Mid-stream error event (e.g. content policy violation, safety filter).
+            // Distinct from response.failed (which signals a complete-response failure).
+            // Map to XaiEvent::Error so the agent's stream_error path fires and the
+            // orphaned user message is compensated — without this the stream ends
+            // silently and the client sees an empty successful response.
+            let message = val["error"]["message"].as_str()
+                .or_else(|| val["message"].as_str())
+                .unwrap_or("xAI stream error")
+                .to_string();
+            pending.push_back(XaiEvent::Error { message });
         }
         "response.completed" | "response.done" => {
             // Usage may be top-level (xAI extension) or nested inside the
@@ -836,5 +851,26 @@ mod tests {
             matches!(event, XaiEvent::Finished { ref reason, .. } if *reason == FinishReason::Failed),
             "expected Finished(Failed), got {event:?}"
         );
+    }
+
+    #[test]
+    fn response_error_event_emits_error() {
+        // Mid-stream error (policy violation, safety filter, etc.).
+        let line = r#"data: {"type":"response.error","error":{"code":"content_policy","message":"Request blocked by content policy"}}"#;
+        let event = parse_line(line).unwrap();
+        match event {
+            XaiEvent::Error { message } => {
+                assert!(message.contains("content policy"), "unexpected message: {message}");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_error_event_fallback_message() {
+        // Fallback when error object is absent or oddly shaped.
+        let line = r#"data: {"type":"response.error","message":"unexpected failure"}"#;
+        let event = parse_line(line).unwrap();
+        assert!(matches!(event, XaiEvent::Error { .. }), "expected Error, got {event:?}");
     }
 }
