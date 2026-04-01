@@ -1,4 +1,4 @@
-/// Agent -> bridge one-shot response. Stream: RESPONSES.
+/// Agent -> bridge one-shot response.
 #[derive(Debug)]
 pub struct ResponseSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -39,3 +39,8 @@ impl async_nats::subject::ToSubject for ResponseSubject {
 }
 
 impl super::super::markers::Subscribable for ResponseSubject {}
+
+impl super::super::stream::StreamAssignment for ResponseSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Responses);
+}

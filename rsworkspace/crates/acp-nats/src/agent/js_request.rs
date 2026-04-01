@@ -12,6 +12,7 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::JsonSerialize;
 
+use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 
@@ -21,7 +22,7 @@ pub async fn js_request<J, Req, Res, S>(
     subject: &str,
     request: &Req,
     serializer: &S,
-    prefix: &str,
+    prefix: &AcpPrefix,
     session_id: &str,
     req_id: &str,
     operation_timeout: Duration,
@@ -114,6 +115,10 @@ mod tests {
 
     use crate::agent::test_support::MockJs;
 
+    fn test_prefix() -> AcpPrefix {
+        AcpPrefix::new("acp").expect("test prefix")
+    }
+
     fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
         async_nats::Message {
             subject: "test".into(),
@@ -141,7 +146,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -167,7 +172,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -187,7 +192,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -214,7 +219,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -239,7 +244,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -261,7 +266,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_millis(10),
@@ -298,7 +303,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -323,7 +328,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -355,7 +360,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),
@@ -377,7 +382,7 @@ mod tests {
             "acp.session.s1.agent.prompt",
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::FailNextSerialize::new(1),
-            "acp",
+            &test_prefix(),
             "s1",
             "req-1",
             Duration::from_secs(5),

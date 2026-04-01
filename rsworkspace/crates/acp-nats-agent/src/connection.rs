@@ -489,7 +489,7 @@ where
     <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
     A: Agent + 'static,
 {
-    let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix.as_str());
+    let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix);
     let config = acp_nats::jetstream::consumers::commands_observer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");

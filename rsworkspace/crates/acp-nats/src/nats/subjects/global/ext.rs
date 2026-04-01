@@ -1,4 +1,4 @@
-/// Core NATS request/reply. Stream: GLOBAL_EXT (observability).
+/// Core NATS request/reply.
 #[derive(Debug)]
 pub struct ExtSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -21,3 +21,8 @@ impl std::fmt::Display for ExtSubject {
 }
 
 impl super::super::markers::Requestable for ExtSubject {}
+
+impl super::super::stream::StreamAssignment for ExtSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::GlobalExt);
+}
