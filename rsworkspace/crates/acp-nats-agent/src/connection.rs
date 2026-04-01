@@ -112,8 +112,8 @@ where
         impl std::future::Future<Output = Result<(), ConnectionError>>,
     )
     where
-        J: JetStreamConsumerFactory + 'static,
-        <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
+        J: JetStreamGetStream + 'static,
+        <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
     {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
@@ -422,7 +422,8 @@ where
 }
 
 use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamConsumerFactory, JsAckWith, JsDispatchMessage,
+    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JsAckWith,
+    JsDispatchMessage,
 };
 
 async fn handle_request_with_keepalive<N, Resp, ReqT, F, M>(
@@ -484,8 +485,8 @@ async fn serve_js<N, J, A>(
 ) -> Result<(), ConnectionError>
 where
     N: PublishClient + FlushClient + Clone + 'static,
-    J: JetStreamConsumerFactory + 'static,
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
+    J: JetStreamGetStream + 'static,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
     A: Agent + 'static,
 {
     let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix);
@@ -493,8 +494,13 @@ where
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
-    let consumer = js
-        .create_consumer(&stream_name, config)
+    let stream = js
+        .get_stream(&stream_name)
+        .await
+        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
+
+    let consumer = stream
+        .create_consumer(config)
         .await
         .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
 

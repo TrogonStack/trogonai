@@ -2,15 +2,14 @@ use async_nats::HeaderMap;
 use async_nats::jetstream;
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
-use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
-use futures::StreamExt;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
-    JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
+    JetStreamPublisher,
 };
 
 #[derive(Clone)]
@@ -28,150 +27,114 @@ impl NatsJetStreamClient {
     }
 }
 
-#[derive(Debug)]
-pub struct JetStreamError(pub String);
-
-impl std::fmt::Display for JetStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for JetStreamError {}
-
 impl JetStreamContext for NatsJetStreamClient {
-    type Error = JetStreamError;
+    type Error = async_nats::jetstream::context::CreateStreamError;
+    type Stream = jetstream::stream::Stream;
 
     async fn get_or_create_stream<S: Into<stream::Config> + Send>(
         &self,
         config: S,
-    ) -> Result<(), JetStreamError> {
-        self.context
-            .get_or_create_stream(config)
-            .await
-            .map(|_| ())
-            .map_err(|e| JetStreamError(e.to_string()))
+    ) -> Result<jetstream::stream::Stream, async_nats::jetstream::context::CreateStreamError> {
+        self.context.get_or_create_stream(config).await
     }
 }
 
-impl JetStreamPublisher for NatsJetStreamClient {
-    type PublishError = JetStreamError;
+pub type PublishError = async_nats::jetstream::context::PublishError;
+pub type PublishAckFuture = async_nats::jetstream::context::PublishAckFuture;
 
-    async fn js_publish_with_headers<S: ToSubject + Send>(
+impl JetStreamPublisher for NatsJetStreamClient {
+    type PublishError = PublishError;
+    type AckFuture = PublishAckFuture;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
         &self,
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAck, JetStreamError> {
+    ) -> Result<PublishAckFuture, PublishError> {
         self.context
             .publish_with_headers(subject, headers, payload)
             .await
-            .map_err(|e| JetStreamError(e.to_string()))?
-            .await
-            .map_err(|e| JetStreamError(e.to_string()))
     }
 }
 
-pub struct NatsJsMessage {
-    inner: jetstream::Message,
-}
-
-impl NatsJsMessage {
-    pub fn new(inner: jetstream::Message) -> Self {
-        Self { inner }
-    }
-}
-
-impl JsMessageRef for NatsJsMessage {
+impl JsMessageRef for jetstream::Message {
     fn message(&self) -> &async_nats::Message {
-        &self.inner.message
+        &self.message
     }
 }
 
-impl JsAck for NatsJsMessage {
+impl JsAck for jetstream::Message {
     type Error = async_nats::Error;
 
     async fn ack(&self) -> Result<(), async_nats::Error> {
-        self.inner.ack().await
+        self.ack().await
     }
 }
 
-impl JsAckWith for NatsJsMessage {
+impl JsAckWith for jetstream::Message {
     type Error = async_nats::Error;
 
     async fn ack_with(&self, kind: AckKind) -> Result<(), async_nats::Error> {
-        self.inner.ack_with(kind).await
+        self.ack_with(kind).await
     }
 }
 
-impl JsDoubleAck for NatsJsMessage {
+impl JsDoubleAck for jetstream::Message {
     type Error = async_nats::Error;
 
     async fn double_ack(&self) -> Result<(), async_nats::Error> {
-        self.inner.double_ack().await
+        self.double_ack().await
     }
 }
 
-impl JsDoubleAckWith for NatsJsMessage {
+impl JsDoubleAckWith for jetstream::Message {
     type Error = async_nats::Error;
 
     async fn double_ack_with(&self, kind: AckKind) -> Result<(), async_nats::Error> {
-        self.inner.double_ack_with(kind).await
+        self.double_ack_with(kind).await
     }
 }
 
-pub struct NatsJetStreamConsumer {
-    inner: jetstream::consumer::Consumer<pull::Config>,
-}
+pub type NatsJetStreamConsumer = jetstream::consumer::Consumer<pull::Config>;
 
-impl NatsJetStreamConsumer {
-    pub fn new(inner: jetstream::consumer::Consumer<pull::Config>) -> Self {
-        Self { inner }
+pub type GetStreamError = async_nats::jetstream::context::GetStreamError;
+pub type ConsumerError = async_nats::jetstream::stream::ConsumerError;
+pub type StreamError = async_nats::jetstream::consumer::StreamError;
+
+impl JetStreamGetStream for NatsJetStreamClient {
+    type Error = GetStreamError;
+    type Stream = jetstream::stream::Stream;
+
+    async fn get_stream<T: AsRef<str> + Send>(
+        &self,
+        stream_name: T,
+    ) -> Result<jetstream::stream::Stream, GetStreamError> {
+        self.context.get_stream(stream_name).await
     }
 }
 
-impl JetStreamConsumerFactory for NatsJetStreamClient {
-    type Error = JetStreamError;
+impl JetStreamCreateConsumer for jetstream::stream::Stream {
+    type Error = ConsumerError;
     type Consumer = NatsJetStreamConsumer;
 
     async fn create_consumer(
         &self,
-        stream_name: &str,
         config: pull::Config,
-    ) -> Result<NatsJetStreamConsumer, JetStreamError> {
-        let stream = self
-            .context
-            .get_stream(stream_name)
-            .await
-            .map_err(|e| JetStreamError(e.to_string()))?;
-
-        let consumer = stream
-            .create_consumer(config)
-            .await
-            .map_err(|e| JetStreamError(e.to_string()))?;
-
-        Ok(NatsJetStreamConsumer::new(consumer))
+    ) -> Result<NatsJetStreamConsumer, ConsumerError> {
+        self.create_consumer(config).await
     }
 }
 
-impl JetStreamConsumer for NatsJetStreamConsumer {
-    type Error = JetStreamError;
-    type Message = NatsJsMessage;
-    type Messages = futures::stream::BoxStream<'static, Result<NatsJsMessage, JetStreamError>>;
+pub type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
 
-    async fn messages(&self) -> Result<Self::Messages, JetStreamError> {
-        let messages = self
-            .inner
-            .messages()
-            .await
-            .map_err(|e| JetStreamError(e.to_string()))?;
+impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
+    type StreamError = StreamError;
+    type MessagesError = MessagesError;
+    type Message = jetstream::Message;
+    type Messages = async_nats::jetstream::consumer::pull::Stream;
 
-        Ok(messages
-            .map(|result| {
-                result
-                    .map(NatsJsMessage::new)
-                    .map_err(|e| JetStreamError(e.to_string()))
-            })
-            .boxed())
+    async fn messages(&self) -> Result<Self::Messages, StreamError> {
+        self.messages().await
     }
 }

@@ -5,7 +5,7 @@ use agent_client_protocol::{
     Error, ErrorCode, Result, SetSessionModelRequest, SetSessionModelResponse,
 };
 use tracing::{info, instrument};
-use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -16,13 +16,13 @@ use trogon_std::time::GetElapsed;
 pub async fn handle<
     N: RequestClient + PublishClient + FlushClient,
     C: GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
+    J: JetStreamPublisher + JetStreamGetStream,
 >(
     bridge: &Bridge<N, C, J>,
     args: SetSessionModelRequest,
 ) -> Result<SetSessionModelResponse>
 where
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
 {
     let start = bridge.clock.now();
 
