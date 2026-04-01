@@ -1060,13 +1060,13 @@ async fn prompt_times_out_when_server_stops_responding() {
         .unwrap();
     let elapsed = start.elapsed();
 
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_eq!(resp.stop_reason, StopReason::Cancelled);
     // Should finish in roughly 1 second — not 30.
     assert!(elapsed < Duration::from_secs(5), "timed out too late: {elapsed:?}");
     assert!(elapsed >= Duration::from_millis(900), "timed out too early: {elapsed:?}");
 
     // The partial text ("partial") was received before the timeout, so history
-    // must be updated.
+    // must be updated (unlike an explicit cancel, a timeout preserves partial text).
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].content_str(), "partial");
@@ -2035,11 +2035,12 @@ async fn new_session_exposes_all_tool_config_options_as_off() {
     let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 3, "expected 3 tool toggles: {opts:?}");
+    assert_eq!(opts.len(), 4, "expected 4 tool toggles: {opts:?}");
     let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
     assert!(ids.contains(&"web_search".to_string()));
     assert!(ids.contains(&"x_search".to_string()));
     assert!(ids.contains(&"code_interpreter".to_string()));
+    assert!(ids.contains(&"file_search".to_string()));
     // All off by default.
     for opt in &opts {
         let current = match &opt.kind {
@@ -2061,7 +2062,7 @@ async fn load_session_exposes_tool_config_options() {
     let resp = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 3, "expected 3 tool toggle options");
+    assert_eq!(opts.len(), 4, "expected 4 tool toggle options");
 }
 
 #[tokio::test]
@@ -2081,7 +2082,7 @@ async fn enable_web_search_persists_and_is_reflected_in_response() {
         .await
         .unwrap();
 
-    assert_eq!(resp.config_options.len(), 3);
+    assert_eq!(resp.config_options.len(), 4);
     let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
@@ -2503,8 +2504,8 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
         .await
         .unwrap();
 
-    // Should return all 3 known tool options.
-    assert_eq!(resp.config_options.len(), 3, "should return current state of all known tool options");
+    // Should return all known tool options.
+    assert_eq!(resp.config_options.len(), 4, "should return current state of all known tool options");
     let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
@@ -2536,7 +2537,7 @@ async fn load_session_reflects_updated_tool_state() {
 
     let loaded = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
     let opts = loaded.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 3);
+    assert_eq!(opts.len(), 4);
     let ci = opts.iter().find(|o| o.id.to_string() == "code_interpreter")
         .expect("code_interpreter option must be present");
     let current = match &ci.kind {
@@ -2664,7 +2665,7 @@ async fn prompt_timeout_with_no_text_does_not_update_history() {
         .await
         .unwrap();
 
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_eq!(resp.stop_reason, StopReason::Cancelled);
 
     // The user message is durably persisted before the xAI call. No text was
     // produced before the timeout — only the user turn survives in history.
