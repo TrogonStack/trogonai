@@ -755,6 +755,38 @@ impl agent_client_protocol::Agent for XaiAgent {
                             warn!(session_id, error = %e, "xai: failed to send tool call notification");
                         }
                     }
+                    XaiEvent::SearchCallCompleted { name } => {
+                        // A server-side search finished on xAI's infrastructure.
+                        // Advance the matching pending tool call to Completed now —
+                        // before the model starts streaming its text answer — so the
+                        // ACP client gets real-time status instead of waiting up to
+                        // 30 s for [DONE].
+                        //
+                        // Matching is by tool name (FIFO) because the search call
+                        // events carry an `item_id` that differs from the `call_id`
+                        // in the `function_call` event. xAI executes server-side
+                        // tool calls sequentially so FIFO order is always correct.
+                        // If no matching entry exists (e.g. the server sent a
+                        // SearchCallCompleted without a prior FunctionCall for some
+                        // reason), this is a silent no-op — not an error.
+                        if let Some(pos) = pending_tool_calls.iter().position(|(_, n)| *n == name) {
+                            let (call_id, tc_name) = pending_tool_calls.remove(pos);
+                            info!(session_id, call_id = %call_id, tool_name = %tc_name,
+                                  "xai: search call completed on server — advancing tool to Completed");
+                            let notif = SessionNotification::new(
+                                session_id.clone(),
+                                SessionUpdate::ToolCall(
+                                    ToolCall::new(call_id, tc_name)
+                                        .status(ToolCallStatus::Completed)
+                                        .kind(ToolKind::Other),
+                                ),
+                            );
+                            if let Err(e) = nats_client.session_notification(notif).await {
+                                warn!(session_id, error = %e,
+                                      "xai: failed to advance search tool call to Completed");
+                            }
+                        }
+                    }
                     XaiEvent::Finished { reason, incomplete_reason } => {
                         info!(session_id, reason = ?reason, incomplete_reason = ?incomplete_reason, "xai: finish reason");
                         match reason {

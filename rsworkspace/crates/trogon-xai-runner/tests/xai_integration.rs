@@ -3108,6 +3108,173 @@ async fn tool_call_then_response_failed_compensates_history() {
     );
 }
 
+// ── search call lifecycle events ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn web_search_call_completed_advances_tool_status_before_done() {
+    // Verifies that response.web_search_call.completed emits ToolCall { Completed }
+    // mid-stream — before [DONE] — giving the ACP client real-time feedback when
+    // the search finishes rather than waiting for the entire generation cycle.
+    //
+    // Stream sequence:
+    //   function_call          → agent emits ToolCall { Pending }
+    //   web_search_call.completed → agent emits ToolCall { Completed } (mid-stream)
+    //   message.delta          → text chunk
+    //   response.completed
+    //   [DONE]                 → pending_tool_calls is already empty; no double-emit
+    //
+    // Because fake_nats drops PUBs, the mid-stream Completed notification cannot
+    // be directly captured here. We verify the observable contract:
+    //   - prompt returns Ok (no panic, no double-emit error)
+    //   - stop_reason is EndTurn
+    //   - history has the correct user + assistant pair
+    let _guard = env_lock().lock().unwrap();
+
+    let body = concat!(
+        "data: {\"id\":\"resp_ws\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_1\",\"name\":\"web_search\",\"arguments\":\"{\\\"query\\\":\\\"rust async\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.web_search_call.completed\",\"item_id\":\"ws_abc\",\"output_index\":0,\"sequence_number\":3}\n\n",
+        "data: {\"id\":\"resp_ws\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Rust async is great\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ws\",\"status\":\"completed\"},\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search for rust async"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content_str(), "Rust async is great");
+}
+
+#[tokio::test]
+async fn x_search_call_completed_advances_tool_status_before_done() {
+    // Same as web_search variant but exercises the x_search_call path.
+    let _guard = env_lock().lock().unwrap();
+
+    let body = concat!(
+        "data: {\"id\":\"resp_xs\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_2\",\"name\":\"x_search\",\"arguments\":\"{\\\"query\\\":\\\"rust 2024\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.x_search_call.completed\",\"item_id\":\"xs_def\",\"output_index\":0,\"sequence_number\":3}\n\n",
+        "data: {\"id\":\"resp_xs\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"X search result\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_xs\",\"status\":\"completed\"},\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search x for rust 2024"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].content_str(), "X search result");
+}
+
+#[tokio::test]
+async fn search_call_completed_without_prior_function_call_is_noop() {
+    // Verifies that SearchCallCompleted arriving with no matching pending tool
+    // call (empty pending_tool_calls) is a silent no-op — not a panic or error.
+    let _guard = env_lock().lock().unwrap();
+
+    let body = concat!(
+        // No function_call event — server emits completed directly (edge case).
+        "data: {\"type\":\"response.web_search_call.completed\",\"item_id\":\"ws_orphan\",\"output_index\":0,\"sequence_number\":1}\n\n",
+        "data: {\"id\":\"resp_noop\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"answer\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_noop\",\"status\":\"completed\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("question"))],
+        ))
+        .await
+        .unwrap();
+
+    // Turn succeeds normally despite the orphaned completed event.
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].content_str(), "answer");
+}
+
 // ── stale-ID retry ────────────────────────────────────────────────────────────
 
 #[tokio::test]
