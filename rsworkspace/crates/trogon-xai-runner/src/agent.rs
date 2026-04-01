@@ -777,7 +777,10 @@ impl agent_client_protocol::Agent for XaiAgent {
                                 // error so the caller knows why they got no output.
                                 stream_error = Some(internal_error("xAI cancelled the response"));
                             }
-                            _ => {}
+                            FinishReason::Completed => {}
+                            FinishReason::Other(ref s) => {
+                                warn!(session_id, status = %s, "xai: unknown finish status — treating as end of turn");
+                            }
                         }
                     }
                     XaiEvent::Usage { prompt_tokens, completion_tokens } => {
@@ -796,12 +799,20 @@ impl agent_client_protocol::Agent for XaiAgent {
                         // Server-side tools complete internally — no explicit
                         // completion event is emitted, so the client would otherwise
                         // see a Pending tool call that never resolves.
+                        // Use Failed when a stream error was already recorded (e.g.
+                        // Finished { Failed } arrived before [DONE]) — marking tools
+                        // Completed in that case would be misleading to the ACP client.
+                        let tool_status = if stream_error.is_some() {
+                            ToolCallStatus::Failed
+                        } else {
+                            ToolCallStatus::Completed
+                        };
                         for (call_id, name) in pending_tool_calls.drain(..) {
                             let notif = SessionNotification::new(
                                 session_id.clone(),
                                 SessionUpdate::ToolCall(
                                     ToolCall::new(call_id, name)
-                                        .status(ToolCallStatus::Completed)
+                                        .status(tool_status.clone())
                                         .kind(ToolKind::Other),
                                 ),
                             );
@@ -823,9 +834,10 @@ impl agent_client_protocol::Agent for XaiAgent {
                         // 4xx errors (auth failure, bad request, quota) are NOT retried:
                         // the stale-ID theory only applies to context/expiry errors. A
                         // 401/403 would just repeat with the same key and fail again,
-                        // wasting one API call. The heuristic checks for "error 4" in the
-                        // formatted message produced by start_request ("xAI API error 4XX:…").
-                        let is_client_error = message.contains("error 4");
+                        // wasting one API call. The heuristic is anchored to the exact
+                        // prefix produced by start_request ("xAI API error 4XX:…") to
+                        // avoid false-positive matches on body text that contains "error 4".
+                        let is_client_error = message.contains("xAI API error 4");
                         if current_prev_response_id.is_some()
                             && !stale_retry_done
                             && !continuation_in_progress
@@ -861,12 +873,18 @@ impl agent_client_protocol::Agent for XaiAgent {
             // XaiEvent::Done already drained this vec — this is a no-op there.
             // cancel/timeout break via 'outer and never reach here; those are
             // abrupt interruptions where leaving tool calls unresolved is acceptable.
+            // Use Failed when a stream error is set — tool calls did not complete.
+            let fallback_tool_status = if stream_error.is_some() {
+                ToolCallStatus::Failed
+            } else {
+                ToolCallStatus::Completed
+            };
             for (call_id, name) in pending_tool_calls.drain(..) {
                 let notif = SessionNotification::new(
                     session_id.clone(),
                     SessionUpdate::ToolCall(
                         ToolCall::new(call_id, name)
-                            .status(ToolCallStatus::Completed)
+                            .status(fallback_tool_status.clone())
                             .kind(ToolKind::Other),
                     ),
                 );
