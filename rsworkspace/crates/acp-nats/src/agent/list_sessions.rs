@@ -45,7 +45,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let expected = ListSessionsResponse::new(vec![]);
         set_json_response(&mock, "acp.agent.session.list", &expected);
 
@@ -57,7 +57,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_returns_error_when_nats_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_next_request();
 
         let request = ListSessionsRequest::new();
@@ -68,7 +68,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.set_response("acp.agent.session.list", "not json".into());
 
         let request = ListSessionsRequest::new();
@@ -79,7 +79,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
             "acp.agent.session.list",
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
         let _ = bridge.list_sessions(ListSessionsRequest::new()).await;

@@ -47,10 +47,16 @@ where
     let req_id = uuid::Uuid::new_v4().to_string();
     let prefix = bridge.config.acp_prefix_ref();
 
-    let result = match bridge.js() {
-        Some(js) => handle_js(bridge, js, &args, serializer, &session_id, prefix, &req_id).await,
-        None => handle_nats(bridge, &args, serializer, &session_id, prefix, &req_id).await,
-    };
+    let result = handle_js(
+        bridge,
+        bridge.js(),
+        &args,
+        serializer,
+        &session_id,
+        prefix,
+        &req_id,
+    )
+    .await;
 
     bridge.metrics.record_request(
         "prompt",
@@ -59,131 +65,6 @@ where
     );
 
     result
-}
-
-async fn handle_nats<N, C, J, S>(
-    bridge: &Bridge<N, C, J>,
-    args: &PromptRequest,
-    serializer: &S,
-    session_id: &AcpSessionId,
-    prefix: &crate::acp_prefix::AcpPrefix,
-    req_id: &str,
-) -> agent_client_protocol::Result<PromptResponse>
-where
-    N: PublishClient + SubscribeClient + FlushClient,
-    C: trogon_std::time::GetElapsed,
-    S: JsonSerialize,
-{
-    // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
-    let mut notifications_sub = bridge
-        .nats
-        .subscribe(session::agent::UpdateSubject::new(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
-
-    let mut response_sub = bridge
-        .nats
-        .subscribe(session::agent::PromptResponseSubject::new(
-            prefix, session_id, req_id,
-        ))
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
-
-    let mut cancel_sub = bridge
-        .nats
-        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
-        .await
-        .map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("subscribe cancelled: {e}"),
-            )
-        })?;
-
-    let payload_bytes = serializer
-        .to_vec(args)
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
-
-    let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id);
-    headers.insert(SESSION_ID_HEADER, session_id.as_str());
-
-    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
-    bridge
-        .nats
-        .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("publish: {e}")))?;
-
-    bridge
-        .nats
-        .flush()
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("flush: {e}")))?;
-
-    let op_timeout = bridge.config.prompt_timeout();
-
-    loop {
-        tokio::select! {
-            notif = notifications_sub.next() => {
-                let Some(msg) = notif else {
-                    bridge.metrics.record_error("prompt", "notification_stream_closed");
-                    break Err(Error::new(
-                        ErrorCode::InternalError.into(),
-                        "notification stream closed unexpectedly",
-                    ));
-                };
-                let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!(error = %e, "bad notification payload; skipping");
-                        continue;
-                    }
-                };
-                let _ = bridge.notification_sender.send(notification).await.inspect_err(|_| {
-                    warn!("notification receiver dropped; continuing prompt");
-                });
-            }
-            resp = timeout(op_timeout, response_sub.next()) => {
-                match resp {
-                    Ok(Some(msg)) => {
-                        match serde_json::from_slice::<PromptResponse>(&msg.payload) {
-                            Ok(response) => break Ok(response),
-                            Err(_) => {
-                                if let Ok(agent_err) = serde_json::from_slice::<Error>(&msg.payload) {
-                                    break Err(agent_err);
-                                }
-                                bridge.metrics.record_error("prompt", "bad_response_payload");
-                                break Err(Error::new(
-                                    ErrorCode::InternalError.into(),
-                                    "bad response payload",
-                                ));
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        bridge.metrics.record_error("prompt", "response_stream_closed");
-                        break Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            "response stream closed unexpectedly",
-                        ));
-                    }
-                    Err(_elapsed) => {
-                        bridge.metrics.record_error("prompt", "prompt_timeout");
-                        break Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            "prompt timed out waiting for runner",
-                        ));
-                    }
-                }
-            }
-            _ = cancel_sub.next() => {
-                break Ok(PromptResponse::new(StopReason::Cancelled));
-            }
-        }
-    }
 }
 
 async fn handle_js<N, C, J, S>(
@@ -388,214 +269,9 @@ mod tests {
         }
     }
 
-    fn mock_bridge() -> (
-        AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
-    ) {
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, _notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("prompt-test"),
-            Config::for_test("acp").with_prompt_timeout(std::time::Duration::from_secs(5)),
-            notification_tx,
-        );
-        (mock, bridge)
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_subscribe_fails() {
-        let (_mock, bridge) = mock_bridge();
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_rejects_invalid_session_id() {
-        let (_mock, bridge) = mock_bridge();
-        let err = handle(
-            &bridge,
-            PromptRequest::new("invalid.session.id", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code, ErrorCode::InvalidParams);
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_done_response_from_runner() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let response = PromptResponse::new(StopReason::EndTurn);
-        resp_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
-            .unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_cancelled_on_cancel_signal() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let cancel_tx = mock.inject_messages();
-
-        cancel_tx.unbounded_send(make_nats_msg(b"")).unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_on_bad_response_payload() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        resp_tx.unbounded_send(make_nats_msg(b"not json")).unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_response_stream_closes() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        drop(resp_tx);
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_second_subscribe_fails() {
-        let (mock, bridge) = mock_bridge();
-        let _notif_tx = mock.inject_messages();
-        // No second stream — second subscribe fails
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_third_subscribe_fails() {
-        let (mock, bridge) = mock_bridge();
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        // No third stream — third subscribe fails
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_serialize_fails() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::FailNextSerialize::new(1),
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_publish_fails() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-        mock.fail_next_publish();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn prompt_returns_error_when_flush_fails() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-        mock.fail_next_flush();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
     use crate::agent::test_support::MockJs;
 
-    fn mock_bridge_with_js() -> (
+    fn mock_bridge() -> (
         AdvancedMockNatsClient,
         MockJs,
         Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
@@ -604,7 +280,7 @@ mod tests {
         let js = MockJs::new();
         let (notification_tx, _notification_rx) =
             tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::with_jetstream(
+        let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
             trogon_std::time::SystemClock,
@@ -616,8 +292,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prompt_rejects_invalid_session_id() {
+        let (_mock, _js, bridge) = mock_bridge();
+        let err = handle(
+            &bridge,
+            PromptRequest::new("invalid.session.id", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
     async fn prompt_js_success() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
 
         // cancel sub for core NATS
         let _cancel_tx = mock.inject_messages();
@@ -650,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_cancel() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
 
         let cancel_tx = mock.inject_messages();
 
@@ -678,7 +367,7 @@ mod tests {
         let js = MockJs::new();
         let (notification_tx, _notification_rx) =
             tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::with_jetstream(
+        let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
             trogon_std::time::SystemClock,
@@ -711,7 +400,7 @@ mod tests {
         let js = MockJs::new();
         let (notification_tx, _notification_rx) =
             tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::with_jetstream(
+        let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
             trogon_std::time::SystemClock,
@@ -763,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_publish_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -785,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_bad_response_payload() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -809,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_agent_error_response() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -838,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_response_stream_closed() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -860,7 +549,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_get_notif_stream_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
         js.consumer_factory.fail_get_stream_at(1);
         let result = handle(
@@ -880,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_get_resp_stream_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(notif_consumer);
@@ -897,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_notif_consumer_creation_failure() {
-        let (mock, _js, bridge) = mock_bridge_with_js();
+        let (mock, _js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
         // Don't add any consumers — first create_consumer call will fail
         let result = handle(
@@ -917,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_resp_consumer_creation_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
         // Add notif consumer but not response consumer
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -939,7 +628,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_cancel_subscribe_failure() {
-        let (_mock, js, bridge) = mock_bridge_with_js();
+        let (_mock, js, bridge) = mock_bridge();
         // Don't inject cancel_tx — subscribe will fail (no streams in mock)
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(notif_consumer);
@@ -957,7 +646,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_notif_messages_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let failing_consumer = trogon_nats::jetstream::MockJetStreamConsumer::failing();
@@ -980,7 +669,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_resp_messages_failure() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -1000,289 +689,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_nats_notification_forwarding() {
-        let (mock, bridge) = mock_bridge_no_js();
-
-        let notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let notification = SessionNotification::new(
-            "s1",
-            agent_client_protocol::SessionUpdate::AgentThoughtChunk(
-                agent_client_protocol::ContentChunk::new(
-                    agent_client_protocol::ContentBlock::Text(
-                        agent_client_protocol::TextContent::new("thinking..."),
-                    ),
-                ),
-            ),
-        );
-        notif_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&notification).unwrap()))
-            .unwrap();
-
-        let response = PromptResponse::new(StopReason::EndTurn);
-        resp_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
-            .unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_notification_rx_dropped_unit_type() {
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        drop(notification_rx);
-        let bridge = Bridge::new(
-            mock.clone(),
-            trogon_std::time::SystemClock,
-            &opentelemetry::global::meter("prompt-rx-dropped-unit-test"),
-            Config::for_test("acp").with_prompt_timeout(std::time::Duration::from_millis(100)),
-            notification_tx,
-        );
-
-        let notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let notification = SessionNotification::new(
-            "s1",
-            agent_client_protocol::SessionUpdate::AgentThoughtChunk(
-                agent_client_protocol::ContentChunk::new(
-                    agent_client_protocol::ContentBlock::Text(
-                        agent_client_protocol::TextContent::new("thinking..."),
-                    ),
-                ),
-            ),
-        );
-        notif_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&notification).unwrap()))
-            .unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("timed out"));
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_notification_stream_closed() {
-        let (mock, bridge) = mock_bridge_no_js();
-
-        let notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        // Close notification stream immediately
-        drop(notif_tx);
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message
-                .contains("notification stream closed")
-        );
-    }
-
-    fn mock_bridge_no_js() -> (
-        AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
-    ) {
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, _notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge: Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs> =
-            Bridge {
-                nats: mock.clone(),
-                js: None,
-                clock: trogon_std::time::SystemClock,
-                config: Config::for_test("acp")
-                    .with_prompt_timeout(std::time::Duration::from_secs(5)),
-                metrics: crate::telemetry::metrics::Metrics::new(&opentelemetry::global::meter(
-                    "prompt-no-js-test",
-                )),
-                notification_sender: notification_tx,
-                pending_session_prompt_responses:
-                    crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters::new(),
-                background_tasks: std::cell::RefCell::new(Vec::new()),
-            };
-        (mock, bridge)
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_bad_notification_payload_skipped() {
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, _notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge: Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs> =
-            Bridge {
-                nats: mock.clone(),
-                js: None,
-                clock: trogon_std::time::SystemClock,
-                config: Config::for_test("acp")
-                    .with_prompt_timeout(std::time::Duration::from_millis(100)),
-                metrics: crate::telemetry::metrics::Metrics::new(&opentelemetry::global::meter(
-                    "prompt-nats-bad-notif-test",
-                )),
-                notification_sender: notification_tx,
-                pending_session_prompt_responses:
-                    crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters::new(),
-                background_tasks: std::cell::RefCell::new(Vec::new()),
-            };
-
-        let notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        // Send only bad notification, no response. select! must pick notification.
-        notif_tx.unbounded_send(make_nats_msg(b"not json")).unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        // Bad notification processed (warn, continue), then times out
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("timed out"));
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_notification_receiver_dropped() {
-        use tracing_subscriber::util::SubscriberInitExt;
-        let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
-
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        drop(notification_rx);
-        let bridge: Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs> =
-            Bridge {
-                nats: mock.clone(),
-                js: None,
-                clock: trogon_std::time::SystemClock,
-                config: Config::for_test("acp")
-                    .with_prompt_timeout(std::time::Duration::from_millis(100)),
-                metrics: crate::telemetry::metrics::Metrics::new(&opentelemetry::global::meter(
-                    "prompt-rx-dropped-test",
-                )),
-                notification_sender: notification_tx,
-                pending_session_prompt_responses:
-                    crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters::new(),
-                background_tasks: std::cell::RefCell::new(Vec::new()),
-            };
-
-        let notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        // Send only notification, no response. Handler processes the notification
-        // (send fails because rx dropped, warn, continue), then times out.
-        let notification = SessionNotification::new(
-            "s1",
-            agent_client_protocol::SessionUpdate::AgentThoughtChunk(
-                agent_client_protocol::ContentChunk::new(
-                    agent_client_protocol::ContentBlock::Text(
-                        agent_client_protocol::TextContent::new("thinking..."),
-                    ),
-                ),
-            ),
-        );
-        notif_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&notification).unwrap()))
-            .unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("timed out"));
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_agent_error_response() {
-        let (mock, bridge) = mock_bridge_no_js();
-
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let agent_err = Error::new(ErrorCode::InternalError.into(), "agent failed");
-        resp_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&agent_err).unwrap()))
-            .unwrap();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("agent failed"));
-    }
-
-    #[tokio::test]
-    async fn prompt_nats_timeout() {
-        let mock = AdvancedMockNatsClient::new();
-        let (notification_tx, _notification_rx) =
-            tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge: Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs> =
-            Bridge {
-                nats: mock.clone(),
-                js: None,
-                clock: trogon_std::time::SystemClock,
-                config: Config::for_test("acp")
-                    .with_prompt_timeout(std::time::Duration::from_secs(5)),
-                metrics: crate::telemetry::metrics::Metrics::new(&opentelemetry::global::meter(
-                    "prompt-nats-timeout-test",
-                )),
-                notification_sender: notification_tx,
-                pending_session_prompt_responses:
-                    crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters::new(),
-                background_tasks: std::cell::RefCell::new(Vec::new()),
-            };
-
-        let _notif_tx = mock.inject_messages();
-        let _resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let result = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("timed out"));
-    }
-
-    #[tokio::test]
     async fn prompt_js_notification_consumer_error() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -1314,7 +722,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_response_consumer_error() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -1345,7 +753,7 @@ mod tests {
         let js = MockJs::new();
         let (notification_tx, _notification_rx) =
             tokio::sync::mpsc::channel::<SessionNotification>(64);
-        let bridge = Bridge::with_jetstream(
+        let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
             trogon_std::time::SystemClock,
@@ -1388,7 +796,7 @@ mod tests {
         let (notification_tx, notification_rx) =
             tokio::sync::mpsc::channel::<SessionNotification>(64);
         drop(notification_rx);
-        let bridge = Bridge::with_jetstream(
+        let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
             trogon_std::time::SystemClock,
@@ -1432,7 +840,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_js_notification_stream_closed() {
-        let (mock, js, bridge) = mock_bridge_with_js();
+        let (mock, js, bridge) = mock_bridge();
         let _cancel_tx = mock.inject_messages();
 
         let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
@@ -1454,34 +862,6 @@ mod tests {
                 .unwrap_err()
                 .message
                 .contains("notification stream closed")
-        );
-    }
-
-    #[tokio::test]
-    async fn prompt_publishes_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
-        let _cancel_tx = mock.inject_messages();
-
-        let response = PromptResponse::new(StopReason::EndTurn);
-        resp_tx
-            .unbounded_send(make_nats_msg(&serde_json::to_vec(&response).unwrap()))
-            .unwrap();
-
-        let _ = handle(
-            &bridge,
-            PromptRequest::new("s1", vec![]),
-            &trogon_std::StdJsonSerialize,
-        )
-        .await;
-
-        let subjects = mock.published_messages();
-        assert!(
-            subjects.iter().any(|s| s == "acp.session.s1.agent.prompt"),
-            "expected publish to acp.session.s1.agent.prompt, got: {:?}",
-            subjects
         );
     }
 }

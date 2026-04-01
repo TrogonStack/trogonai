@@ -60,18 +60,17 @@ where
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
-    use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{
         Agent, ErrorCode, SetSessionModelRequest, SetSessionModelResponse,
     };
 
     #[tokio::test]
     async fn set_session_model_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (_mock, js, bridge) = mock_bridge();
         let expected = SetSessionModelResponse::new();
-        set_json_response(&mock, "acp.session.s1.agent.set_model", &expected);
+        set_js_response(&js, &expected);
 
         let request = SetSessionModelRequest::new("s1", "claude-sonnet-4-6");
         let result = bridge.set_session_model(request).await;
@@ -79,20 +78,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_session_model_returns_error_when_nats_fails() {
-        let (mock, bridge) = mock_bridge();
-        mock.fail_next_request();
+    async fn set_session_model_returns_error_when_js_fails() {
+        let (_mock, _js, bridge) = mock_bridge();
 
         let request = SetSessionModelRequest::new("s1", "claude-sonnet-4-6");
         let err = bridge.set_session_model(request).await.unwrap_err();
 
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+        assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[tokio::test]
     async fn set_session_model_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.session.s1.agent.set_model", "not json".into());
+        let (_mock, js, bridge) = mock_bridge();
+        crate::agent::test_support::set_js_raw_response(&js, b"not json");
 
         let request = SetSessionModelRequest::new("s1", "claude-sonnet-4-6");
         let err = bridge.set_session_model(request).await.unwrap_err();
@@ -102,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_validates_session_id() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let request = SetSessionModelRequest::new("invalid.session.id", "claude-sonnet-4-6");
         let err = bridge.set_session_model(request).await.unwrap_err();
 
@@ -112,12 +110,8 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.set_model",
-            &SetSessionModelResponse::new(),
-        );
+        let (_mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &SetSessionModelResponse::new());
 
         let _ = bridge
             .set_session_model(SetSessionModelRequest::new("s1", "claude-sonnet-4-6"))
@@ -134,8 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_next_request();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge
             .set_session_model(SetSessionModelRequest::new("s1", "claude-sonnet-4-6"))

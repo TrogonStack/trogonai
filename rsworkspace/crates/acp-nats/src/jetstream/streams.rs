@@ -241,6 +241,29 @@ mod tests {
     }
 
     #[test]
+    fn session_list_not_captured_by_any_stream() {
+        let prefix = p("acp");
+        let session_list_subject = "acp.agent.session.list";
+        for stream in AcpStream::ALL {
+            for pattern in stream.subject_patterns(&prefix) {
+                assert_ne!(
+                    pattern, session_list_subject,
+                    "stream {} must not capture session.list",
+                    stream
+                );
+                if pattern.contains('>') {
+                    let pattern_prefix = pattern.trim_end_matches('>');
+                    assert!(
+                        !session_list_subject.starts_with(pattern_prefix),
+                        "stream {} wildcard pattern {pattern} would capture session.list",
+                        stream
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn no_subject_overlaps_between_streams() {
         let configs = all_configs(&p("acp"));
         let all_subjects: Vec<&String> = configs.iter().flat_map(|c| &c.subjects).collect();

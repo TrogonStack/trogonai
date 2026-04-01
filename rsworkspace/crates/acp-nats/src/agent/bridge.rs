@@ -32,9 +32,9 @@ use super::{
 
 use crate::constants::SESSION_READY_DELAY;
 
-pub struct Bridge<N, C: GetElapsed, J = ()> {
+pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) nats: N,
-    pub(crate) js: Option<J>,
+    pub(crate) js: J,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
@@ -43,29 +43,8 @@ pub struct Bridge<N, C: GetElapsed, J = ()> {
     pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
 }
 
-impl<N, C: GetElapsed> Bridge<N, C> {
-    pub fn new(
-        nats: N,
-        clock: C,
-        meter: &Meter,
-        config: Config,
-        notification_sender: mpsc::Sender<SessionNotification>,
-    ) -> Self {
-        Self {
-            nats,
-            js: None,
-            clock,
-            config,
-            metrics: Metrics::new(meter),
-            notification_sender,
-            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
-            background_tasks: RefCell::new(Vec::new()),
-        }
-    }
-}
-
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
-    pub fn with_jetstream(
+    pub fn new(
         nats: N,
         js: J,
         clock: C,
@@ -75,7 +54,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
     ) -> Self {
         Self {
             nats,
-            js: Some(js),
+            js,
             clock,
             config,
             metrics: Metrics::new(meter),
@@ -89,8 +68,8 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         &self.nats
     }
 
-    pub(crate) fn js(&self) -> Option<&J> {
-        self.js.as_ref()
+    pub(crate) fn js(&self) -> &J {
+        &self.js
     }
 
     pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
@@ -173,33 +152,19 @@ where
         Req: serde::Serialize,
         Res: serde::de::DeserializeOwned,
     {
-        use crate::error::map_nats_error;
-
         let subject_str = subject.to_string();
-        match self.js() {
-            Some(js) => {
-                let req_id = uuid::Uuid::new_v4().to_string();
-                js_request::js_request::<J, _, Res, _>(
-                    js,
-                    &subject_str,
-                    args,
-                    &trogon_std::StdJsonSerialize,
-                    self.config.acp_prefix_ref(),
-                    session_id,
-                    &req_id,
-                    self.config.operation_timeout,
-                )
-                .await
-            }
-            None => trogon_nats::request_with_timeout::<N, Req, Res>(
-                self.nats(),
-                &subject_str,
-                args,
-                self.config.operation_timeout,
-            )
-            .await
-            .map_err(map_nats_error),
-        }
+        let req_id = uuid::Uuid::new_v4().to_string();
+        js_request::js_request::<J, _, Res, _>(
+            self.js(),
+            &subject_str,
+            args,
+            &trogon_std::StdJsonSerialize,
+            self.config.acp_prefix_ref(),
+            session_id,
+            &req_id,
+            self.config.operation_timeout,
+        )
+        .await
     }
 }
 

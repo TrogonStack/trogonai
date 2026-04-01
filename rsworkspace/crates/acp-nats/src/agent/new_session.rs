@@ -60,7 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let session_id = SessionId::from("test-session-1");
         let expected = NewSessionResponse::new(session_id.clone());
         set_json_response(&mock, "acp.agent.session.new", &expected);
@@ -75,7 +75,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_returns_error_when_nats_request_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_next_request();
 
         let request = NewSessionRequest::new(".");
@@ -87,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.set_response("acp.agent.session.new", "not json".into());
 
         let request = NewSessionRequest::new(".");
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let session_id = SessionId::from("test-session-1");
         set_json_response(
             &mock,
@@ -121,7 +121,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
@@ -137,7 +137,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let session_id = SessionId::from("test-session-1");
         set_json_response(
             &mock,
@@ -164,7 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let session_id = SessionId::from("test-session-1");
         set_json_response(
             &mock,

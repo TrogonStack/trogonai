@@ -32,12 +32,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = nats::connect(ws_config.acp.nats(), nats_connect_timeout).await?;
 
+    let js_context = async_nats::jetstream::new(nats_client.clone());
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
+    acp_nats::jetstream::provision::provision_streams(&js_client, ws_config.acp.acp_prefix_ref())
+        .await?;
+
     let (shutdown_tx, _) = watch::channel(false);
     let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
 
     let conn_thread = std::thread::Builder::new()
         .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(conn_rx, nats_client, ws_config.acp))?;
+        .spawn(move || run_connection_thread(conn_rx, nats_client, js_client, ws_config.acp))?;
 
     let state = UpgradeState {
         conn_tx,
@@ -88,9 +93,10 @@ use constants::THREAD_NAME;
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
 /// `Agent` trait is `?Send`, requiring `spawn_local` / `Rc`.
-fn run_connection_thread<N>(
+fn run_connection_thread<N, J>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
 ) where
     N: acp_nats::RequestClient
@@ -100,6 +106,11 @@ fn run_connection_thread<N>(
         + Clone
         + Send
         + 'static,
+    J: acp_nats::JetStreamPublisher
+        + acp_nats::JetStreamGetStream
+        + Send
+        + 'static,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -107,7 +118,7 @@ fn run_connection_thread<N>(
         .expect("failed to create per-connection runtime");
 
     let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(conn_rx, nats_client, config)));
+    rt.block_on(local.run_until(process_connections(conn_rx, nats_client, js_client, config)));
 
     // run_until returns once its future completes, but sub-tasks
     // spawned by connection handlers (pumps, AgentSideConnection
@@ -118,9 +129,10 @@ fn run_connection_thread<N>(
     info!("Local thread exiting");
 }
 
-async fn process_connections<N>(
+async fn process_connections<N, J>(
     mut conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
 ) where
     N: acp_nats::RequestClient
@@ -130,16 +142,22 @@ async fn process_connections<N>(
         + Clone
         + Send
         + 'static,
+    J: acp_nats::JetStreamPublisher
+        + acp_nats::JetStreamGetStream
+        + 'static,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
 {
     let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     while let Some(req) = conn_rx.recv().await {
         conn_handles.retain(|h| !h.is_finished());
         let client = nats_client.clone();
+        let js = js_client.clone();
         let cfg = config.clone();
         conn_handles.push(tokio::task::spawn_local(connection::handle(
             req.socket,
             client,
+            js,
             cfg,
             req.shutdown_rx,
         )));
@@ -169,6 +187,51 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
     use trogon_nats::AdvancedMockNatsClient;
 
+    #[derive(Clone)]
+    struct MockJs {
+        publisher: trogon_nats::jetstream::MockJetStreamPublisher,
+        consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
+    }
+
+    impl MockJs {
+        fn new() -> Self {
+            Self {
+                publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
+                consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
+            }
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+        type PublishError = trogon_nats::mocks::MockError;
+        type AckFuture = std::future::Ready<
+            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
+        >;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
+        type Error = trogon_nats::mocks::MockError;
+        type Stream = trogon_nats::jetstream::MockJetStreamStream;
+
+        async fn get_stream<T: AsRef<str> + Send>(
+            &self,
+            stream_name: T,
+        ) -> Result<trogon_nats::jetstream::MockJetStreamStream, Self::Error> {
+            self.consumer_factory.get_stream(stream_name).await
+        }
+    }
+
     #[tokio::test]
     async fn test_websocket_connection_lifecycle() {
         let nats_mock = AdvancedMockNatsClient::new();
@@ -189,7 +252,7 @@ mod tests {
         let nats_mock_clone = nats_mock.clone();
         let conn_thread = std::thread::Builder::new()
             .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, MockJs::new(), config))
             .expect("failed to spawn connection thread");
 
         let state = UpgradeState {
@@ -279,7 +342,7 @@ mod tests {
         let nats_mock_clone = nats_mock.clone();
         let conn_thread = std::thread::Builder::new()
             .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, MockJs::new(), config))
             .expect("failed to spawn connection thread");
 
         let state = UpgradeState {

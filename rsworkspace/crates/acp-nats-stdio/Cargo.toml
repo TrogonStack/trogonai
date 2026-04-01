@@ -17,6 +17,7 @@ futures = { workspace = true }
 opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std"] }
 tracing = { workspace = true }
+trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap"] }
 
 [dev-dependencies]

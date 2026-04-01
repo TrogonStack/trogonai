@@ -137,9 +137,10 @@ mod tests {
     use trogon_nats::MockNatsClient;
     use trogon_std::time::MockClock;
 
-    fn make_bridge() -> Bridge<MockNatsClient, MockClock> {
+    fn make_bridge() -> Bridge<MockNatsClient, MockClock, crate::agent::test_support::MockJs> {
         Bridge::new(
             MockNatsClient::new(),
+            crate::agent::test_support::MockJs::new(),
             MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),

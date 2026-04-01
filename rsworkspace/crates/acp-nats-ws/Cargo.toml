@@ -20,6 +20,7 @@ opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync", "io-util"] }
 tower-http = { workspace = true }
 tracing = { workspace = true }
+trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
