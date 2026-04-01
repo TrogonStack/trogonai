@@ -5,9 +5,8 @@
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `vendor.operation`) but rejects
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.
 
-use crate::nats_token_policies::MultiTokenPolicy;
 use crate::subject_token_violation::SubjectTokenViolation;
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 
 /// Error returned when [`ExtMethodName`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,11 +32,13 @@ impl std::error::Error for ExtMethodNameError {}
 ///
 /// Rejects empty, too-long, wildcard, whitespace, and malformed dotted names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ExtMethodName(NatsToken<MultiTokenPolicy>);
+pub struct ExtMethodName(DottedNatsToken);
 
 impl ExtMethodName {
     pub fn new(method: impl AsRef<str>) -> Result<Self, ExtMethodNameError> {
-        NatsToken::new(method).map(Self).map_err(ExtMethodNameError)
+        DottedNatsToken::new(method)
+            .map(Self)
+            .map_err(ExtMethodNameError)
     }
 
     pub fn as_str(&self) -> &str {

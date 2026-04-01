@@ -1,112 +1,46 @@
-//! Generic NATS-safe subject token value object.
+//! NATS-safe subject token value objects.
 //!
-//! [`NatsToken<P>`] is parameterized by a [`NatsTokenPolicy`] that encodes the
-//! validation flavor (single-token vs. multi-token, ASCII-only vs. UTF-8, etc.).
+//! Two concrete types cover the two validation flavors used in practice:
+//!
+//! - [`NatsToken`] — single token, no dots, ASCII-only, max 128 chars
+//! - [`DottedNatsToken`] — dotted segments allowed, UTF-8, max 128 bytes
+//!
 //! All validation happens at construction; invalid instances are unrepresentable.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::subject_token_violation::SubjectTokenViolation;
 use crate::token;
 
-/// Policy trait that controls how a [`NatsToken`] is validated.
+const MAX_LENGTH: usize = 128;
+
+// ── NatsToken (single, ASCII-only) ─────────────────────────────────────
+
+/// A validated single NATS subject token.
 ///
-/// Implemented as associated constants so the compiler can monomorphize away
-/// all branching at compile time.
-pub trait NatsTokenPolicy {
-    /// Whether `.` is accepted as a token separator (multi-token mode).
-    const ALLOW_DOTS: bool;
+/// Rejects empty, non-ASCII, dots, wildcards (`*`, `>`), and whitespace.
+/// Max 128 characters. Wraps an `Arc<str>` so cloning is cheap.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NatsToken(Arc<str>);
 
-    /// Whether non-ASCII characters are rejected.
-    /// When `true`, length is measured in **chars**; otherwise in **bytes**.
-    const REQUIRE_ASCII: bool;
-
-    /// Maximum permitted length (chars when `REQUIRE_ASCII`, bytes otherwise).
-    const MAX_LENGTH: usize;
-}
-
-/// A validated NATS subject token (or dotted token sequence).
-///
-/// Wraps an `Arc<str>` so cloning is cheap. The policy `P` determines which
-/// characters and lengths are accepted.
-///
-/// Trait impls are hand-written so that `P` does not need to implement
-/// `Clone`, `Debug`, `PartialEq`, `Eq`, or `Hash`.
-pub struct NatsToken<P: NatsTokenPolicy>(Arc<str>, PhantomData<P>);
-
-impl<P: NatsTokenPolicy> Clone for NatsToken<P> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
-    }
-}
-
-impl<P: NatsTokenPolicy> std::fmt::Debug for NatsToken<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("NatsToken").field(&self.0).finish()
-    }
-}
-
-impl<P: NatsTokenPolicy> PartialEq for NatsToken<P> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl<P: NatsTokenPolicy> Eq for NatsToken<P> {}
-
-impl<P: NatsTokenPolicy> std::hash::Hash for NatsToken<P> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl<P: NatsTokenPolicy> NatsToken<P> {
-    /// Validate and construct a new token.
+impl NatsToken {
+    /// Validate and construct a new single token.
     pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolation> {
         let s = s.as_ref();
-
         if s.is_empty() {
             return Err(SubjectTokenViolation::Empty);
         }
-
-        if P::REQUIRE_ASCII {
-            let mut char_count: usize = 0;
-            for ch in s.chars() {
-                char_count += 1;
-                if char_count > P::MAX_LENGTH {
-                    return Err(SubjectTokenViolation::TooLong(char_count));
-                }
-                if !ch.is_ascii() {
-                    return Err(SubjectTokenViolation::InvalidCharacter(ch));
-                }
-                if ch == '*' || ch == '>' || ch.is_whitespace() {
-                    return Err(SubjectTokenViolation::InvalidCharacter(ch));
-                }
-                if ch == '.' && !P::ALLOW_DOTS {
-                    return Err(SubjectTokenViolation::InvalidCharacter(ch));
-                }
+        let mut char_count: usize = 0;
+        for ch in s.chars() {
+            char_count += 1;
+            if char_count > MAX_LENGTH {
+                return Err(SubjectTokenViolation::TooLong(char_count));
             }
-            if P::ALLOW_DOTS && token::has_consecutive_or_boundary_dots(s) {
-                return Err(SubjectTokenViolation::InvalidCharacter('.'));
-            }
-        } else {
-            if let Some(ch) = token::has_wildcards_or_whitespace(s) {
+            if !ch.is_ascii() || ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
                 return Err(SubjectTokenViolation::InvalidCharacter(ch));
             }
-            if !P::ALLOW_DOTS {
-                if s.contains('.') {
-                    return Err(SubjectTokenViolation::InvalidCharacter('.'));
-                }
-            } else if token::has_consecutive_or_boundary_dots(s) {
-                return Err(SubjectTokenViolation::InvalidCharacter('.'));
-            }
-            if s.len() > P::MAX_LENGTH {
-                return Err(SubjectTokenViolation::TooLong(s.len()));
-            }
         }
-
-        Ok(Self(s.into(), PhantomData))
+        Ok(Self(s.into()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -114,13 +48,13 @@ impl<P: NatsTokenPolicy> NatsToken<P> {
     }
 }
 
-impl<P: NatsTokenPolicy> std::fmt::Display for NatsToken<P> {
+impl std::fmt::Display for NatsToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<P: NatsTokenPolicy> std::ops::Deref for NatsToken<P> {
+impl std::ops::Deref for NatsToken {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -128,7 +62,61 @@ impl<P: NatsTokenPolicy> std::ops::Deref for NatsToken<P> {
     }
 }
 
-impl<P: NatsTokenPolicy> AsRef<str> for NatsToken<P> {
+impl AsRef<str> for NatsToken {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+// ── DottedNatsToken (multi-segment, UTF-8) ─────────────────────────────
+
+/// A validated dotted NATS subject segment.
+///
+/// Allows `.` as a token separator but rejects malformed dots (consecutive,
+/// leading, trailing). Rejects wildcards (`*`, `>`) and whitespace.
+/// Max 128 bytes. Wraps an `Arc<str>` so cloning is cheap.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DottedNatsToken(Arc<str>);
+
+impl DottedNatsToken {
+    /// Validate and construct a new dotted token.
+    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolation> {
+        let s = s.as_ref();
+        if s.is_empty() {
+            return Err(SubjectTokenViolation::Empty);
+        }
+        if let Some(ch) = token::has_wildcards_or_whitespace(s) {
+            return Err(SubjectTokenViolation::InvalidCharacter(ch));
+        }
+        if token::has_consecutive_or_boundary_dots(s) {
+            return Err(SubjectTokenViolation::InvalidCharacter('.'));
+        }
+        if s.len() > MAX_LENGTH {
+            return Err(SubjectTokenViolation::TooLong(s.len()));
+        }
+        Ok(Self(s.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DottedNatsToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Deref for DottedNatsToken {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for DottedNatsToken {
     fn as_ref(&self) -> &str {
         &self.0
     }
@@ -138,216 +126,166 @@ impl<P: NatsTokenPolicy> AsRef<str> for NatsToken<P> {
 mod tests {
     use super::*;
 
-    struct SingleTokenPolicy;
-    impl NatsTokenPolicy for SingleTokenPolicy {
-        const ALLOW_DOTS: bool = false;
-        const REQUIRE_ASCII: bool = true;
-        const MAX_LENGTH: usize = 128;
-    }
-
-    struct MultiTokenPolicy;
-    impl NatsTokenPolicy for MultiTokenPolicy {
-        const ALLOW_DOTS: bool = true;
-        const REQUIRE_ASCII: bool = false;
-        const MAX_LENGTH: usize = 128;
-    }
-
-    struct AsciiMultiTokenPolicy;
-    impl NatsTokenPolicy for AsciiMultiTokenPolicy {
-        const ALLOW_DOTS: bool = true;
-        const REQUIRE_ASCII: bool = true;
-        const MAX_LENGTH: usize = 128;
-    }
-
-    type SingleToken = NatsToken<SingleTokenPolicy>;
-    type MultiToken = NatsToken<MultiTokenPolicy>;
-    type AsciiMultiToken = NatsToken<AsciiMultiTokenPolicy>;
-
-    // ── SingleTokenPolicy (no dots, ASCII-only) ────────────────────────
+    // ── NatsToken (single, ASCII-only) ─────────────────────────────────
 
     #[test]
     fn single_valid() {
-        assert!(SingleToken::new("valid-session-123").is_ok());
-        assert!(SingleToken::new("a").is_ok());
-        assert_eq!(SingleToken::new("hello").unwrap().as_str(), "hello");
+        assert!(NatsToken::new("valid-session-123").is_ok());
+        assert!(NatsToken::new("a").is_ok());
+        assert_eq!(NatsToken::new("hello").unwrap().as_str(), "hello");
     }
 
     #[test]
     fn single_empty() {
-        assert_eq!(SingleToken::new(""), Err(SubjectTokenViolation::Empty));
+        assert_eq!(NatsToken::new(""), Err(SubjectTokenViolation::Empty));
     }
 
     #[test]
     fn single_too_long() {
         let long = "a".repeat(129);
         assert_eq!(
-            SingleToken::new(&long),
+            NatsToken::new(&long),
             Err(SubjectTokenViolation::TooLong(129))
         );
-        assert!(SingleToken::new("a".repeat(128)).is_ok());
+        assert!(NatsToken::new("a".repeat(128)).is_ok());
     }
 
     #[test]
     fn single_rejects_dots() {
         assert_eq!(
-            SingleToken::new("a.b"),
+            NatsToken::new("a.b"),
             Err(SubjectTokenViolation::InvalidCharacter('.'))
         );
     }
 
     #[test]
     fn single_rejects_wildcards() {
-        assert!(SingleToken::new("a*").is_err());
-        assert!(SingleToken::new("a>").is_err());
-        assert!(SingleToken::new(">").is_err());
+        assert!(NatsToken::new("a*").is_err());
+        assert!(NatsToken::new("a>").is_err());
+        assert!(NatsToken::new(">").is_err());
     }
 
     #[test]
     fn single_rejects_whitespace() {
-        assert!(SingleToken::new("a b").is_err());
-        assert!(SingleToken::new("a\t").is_err());
-        assert!(SingleToken::new("a\n").is_err());
+        assert!(NatsToken::new("a b").is_err());
+        assert!(NatsToken::new("a\t").is_err());
+        assert!(NatsToken::new("a\n").is_err());
     }
 
     #[test]
     fn single_rejects_non_ascii() {
         assert_eq!(
-            SingleToken::new("séssion"),
+            NatsToken::new("séssion"),
             Err(SubjectTokenViolation::InvalidCharacter('é'))
         );
     }
 
-    // ── MultiTokenPolicy (dots ok, byte-length) ───────────────────────
+    // ── DottedNatsToken (multi-segment, UTF-8) ─────────────────────────
 
     #[test]
-    fn multi_valid_simple() {
-        assert!(MultiToken::new("acp").is_ok());
-        assert!(MultiToken::new("a").is_ok());
+    fn dotted_valid_simple() {
+        assert!(DottedNatsToken::new("acp").is_ok());
+        assert!(DottedNatsToken::new("a").is_ok());
     }
 
     #[test]
-    fn multi_valid_dotted() {
+    fn dotted_valid_dotted() {
         assert_eq!(
-            MultiToken::new("my.multi.part").unwrap().as_str(),
+            DottedNatsToken::new("my.multi.part").unwrap().as_str(),
             "my.multi.part"
         );
-        assert!(MultiToken::new("a.b").is_ok());
-        assert!(MultiToken::new("vendor.operation").is_ok());
+        assert!(DottedNatsToken::new("a.b").is_ok());
+        assert!(DottedNatsToken::new("vendor.operation").is_ok());
     }
 
     #[test]
-    fn multi_empty() {
-        assert_eq!(MultiToken::new(""), Err(SubjectTokenViolation::Empty));
+    fn dotted_empty() {
+        assert_eq!(DottedNatsToken::new(""), Err(SubjectTokenViolation::Empty));
     }
 
     #[test]
-    fn multi_too_long() {
+    fn dotted_too_long() {
         let long = "a".repeat(129);
         assert_eq!(
-            MultiToken::new(&long),
+            DottedNatsToken::new(&long),
             Err(SubjectTokenViolation::TooLong(129))
         );
-        assert!(MultiToken::new("a".repeat(128)).is_ok());
+        assert!(DottedNatsToken::new("a".repeat(128)).is_ok());
     }
 
     #[test]
-    fn multi_rejects_wildcards() {
-        assert!(MultiToken::new("acp.*").is_err());
-        assert!(MultiToken::new("acp.>").is_err());
+    fn dotted_rejects_wildcards() {
+        assert!(DottedNatsToken::new("acp.*").is_err());
+        assert!(DottedNatsToken::new("acp.>").is_err());
     }
 
     #[test]
-    fn multi_rejects_whitespace() {
-        assert!(MultiToken::new("acp prefix").is_err());
-        assert!(MultiToken::new("acp\t").is_err());
-        assert!(MultiToken::new("acp\n").is_err());
+    fn dotted_rejects_whitespace() {
+        assert!(DottedNatsToken::new("acp prefix").is_err());
+        assert!(DottedNatsToken::new("acp\t").is_err());
+        assert!(DottedNatsToken::new("acp\n").is_err());
     }
 
     #[test]
-    fn multi_rejects_malformed_dots() {
-        assert!(MultiToken::new("..method").is_err());
-        assert!(MultiToken::new("method..name").is_err());
-        assert!(MultiToken::new(".method").is_err());
-        assert!(MultiToken::new("method.").is_err());
-        assert!(MultiToken::new(".").is_err());
-        assert!(MultiToken::new("acp..foo").is_err());
-        assert!(MultiToken::new(".acp").is_err());
-        assert!(MultiToken::new("acp.").is_err());
+    fn dotted_rejects_malformed_dots() {
+        assert!(DottedNatsToken::new("..method").is_err());
+        assert!(DottedNatsToken::new("method..name").is_err());
+        assert!(DottedNatsToken::new(".method").is_err());
+        assert!(DottedNatsToken::new("method.").is_err());
+        assert!(DottedNatsToken::new(".").is_err());
+        assert!(DottedNatsToken::new("acp..foo").is_err());
+        assert!(DottedNatsToken::new(".acp").is_err());
+        assert!(DottedNatsToken::new("acp.").is_err());
     }
 
     #[test]
-    fn multi_accepts_non_ascii() {
-        assert!(MultiToken::new("préfixe").is_ok());
+    fn dotted_accepts_non_ascii() {
+        assert!(DottedNatsToken::new("préfixe").is_ok());
     }
 
-    // ── Trait impls ────────────────────────────────────────────────────
+    // ── Shared trait impls ─────────────────────────────────────────────
 
     #[test]
-    fn display_and_deref() {
-        let t = SingleToken::new("my-session").unwrap();
+    fn single_display_and_deref() {
+        let t = NatsToken::new("my-session").unwrap();
         assert_eq!(format!("{}", t), "my-session");
         assert_eq!(t.len(), 10);
         assert!(t.starts_with("my"));
     }
 
     #[test]
-    fn as_ref_str() {
-        let t = MultiToken::new("hello").unwrap();
+    fn dotted_display_and_deref() {
+        let t = DottedNatsToken::new("my.prefix").unwrap();
+        assert_eq!(format!("{}", t), "my.prefix");
+        assert_eq!(t.len(), 9);
+        assert!(t.starts_with("my"));
+    }
+
+    #[test]
+    fn single_as_ref_str() {
+        let t = NatsToken::new("hello").unwrap();
         let s: &str = t.as_ref();
         assert_eq!(s, "hello");
     }
 
     #[test]
-    fn clone_and_eq() {
-        let a = SingleToken::new("abc").unwrap();
+    fn dotted_as_ref_str() {
+        let t = DottedNatsToken::new("hello").unwrap();
+        let s: &str = t.as_ref();
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn single_clone_and_eq() {
+        let a = NatsToken::new("abc").unwrap();
         let b = a.clone();
         assert_eq!(a, b);
     }
 
-    // ── AsciiMultiTokenPolicy (dots ok, ASCII-only) ─────────────────────
-
     #[test]
-    fn ascii_multi_valid_dotted() {
-        assert_eq!(
-            AsciiMultiToken::new("my.multi.part").unwrap().as_str(),
-            "my.multi.part"
-        );
-        assert!(AsciiMultiToken::new("a.b").is_ok());
-        assert!(AsciiMultiToken::new("vendor.operation").is_ok());
-    }
-
-    #[test]
-    fn ascii_multi_valid_simple() {
-        assert!(AsciiMultiToken::new("simple").is_ok());
-        assert!(AsciiMultiToken::new("a").is_ok());
-    }
-
-    #[test]
-    fn ascii_multi_rejects_non_ascii() {
-        assert_eq!(
-            AsciiMultiToken::new("préfixe"),
-            Err(SubjectTokenViolation::InvalidCharacter('é'))
-        );
-    }
-
-    #[test]
-    fn ascii_multi_rejects_malformed_dots() {
-        assert!(AsciiMultiToken::new("..method").is_err());
-        assert!(AsciiMultiToken::new("method..name").is_err());
-        assert!(AsciiMultiToken::new(".method").is_err());
-        assert!(AsciiMultiToken::new("method.").is_err());
-        assert!(AsciiMultiToken::new(".").is_err());
-    }
-
-    #[test]
-    fn ascii_multi_rejects_wildcards() {
-        assert!(AsciiMultiToken::new("a.*").is_err());
-        assert!(AsciiMultiToken::new("a.>").is_err());
-    }
-
-    #[test]
-    fn ascii_multi_rejects_whitespace() {
-        assert!(AsciiMultiToken::new("a b").is_err());
-        assert!(AsciiMultiToken::new("a\t").is_err());
+    fn dotted_clone_and_eq() {
+        let a = DottedNatsToken::new("a.b.c").unwrap();
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

@@ -7,9 +7,8 @@
 //! malformed dots (consecutive, leading, trailing). Max 128 bytes. Validity is guaranteed at
 //! construction.
 
-use crate::nats_token_policies::MultiTokenPolicy;
 use crate::subject_token_violation::SubjectTokenViolation;
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 
 /// Error returned when [`AcpPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,12 +32,12 @@ impl std::error::Error for AcpPrefixError {}
 
 /// NATS-safe ACP prefix. Guarantees validity at construction—invalid instances are unrepresentable.
 #[derive(Clone, Debug)]
-pub struct AcpPrefix(NatsToken<MultiTokenPolicy>);
+pub struct AcpPrefix(DottedNatsToken);
 
 impl AcpPrefix {
     pub fn new(s: impl Into<String>) -> Result<Self, AcpPrefixError> {
         let s = s.into();
-        NatsToken::new(s).map(Self).map_err(AcpPrefixError)
+        DottedNatsToken::new(s).map(Self).map_err(AcpPrefixError)
     }
 
     pub fn as_str(&self) -> &str {

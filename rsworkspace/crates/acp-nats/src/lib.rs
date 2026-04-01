@@ -10,7 +10,6 @@ pub(crate) mod in_flight_slot_guard;
 pub mod jetstream;
 pub(crate) mod jsonrpc;
 pub mod nats;
-pub(crate) mod nats_token_policies;
 pub(crate) mod pending_prompt_waiters;
 pub mod session_id;
 pub mod subject_token_violation;

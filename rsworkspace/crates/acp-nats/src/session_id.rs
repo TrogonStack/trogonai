@@ -5,7 +5,6 @@
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.
 
-use crate::nats_token_policies::SingleTokenPolicy;
 use crate::subject_token_violation::SubjectTokenViolation;
 use trogon_nats::NatsToken;
 
@@ -34,7 +33,7 @@ impl std::error::Error for SessionIdError {}
 /// Follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 /// ASCII only; rejects `.`, `*`, `>`, and whitespace. Max 128 characters.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AcpSessionId(NatsToken<SingleTokenPolicy>);
+pub struct AcpSessionId(NatsToken);
 
 impl AcpSessionId {
     pub fn new(s: impl AsRef<str>) -> Result<Self, SessionIdError> {
