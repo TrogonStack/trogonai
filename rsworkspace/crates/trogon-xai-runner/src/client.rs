@@ -560,6 +560,21 @@ fn process_sse_line(
             pending.push_back(XaiEvent::Error { message });
         }
         "response.completed" | "response.done" => {
+            // The OpenAI Responses API spec puts the response ID at response.id
+            // (nested), not at the top-level id field. xAI's streaming events
+            // (message.delta, function_call) do carry a top-level id, so the
+            // `response_id_emitted` guard at the top of this function handles the
+            // common path. But a stream that emits only response.completed — e.g. a
+            // pure server-side tool turn where no text is streamed, or an empty
+            // continuation — would never see a top-level id and would leave
+            // current_response_id as None, forcing full-history fallback on the
+            // next turn. Extract the nested id here as a fallback.
+            if !*response_id_emitted {
+                if let Some(id) = val["response"]["id"].as_str() {
+                    pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+                    *response_id_emitted = true;
+                }
+            }
             // Usage may be top-level (xAI extension) or nested inside the
             // response object (per OpenAI Responses API spec).
             let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
@@ -872,5 +887,36 @@ mod tests {
         let line = r#"data: {"type":"response.error","message":"unexpected failure"}"#;
         let event = parse_line(line).unwrap();
         assert!(matches!(event, XaiEvent::Error { .. }), "expected Error, got {event:?}");
+    }
+
+    #[test]
+    fn response_completed_nested_id_emitted_when_not_yet_captured() {
+        // When response.completed is the first (or only) event and carries no
+        // top-level id, the nested response.id must be extracted so the agent
+        // can use previous_response_id on the next turn.
+        let line = r#"data: {"type":"response.completed","response":{"id":"resp_nested","status":"completed"}}"#;
+        let events = parse_lines(&[line]);
+        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
+            XaiEvent::ResponseId { id } => Some(id.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(id_events, vec!["resp_nested"], "nested response.id must be emitted as ResponseId");
+    }
+
+    #[test]
+    fn response_completed_nested_id_not_duplicated_when_already_captured() {
+        // If a top-level id was already emitted (from a message.delta), the nested
+        // id in response.completed must NOT produce a second ResponseId event.
+        let lines = &[
+            r#"data: {"id":"resp_toplevel","type":"message.delta","delta":{"type":"output_text","text":"hi"}}"#,
+            r#"data: {"type":"response.completed","response":{"id":"resp_nested","status":"completed"}}"#,
+        ];
+        let events = parse_lines(lines);
+        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
+            XaiEvent::ResponseId { id } => Some(id.as_str()),
+            _ => None,
+        }).collect();
+        // Only the top-level id from message.delta; the nested one is suppressed.
+        assert_eq!(id_events, vec!["resp_toplevel"]);
     }
 }
