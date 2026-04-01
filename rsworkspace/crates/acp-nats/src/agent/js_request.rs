@@ -7,8 +7,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 use trogon_nats::REQ_ID_HEADER;
 use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamConsumerFactory, JetStreamPublisher, JsAck as _,
-    JsAckWith as _, JsMessageRef as _, JsRequestMessage,
+    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher,
+    JsAck as _, JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
 
 use crate::constants::SESSION_ID_HEADER;
@@ -27,29 +27,29 @@ pub async fn js_request<J, Req, Res>(
     operation_timeout: Duration,
 ) -> agent_client_protocol::Result<Res>
 where
-    J: JetStreamPublisher + JetStreamConsumerFactory,
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    J: JetStreamPublisher + JetStreamGetStream,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
     Req: serde::Serialize,
     Res: DeserializeOwned,
 {
     let responses_stream = streams::responses_stream_name(prefix);
     let resp_config = consumers::response_consumer(prefix, session_id, req_id);
-    let resp_consumer: J::Consumer = js
-        .create_consumer(&responses_stream, resp_config)
+    let stream = js
+        .get_stream(&responses_stream)
         .await
-        .map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("create response consumer: {e}"),
-            )
-        })?;
-    let mut resp_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
-        resp_consumer.messages().await.map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("response messages: {e}"),
-            )
-        })?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("get stream: {e}")))?;
+    let resp_consumer = stream.create_consumer(resp_config).await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("create response consumer: {e}"),
+        )
+    })?;
+    let mut resp_messages = resp_consumer.messages().await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("response messages: {e}"),
+        )
+    })?;
 
     let encoded = encode_request(method, RequestId::String(req_id.as_str().to_string()), request)
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
@@ -58,9 +58,11 @@ where
     headers.insert(REQ_ID_HEADER, req_id);
     headers.insert(SESSION_ID_HEADER, session_id);
 
-    js.js_publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
+    js.publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
     match timeout(operation_timeout, resp_messages.next()).await {
         Ok(Some(Ok(js_msg))) => {

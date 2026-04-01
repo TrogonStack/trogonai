@@ -7,8 +7,8 @@ use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamConsumerFactory, JetStreamPublisher, JsAck as _,
-    JsAckWith as _, JsMessageRef as _, JsRequestMessage,
+    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher,
+    JsAck as _, JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
 use trogon_std::JsonSerialize;
 
@@ -33,8 +33,8 @@ pub async fn handle<N, C, J, S>(
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: trogon_std::time::GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    J: JetStreamPublisher + JetStreamGetStream,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
     S: JsonSerialize,
 {
     let start = bridge.clock.now();
@@ -195,8 +195,8 @@ async fn handle_js<N, C, J, S>(
 where
     N: SubscribeClient,
     C: trogon_std::time::GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    J: JetStreamPublisher + JetStreamGetStream,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
     S: JsonSerialize,
 {
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
@@ -204,8 +204,14 @@ where
     // response even if the runner responds before we start consuming.
     let notifications_stream = streams::notifications_stream_name(prefix);
     let notif_config = consumers::prompt_notifications_consumer(prefix, sid, req_id);
-    let notif_consumer: J::Consumer = js
-        .create_consumer(&notifications_stream, notif_config)
+    let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("get notifications stream: {e}"),
+        )
+    })?;
+    let notif_consumer = notif_stream
+        .create_consumer(notif_config)
         .await
         .map_err(|e| {
             Error::new(
@@ -213,18 +219,23 @@ where
                 format!("create notification consumer: {e}"),
             )
         })?;
-    let mut notif_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
-        notif_consumer.messages().await.map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("notification messages: {e}"),
-            )
-        })?;
+    let mut notif_messages = notif_consumer.messages().await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("notification messages: {e}"),
+        )
+    })?;
 
     let responses_stream = streams::responses_stream_name(prefix);
     let resp_config = consumers::prompt_response_consumer(prefix, sid, req_id);
-    let resp_consumer: J::Consumer = js
-        .create_consumer(&responses_stream, resp_config)
+    let resp_stream = js.get_stream(&responses_stream).await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("get responses stream: {e}"),
+        )
+    })?;
+    let resp_consumer = resp_stream
+        .create_consumer(resp_config)
         .await
         .map_err(|e| {
             Error::new(
@@ -232,13 +243,12 @@ where
                 format!("create response consumer: {e}"),
             )
         })?;
-    let mut resp_messages: <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages =
-        resp_consumer.messages().await.map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("response messages: {e}"),
-            )
-        })?;
+    let mut resp_messages = resp_consumer.messages().await.map_err(|e| {
+        Error::new(
+            ErrorCode::InternalError.into(),
+            format!("response messages: {e}"),
+        )
+    })?;
 
     // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
     let mut cancel_sub = bridge
@@ -262,9 +272,11 @@ where
     headers.insert(SESSION_ID_HEADER, sid);
 
     let prompt_subject = session::agent::prompt(prefix, sid);
-    js.js_publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+    js.publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
     let op_timeout = bridge.config.prompt_timeout();
 
@@ -840,6 +852,43 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn prompt_js_get_notif_stream_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+        js.consumer_factory.fail_get_stream_at(1);
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .message
+                .contains("get notifications stream")
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_js_get_resp_stream_failure() {
+        let (mock, js, bridge) = mock_bridge_with_js();
+        let _cancel_tx = mock.inject_messages();
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+        js.consumer_factory.fail_get_stream_at(2);
+        let result = handle(
+            &bridge,
+            PromptRequest::new("s1", vec![]),
+            &trogon_std::StdJsonSerialize,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("get responses stream"));
     }
 
     #[tokio::test]
