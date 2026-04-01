@@ -903,7 +903,20 @@ impl agent_client_protocol::Agent for XaiAgent {
             // - "max_turns" (or unknown): tool-call iterations were exhausted.
             //   The model has all tool results in context but hasn't answered yet.
             //   Re-send the original question so the model produces the final answer.
-            if needs_continuation && continuations < MAX_CONTINUATIONS && stream_error.is_none() {
+            if needs_continuation && stream_error.is_none() {
+                // Guard: prevent infinite loops when the model is repeatedly
+                // Incomplete. When MAX_CONTINUATIONS is exhausted the partial
+                // text accumulated so far is saved (the else-if branch below)
+                // and the caller receives Cancelled — distinct from EndTurn so
+                // the ACP client knows the output is incomplete.
+                if continuations >= MAX_CONTINUATIONS {
+                    warn!(
+                        session_id,
+                        MAX_CONTINUATIONS,
+                        "xai: max continuations reached — returning partial response as Cancelled"
+                    );
+                    break 'outer StopReason::Cancelled;
+                }
                 if let Some(resp_id) = current_response_id.clone() {
                     info!(
                         session_id,
