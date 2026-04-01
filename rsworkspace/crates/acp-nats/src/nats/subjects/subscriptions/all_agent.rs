@@ -6,7 +6,9 @@ pub struct AllAgentSubject {
 
 impl AllAgentSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self { prefix: prefix.clone() }
+        Self {
+            prefix: prefix.clone(),
+        }
     }
 }
 
@@ -23,7 +25,3 @@ impl async_nats::subject::ToSubject for AllAgentSubject {
 }
 
 impl super::super::markers::Subscribable for AllAgentSubject {}
-
-impl super::super::stream::StreamAssignment for AllAgentSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = None;
-}

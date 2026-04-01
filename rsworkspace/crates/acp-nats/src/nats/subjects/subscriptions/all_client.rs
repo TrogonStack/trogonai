@@ -6,7 +6,9 @@ pub struct AllClientSubject {
 
 impl AllClientSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self { prefix: prefix.clone() }
+        Self {
+            prefix: prefix.clone(),
+        }
     }
 }
 
@@ -23,7 +25,3 @@ impl async_nats::subject::ToSubject for AllClientSubject {
 }
 
 impl super::super::markers::Subscribable for AllClientSubject {}
-
-impl super::super::stream::StreamAssignment for AllClientSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = None;
-}

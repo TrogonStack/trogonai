@@ -34,28 +34,32 @@ fn to_acp_error(e: impl std::fmt::Display) -> Error {
 }
 
 impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
-    fn prefix(&self) -> &str {
-        self.prefix.as_str()
+    fn prefix(&self) -> &AcpPrefix {
+        &self.prefix
     }
 
-    fn session_id(&self) -> &str {
-        self.session_id.as_str()
+    fn session_id(&self) -> &AcpSessionId {
+        &self.session_id
     }
 
     async fn request<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
         &self,
-        subject: &str,
+        subject: &impl crate::nats::markers::ClientRequestable,
         args: &Req,
     ) -> Result<Resp> {
-        request_with_timeout(&self.nats, subject, args, self.timeout)
+        request_with_timeout(&self.nats, &subject.to_string(), args, self.timeout)
             .await
             .map_err(to_acp_error)
     }
 
-    async fn notify<Req: serde::Serialize>(&self, subject: &str, args: &Req) -> Result<()> {
+    async fn notify<Req: serde::Serialize>(
+        &self,
+        subject: &impl crate::nats::markers::ClientRequestable,
+        args: &Req,
+    ) -> Result<()> {
         publish(
             &self.nats,
-            subject,
+            &subject.to_string(),
             args,
             trogon_nats::PublishOptions::default(),
         )
@@ -70,32 +74,33 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse> {
-        let s = session::client::session_request_permission(self.prefix(), self.session_id());
+        let s =
+            session::client::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
-        let s = session::client::session_update(self.prefix(), self.session_id());
+        let s = session::client::SessionUpdateSubject::new(self.prefix(), self.session_id());
         self.notify(&s, &args).await
     }
 
     async fn read_text_file(&self, args: ReadTextFileRequest) -> Result<ReadTextFileResponse> {
-        let s = session::client::fs_read_text_file(self.prefix(), self.session_id());
+        let s = session::client::FsReadTextFileSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn write_text_file(&self, args: WriteTextFileRequest) -> Result<WriteTextFileResponse> {
-        let s = session::client::fs_write_text_file(self.prefix(), self.session_id());
+        let s = session::client::FsWriteTextFileSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn create_terminal(&self, args: CreateTerminalRequest) -> Result<CreateTerminalResponse> {
-        let s = session::client::terminal_create(self.prefix(), self.session_id());
+        let s = session::client::TerminalCreateSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn terminal_output(&self, args: TerminalOutputRequest) -> Result<TerminalOutputResponse> {
-        let s = session::client::terminal_output(self.prefix(), self.session_id());
+        let s = session::client::TerminalOutputSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
@@ -103,7 +108,7 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: ReleaseTerminalRequest,
     ) -> Result<ReleaseTerminalResponse> {
-        let s = session::client::terminal_release(self.prefix(), self.session_id());
+        let s = session::client::TerminalReleaseSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
@@ -111,12 +116,12 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
         &self,
         args: WaitForTerminalExitRequest,
     ) -> Result<WaitForTerminalExitResponse> {
-        let s = session::client::terminal_wait_for_exit(self.prefix(), self.session_id());
+        let s = session::client::TerminalWaitForExitSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
-        let s = session::client::terminal_kill(self.prefix(), self.session_id());
+        let s = session::client::TerminalKillSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 }

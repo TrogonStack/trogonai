@@ -1,15 +1,15 @@
-/// Core NATS request/reply.
+/// Core NATS request/reply. Stream: GLOBAL_EXT (observability).
 #[derive(Debug)]
 pub struct ExtSubject {
     prefix: crate::acp_prefix::AcpPrefix,
-    method: crate::ext_method_name::ExtMethodName,
+    method: String,
 }
 
 impl ExtSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &crate::ext_method_name::ExtMethodName) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &str) -> Self {
         Self {
             prefix: prefix.clone(),
-            method: method.clone(),
+            method: method.to_string(),
         }
     }
 }
@@ -21,7 +21,3 @@ impl std::fmt::Display for ExtSubject {
 }
 
 impl super::super::markers::Requestable for ExtSubject {}
-
-impl super::super::stream::StreamAssignment for ExtSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::GlobalExt);
-}

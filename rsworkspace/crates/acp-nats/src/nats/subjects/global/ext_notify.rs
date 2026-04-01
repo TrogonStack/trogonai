@@ -1,15 +1,15 @@
-/// Core NATS publish (fire-and-forget notification).
+/// Core NATS publish (fire-and-forget notification). Stream: GLOBAL_EXT (observability).
 #[derive(Debug)]
 pub struct ExtNotifySubject {
     prefix: crate::acp_prefix::AcpPrefix,
-    method: crate::ext_method_name::ExtMethodName,
+    method: String,
 }
 
 impl ExtNotifySubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &crate::ext_method_name::ExtMethodName) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &str) -> Self {
         Self {
             prefix: prefix.clone(),
-            method: method.clone(),
+            method: method.to_string(),
         }
     }
 }
@@ -21,7 +21,3 @@ impl std::fmt::Display for ExtNotifySubject {
 }
 
 impl super::super::markers::Publishable for ExtNotifySubject {}
-
-impl super::super::stream::StreamAssignment for ExtNotifySubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::GlobalExt);
-}

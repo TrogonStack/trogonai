@@ -108,7 +108,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
 impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> Bridge<N, C, J> {
     pub(crate) fn schedule_session_ready(&self, session_id: SessionId) {
         let nats = self.nats.clone();
-        let prefix = self.config.acp_prefix().to_string();
+        let prefix = self.config.acp_prefix_ref().clone();
         let metrics = self.metrics.clone();
         let handle = tokio::spawn(async move {
             publish_session_ready(&nats, &prefix, &session_id, &metrics).await;
@@ -119,13 +119,21 @@ impl<N: PublishClient + FlushClient + Clone + Send + 'static, C: GetElapsed, J> 
 
 async fn publish_session_ready<N: PublishClient + FlushClient>(
     nats: &N,
-    prefix: &str,
+    prefix: &crate::acp_prefix::AcpPrefix,
     session_id: &SessionId,
     metrics: &Metrics,
 ) {
     tokio::time::sleep(SESSION_READY_DELAY).await;
 
-    let subject = session::agent::ext_ready(prefix, &session_id.to_string());
+    let acp_session_id = match crate::session_id::AcpSessionId::new(session_id.to_string()) {
+        Ok(id) => id,
+        Err(e) => {
+            warn!(session_id = %session_id, error = %e, "Invalid session ID from backend, skipping session.ready");
+            metrics.record_error("session_ready", "invalid_session_id");
+            return;
+        }
+    };
+    let subject = session::agent::ExtReadySubject::new(prefix, &acp_session_id);
     info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
 
     let message = ExtSessionReady::new(session_id.clone());
@@ -157,7 +165,7 @@ where
 {
     pub(crate) async fn session_request<Req, Res>(
         &self,
-        subject: &str,
+        subject: &impl crate::nats::markers::SessionCommand,
         args: &Req,
         session_id: &str,
     ) -> Result<Res>
@@ -167,12 +175,13 @@ where
     {
         use crate::error::map_nats_error;
 
+        let subject_str = subject.to_string();
         match self.js() {
             Some(js) => {
                 let req_id = uuid::Uuid::new_v4().to_string();
                 js_request::js_request::<J, _, Res, _>(
                     js,
-                    subject,
+                    &subject_str,
                     args,
                     &trogon_std::StdJsonSerialize,
                     self.config.acp_prefix(),
@@ -182,9 +191,9 @@ where
                 )
                 .await
             }
-            None => nats::request_with_timeout::<N, Req, Res>(
+            None => trogon_nats::request_with_timeout::<N, Req, Res>(
                 self.nats(),
-                subject,
+                &subject_str,
                 args,
                 self.config.operation_timeout,
             )

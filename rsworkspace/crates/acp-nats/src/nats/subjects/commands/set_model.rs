@@ -1,4 +1,4 @@
-/// Set session model.
+/// Set session model. Stream: COMMANDS.
 #[derive(Debug)]
 pub struct SetModelSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -6,7 +6,10 @@ pub struct SetModelSubject {
 }
 
 impl SetModelSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        session_id: &crate::session_id::AcpSessionId,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -32,7 +35,3 @@ impl async_nats::subject::ToSubject for SetModelSubject {
 }
 
 impl super::super::markers::SessionCommand for SetModelSubject {}
-
-impl super::super::stream::StreamAssignment for SetModelSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Commands);
-}
