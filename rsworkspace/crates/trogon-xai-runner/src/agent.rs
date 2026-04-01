@@ -770,6 +770,13 @@ impl agent_client_protocol::Agent for XaiAgent {
                                 // of a silent empty response.
                                 stream_error = Some(internal_error("xAI response failed"));
                             }
+                            FinishReason::Cancelled => {
+                                // xAI cancelled the response server-side (safety filter,
+                                // content policy, quota). Not the same as our client-side
+                                // cancel — the user's prompt was rejected. Surface as an
+                                // error so the caller knows why they got no output.
+                                stream_error = Some(internal_error("xAI cancelled the response"));
+                            }
                             _ => {}
                         }
                     }
@@ -812,9 +819,17 @@ impl agent_client_protocol::Agent for XaiAgent {
                         // `continuation_in_progress` ensures a continuation error
                         // surfaces to the caller instead of silently restarting the
                         // model from scratch with a different response.
+                        //
+                        // 4xx errors (auth failure, bad request, quota) are NOT retried:
+                        // the stale-ID theory only applies to context/expiry errors. A
+                        // 401/403 would just repeat with the same key and fail again,
+                        // wasting one API call. The heuristic checks for "error 4" in the
+                        // formatted message produced by start_request ("xAI API error 4XX:…").
+                        let is_client_error = message.contains("error 4");
                         if current_prev_response_id.is_some()
                             && !stale_retry_done
                             && !continuation_in_progress
+                            && !is_client_error
                         {
                             warn!(session_id, error = %message,
                                 "xai: error with previous_response_id — retrying with full history");
@@ -823,6 +838,12 @@ impl agent_client_protocol::Agent for XaiAgent {
                             // partial Incomplete turn) — the retry produces a fresh response
                             // and must not be concatenated with the truncated text.
                             assistant_text.clear();
+                            // Also clear current_response_id: if the failed stream emitted
+                            // an ID before the error, that ID is from a failed request and
+                            // must not be saved as last_response_id. If the retry succeeds
+                            // it will set a fresh ID; if it fails too, None is the right
+                            // value (forces full-history rebuild on the next prompt).
+                            current_response_id = None;
                             current_prev_response_id = None;
                             current_input = build_full_history_input(&session, &user_input, resuming);
                             continue 'outer;

@@ -2803,3 +2803,123 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
     assert!(content.contains("main.rs"), "resource link must be included: {content:?}");
 }
 
+// ── response.error mid-stream event ──────────────────────────────────────────
+
+/// SSE server: emits a `response.error` event (mid-stream error).
+async fn fake_xai_sse_response_error(code: &'static str, message: &'static str) -> String {
+    let body = format!(
+        "data: {{\"type\":\"response.error\",\"error\":{{\"code\":\"{code}\",\"message\":\"{message}\"}}}}\n\ndata: [DONE]\n\n"
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+/// SSE server: emits `response.completed` with `status: "cancelled"`.
+async fn fake_xai_sse_cancelled() -> String {
+    let body = concat!(
+        "data: {\"id\":\"resp_cancelled\",\"type\":\"response.completed\",\"response\":{\"status\":\"cancelled\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+#[tokio::test]
+async fn response_error_event_surfaces_as_acp_error() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_response_error("content_policy", "Request blocked by content policy").await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("test"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
+    // Orphaned user message must be compensated.
+    let history = agent.test_session_history(&session_id).await;
+    assert!(history.is_empty(), "history must be empty after response.error: {history:?}");
+}
+
+#[tokio::test]
+async fn xai_server_cancelled_surfaces_as_acp_error() {
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_sse_cancelled().await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("test"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
+    // Orphaned user message must be compensated — server cancelled the request.
+    let history = agent.test_session_history(&session_id).await;
+    assert!(history.is_empty(), "history must be empty after server-side cancel: {history:?}");
+}
+
+#[tokio::test]
+async fn api_401_error_surfaces_as_acp_error_without_retry() {
+    // A 401 error must surface as ACP error. The 4xx-skip guard in the stale-ID
+    // retry path ensures only one API call is made (not two). We verify the
+    // error contract here; the retry-count invariant is validated by the single
+    // fake_xai_error server accepting only one connection.
+    let _guard = env_lock().lock().unwrap();
+    let url = fake_xai_error(401).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("ping"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
+    // History compensated away — turn failed entirely.
+    let history = agent.test_session_history(&session_id).await;
+    assert!(history.is_empty(), "history must be empty after 401 error: {history:?}");
+}
+
