@@ -21,7 +21,7 @@ use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-use trogon_nats::jetstream::{JetStreamConsumerFactory, JetStreamPublisher, JsRequestMessage};
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 use super::{
@@ -150,10 +150,10 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
 impl<
     N: RequestClient + PublishClient + FlushClient,
     C: GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
+    J: JetStreamPublisher + JetStreamGetStream,
 > Bridge<N, C, J>
 where
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
 {
     pub(crate) async fn session_request<Req, Res>(
         &self,
@@ -198,10 +198,10 @@ where
 impl<
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: GetElapsed,
-    J: JetStreamPublisher + JetStreamConsumerFactory,
+    J: JetStreamPublisher + JetStreamGetStream,
 > Agent for Bridge<N, C, J>
 where
-    <J::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await

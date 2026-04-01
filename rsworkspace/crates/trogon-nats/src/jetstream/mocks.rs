@@ -13,7 +13,8 @@ use futures::stream::BoxStream;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
-    JetStreamConsumer, JetStreamConsumerFactory, JetStreamContext, JetStreamPublisher,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
+    JetStreamPublisher,
 };
 use crate::mocks::MockError;
 
@@ -171,6 +172,7 @@ impl Default for MockJetStreamContext {
 
 impl JetStreamContext for MockJetStreamContext {
     type Error = MockError;
+    type Stream = ();
 
     async fn get_or_create_stream<S: Into<stream::Config> + Send>(
         &self,
@@ -254,13 +256,14 @@ impl Default for MockJetStreamPublisher {
 
 impl JetStreamPublisher for MockJetStreamPublisher {
     type PublishError = MockError;
+    type AckFuture = std::future::Ready<Result<PublishAck, MockError>>;
 
-    async fn js_publish_with_headers<S: ToSubject + Send>(
+    async fn publish_with_headers<S: ToSubject + Send>(
         &self,
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAck, MockError> {
+    ) -> Result<Self::AckFuture, MockError> {
         let subject = subject.to_subject().to_string();
         let should_fail = {
             let mut count = self.publish_fail_count.lock().unwrap();
@@ -288,13 +291,13 @@ impl JetStreamPublisher for MockJetStreamPublisher {
             current
         };
 
-        Ok(PublishAck {
+        Ok(std::future::ready(Ok(PublishAck {
             stream: "mock-stream".to_string(),
             sequence: seq,
             domain: String::new(),
             duplicate: false,
             value: None,
-        })
+        })))
     }
 }
 
@@ -302,12 +305,16 @@ impl JetStreamPublisher for MockJetStreamPublisher {
 
 pub struct MockJetStreamConsumerFactory {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
+    get_stream_fail_at: Arc<Mutex<Option<u32>>>,
+    get_stream_call_count: Arc<Mutex<u32>>,
 }
 
 impl Clone for MockJetStreamConsumerFactory {
     fn clone(&self) -> Self {
         Self {
             consumers: self.consumers.clone(),
+            get_stream_fail_at: self.get_stream_fail_at.clone(),
+            get_stream_call_count: self.get_stream_call_count.clone(),
         }
     }
 }
@@ -316,11 +323,17 @@ impl MockJetStreamConsumerFactory {
     pub fn new() -> Self {
         Self {
             consumers: Arc::new(Mutex::new(VecDeque::new())),
+            get_stream_fail_at: Arc::new(Mutex::new(None)),
+            get_stream_call_count: Arc::new(Mutex::new(0)),
         }
     }
 
     pub fn add_consumer(&self, consumer: MockJetStreamConsumer) {
         self.consumers.lock().unwrap().push_back(consumer);
+    }
+
+    pub fn fail_get_stream_at(&self, call_number: u32) {
+        *self.get_stream_fail_at.lock().unwrap() = Some(call_number);
     }
 }
 
@@ -330,13 +343,40 @@ impl Default for MockJetStreamConsumerFactory {
     }
 }
 
-impl JetStreamConsumerFactory for MockJetStreamConsumerFactory {
+pub struct MockJetStreamStream {
+    consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
+}
+
+impl JetStreamGetStream for MockJetStreamConsumerFactory {
+    type Error = MockError;
+    type Stream = MockJetStreamStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(
+        &self,
+        _stream_name: T,
+    ) -> Result<MockJetStreamStream, MockError> {
+        let mut count = self.get_stream_call_count.lock().unwrap();
+        *count += 1;
+        let current = *count;
+        drop(count);
+
+        if let Some(fail_at) = *self.get_stream_fail_at.lock().unwrap()
+            && current == fail_at
+        {
+            return Err(MockError("simulated get_stream failure".to_string()));
+        }
+        Ok(MockJetStreamStream {
+            consumers: self.consumers.clone(),
+        })
+    }
+}
+
+impl JetStreamCreateConsumer for MockJetStreamStream {
     type Error = MockError;
     type Consumer = MockJetStreamConsumer;
 
     async fn create_consumer(
         &self,
-        _stream_name: &str,
         _config: pull::Config,
     ) -> Result<MockJetStreamConsumer, MockError> {
         self.consumers
@@ -373,7 +413,8 @@ impl MockJetStreamConsumer {
 }
 
 impl JetStreamConsumer for MockJetStreamConsumer {
-    type Error = MockError;
+    type MessagesError = MockError;
+    type StreamError = MockError;
     type Message = MockJsMessage;
     type Messages = BoxStream<'static, Result<MockJsMessage, MockError>>;
 
@@ -478,11 +519,13 @@ mod tests {
     async fn mock_publisher_records_publishes() {
         let pub_mock = MockJetStreamPublisher::new();
         let ack = pub_mock
-            .js_publish_with_headers(
+            .publish_with_headers(
                 "test.subject".to_string(),
                 HeaderMap::new(),
                 Bytes::from("hello"),
             )
+            .await
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(ack.sequence, 1);
@@ -494,11 +537,15 @@ mod tests {
     async fn mock_publisher_increments_sequence() {
         let pub_mock = MockJetStreamPublisher::new();
         let ack1 = pub_mock
-            .js_publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
+            .publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
+            .await
+            .unwrap()
             .await
             .unwrap();
         let ack2 = pub_mock
-            .js_publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+            .publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+            .await
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(ack1.sequence, 1);
@@ -510,12 +557,12 @@ mod tests {
         let pub_mock = MockJetStreamPublisher::new();
         pub_mock.fail_next_js_publish();
         let result = pub_mock
-            .js_publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
+            .publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
             .await;
         assert!(result.is_err());
 
         let result = pub_mock
-            .js_publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
+            .publish_with_headers("test".to_string(), HeaderMap::new(), Bytes::new())
             .await;
         assert!(result.is_ok());
     }
@@ -528,18 +575,19 @@ mod tests {
         factory.add_consumer(consumer1);
         factory.add_consumer(consumer2);
 
-        let _c1 =
-            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
-                .await
-                .unwrap();
-        let _c2 =
-            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
-                .await
-                .unwrap();
+        let stream = JetStreamGetStream::get_stream(&factory, "stream")
+            .await
+            .unwrap();
+        let _c1 = stream
+            .create_consumer(pull::Config::default())
+            .await
+            .unwrap();
+        let _c2 = stream
+            .create_consumer(pull::Config::default())
+            .await
+            .unwrap();
 
-        let result =
-            JetStreamConsumerFactory::create_consumer(&factory, "stream", pull::Config::default())
-                .await;
+        let result = stream.create_consumer(pull::Config::default()).await;
         assert!(result.is_err());
     }
 
@@ -589,19 +637,21 @@ mod tests {
         pub_mock.fail_js_publish_count(2);
         assert!(
             pub_mock
-                .js_publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
+                .publish_with_headers("a".to_string(), HeaderMap::new(), Bytes::new())
                 .await
                 .is_err()
         );
         assert!(
             pub_mock
-                .js_publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
+                .publish_with_headers("b".to_string(), HeaderMap::new(), Bytes::new())
                 .await
                 .is_err()
         );
         assert!(
             pub_mock
-                .js_publish_with_headers("c".to_string(), HeaderMap::new(), Bytes::new())
+                .publish_with_headers("c".to_string(), HeaderMap::new(), Bytes::new())
+                .await
+                .unwrap()
                 .await
                 .is_ok()
         );
