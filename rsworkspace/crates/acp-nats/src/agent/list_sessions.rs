@@ -15,7 +15,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!("List sessions request");
 
     let nats = bridge.nats();
-    let subject = agent::session_list(bridge.config.acp_prefix());
+    let subject = agent::SessionListSubject::new(bridge.config.acp_prefix_ref());
 
     let result = nats::request_with_timeout::<N, ListSessionsRequest, ListSessionsResponse>(
         nats,

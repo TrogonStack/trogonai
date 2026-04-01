@@ -37,8 +37,8 @@ where
             format!("Invalid session ID: {}", e),
         )
     })?;
-    let prefix = bridge.config.acp_prefix();
-    let subject = session::agent::set_config_option(prefix, session_id.as_str());
+    let prefix = bridge.config.acp_prefix_ref();
+    let subject = session::agent::SetConfigOptionSubject::new(prefix, &session_id);
 
     let result = bridge
         .session_request::<SetSessionConfigOptionRequest, SetSessionConfigOptionResponse>(

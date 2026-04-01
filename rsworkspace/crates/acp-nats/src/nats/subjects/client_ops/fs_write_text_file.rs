@@ -1,4 +1,4 @@
-/// Agent -> bridge. Core NATS request/reply.
+/// Agent -> bridge. Core NATS request/reply. Stream: CLIENT_OPS.
 #[derive(Debug)]
 pub struct FsWriteTextFileSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -6,7 +6,10 @@ pub struct FsWriteTextFileSubject {
 }
 
 impl FsWriteTextFileSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        session_id: &crate::session_id::AcpSessionId,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -26,7 +29,3 @@ impl std::fmt::Display for FsWriteTextFileSubject {
 }
 
 impl super::super::markers::ClientRequestable for FsWriteTextFileSubject {}
-
-impl super::super::stream::StreamAssignment for FsWriteTextFileSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::ClientOps);
-}

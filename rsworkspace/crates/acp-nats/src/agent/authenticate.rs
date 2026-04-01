@@ -21,7 +21,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     let result = nats::request_with_timeout::<N, AuthenticateRequest, AuthenticateResponse>(
         nats,
-        &agent::authenticate(bridge.config.acp_prefix()),
+        &agent::AuthenticateSubject::new(bridge.config.acp_prefix_ref()),
         &args,
         bridge.config.operation_timeout,
     )

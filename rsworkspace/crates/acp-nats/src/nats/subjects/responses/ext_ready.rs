@@ -1,4 +1,4 @@
-/// Agent -> bridge signal.
+/// Agent -> bridge signal. Stream: RESPONSES.
 #[derive(Debug)]
 pub struct ExtReadySubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -6,7 +6,10 @@ pub struct ExtReadySubject {
 }
 
 impl ExtReadySubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        session_id: &crate::session_id::AcpSessionId,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -26,7 +29,3 @@ impl std::fmt::Display for ExtReadySubject {
 }
 
 impl super::super::markers::Publishable for ExtReadySubject {}
-
-impl super::super::stream::StreamAssignment for ExtReadySubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Responses);
-}

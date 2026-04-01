@@ -1,4 +1,4 @@
-/// Cancel in-flight prompt.
+/// Cancel in-flight prompt. Stream: COMMANDS.
 #[derive(Debug)]
 pub struct CancelSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -6,7 +6,10 @@ pub struct CancelSubject {
 }
 
 impl CancelSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        session_id: &crate::session_id::AcpSessionId,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -32,7 +35,3 @@ impl async_nats::subject::ToSubject for CancelSubject {
 }
 
 impl super::super::markers::Publishable for CancelSubject {}
-
-impl super::super::stream::StreamAssignment for CancelSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Commands);
-}

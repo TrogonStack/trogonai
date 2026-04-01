@@ -45,12 +45,11 @@ where
     })?;
 
     let req_id = uuid::Uuid::new_v4().to_string();
-    let sid = session_id.as_ref();
-    let prefix = bridge.config.acp_prefix();
+    let prefix = bridge.config.acp_prefix_ref();
 
     let result = match bridge.js() {
-        Some(js) => handle_js(bridge, js, &args, serializer, sid, prefix, &req_id).await,
-        None => handle_nats(bridge, &args, serializer, sid, prefix, &req_id).await,
+        Some(js) => handle_js(bridge, js, &args, serializer, &session_id, prefix, &req_id).await,
+        None => handle_nats(bridge, &args, serializer, &session_id, prefix, &req_id).await,
     };
 
     bridge.metrics.record_request(
@@ -66,8 +65,8 @@ async fn handle_nats<N, C, J, S>(
     bridge: &Bridge<N, C, J>,
     args: &PromptRequest,
     serializer: &S,
-    sid: &str,
-    prefix: &str,
+    session_id: &AcpSessionId,
+    prefix: &crate::acp_prefix::AcpPrefix,
     req_id: &str,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
@@ -78,19 +77,23 @@ where
     // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
     let mut notifications_sub = bridge
         .nats
-        .subscribe(session::agent::update(prefix, sid, req_id))
+        .subscribe(session::agent::UpdateSubject::new(
+            prefix, session_id, req_id,
+        ))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut response_sub = bridge
         .nats
-        .subscribe(session::agent::prompt_response(prefix, sid, req_id))
+        .subscribe(session::agent::PromptResponseSubject::new(
+            prefix, session_id, req_id,
+        ))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut cancel_sub = bridge
         .nats
-        .subscribe(session::agent::cancelled(prefix, sid))
+        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
         .await
         .map_err(|e| {
             Error::new(
@@ -105,9 +108,9 @@ where
 
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id);
-    headers.insert(SESSION_ID_HEADER, sid);
+    headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
-    let prompt_subject = session::agent::prompt(prefix, sid);
+    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
     bridge
         .nats
         .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
@@ -188,8 +191,8 @@ async fn handle_js<N, C, J, S>(
     js: &J,
     args: &PromptRequest,
     serializer: &S,
-    sid: &str,
-    prefix: &str,
+    session_id: &AcpSessionId,
+    prefix: &crate::acp_prefix::AcpPrefix,
     req_id: &str,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
@@ -202,8 +205,10 @@ where
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
     // JetStream consumers with DeliverAll replay from stream start, so they'll see the
     // response even if the runner responds before we start consuming.
-    let notifications_stream = streams::notifications_stream_name(prefix);
-    let notif_config = consumers::prompt_notifications_consumer(prefix, sid, req_id);
+    let sid = session_id.as_str();
+    let pfx = prefix.as_str();
+    let notifications_stream = streams::notifications_stream_name(pfx);
+    let notif_config = consumers::prompt_notifications_consumer(pfx, sid, req_id);
     let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -226,8 +231,8 @@ where
         )
     })?;
 
-    let responses_stream = streams::responses_stream_name(prefix);
-    let resp_config = consumers::prompt_response_consumer(prefix, sid, req_id);
+    let responses_stream = streams::responses_stream_name(pfx);
+    let resp_config = consumers::prompt_response_consumer(pfx, sid, req_id);
     let resp_stream = js.get_stream(&responses_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -253,7 +258,7 @@ where
     // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
     let mut cancel_sub = bridge
         .nats
-        .subscribe(session::agent::cancelled(prefix, sid))
+        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
         .await
         .map_err(|e| {
             Error::new(
@@ -271,7 +276,7 @@ where
     headers.insert(REQ_ID_HEADER, req_id);
     headers.insert(SESSION_ID_HEADER, sid);
 
-    let prompt_subject = session::agent::prompt(prefix, sid);
+    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
     js.publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?

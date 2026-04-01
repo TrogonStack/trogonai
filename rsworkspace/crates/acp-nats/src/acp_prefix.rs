@@ -34,7 +34,7 @@ impl std::fmt::Display for AcpPrefixError {
 impl std::error::Error for AcpPrefixError {}
 
 /// NATS-safe ACP prefix. Guarantees validity at construction—invalid instances are unrepresentable.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AcpPrefix(Arc<str>);
 
 impl AcpPrefix {

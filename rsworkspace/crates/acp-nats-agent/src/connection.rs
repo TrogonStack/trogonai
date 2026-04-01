@@ -82,7 +82,7 @@ where
         impl std::future::Future<Output = Result<(), ConnectionError>>,
     ) {
         let nats_for_serve = nats.clone();
-        let prefix = acp_prefix.as_str().to_string();
+        let prefix = acp_prefix.clone();
 
         let io_task = async move { serve(agent, nats_for_serve, &prefix, spawn).await };
 
@@ -110,7 +110,7 @@ where
     {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
-        let prefix = acp_prefix.as_str().to_string();
+        let prefix = acp_prefix.clone();
         let prefix_js = prefix.clone();
 
         let io_task = async move {
@@ -146,15 +146,15 @@ where
 async fn serve<N, A>(
     agent: A,
     nats: N,
-    prefix: &str,
+    prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
 ) -> Result<(), ConnectionError>
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: Agent + 'static,
 {
-    let global_wildcard = acp_nats::nats::agent::wildcards::all(prefix);
-    let session_wildcard = acp_nats::nats::session::wildcards::all_agent(prefix);
+    let global_wildcard = acp_nats::nats::agent::wildcards::GlobalAllSubject::new(prefix);
+    let session_wildcard = acp_nats::nats::session::wildcards::AllAgentSubject::new(prefix);
 
     info!(
         global = %global_wildcard,
@@ -192,15 +192,15 @@ where
 async fn serve_global<N, A>(
     agent: Rc<A>,
     nats: N,
-    prefix: &str,
+    prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
 ) -> Result<(), ConnectionError>
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: Agent + 'static,
 {
-    let global_wildcard = acp_nats::nats::agent::wildcards::all(prefix);
-    let ext_wildcard = acp_nats::nats::session::wildcards::all_agent_ext(prefix);
+    let global_wildcard = acp_nats::nats::agent::wildcards::GlobalAllSubject::new(prefix);
+    let ext_wildcard = acp_nats::nats::session::wildcards::AllAgentExtSubject::new(prefix);
 
     info!(
         global = %global_wildcard,
@@ -473,7 +473,7 @@ async fn serve_js<N, J, A>(
     agent: Rc<A>,
     nats: N,
     js: J,
-    prefix: &str,
+    prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
 ) -> Result<(), ConnectionError>
 where
@@ -482,7 +482,7 @@ where
     <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
     A: Agent + 'static,
 {
-    let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix);
+    let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix.as_str());
     let config = acp_nats::jetstream::consumers::commands_observer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
@@ -504,7 +504,7 @@ where
 
     let nats = Rc::new(nats);
 
-    let prefix = Rc::new(prefix.to_string());
+    let prefix = Rc::new(prefix.clone());
 
     while let Some(msg_result) = messages.next().await {
         match msg_result {
@@ -530,7 +530,7 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
     js_msg: M,
     agent: &A,
     nats: &N,
-    prefix: &str,
+    prefix: &AcpPrefix,
 ) {
     let subject = js_msg.message().subject.to_string();
 
@@ -561,16 +561,16 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
         .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
         .map(|v| v.as_str().to_string());
 
-    let reply_subject = match (&req_id, &method) {
+    let reply_subject: Option<String> = match (&req_id, &method) {
         (Some(rid), SessionAgentMethod::Prompt) => Some(
-            acp_nats::nats::session::agent::prompt_response(prefix, session_id.as_str(), rid),
+            acp_nats::nats::session::agent::PromptResponseSubject::new(prefix, &session_id, rid)
+                .to_string(),
         ),
         (_, SessionAgentMethod::Cancel) => None,
-        (Some(rid), _) => Some(acp_nats::nats::session::agent::response(
-            prefix,
-            session_id.as_str(),
-            rid,
-        )),
+        (Some(rid), _) => Some(
+            acp_nats::nats::session::agent::ResponseSubject::new(prefix, &session_id, rid)
+                .to_string(),
+        ),
         (None, _) => {
             warn!(subject, "JetStream message missing X-Req-Id header");
             None
@@ -580,7 +580,7 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
     let inner = js_msg.message();
     let msg = Message {
         subject: subject.as_str().into(),
-        reply: reply_subject.as_deref().map(|s| s.into()),
+        reply: reply_subject.map(|s| s.into()),
         payload: inner.payload.clone(),
         headers: inner.headers.clone(),
         status: None,
@@ -795,6 +795,18 @@ mod tests {
 
     fn init_request() -> InitializeRequest {
         InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0)
+    }
+
+    fn test_prefix() -> AcpPrefix {
+        AcpPrefix::new("acp").expect("test prefix")
+    }
+
+    fn test_prefix_custom(s: &str) -> AcpPrefix {
+        AcpPrefix::new(s).expect("test prefix")
+    }
+
+    fn test_session_id(s: &str) -> AcpSessionId {
+        AcpSessionId::new(s).expect("test session id")
     }
 
     #[tokio::test]
@@ -1048,14 +1060,10 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let (conn, io_task) = AgentSideNatsConnection::new(
-                    MockAgent::new(),
-                    nats,
-                    AcpPrefix::new("acp").unwrap(),
-                    |fut| {
+                let (conn, io_task) =
+                    AgentSideNatsConnection::new(MockAgent::new(), nats, test_prefix(), |fut| {
                         tokio::task::spawn_local(fut);
-                    },
-                );
+                    });
 
                 assert_eq!(conn.acp_prefix.as_str(), "acp");
 
@@ -1076,16 +1084,12 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let (conn, io_task) = AgentSideNatsConnection::new(
-                    MockAgent::new(),
-                    nats,
-                    AcpPrefix::new("acp").unwrap(),
-                    |fut| {
+                let (conn, io_task) =
+                    AgentSideNatsConnection::new(MockAgent::new(), nats, test_prefix(), |fut| {
                         tokio::task::spawn_local(fut);
-                    },
-                );
+                    });
 
-                let _client = conn.client_for_session(AcpSessionId::new("sess-1").unwrap());
+                let _client = conn.client_for_session(test_session_id("sess-1"));
 
                 let result = io_task.await;
                 assert!(result.is_ok());
@@ -1131,7 +1135,7 @@ mod tests {
                     agent,
                     nats,
                     factory,
-                    AcpPrefix::new("acp").unwrap(),
+                    test_prefix(),
                     |fut| {
                         tokio::task::spawn_local(fut);
                     },
@@ -1159,9 +1163,14 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let _ = serve_global(Rc::new(agent), nats.clone(), "myprefix", |fut| {
-                    tokio::task::spawn_local(fut);
-                })
+                let _ = serve_global(
+                    Rc::new(agent),
+                    nats.clone(),
+                    &test_prefix_custom("myprefix"),
+                    |fut| {
+                        tokio::task::spawn_local(fut);
+                    },
+                )
                 .await;
 
                 let subjects = nats.subscribed_to();
@@ -1200,7 +1209,7 @@ mod tests {
                 drop(global_tx);
                 drop(ext_tx);
 
-                let _ = serve_global(Rc::new(agent), nats.clone(), "acp", |fut| {
+                let _ = serve_global(Rc::new(agent), nats.clone(), &test_prefix(), |fut| {
                     tokio::task::spawn_local(fut);
                 })
                 .await;
@@ -1244,9 +1253,15 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let _ = serve_js(Rc::new(agent), nats.clone(), factory, "acp", |fut| {
-                    tokio::task::spawn_local(fut);
-                })
+                let _ = serve_js(
+                    Rc::new(agent),
+                    nats.clone(),
+                    factory,
+                    &test_prefix(),
+                    |fut| {
+                        tokio::task::spawn_local(fut);
+                    },
+                )
                 .await;
 
                 tokio::task::yield_now().await;
@@ -1275,9 +1290,15 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let _ = serve_js(Rc::new(agent), nats.clone(), factory, "acp", |fut| {
-                    tokio::task::spawn_local(fut);
-                })
+                let _ = serve_js(
+                    Rc::new(agent),
+                    nats.clone(),
+                    factory,
+                    &test_prefix(),
+                    |fut| {
+                        tokio::task::spawn_local(fut);
+                    },
+                )
                 .await;
             })
             .await;
@@ -1294,9 +1315,15 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let result = serve_js(Rc::new(agent), nats.clone(), factory, "acp", |fut| {
-                    tokio::task::spawn_local(fut);
-                })
+                let result = serve_js(
+                    Rc::new(agent),
+                    nats.clone(),
+                    factory,
+                    &test_prefix(),
+                    |fut| {
+                        tokio::task::spawn_local(fut);
+                    },
+                )
                 .await;
                 assert!(result.is_err());
             })
@@ -1310,7 +1337,7 @@ mod tests {
         let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
         let js_msg = make_js_msg("acp.session.s1.agent.load", &payload, None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(!nats.published_messages().is_empty());
     }
@@ -1321,7 +1348,7 @@ mod tests {
         let agent = MockAgent::new();
         let js_msg = make_js_msg("acp.unknown.something", b"{}", None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(nats.published_messages().is_empty());
     }
@@ -1332,7 +1359,7 @@ mod tests {
         let agent = MockAgent::new();
         let js_msg = make_js_msg("acp.session.s1.agent.load", b"not json", None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         let payloads = nats.published_payloads();
         assert_eq!(payloads.len(), 1);
@@ -1346,7 +1373,7 @@ mod tests {
         let agent = MockAgent::new();
         let js_msg = make_js_msg("acp.agent.initialize", &serialize(&init_request()), None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(nats.published_messages().is_empty());
     }
@@ -1366,7 +1393,7 @@ mod tests {
             description: None,
             length: payload.len(),
         });
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         // No reply published because no req_id → no reply subject
         assert!(nats.published_messages().is_empty());
     }
@@ -1379,7 +1406,7 @@ mod tests {
             agent_client_protocol::ProtocolVersion::V0,
         ));
         let js_msg = make_js_msg("acp.agent.initialize", &payload, Some("_INBOX.1"));
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         // Global methods return early — no dispatch, no reply
         assert!(nats.published_messages().is_empty());
     }
@@ -1392,7 +1419,7 @@ mod tests {
             agent_client_protocol::ProtocolVersion::V0,
         ));
         let js_msg = make_failing_js_msg("acp.agent.initialize", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     fn make_js_msg_no_headers(subject: &str, payload: &[u8]) -> MockJsMessage {
@@ -1420,7 +1447,7 @@ mod tests {
         let payload = serialize(&agent_client_protocol::ExtNotification::new("my_tool", raw));
         // No X-Req-Id → ext notification path (reply_subject is None → msg.reply is None)
         let js_msg = make_js_msg_no_headers("acp.session.s1.agent.ext.my_tool", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1443,7 +1470,7 @@ mod tests {
             description: None,
             length: payload.len(),
         });
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1455,7 +1482,7 @@ mod tests {
         );
         let payload = serialize(&agent_client_protocol::ExtNotification::new("my_tool", raw));
         let js_msg = make_js_msg_no_headers("acp.agent.ext.my_tool", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1465,7 +1492,7 @@ mod tests {
         let payload = serialize(&PromptRequest::new("s1", vec![]));
         let js_msg = make_js_msg("acp.session.s1.agent.prompt", &payload, None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         let subjects = nats.published_messages();
         assert!(
@@ -1484,7 +1511,7 @@ mod tests {
         let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
         let js_msg = make_js_msg("acp.session.s1.agent.load", &payload, None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         let subjects = nats.published_messages();
         assert!(
@@ -1539,7 +1566,7 @@ mod tests {
                 drop(global_tx);
                 drop(session_tx);
 
-                let result = serve(agent, nats.clone(), "acp", |fut| {
+                let result = serve(agent, nats.clone(), &test_prefix(), |fut| {
                     tokio::task::spawn_local(fut);
                 })
                 .await;
@@ -1569,7 +1596,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let result = serve(agent, nats, "acp", |fut| {
+                let result = serve(agent, nats, &test_prefix(), |fut| {
                     tokio::task::spawn_local(fut);
                 })
                 .await;
@@ -1593,9 +1620,14 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let _ = serve(agent, nats.clone(), "myprefix", |fut| {
-                    tokio::task::spawn_local(fut);
-                })
+                let _ = serve(
+                    agent,
+                    nats.clone(),
+                    &test_prefix_custom("myprefix"),
+                    |fut| {
+                        tokio::task::spawn_local(fut);
+                    },
+                )
                 .await;
 
                 let subjects = nats.subscribed_to();
@@ -1620,7 +1652,7 @@ mod tests {
         let payload = serialize(&CancelNotification::new("s1"));
         let js_msg = make_js_msg("acp.session.s1.agent.cancel", &payload, None);
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert_eq!(agent.cancelled.borrow().len(), 1);
     }
@@ -1632,7 +1664,7 @@ mod tests {
         let payload = serialize(&SetSessionModeRequest::new("s1", "code"));
         let js_msg = make_js_msg("acp.session.s1.agent.set_mode", &payload, Some("_INBOX.r"));
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(!nats.published_messages().is_empty());
     }
@@ -1644,7 +1676,7 @@ mod tests {
         let payload = serialize(&CloseSessionRequest::new("s1"));
         let js_msg = make_js_msg("acp.session.s1.agent.close", &payload, Some("_INBOX.r"));
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(!nats.published_messages().is_empty());
     }
@@ -1656,7 +1688,7 @@ mod tests {
         let payload = serialize(&ForkSessionRequest::new("s1", "/tmp"));
         let js_msg = make_js_msg("acp.session.s1.agent.fork", &payload, Some("_INBOX.r"));
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
         assert!(!nats.published_messages().is_empty());
     }
@@ -1671,7 +1703,7 @@ mod tests {
             &payload,
             Some("_INBOX.r"),
         );
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         assert!(!nats.published_messages().is_empty());
     }
 
@@ -1681,7 +1713,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&SetSessionModelRequest::new("s1", "gpt-4"));
         let js_msg = make_js_msg("acp.session.s1.agent.set_model", &payload, Some("_INBOX.r"));
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         assert!(!nats.published_messages().is_empty());
     }
 
@@ -1691,7 +1723,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&ResumeSessionRequest::new("s1", "/tmp"));
         let js_msg = make_js_msg("acp.session.s1.agent.resume", &payload, Some("_INBOX.r"));
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         assert!(!nats.published_messages().is_empty());
     }
 
@@ -1701,7 +1733,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&PromptRequest::new("s1", vec![]));
         let js_msg = make_js_msg("acp.session.s1.agent.prompt", &payload, Some("_INBOX.r"));
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
         assert!(!nats.published_messages().is_empty());
     }
 
@@ -1713,7 +1745,7 @@ mod tests {
         let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
         let js_msg = make_js_msg("acp.session.s1.agent.load", &payload, Some("_INBOX.r"));
 
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     fn make_failing_js_msg(subject: &str, payload: &[u8]) -> MockJsMessage {
@@ -1736,7 +1768,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
         let js_msg = make_failing_js_msg("acp.session.s1.agent.load", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1744,7 +1776,7 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let js_msg = make_failing_js_msg("unknown.subject", b"{}");
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1752,7 +1784,7 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let js_msg = make_failing_js_msg("acp.session.s1.agent.load", b"not json");
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1770,7 +1802,7 @@ mod tests {
             description: None,
             length: payload.len(),
         });
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1780,7 +1812,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
         let js_msg = make_failing_js_msg("acp.session.s1.agent.load", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]
@@ -1789,7 +1821,7 @@ mod tests {
         let agent = MockAgent::new();
         let payload = serialize(&CancelNotification::new("s1"));
         let js_msg = make_failing_js_msg("acp.session.s1.agent.cancel", &payload);
-        dispatch_js_message(js_msg, &agent, &nats, "acp").await;
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     }
 
     #[tokio::test]

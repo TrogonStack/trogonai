@@ -6,7 +6,10 @@ pub struct OneClientSubject {
 }
 
 impl OneClientSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        session_id: &crate::session_id::AcpSessionId,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -32,7 +35,3 @@ impl async_nats::subject::ToSubject for OneClientSubject {
 }
 
 impl super::super::markers::Subscribable for OneClientSubject {}
-
-impl super::super::stream::StreamAssignment for OneClientSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = None;
-}
