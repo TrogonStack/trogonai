@@ -55,6 +55,10 @@ impl Config {
         self.acp_prefix.as_str()
     }
 
+    pub fn acp_prefix_ref(&self) -> &AcpPrefix {
+        &self.acp_prefix
+    }
+
     pub fn nats(&self) -> &NatsConfig {
         &self.nats
     }

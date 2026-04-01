@@ -3,7 +3,7 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{PromptResponse, SessionId};
-use tracing::{instrument, warn};
+use tracing::{error, instrument, warn};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
@@ -61,20 +61,39 @@ pub async fn handle<
         return;
     };
 
-    bridge
+    // error! is justified here: mutex poisoning means a thread panicked while
+    // holding the lock — process state is corrupted and unrecoverable.
+    if let Err(e) = bridge
         .pending_session_prompt_responses
-        .purge_expired_timed_out_waiters(&bridge.clock);
-    let suppress_missing_waiter_warning = bridge
+        .purge_expired_timed_out_waiters(&bridge.clock)
+    {
+        error!(error = %e, "Lock poisoned in purge_expired_timed_out_waiters");
+        return;
+    }
+    let suppress_missing_waiter_warning = match bridge
         .pending_session_prompt_responses
-        .should_suppress_missing_waiter_warning(&session_id_typed, prompt_token, &bridge.clock);
+        .should_suppress_missing_waiter_warning(&session_id_typed, prompt_token, &bridge.clock)
+    {
+        Ok(v) => v,
+        Err(e) => {
+            error!(error = %e, "Lock poisoned in should_suppress_missing_waiter_warning");
+            return;
+        }
+    };
 
     let parse_failed = response_result.is_err();
-    if !bridge.pending_session_prompt_responses.resolve_waiter(
+    let resolved = match bridge.pending_session_prompt_responses.resolve_waiter(
         &session_id_typed,
         prompt_token,
         response_result,
-    ) && !suppress_missing_waiter_warning
-    {
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(error = %e, "Lock poisoned in resolve_waiter");
+            return;
+        }
+    };
+    if !resolved && !suppress_missing_waiter_warning {
         warn!(
             session_id = %session_id,
             "No pending prompt response waiter found for session"
@@ -259,11 +278,14 @@ mod tests {
             .pending_session_prompt_responses
             .register_waiter(session_id.clone())
             .unwrap();
-        bridge.pending_session_prompt_responses.resolve_waiter(
-            &session_id,
-            token1,
-            Ok(PromptResponse::new(StopReason::EndTurn)),
-        );
+        bridge
+            .pending_session_prompt_responses
+            .resolve_waiter(
+                &session_id,
+                token1,
+                Ok(PromptResponse::new(StopReason::EndTurn)),
+            )
+            .unwrap();
         let _ = _rx1.await;
 
         let (rx2, token2) = bridge
@@ -280,11 +302,14 @@ mod tests {
                 .has_waiter(&session_id),
             "late response with old token must not resolve new prompt"
         );
-        bridge.pending_session_prompt_responses.resolve_waiter(
-            &session_id,
-            token2,
-            Ok(PromptResponse::new(StopReason::EndTurn)),
-        );
+        bridge
+            .pending_session_prompt_responses
+            .resolve_waiter(
+                &session_id,
+                token2,
+                Ok(PromptResponse::new(StopReason::EndTurn)),
+            )
+            .unwrap();
         let result = rx2.await.unwrap().unwrap();
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }

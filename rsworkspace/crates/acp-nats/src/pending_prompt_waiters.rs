@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use agent_client_protocol::{PromptResponse, SessionId};
 use tokio::sync::oneshot;
@@ -9,6 +9,23 @@ use crate::constants::PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW;
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct PromptToken(pub u64);
+
+#[derive(Debug)]
+pub(crate) struct LockPoisonedError;
+
+impl std::fmt::Display for LockPoisonedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "mutex lock poisoned")
+    }
+}
+
+impl std::error::Error for LockPoisonedError {}
+
+impl<T> From<PoisonError<T>> for LockPoisonedError {
+    fn from(_: PoisonError<T>) -> Self {
+        Self
+    }
+}
 
 struct WaiterEntry {
     token: PromptToken,
@@ -28,10 +45,14 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         }
     }
 
-    pub(crate) fn purge_expired_timed_out_waiters<C: GetElapsed<Instant = I>>(&self, clock: &C) {
-        self.timed_out.lock().unwrap().retain(|_, seen_at| {
+    pub(crate) fn purge_expired_timed_out_waiters<C: GetElapsed<Instant = I>>(
+        &self,
+        clock: &C,
+    ) -> Result<(), LockPoisonedError> {
+        self.timed_out.lock()?.retain(|_, seen_at| {
             clock.elapsed(*seen_at) < PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW
         });
+        Ok(())
     }
 
     pub(crate) fn should_suppress_missing_waiter_warning<C: GetElapsed<Instant = I>>(
@@ -39,11 +60,11 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         session_id: &SessionId,
         prompt_token: PromptToken,
         _clock: &C,
-    ) -> bool {
-        self.timed_out
-            .lock()
-            .unwrap()
-            .contains_key(&(session_id.clone(), prompt_token))
+    ) -> Result<bool, LockPoisonedError> {
+        Ok(self
+            .timed_out
+            .lock()?
+            .contains_key(&(session_id.clone(), prompt_token)))
     }
 
     pub fn resolve_waiter(
@@ -51,8 +72,8 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         session_id: &SessionId,
         prompt_token: PromptToken,
         response: std::result::Result<PromptResponse, String>,
-    ) -> bool {
-        let mut waiters = self.waiters.lock().unwrap();
+    ) -> Result<bool, LockPoisonedError> {
+        let mut waiters = self.waiters.lock()?;
         let should_remove = waiters
             .get(session_id)
             .is_some_and(|e| e.token == prompt_token);
@@ -64,12 +85,11 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         drop(waiters);
         if let Some(waiter) = waiter {
             self.timed_out
-                .lock()
-                .unwrap()
+                .lock()?
                 .remove(&(session_id.clone(), prompt_token));
-            waiter.sender.send(response).is_ok()
+            Ok(waiter.sender.send(response).is_ok())
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -118,13 +138,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lock_poisoned_error_display() {
+        let err = LockPoisonedError;
+        assert_eq!(err.to_string(), "mutex lock poisoned");
+    }
+
+    #[test]
+    fn lock_poisoned_error_is_std_error() {
+        let err: &dyn std::error::Error = &LockPoisonedError;
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn lock_poisoned_error_from_poison_error() {
+        use std::sync::{Arc, Mutex};
+
+        let mutex = Arc::new(Mutex::new(42));
+        let mutex_clone = mutex.clone();
+
+        // Poison the mutex by panicking in another thread while holding the lock
+        let handle = std::thread::spawn(move || {
+            let _guard = mutex_clone.lock().expect("test lock");
+            panic!("intentional panic to poison mutex");
+        });
+        let _ = handle.join();
+
+        // Now the mutex is poisoned — verify From<PoisonError> works
+        let err = mutex.lock().unwrap_err();
+        let _: LockPoisonedError = err.into();
+    }
+
+    #[test]
     fn resolve_waiter_returns_false_when_no_waiter_registered() {
         let waiters = PendingSessionPromptResponseWaiters::<MockInstant>::new();
-        let resolved = waiters.resolve_waiter(
-            &SessionId::from("s1"),
-            PromptToken(0),
-            Ok(PromptResponse::new(StopReason::EndTurn)),
-        );
+        let resolved = waiters
+            .resolve_waiter(
+                &SessionId::from("s1"),
+                PromptToken(0),
+                Ok(PromptResponse::new(StopReason::EndTurn)),
+            )
+            .unwrap();
         assert!(!resolved);
     }
 
@@ -147,7 +200,7 @@ mod tests {
         assert_eq!(waiters.timed_out.lock().unwrap().len(), 1);
 
         clock.advance(PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW + Duration::from_millis(1));
-        waiters.purge_expired_timed_out_waiters(&clock);
+        waiters.purge_expired_timed_out_waiters(&clock).unwrap();
 
         assert!(waiters.timed_out.lock().unwrap().is_empty());
     }
@@ -166,7 +219,7 @@ mod tests {
         }
         assert_eq!(waiters.timed_out.lock().unwrap().len(), 2);
 
-        waiters.purge_expired_timed_out_waiters(&clock);
+        waiters.purge_expired_timed_out_waiters(&clock).unwrap();
 
         let timed_out = waiters.timed_out.lock().unwrap();
         assert_eq!(timed_out.len(), 1);

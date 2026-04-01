@@ -19,7 +19,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     info!(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), "New session request");
 
     let nats = bridge.nats();
-    let subject = agent::session_new(bridge.config.acp_prefix());
+    let subject = agent::SessionNewSubject::new(bridge.config.acp_prefix_ref());
 
     let result = nats::request_with_timeout::<N, NewSessionRequest, NewSessionResponse>(
         nats,
