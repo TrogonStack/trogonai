@@ -1,4 +1,4 @@
-/// Core NATS request/reply. Stream: GLOBAL (observability).
+/// Core NATS request/reply.
 #[derive(Debug)]
 pub struct SessionNewSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -19,3 +19,8 @@ impl std::fmt::Display for SessionNewSubject {
 }
 
 impl super::super::markers::Requestable for SessionNewSubject {}
+
+impl super::super::stream::StreamAssignment for SessionNewSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Global);
+}

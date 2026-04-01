@@ -1,4 +1,4 @@
-/// Agent -> bridge broadcast. Stream: RESPONSES.
+/// Agent -> bridge broadcast.
 #[derive(Debug)]
 pub struct CancelledSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -36,3 +36,8 @@ impl async_nats::subject::ToSubject for CancelledSubject {
 
 impl super::super::markers::Publishable for CancelledSubject {}
 impl super::super::markers::Subscribable for CancelledSubject {}
+
+impl super::super::stream::StreamAssignment for CancelledSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Responses);
+}

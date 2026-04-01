@@ -35,3 +35,7 @@ impl async_nats::subject::ToSubject for OneAgentSubject {
 }
 
 impl super::super::markers::Subscribable for OneAgentSubject {}
+
+impl super::super::stream::StreamAssignment for OneAgentSubject {
+    const STREAM: Option<super::super::stream::AcpStream> = None;
+}

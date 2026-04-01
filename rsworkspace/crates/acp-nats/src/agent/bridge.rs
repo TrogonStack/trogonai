@@ -184,7 +184,7 @@ where
                     &subject_str,
                     args,
                     &trogon_std::StdJsonSerialize,
-                    self.config.acp_prefix(),
+                    self.config.acp_prefix_ref(),
                     session_id,
                     &req_id,
                     self.config.operation_timeout,

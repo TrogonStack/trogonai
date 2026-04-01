@@ -25,3 +25,7 @@ impl async_nats::subject::ToSubject for AllAgentExtSubject {
 }
 
 impl super::super::markers::Subscribable for AllAgentExtSubject {}
+
+impl super::super::stream::StreamAssignment for AllAgentExtSubject {
+    const STREAM: Option<super::super::stream::AcpStream> = None;
+}

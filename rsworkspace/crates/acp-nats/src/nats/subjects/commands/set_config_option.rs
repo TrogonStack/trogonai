@@ -1,4 +1,4 @@
-/// Set session config option. Stream: COMMANDS.
+/// Set session config option.
 #[derive(Debug)]
 pub struct SetConfigOptionSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for SetConfigOptionSubject {
 }
 
 impl super::super::markers::SessionCommand for SetConfigOptionSubject {}
+
+impl super::super::stream::StreamAssignment for SetConfigOptionSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

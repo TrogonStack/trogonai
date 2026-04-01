@@ -1,4 +1,4 @@
-/// Agent -> bridge. Core NATS request/reply. Stream: CLIENT_OPS.
+/// Agent -> bridge. Core NATS request/reply.
 #[derive(Debug)]
 pub struct TerminalReleaseSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -29,3 +29,8 @@ impl std::fmt::Display for TerminalReleaseSubject {
 }
 
 impl super::super::markers::ClientRequestable for TerminalReleaseSubject {}
+
+impl super::super::stream::StreamAssignment for TerminalReleaseSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::ClientOps);
+}
