@@ -26,7 +26,7 @@
 //! Revisit gRPC only if xAI-exclusive features (Batch API, `agent_count`,
 //! `use_encrypted_content`) become necessary.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use bytes::Bytes;
 use futures_util::stream::StreamExt as _;
@@ -344,6 +344,12 @@ struct SseState {
     response_id_emitted: bool,
     /// Events ready to be yielded before pulling more bytes.
     pending: VecDeque<XaiEvent>,
+    /// In-flight function call argument buffers for the OpenAI Responses API
+    /// streaming events (`response.output_item.added` →
+    /// `response.function_call_arguments.delta` →
+    /// `response.function_call_arguments.done`).
+    /// Keyed by `call_id`; value is `(name, accumulated_arguments)`.
+    pending_fc: HashMap<String, (String, String)>,
 }
 
 /// Parse a raw SSE byte stream from the Responses API into `XaiEvent`s.
@@ -356,6 +362,7 @@ fn parse_sse(
             buf: String::new(),
             response_id_emitted: false,
             pending: VecDeque::new(),
+            pending_fc: HashMap::new(),
         },
         |mut state| async move {
             loop {
@@ -366,7 +373,7 @@ fn parse_sse(
                 if let Some(nl) = state.buf.find('\n') {
                     let line = state.buf[..nl].trim_end_matches('\r').to_string();
                     state.buf = state.buf[nl + 1..].to_string();
-                    process_sse_line(&line, &mut state.response_id_emitted, &mut state.pending);
+                    process_sse_line(&line, &mut state.response_id_emitted, &mut state.pending, &mut state.pending_fc);
                     continue;
                 }
 
@@ -382,7 +389,7 @@ fn parse_sse(
                         let remaining = std::mem::take(&mut state.buf);
                         let line = remaining.trim();
                         if !line.is_empty() {
-                            process_sse_line(line, &mut state.response_id_emitted, &mut state.pending);
+                            process_sse_line(line, &mut state.response_id_emitted, &mut state.pending, &mut state.pending_fc);
                         }
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
@@ -415,6 +422,7 @@ fn process_sse_line(
     line: &str,
     response_id_emitted: &mut bool,
     pending: &mut VecDeque<XaiEvent>,
+    pending_fc: &mut HashMap<String, (String, String)>,
 ) {
     let data = match line.strip_prefix("data: ") {
         Some(d) => d,
@@ -473,6 +481,7 @@ fn process_sse_line(
             }
         }
         "function_call" => {
+            // xAI custom event — complete function call delivered as a single chunk.
             // {"type":"function_call","function_call":{"call_id":"...","name":"...","arguments":"..."}}
             let fc = &val["function_call"];
             let call_id = fc["call_id"].as_str().unwrap_or("").to_string();
@@ -481,6 +490,59 @@ fn process_sse_line(
             if !call_id.is_empty() || !name.is_empty() {
                 pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
             }
+        }
+        // ── OpenAI Responses API function-call streaming events ───────────────
+        // xAI may follow the OpenAI spec and stream function calls as three
+        // separate events rather than the custom single-chunk "function_call".
+        // Both paths emit the same FunctionCall event; the two are not mutually
+        // exclusive — a server may send the xAI custom event AND the spec events,
+        // so care is taken to avoid duplicate FunctionCall emissions (the
+        // done event removes the pending_fc entry and the xAI event never adds
+        // to pending_fc, so no double-emit is possible).
+        "response.output_item.added" => {
+            // Announces a new output item. When item.type == "function_call",
+            // record call_id and name so deltas can be accumulated by call_id.
+            if val["item"]["type"].as_str() == Some("function_call") {
+                let call_id = val["item"]["call_id"].as_str().unwrap_or("").to_string();
+                let name = val["item"]["name"].as_str().unwrap_or("").to_string();
+                if !call_id.is_empty() {
+                    pending_fc.insert(call_id, (name, String::new()));
+                }
+            }
+        }
+        "response.function_call_arguments.delta" => {
+            // Partial arguments fragment — append to the in-flight buffer.
+            let call_id = val["call_id"].as_str().unwrap_or("");
+            let delta = val["delta"].as_str().unwrap_or("");
+            if !call_id.is_empty() && !delta.is_empty() {
+                if let Some(entry) = pending_fc.get_mut(call_id) {
+                    entry.1.push_str(delta);
+                }
+            }
+        }
+        "response.function_call_arguments.done" => {
+            // Complete function call — arguments are authoritative here.
+            // Name falls back to what was recorded in output_item.added.
+            let call_id = val["call_id"].as_str().unwrap_or("").to_string();
+            let arguments = val["arguments"].as_str().unwrap_or("").to_string();
+            let name = val["name"].as_str()
+                .map(str::to_string)
+                .or_else(|| pending_fc.get(&call_id).map(|(n, _)| n.clone()))
+                .unwrap_or_default();
+            pending_fc.remove(&call_id);
+            if !call_id.is_empty() || !name.is_empty() {
+                pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+            }
+        }
+        "response.failed" => {
+            // OpenAI Responses API defines response.failed as a distinct event
+            // type (not nested under response.completed). Map it to Failed so the
+            // agent's stream_error path fires — otherwise the stream ends silently
+            // with no Finished event and the client sees an empty success.
+            pending.push_back(XaiEvent::Finished {
+                reason: FinishReason::Failed,
+                incomplete_reason: None,
+            });
         }
         "response.completed" | "response.done" => {
             // Usage may be top-level (xAI extension) or nested inside the
@@ -525,7 +587,8 @@ mod tests {
     fn parse_line(line: &str) -> Option<XaiEvent> {
         let mut emitted = false;
         let mut pending = VecDeque::new();
-        process_sse_line(line, &mut emitted, &mut pending);
+        let mut pending_fc = HashMap::new();
+        process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
         pending.pop_front()
     }
 
@@ -533,7 +596,19 @@ mod tests {
     fn parse_line_all(line: &str) -> Vec<XaiEvent> {
         let mut emitted = false;
         let mut pending = VecDeque::new();
-        process_sse_line(line, &mut emitted, &mut pending);
+        let mut pending_fc = HashMap::new();
+        process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
+        pending.into_iter().collect()
+    }
+
+    /// Parse a sequence of lines sharing state (for stateful streaming events).
+    fn parse_lines(lines: &[&str]) -> Vec<XaiEvent> {
+        let mut emitted = false;
+        let mut pending = VecDeque::new();
+        let mut pending_fc = HashMap::new();
+        for &line in lines {
+            process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
+        }
         pending.into_iter().collect()
     }
 
@@ -595,7 +670,8 @@ mod tests {
         // Second call with same id must NOT emit ResponseId again.
         let mut emitted = true; // already emitted
         let mut pending = VecDeque::new();
-        process_sse_line(line, &mut emitted, &mut pending);
+        let mut pending_fc = HashMap::new();
+        process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
         let events2: Vec<_> = pending.into_iter().collect();
         assert!(
             !events2.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
@@ -697,5 +773,68 @@ mod tests {
     fn unknown_event_type_returns_none() {
         let line = r#"data: {"type":"some.unknown.event","foo":"bar"}"#;
         assert!(parse_line(line).is_none());
+    }
+
+    // ── OpenAI Responses API function-call streaming events ───────────────────
+
+    #[test]
+    fn function_call_arguments_done_emits_function_call() {
+        // response.function_call_arguments.done carries the complete call.
+        let line = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_abc","name":"web_search","arguments":"{\"q\":\"rust\"}"}"#;
+        let event = parse_line(line).unwrap();
+        match event {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
+                assert_eq!(call_id, "call_abc");
+                assert_eq!(name, "web_search");
+                assert_eq!(arguments, r#"{"q":"rust"}"#);
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_call_streaming_sequence_output_item_added_delta_done() {
+        // Full three-event OpenAI spec sequence: added → delta → done.
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"web_search"}}"#;
+        let delta1 = r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\"q\":"}"#;
+        let delta2 = r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"\"test\"}"}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"web_search","arguments":"{\"q\":\"test\"}"}"#;
+
+        let events = parse_lines(&[added, delta1, delta2, done]);
+        // Only the done event emits a FunctionCall (added/delta are stateful, no events).
+        assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
+        match &events[0] {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
+                assert_eq!(call_id, "call_1");
+                assert_eq!(name, "web_search");
+                assert_eq!(arguments, r#"{"q":"test"}"#);
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_call_done_without_prior_added_still_emits() {
+        // done without a preceding output_item.added — name comes from done itself.
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_2","name":"x_search","arguments":"{}"}"#;
+        let event = parse_line(done).unwrap();
+        assert!(matches!(event, XaiEvent::FunctionCall { name, .. } if name == "x_search"));
+    }
+
+    #[test]
+    fn output_item_added_non_function_call_emits_nothing() {
+        // output_item.added for text items must not emit any event.
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn response_failed_event_emits_finished_failed() {
+        let line = r#"data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"Internal error"}}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::Finished { ref reason, .. } if *reason == FinishReason::Failed),
+            "expected Finished(Failed), got {event:?}"
+        );
     }
 }

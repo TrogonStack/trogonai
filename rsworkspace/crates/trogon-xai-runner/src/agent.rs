@@ -497,6 +497,9 @@ impl agent_client_protocol::Agent for XaiAgent {
         let mut session = self.session_store.get(&session_id).await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         session.model = Some(model_id.clone());
+        // response IDs are model-specific — a stale ID from the previous model
+        // would always trigger a retry on the next prompt. Clear it proactively.
+        session.last_response_id = None;
         self.session_store.put(&session_id, &session).await.map_err(store_error)?;
 
         info!(session_id, model = %model_id, "xai: set_session_model");
@@ -705,8 +708,12 @@ impl agent_client_protocol::Agent for XaiAgent {
                         match maybe {
                             Err(_elapsed) => {
                                 warn!(session_id, "xai: prompt timed out");
-                                canceled = true;
-                                break 'outer StopReason::EndTurn;
+                                // Do NOT set canceled=true. Unlike an explicit cancel,
+                                // a timeout may have produced partial text that should be
+                                // preserved (the else-if branch below saves it).
+                                // StopReason::Cancelled signals to the ACP client that
+                                // the prompt did not complete normally.
+                                break 'outer StopReason::Cancelled;
                             }
                             Ok(Some(e)) => e,
                             Ok(None) => break StopReason::EndTurn,
