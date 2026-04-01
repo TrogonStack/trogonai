@@ -1,4 +1,4 @@
-/// Load session into agent. Stream: COMMANDS.
+/// Load session into agent.
 #[derive(Debug)]
 pub struct LoadSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for LoadSubject {
 }
 
 impl super::super::markers::SessionCommand for LoadSubject {}
+
+impl super::super::stream::StreamAssignment for LoadSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

@@ -36,7 +36,11 @@ impl AcpStream {
     }
 
     pub fn stream_name(&self, prefix: &AcpPrefix) -> String {
-        format!("{}_{}", prefix.as_str().to_uppercase().replace('.', "_"), self.suffix())
+        format!(
+            "{}_{}",
+            prefix.as_str().to_uppercase().replace('.', "_"),
+            self.suffix()
+        )
     }
 
     pub fn subject_patterns(&self, prefix: &AcpPrefix) -> Vec<String> {
@@ -64,7 +68,6 @@ impl AcpStream {
             Self::Global => vec![
                 format!("{p}.agent.initialize"),
                 format!("{p}.agent.authenticate"),
-                format!("{p}.agent.logout"),
                 format!("{p}.agent.session.new"),
             ],
             Self::GlobalExt => vec![format!("{p}.agent.ext.>")],

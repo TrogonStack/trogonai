@@ -1,4 +1,4 @@
-/// Agent -> bridge. Core NATS request/reply. Stream: CLIENT_OPS.
+/// Agent -> bridge. Core NATS request/reply.
 #[derive(Debug)]
 pub struct SessionUpdateSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -29,3 +29,8 @@ impl std::fmt::Display for SessionUpdateSubject {
 }
 
 impl super::super::markers::ClientRequestable for SessionUpdateSubject {}
+
+impl super::super::stream::StreamAssignment for SessionUpdateSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::ClientOps);
+}

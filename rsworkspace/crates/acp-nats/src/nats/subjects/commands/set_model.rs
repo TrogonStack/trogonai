@@ -1,4 +1,4 @@
-/// Set session model. Stream: COMMANDS.
+/// Set session model.
 #[derive(Debug)]
 pub struct SetModelSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for SetModelSubject {
 }
 
 impl super::super::markers::SessionCommand for SetModelSubject {}
+
+impl super::super::stream::StreamAssignment for SetModelSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

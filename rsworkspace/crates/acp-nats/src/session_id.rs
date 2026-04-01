@@ -5,8 +5,8 @@
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.
 
-use trogon_nats::SubjectTokenViolation;
 use trogon_nats::NatsToken;
+use trogon_nats::SubjectTokenViolation;
 
 /// Error returned when [`AcpSessionId`] validation fails.
 #[derive(Debug, Clone, PartialEq)]

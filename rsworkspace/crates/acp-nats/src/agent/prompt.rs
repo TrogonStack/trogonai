@@ -142,9 +142,9 @@ where
                         continue;
                     }
                 };
-                if bridge.notification_sender.send(notification).await.is_err() {
+                let _ = bridge.notification_sender.send(notification).await.inspect_err(|_| {
                     warn!("notification receiver dropped; continuing prompt");
-                }
+                });
             }
             resp = timeout(op_timeout, response_sub.next()) => {
                 match resp {
@@ -206,9 +206,8 @@ where
     // JetStream consumers with DeliverAll replay from stream start, so they'll see the
     // response even if the runner responds before we start consuming.
     let sid = session_id.as_str();
-    let pfx = prefix.as_str();
-    let notifications_stream = streams::notifications_stream_name(pfx);
-    let notif_config = consumers::prompt_notifications_consumer(pfx, sid, req_id);
+    let notifications_stream = streams::notifications_stream_name(prefix);
+    let notif_config = consumers::prompt_notifications_consumer(prefix, sid, req_id);
     let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -231,8 +230,8 @@ where
         )
     })?;
 
-    let responses_stream = streams::responses_stream_name(pfx);
-    let resp_config = consumers::prompt_response_consumer(pfx, sid, req_id);
+    let responses_stream = streams::responses_stream_name(prefix);
+    let resp_config = consumers::prompt_response_consumer(prefix, sid, req_id);
     let resp_stream = js.get_stream(&responses_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -313,9 +312,9 @@ where
                             }
                         };
                         let _ = js_msg.ack().await;
-                        if bridge.notification_sender.send(notification).await.is_err() {
+                        let _ = bridge.notification_sender.send(notification).await.inspect_err(|_| {
                             warn!("notification receiver dropped; continuing prompt");
-                        }
+                        });
                     }
                 }
             }

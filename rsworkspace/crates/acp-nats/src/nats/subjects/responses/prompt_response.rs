@@ -1,4 +1,4 @@
-/// Agent -> bridge streamed response. Stream: RESPONSES.
+/// Agent -> bridge streamed response.
 #[derive(Debug)]
 pub struct PromptResponseSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -39,3 +39,8 @@ impl async_nats::subject::ToSubject for PromptResponseSubject {
 }
 
 impl super::super::markers::Subscribable for PromptResponseSubject {}
+
+impl super::super::stream::StreamAssignment for PromptResponseSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Responses);
+}

@@ -1,4 +1,4 @@
-/// Send prompt to agent. Stream: COMMANDS.
+/// Send prompt to agent.
 #[derive(Debug)]
 pub struct PromptSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for PromptSubject {
 }
 
 impl super::super::markers::SessionCommand for PromptSubject {}
+
+impl super::super::stream::StreamAssignment for PromptSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

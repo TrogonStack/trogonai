@@ -16,7 +16,7 @@ impl std::error::Error for ProvisionError {}
 
 pub async fn provision_streams<J: JetStreamContext>(
     js: &J,
-    prefix: &str,
+    prefix: &crate::acp_prefix::AcpPrefix,
 ) -> Result<(), ProvisionError> {
     for config in streams::all_configs(prefix) {
         let name = config.name.clone();
@@ -31,19 +31,24 @@ pub async fn provision_streams<J: JetStreamContext>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acp_prefix::AcpPrefix;
     use trogon_nats::jetstream::MockJetStreamContext;
+
+    fn p(s: &str) -> AcpPrefix {
+        AcpPrefix::new(s).expect("test prefix")
+    }
 
     #[tokio::test]
     async fn provision_creates_six_streams() {
         let ctx = MockJetStreamContext::new();
-        provision_streams(&ctx, "acp").await.unwrap();
+        provision_streams(&ctx, &p("acp")).await.unwrap();
         assert_eq!(ctx.created_streams().len(), 6);
     }
 
     #[tokio::test]
     async fn provision_creates_correct_stream_names() {
         let ctx = MockJetStreamContext::new();
-        provision_streams(&ctx, "acp").await.unwrap();
+        provision_streams(&ctx, &p("acp")).await.unwrap();
         let names: Vec<String> = ctx
             .created_streams()
             .iter()
@@ -60,7 +65,7 @@ mod tests {
     #[tokio::test]
     async fn provision_with_custom_prefix() {
         let ctx = MockJetStreamContext::new();
-        provision_streams(&ctx, "myapp").await.unwrap();
+        provision_streams(&ctx, &p("myapp")).await.unwrap();
         let names: Vec<String> = ctx
             .created_streams()
             .iter()
@@ -73,7 +78,7 @@ mod tests {
     async fn provision_returns_error_on_failure() {
         let ctx = MockJetStreamContext::new();
         ctx.fail_next();
-        let result = provision_streams(&ctx, "acp").await;
+        let result = provision_streams(&ctx, &p("acp")).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("ACP_COMMANDS"));
     }
@@ -81,8 +86,8 @@ mod tests {
     #[tokio::test]
     async fn provision_is_idempotent() {
         let ctx = MockJetStreamContext::new();
-        provision_streams(&ctx, "acp").await.unwrap();
-        provision_streams(&ctx, "acp").await.unwrap();
+        provision_streams(&ctx, &p("acp")).await.unwrap();
+        provision_streams(&ctx, &p("acp")).await.unwrap();
         assert_eq!(ctx.created_streams().len(), 12);
     }
 }

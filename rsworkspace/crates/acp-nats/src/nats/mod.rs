@@ -11,7 +11,7 @@ pub use parsing::{
     ClientMethod, GlobalAgentMethod, ParsedAgentSubject, ParsedClientSubject, SessionAgentMethod,
     parse_agent_subject, parse_client_subject,
 };
-pub use subjects::{agent, markers, session};
+pub use subjects::{AcpStream, StreamAssignment, agent, markers, session};
 pub use trogon_nats::{
     FlushClient, FlushPolicy, NatsError, PublishClient, PublishOptions, RequestClient, RetryPolicy,
     SubscribeClient, client, connect, headers_with_trace_context, inject_trace_context,
