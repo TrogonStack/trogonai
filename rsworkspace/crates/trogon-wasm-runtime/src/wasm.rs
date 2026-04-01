@@ -1,0 +1,88 @@
+use agent_client_protocol::TerminalExitStatus;
+use std::path::Path;
+use wasmtime::{Engine, Linker, Module, Store};
+use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+use wasmtime_wasi::pipe::MemoryOutputPipe;
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
+
+/// Output captured from a WASM module execution.
+pub struct WasmOutput {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub exit_status: TerminalExitStatus,
+}
+
+/// Runs a WASIp1 core module (`.wasm` compiled from `wasm32-wasip1` target).
+///
+/// The module is sandboxed to `sandbox_dir` as its preopened root (`/`).
+/// `args[0]` is set to the module path; remaining `args` are forwarded.
+/// `env_vars` are set as the WASI environment.
+///
+/// stdout and stderr are captured and returned in `WasmOutput`.
+/// The function is async because wasmtime async mode is required for
+/// well-behaved cooperative scheduling with tokio.
+pub async fn run_module(
+    engine: &Engine,
+    wasm_path: &Path,
+    args: &[String],
+    env_vars: &[(String, String)],
+    sandbox_dir: &Path,
+    output_byte_limit: usize,
+) -> Result<WasmOutput, anyhow::Error> {
+    let module = Module::from_file(engine, wasm_path)?;
+
+    let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
+    preview1::add_to_linker_async(&mut linker, |t| t)?;
+    let pre = linker.instantiate_pre(&module)?;
+
+    let stdout_pipe = MemoryOutputPipe::new(output_byte_limit);
+    let stderr_pipe = MemoryOutputPipe::new(output_byte_limit);
+
+    // argv: module path as argv[0] then user args.
+    let mut argv: Vec<String> = Vec::with_capacity(args.len() + 1);
+    argv.push(wasm_path.to_string_lossy().into_owned());
+    argv.extend_from_slice(args);
+
+    let mut builder = WasiCtxBuilder::new();
+    builder
+        .stdout(stdout_pipe.clone())
+        .stderr(stderr_pipe.clone())
+        .args(&argv)
+        .preopened_dir(sandbox_dir, "/", DirPerms::all(), FilePerms::all())?;
+
+    for (k, v) in env_vars {
+        builder.env(k, v);
+    }
+
+    let wasi_ctx = builder.build_p1();
+    let mut store = Store::new(engine, wasi_ctx);
+
+    // Enable fuel consumption to prevent runaway modules (1 billion instructions).
+    store.set_fuel(1_000_000_000)?;
+
+    let instance = pre.instantiate_async(&mut store).await?;
+    let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
+
+    let exit_status = match start.call_async(&mut store, ()).await {
+        Ok(()) => TerminalExitStatus::new().exit_code(Some(0u32)),
+        Err(e) => {
+            // A WASI exit code is surfaced as a trap with `I32Exit`.
+            if let Some(exit) = e.downcast_ref::<wasmtime_wasi::I32Exit>() {
+                TerminalExitStatus::new().exit_code(Some(exit.0 as u32))
+            } else {
+                // Other trap (e.g. unreachable, out-of-fuel).
+                TerminalExitStatus::new()
+                    .signal(Some(format!("trap: {e}")))
+            }
+        }
+    };
+
+    let stdout = stdout_pipe.contents().to_vec();
+    let stderr = stderr_pipe.contents().to_vec();
+
+    Ok(WasmOutput {
+        stdout,
+        stderr,
+        exit_status,
+    })
+}

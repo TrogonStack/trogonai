@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::session::WasmSession;
 use crate::terminal::WasmTerminal;
+use crate::wasm;
 use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
@@ -105,11 +106,9 @@ impl WasmRuntime {
         let is_wasm = command.ends_with(".wasm");
 
         if is_wasm {
-            // WASM module execution path — scaffolded, full dispatch in next step.
-            return Err(agent_client_protocol::Error::new(
-                -32601,
-                format!("WASM module execution not yet implemented for: {command}"),
-            ));
+            return self
+                .run_wasm_terminal(session_id, command, args, &req.env, &cwd, &sandbox_dir)
+                .await;
         }
 
         // Native process — sandboxed to session directory.
@@ -187,6 +186,60 @@ impl WasmRuntime {
         };
 
         info!(session_id, terminal_id, command, "Terminal created");
+        self.terminals
+            .borrow_mut()
+            .insert(terminal_id.clone(), terminal);
+
+        Ok(CreateTerminalResponse::new(TerminalId::new(
+            terminal_id.as_str(),
+        )))
+    }
+
+    /// Runs a `.wasm` module synchronously using wasmtime + WASIp1.
+    ///
+    /// The module's stdout+stderr are buffered. A synthetic `WasmTerminal`
+    /// is registered so callers can retrieve output via `terminal_output` and
+    /// `wait_for_terminal_exit` using the same API as native terminals.
+    async fn run_wasm_terminal(
+        &self,
+        session_id: &str,
+        command: &str,
+        args: &[String],
+        env_vars: &[agent_client_protocol::EnvVariable],
+        _cwd: &std::path::Path,
+        sandbox_dir: &std::path::Path,
+    ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        let wasm_path = std::path::Path::new(command);
+        let env_pairs: Vec<(String, String)> = env_vars
+            .iter()
+            .map(|e| (e.name.clone(), e.value.clone()))
+            .collect();
+
+        let output: crate::wasm::WasmOutput = wasm::run_module(
+            &self.engine,
+            wasm_path,
+            args,
+            &env_pairs,
+            sandbox_dir,
+            self.output_byte_limit,
+        )
+        .await
+        .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
+
+        // Merge stdout + stderr into the output buffer (stdout first).
+        let combined = [output.stdout.as_slice(), output.stderr.as_slice()].concat();
+        let output_buf = std::sync::Arc::new(std::sync::Mutex::new(combined));
+
+        let terminal_id = Uuid::new_v4().to_string();
+        let terminal = WasmTerminal {
+            child: None, // already exited
+            output_buf,
+            output_byte_limit: self.output_byte_limit,
+            output_collector: None,
+            exit_status: Some(output.exit_status),
+        };
+
+        info!(session_id, terminal_id, command, "WASM module executed");
         self.terminals
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
