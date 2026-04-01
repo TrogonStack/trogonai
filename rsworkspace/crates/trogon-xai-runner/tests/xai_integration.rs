@@ -3108,3 +3108,376 @@ async fn tool_call_then_response_failed_compensates_history() {
     );
 }
 
+// ── stale-ID retry ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
+    // Verifies the stale-ID retry path:
+    //   Turn 1: succeeds normally, session stores last_response_id = "resp_turn1".
+    //   Turn 2: first request (carrying previous_response_id) → HTTP 500 (non-4xx).
+    //           Agent retries transparently with full history, no previous_response_id.
+    //   Turn 2 retry: succeeds.
+    // Expected: prompt() returns Ok, history has all 4 messages, no previous_response_id
+    // on the retried request.
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_clone = Arc::clone(&captured);
+
+    tokio::spawn(async move {
+        // Connection 1: successful turn 1 — emits response_id "resp_turn1".
+        let turn1 = concat!(
+            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
+            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                turn1.len(), turn1,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 2: HTTP 500 for turn 2 (stale previous_response_id).
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let error_body = r#"{"error":"response not found"}"#;
+            let http = format!(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                error_body.len(), error_body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 3: retry (full history, no previous_response_id) — succeeds.
+        let turn2_retry = concat!(
+            "data: {\"id\":\"resp_turn2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"second reply\"}}\n\n",
+            "data: {\"id\":\"resp_turn2\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn2\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                turn2_retry.len(), turn2_retry,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Turn 1: succeeds; session now holds last_response_id = "resp_turn1".
+    let r1 = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("first question"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r1.stop_reason, StopReason::EndTurn);
+
+    // Turn 2: first attempt → 500 → transparent retry → succeeds.
+    let r2 = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("second question"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r2.stop_reason, StopReason::EndTurn);
+
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 3, "expected 3 HTTP requests total");
+
+    // Request 1 (turn 1): no previous_response_id.
+    assert!(
+        reqs[0].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
+        "turn 1 must not send previous_response_id"
+    );
+
+    // Request 2 (turn 2, first attempt): carries the stale previous_response_id.
+    assert_eq!(
+        reqs[1]["previous_response_id"].as_str(),
+        Some("resp_turn1"),
+        "turn 2 first attempt must send previous_response_id = resp_turn1"
+    );
+
+    // Request 3 (turn 2, retry): no previous_response_id, sends full history.
+    assert!(
+        reqs[2].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
+        "stale-ID retry must not carry previous_response_id"
+    );
+    let retry_input = reqs[2]["input"].as_array().expect("retry input must be array");
+    assert!(
+        retry_input.len() >= 2,
+        "retry must include full history (at least prior assistant + new user), got {retry_input:?}"
+    );
+
+    // History: 4 messages — user1, assistant1, user2, assistant2.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 4, "history must have 4 messages after 2 turns");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[2].role, "user");
+    assert_eq!(history[3].role, "assistant");
+}
+
+// ── MAX_CONTINUATIONS exhaustion ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn max_continuations_exhausted_returns_cancelled_with_partial_text() {
+    // Verifies that when the model returns "incomplete" more than MAX_CONTINUATIONS
+    // (5) times in a row, the agent breaks the loop and returns StopReason::Cancelled
+    // with the accumulated partial text saved in history.
+    //
+    // MAX_CONTINUATIONS = 5, so 6 connections are accepted (5 continuations attempted,
+    // then on the 6th incomplete response the guard fires and returns Cancelled).
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+
+    tokio::spawn(async move {
+        // 6 connections, each returns a partial chunk + incomplete status.
+        for i in 0u32..6 {
+            if let Ok((stream, _)) = listener.accept().await {
+                let (reader, mut writer) = stream.into_split();
+                let mut reader = BufReader::new(reader);
+                drain_request(&mut reader).await;
+
+                let resp_id = format!("resp_part{i}");
+                let chunk = format!("chunk{i} ");
+                let body = format!(
+                    "data: {{\"id\":\"{resp_id}\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{chunk}\"}}}}\n\ndata: {{\"id\":\"{resp_id}\",\"type\":\"response.completed\",\"response\":{{\"id\":\"{resp_id}\",\"status\":\"incomplete\",\"incomplete_details\":{{\"reason\":\"max_output_tokens\"}}}}}}\n\ndata: [DONE]\n\n",
+                );
+                let http = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body,
+                );
+                writer.write_all(http.as_bytes()).await.ok();
+            }
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("keep going"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.stop_reason,
+        StopReason::Cancelled,
+        "exhausted continuations must return Cancelled, got {:?}",
+        resp.stop_reason
+    );
+
+    // Partial text from all 6 chunks must be saved in history.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2, "history must have user + partial assistant");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
+    let saved_text = history[1].content_str();
+    assert!(
+        saved_text.contains("chunk0"),
+        "partial text must include chunks from all iterations, got: {saved_text:?}"
+    );
+    assert!(
+        saved_text.contains("chunk5"),
+        "partial text must include chunks from the 6th (final) iteration, got: {saved_text:?}"
+    );
+}
+
+// ── max_turns continuation input ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn incomplete_max_turns_continuation_resends_user_input() {
+    // Verifies that when the incomplete reason is "max_turns" (tool-call iterations
+    // exhausted), the continuation request re-sends the original user message (not
+    // an empty input), so the model produces its final answer.
+    //
+    // Contrast with max_output_tokens where the continuation must send empty input.
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_clone = Arc::clone(&captured);
+
+    tokio::spawn(async move {
+        // Connection 1: incomplete due to max_turns.
+        let first = concat!(
+            "data: {\"id\":\"resp_mt\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mt\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_turns\"}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                first.len(), first,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 2: continuation — final answer.
+        let second = concat!(
+            "data: {\"id\":\"resp_mt2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"final answer\"}}\n\n",
+            "data: {\"id\":\"resp_mt2\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mt2\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).await.ok();
+                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                second.len(), second,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("what is the answer?"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 2, "expected exactly 2 HTTP requests");
+
+    // Continuation: must carry previous_response_id AND re-send the user message.
+    assert_eq!(
+        reqs[1]["previous_response_id"].as_str(),
+        Some("resp_mt"),
+        "max_turns continuation must reference the incomplete response's ID"
+    );
+    let cont_input = reqs[1]["input"].as_array().expect("continuation input must be array");
+    assert!(
+        !cont_input.is_empty(),
+        "max_turns continuation must NOT send empty input (unlike max_output_tokens)"
+    );
+    let has_user_msg = cont_input.iter().any(|item| {
+        item["role"].as_str() == Some("user")
+            && item["content"].as_str() == Some("what is the answer?")
+    });
+    assert!(
+        has_user_msg,
+        "max_turns continuation must re-send the original user message, got: {cont_input:?}"
+    );
+
+    // History: user + assembled assistant text.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content_str(), "final answer");
+}
+
