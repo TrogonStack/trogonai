@@ -385,10 +385,13 @@ fn parse_sse(
 
 /// Process one `data: ...` SSE line from the Responses API.
 ///
-/// Responses API event types:
-/// - `message.delta` with `delta.type == "output_text"` → `TextDelta`
+/// Responses API event types handled:
+/// - `message.delta` / `response.output_text.delta` → `TextDelta`
+///   Both names are accepted: `message.delta` is the documented xAI name;
+///   `response.output_text.delta` is the OpenAI Responses API spec name.
+///   The `delta` field may be an object `{"text":"..."}` or a bare string.
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
-/// - `response.completed` → `Usage`
+/// - `response.completed` / `response.done` → `Usage` + `Finished`
 /// - `[DONE]` → `Done`
 ///
 /// The top-level `id` field present on most events is used to emit `ResponseId`
@@ -427,9 +430,13 @@ fn process_sse_line(
     let event_type = val["type"].as_str().unwrap_or("");
 
     match event_type {
-        "message.delta" => {
-            // {"type":"message.delta","delta":{"type":"output_text","text":"..."}}
-            if let Some(text) = val["delta"]["text"].as_str() {
+        // Accept both documented xAI name ("message.delta") and OpenAI spec name
+        // ("response.output_text.delta"). The delta payload may be an object with
+        // a "text" field or a bare string — try both.
+        "message.delta" | "response.output_text.delta" => {
+            if let Some(text) = val["delta"]["text"].as_str()
+                .or_else(|| val["delta"].as_str())
+            {
                 if !text.is_empty() {
                     pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
                 }
@@ -510,6 +517,22 @@ mod tests {
     #[test]
     fn text_delta_responses_api() {
         let line = r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
+    }
+
+    #[test]
+    fn text_delta_openai_spec_event_name() {
+        // OpenAI Responses API spec uses "response.output_text.delta" with a bare string delta.
+        let line = r#"data: {"type":"response.output_text.delta","delta":"world"}"#;
+        let event = parse_line(line).unwrap();
+        assert!(matches!(event, XaiEvent::TextDelta { text } if text == "world"));
+    }
+
+    #[test]
+    fn text_delta_openai_spec_object_delta() {
+        // OpenAI Responses API spec may also wrap delta in an object.
+        let line = r#"data: {"type":"response.output_text.delta","delta":{"text":"hello"}}"#;
         let event = parse_line(line).unwrap();
         assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
     }
