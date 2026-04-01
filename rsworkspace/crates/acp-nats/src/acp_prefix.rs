@@ -7,7 +7,7 @@
 //! malformed dots (consecutive, leading, trailing). Max 128 bytes. Validity is guaranteed at
 //! construction.
 
-use crate::subject_token_violation::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolation;
 use trogon_nats::DottedNatsToken;
 
 /// Error returned when [`AcpPrefix`] validation fails.

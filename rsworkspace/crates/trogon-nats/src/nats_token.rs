@@ -9,10 +9,9 @@
 
 use std::sync::Arc;
 
+use crate::constants::MAX_NATS_TOKEN_LENGTH;
 use crate::subject_token_violation::SubjectTokenViolation;
 use crate::token;
-
-const MAX_LENGTH: usize = 128;
 
 // ── NatsToken (single, ASCII-only) ─────────────────────────────────────
 
@@ -33,7 +32,7 @@ impl NatsToken {
         let mut char_count: usize = 0;
         for ch in s.chars() {
             char_count += 1;
-            if char_count > MAX_LENGTH {
+            if char_count > MAX_NATS_TOKEN_LENGTH {
                 return Err(SubjectTokenViolation::TooLong(char_count));
             }
             if !ch.is_ascii() || ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
@@ -91,7 +90,7 @@ impl DottedNatsToken {
         if token::has_consecutive_or_boundary_dots(s) {
             return Err(SubjectTokenViolation::InvalidCharacter('.'));
         }
-        if s.len() > MAX_LENGTH {
+        if s.len() > MAX_NATS_TOKEN_LENGTH {
             return Err(SubjectTokenViolation::TooLong(s.len()));
         }
         Ok(Self(s.into()))

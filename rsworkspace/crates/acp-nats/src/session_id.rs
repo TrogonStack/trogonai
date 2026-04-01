@@ -5,7 +5,7 @@
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.
 
-use crate::subject_token_violation::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolation;
 use trogon_nats::NatsToken;
 
 /// Error returned when [`AcpSessionId`] validation fails.
