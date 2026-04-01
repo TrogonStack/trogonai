@@ -1,4 +1,4 @@
-/// Agent -> bridge async notification. Stream: NOTIFICATIONS.
+/// Agent -> bridge async notification.
 #[derive(Debug)]
 pub struct UpdateSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -39,3 +39,8 @@ impl async_nats::subject::ToSubject for UpdateSubject {
 }
 
 impl super::super::markers::Subscribable for UpdateSubject {}
+
+impl super::super::stream::StreamAssignment for UpdateSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Notifications);
+}

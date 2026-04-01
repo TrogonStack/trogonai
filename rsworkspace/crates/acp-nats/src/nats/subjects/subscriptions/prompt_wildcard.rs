@@ -25,3 +25,7 @@ impl async_nats::subject::ToSubject for PromptWildcardSubject {
 }
 
 impl super::super::markers::Subscribable for PromptWildcardSubject {}
+
+impl super::super::stream::StreamAssignment for PromptWildcardSubject {
+    const STREAM: Option<super::super::stream::AcpStream> = None;
+}

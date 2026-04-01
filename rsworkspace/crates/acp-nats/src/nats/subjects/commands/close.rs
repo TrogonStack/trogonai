@@ -1,4 +1,4 @@
-/// Close session. Stream: COMMANDS.
+/// Close session.
 #[derive(Debug)]
 pub struct CloseSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for CloseSubject {
 }
 
 impl super::super::markers::SessionCommand for CloseSubject {}
+
+impl super::super::stream::StreamAssignment for CloseSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

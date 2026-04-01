@@ -1,4 +1,4 @@
-/// Fork session. Stream: COMMANDS.
+/// Fork session.
 #[derive(Debug)]
 pub struct ForkSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for ForkSubject {
 }
 
 impl super::super::markers::SessionCommand for ForkSubject {}
+
+impl super::super::stream::StreamAssignment for ForkSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

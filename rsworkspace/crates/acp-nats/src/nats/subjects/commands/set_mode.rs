@@ -1,4 +1,4 @@
-/// Set session mode. Stream: COMMANDS.
+/// Set session mode.
 #[derive(Debug)]
 pub struct SetModeSubject {
     prefix: crate::acp_prefix::AcpPrefix,
@@ -35,3 +35,8 @@ impl async_nats::subject::ToSubject for SetModeSubject {
 }
 
 impl super::super::markers::SessionCommand for SetModeSubject {}
+
+impl super::super::stream::StreamAssignment for SetModeSubject {
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Commands);
+}

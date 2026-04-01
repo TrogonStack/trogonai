@@ -3,7 +3,10 @@ pub mod commands;
 pub mod global;
 pub mod markers;
 pub mod responses;
+pub mod stream;
 pub mod subscriptions;
+
+pub use stream::{AcpStream, StreamAssignment};
 
 pub mod agent {
     pub use super::global::{
@@ -47,7 +50,7 @@ pub mod session {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent, session};
+    use super::{AcpStream, StreamAssignment, agent, session};
     use crate::acp_prefix::AcpPrefix;
     use crate::session_id::AcpSessionId;
 
@@ -379,6 +382,121 @@ mod tests {
             session::client::FsReadTextFileSubject::new(&p("myapp"), &sid("s1")).to_string(),
             "myapp.session.s1.client.fs.read_text_file"
         );
+    }
+
+    #[test]
+    fn stream_assignments() {
+        assert_eq!(
+            session::agent::LoadSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::PromptSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::CancelSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::CloseSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::ForkSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::ResumeSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::SetModeSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::SetConfigOptionSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::SetModelSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+
+        assert_eq!(agent::InitializeSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(agent::AuthenticateSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(agent::SessionNewSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(agent::SessionListSubject::STREAM, None);
+        assert_eq!(agent::ExtSubject::STREAM, Some(AcpStream::GlobalExt));
+        assert_eq!(agent::ExtNotifySubject::STREAM, Some(AcpStream::GlobalExt));
+
+        assert_eq!(
+            session::agent::CancelledSubject::STREAM,
+            Some(AcpStream::Responses)
+        );
+        assert_eq!(
+            session::agent::ExtReadySubject::STREAM,
+            Some(AcpStream::Responses)
+        );
+        assert_eq!(
+            session::agent::PromptResponseSubject::STREAM,
+            Some(AcpStream::Responses)
+        );
+        assert_eq!(
+            session::agent::ResponseSubject::STREAM,
+            Some(AcpStream::Responses)
+        );
+        assert_eq!(
+            session::agent::UpdateSubject::STREAM,
+            Some(AcpStream::Notifications)
+        );
+
+        assert_eq!(
+            session::client::FsReadTextFileSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::FsWriteTextFileSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::SessionRequestPermissionSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::SessionUpdateSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::TerminalCreateSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::TerminalKillSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::TerminalOutputSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::TerminalReleaseSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            session::client::TerminalWaitForExitSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+
+        assert_eq!(session::wildcards::AllAgentSubject::STREAM, None);
+        assert_eq!(session::wildcards::AllAgentExtSubject::STREAM, None);
+        assert_eq!(session::wildcards::AllClientSubject::STREAM, None);
+        assert_eq!(session::wildcards::AllSessionSubject::STREAM, None);
+        assert_eq!(agent::wildcards::GlobalAllSubject::STREAM, None);
+        assert_eq!(session::wildcards::OneAgentSubject::STREAM, None);
+        assert_eq!(session::wildcards::OneClientSubject::STREAM, None);
+        assert_eq!(session::wildcards::OneSessionSubject::STREAM, None);
+        assert_eq!(session::agent::PromptWildcardSubject::STREAM, None);
     }
 
     #[test]
