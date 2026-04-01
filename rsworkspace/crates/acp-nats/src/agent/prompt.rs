@@ -34,7 +34,7 @@ where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
     S: JsonSerialize,
 {
     let start = bridge.clock.now();
@@ -80,7 +80,7 @@ where
     N: SubscribeClient,
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
     S: JsonSerialize,
 {
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.

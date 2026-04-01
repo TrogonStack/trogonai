@@ -17,7 +17,7 @@ pub use message::{
 };
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
-    JetStreamPublisher,
+    JetStreamPublisher, JsMessageOf,
 };
 
 #[cfg(feature = "test-support")]

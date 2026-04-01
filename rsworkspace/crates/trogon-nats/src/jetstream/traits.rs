@@ -64,3 +64,8 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
 
     fn messages(&self) -> impl Future<Output = Result<Self::Messages, Self::StreamError>> + Send;
 }
+
+/// The message type produced by the consumer at the end of the
+/// `J → Stream → Consumer → Message` chain.
+pub type JsMessageOf<J> =
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::Message;

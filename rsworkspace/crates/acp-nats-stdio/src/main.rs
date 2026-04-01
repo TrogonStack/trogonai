@@ -75,10 +75,8 @@ where
         + acp_nats::FlushClient
         + acp_nats::SubscribeClient
         + 'static,
-    J: acp_nats::JetStreamPublisher
-        + acp_nats::JetStreamGetStream
-        + 'static,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
     W: futures::AsyncWrite + Unpin + 'static,
     R: futures::AsyncRead + Unpin + 'static,
 {

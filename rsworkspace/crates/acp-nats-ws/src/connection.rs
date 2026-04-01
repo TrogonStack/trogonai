@@ -25,10 +25,8 @@ pub async fn handle<N, J>(
         + acp_nats::SubscribeClient
         + Clone
         + 'static,
-    J: acp_nats::JetStreamPublisher
-        + acp_nats::JetStreamGetStream
-        + 'static,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let (ws_sender, ws_receiver) = socket.split();
 

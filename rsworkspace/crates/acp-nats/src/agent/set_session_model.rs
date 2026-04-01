@@ -22,7 +22,7 @@ pub async fn handle<
     args: SetSessionModelRequest,
 ) -> Result<SetSessionModelResponse>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     let start = bridge.clock.now();
 

@@ -29,7 +29,7 @@ pub async fn js_request<J, Req, Res, S>(
 ) -> agent_client_protocol::Result<Res>
 where
     J: JetStreamPublisher + JetStreamGetStream,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
     Req: serde::Serialize,
     Res: DeserializeOwned,
     S: JsonSerialize,

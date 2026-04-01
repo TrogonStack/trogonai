@@ -140,7 +140,7 @@ impl<
     J: JetStreamPublisher + JetStreamGetStream,
 > Bridge<N, C, J>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     pub(crate) async fn session_request<Req, Res>(
         &self,
@@ -175,7 +175,7 @@ impl<
     J: JetStreamPublisher + JetStreamGetStream,
 > Agent for Bridge<N, C, J>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await

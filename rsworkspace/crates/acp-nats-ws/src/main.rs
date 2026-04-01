@@ -104,11 +104,8 @@ fn run_connection_thread<N, J>(
         + Clone
         + Send
         + 'static,
-    J: acp_nats::JetStreamPublisher
-        + acp_nats::JetStreamGetStream
-        + Send
-        + 'static,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -140,10 +137,8 @@ async fn process_connections<N, J>(
         + Clone
         + Send
         + 'static,
-    J: acp_nats::JetStreamPublisher
-        + acp_nats::JetStreamGetStream
-        + 'static,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: trogon_nats::jetstream::JsRequestMessage,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
