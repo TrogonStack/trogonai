@@ -1,9 +1,7 @@
-use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::nats::{
     GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject,
 };
-use acp_nats::session_id::AcpSessionId;
+use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
     ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
