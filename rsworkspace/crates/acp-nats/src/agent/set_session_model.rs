@@ -44,7 +44,7 @@ where
         .session_request::<SetSessionModelRequest, SetSessionModelResponse>(
             &subject,
             &args,
-            session_id.as_str(),
+            &session_id,
         )
         .await;
 

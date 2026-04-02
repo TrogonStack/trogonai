@@ -44,7 +44,7 @@ where
         .session_request::<ResumeSessionRequest, ResumeSessionResponse>(
             &subject,
             &args,
-            session_id.as_str(),
+            &session_id,
         )
         .await;
 

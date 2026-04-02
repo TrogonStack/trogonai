@@ -23,7 +23,7 @@ pub async fn js_request<J, Req, Res>(
     request: &Req,
     serializer: &S,
     prefix: &AcpPrefix,
-    session_id: &str,
+    session_id: &crate::session_id::AcpSessionId,
     req_id: &str,
     operation_timeout: Duration,
 ) -> agent_client_protocol::Result<Res>
@@ -57,7 +57,7 @@ where
 
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id);
-    headers.insert(SESSION_ID_HEADER, session_id);
+    headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     js.publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
         .await
@@ -117,9 +117,14 @@ mod tests {
     use trogon_nats::jetstream::mocks::*;
 
     use crate::agent::test_support::MockJs;
+    use crate::session_id::AcpSessionId;
 
     fn test_prefix() -> AcpPrefix {
         AcpPrefix::new("acp").expect("test prefix")
+    }
+
+    fn test_sid(s: &str) -> AcpSessionId {
+        AcpSessionId::new(s).expect("test session id")
     }
 
     fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
@@ -150,7 +155,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -176,7 +181,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -196,7 +201,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -223,7 +228,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -248,7 +253,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -270,7 +275,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_millis(10),
         )
@@ -307,7 +312,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -332,7 +337,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -364,7 +369,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )
@@ -386,7 +391,7 @@ mod tests {
             &agent_client_protocol::PromptRequest::new("s1", vec![]),
             &trogon_std::FailNextSerialize::new(1),
             &test_prefix(),
-            "s1",
+            &test_sid("s1"),
             "req-1",
             Duration::from_secs(5),
         )

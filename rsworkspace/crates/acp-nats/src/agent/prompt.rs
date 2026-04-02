@@ -86,9 +86,8 @@ where
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
     // JetStream consumers with DeliverAll replay from stream start, so they'll see the
     // response even if the runner responds before we start consuming.
-    let sid = session_id.as_str();
     let notifications_stream = streams::notifications_stream_name(prefix);
-    let notif_config = consumers::prompt_notifications_consumer(prefix, sid, req_id);
+    let notif_config = consumers::prompt_notifications_consumer(prefix, session_id, req_id);
     let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -112,7 +111,7 @@ where
     })?;
 
     let responses_stream = streams::responses_stream_name(prefix);
-    let resp_config = consumers::prompt_response_consumer(prefix, sid, req_id);
+    let resp_config = consumers::prompt_response_consumer(prefix, session_id, req_id);
     let resp_stream = js.get_stream(&responses_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -154,7 +153,7 @@ where
 
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id);
-    headers.insert(SESSION_ID_HEADER, sid);
+    headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
     js.publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
