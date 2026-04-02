@@ -1,3 +1,4 @@
+use crate::metrics::METRICS;
 use crate::terminal::WasmTerminal;
 use agent_client_protocol::TerminalExitStatus;
 use futures::StreamExt as _;
@@ -98,6 +99,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
@@ -150,6 +152,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
@@ -223,6 +226,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
@@ -290,6 +294,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
@@ -349,6 +354,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 // Take the subscriber out temporarily for async recv.
                 let mut sub = match caller.data_mut().subscriptions.remove(&sub_id) {
@@ -423,6 +429,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 if caller.data_mut().subscriptions.remove(&sub_id).is_some() {
                     results[0] = wasmtime::Val::I32(0);
@@ -455,6 +462,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
+                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
@@ -671,6 +679,12 @@ pub async fn run_module_compiled(
     let exit_status = match call_result {
         Ok(()) => TerminalExitStatus::new().exit_code(Some(0u32)),
         Err(e) => {
+            // Check for fuel exhaustion (OutOfFuel trap) first.
+            if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+                if *trap == wasmtime::Trap::OutOfFuel {
+                    return Ok(TerminalExitStatus::new().signal(Some("fuel_exhausted".to_string())));
+                }
+            }
             // proc_exit raises I32Exit. The top-level anyhow::Error wraps it
             // (possibly with a WasmBacktrace context), so downcast_ref on the
             // anyhow::Error directly peels through context layers correctly.

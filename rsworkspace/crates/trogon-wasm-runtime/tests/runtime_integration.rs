@@ -28,6 +28,9 @@ fn test_config(session_root: PathBuf) -> Config {
         wasm_fuel_limit: 1_000_000_000u64,
         wasm_host_call_limit: 10_000u32,
         acp_prefix: "acp".to_string(),
+        wasm_max_concurrent_tasks: 32,
+        session_idle_timeout_secs: 3600,
+        wasm_max_module_size_bytes: 100 * 1024 * 1024,
     }
 }
 
@@ -233,6 +236,9 @@ async fn output_byte_limit_truncates() {
         wasm_fuel_limit: 1_000_000_000u64,
         wasm_host_call_limit: 10_000u32,
         acp_prefix: "acp".to_string(),
+        wasm_max_concurrent_tasks: 32,
+        session_idle_timeout_secs: 3600,
+        wasm_max_module_size_bytes: 100 * 1024 * 1024,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -536,6 +542,9 @@ async fn wasm_module_runs_with_timeout_set() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -723,6 +732,9 @@ async fn wasm_only_rejects_native_commands() {
         wasm_fuel_limit: 1_000_000_000u64,
         wasm_host_call_limit: 10_000u32,
         acp_prefix: "acp".to_string(),
+        wasm_max_concurrent_tasks: 32,
+        session_idle_timeout_secs: 3600,
+        wasm_max_module_size_bytes: 100 * 1024 * 1024,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -755,6 +767,9 @@ async fn wasm_only_allows_wasm_commands() {
         wasm_fuel_limit: 1_000_000_000u64,
         wasm_host_call_limit: 10_000u32,
         acp_prefix: "acp".to_string(),
+        wasm_max_concurrent_tasks: 32,
+        session_idle_timeout_secs: 3600,
+        wasm_max_module_size_bytes: 100 * 1024 * 1024,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -815,6 +830,9 @@ async fn wasm_module_memory_limit_enforced() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -955,6 +973,9 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_fuel_limit: 1_000_000_000u64,
                     wasm_host_call_limit: 10_000u32,
                     acp_prefix: "acp".to_string(),
+                    wasm_max_concurrent_tasks: 32,
+                    session_idle_timeout_secs: 3600,
+                    wasm_max_module_size_bytes: 100 * 1024 * 1024,
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1003,6 +1024,9 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_fuel_limit: 1_000_000_000u64,
                     wasm_host_call_limit: 10_000u32,
                     acp_prefix: "acp".to_string(),
+                    wasm_max_concurrent_tasks: 32,
+                    session_idle_timeout_secs: 3600,
+                    wasm_max_module_size_bytes: 100 * 1024 * 1024,
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1075,6 +1099,9 @@ async fn module_cache_invalidates_on_mtime_change() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1311,6 +1338,9 @@ async fn wasm_module_network_enabled_flag_wires_through() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1378,6 +1408,9 @@ async fn wasm_module_custom_fuel_limit() {
                 wasm_fuel_limit: 1000, // very low — exhausted immediately by the loop
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1456,6 +1489,9 @@ async fn wasm_module_host_call_budget_exhausted() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 2, // very low budget
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1602,6 +1638,9 @@ async fn wasm_module_request_permission_no_nats_denied() {
                 wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 10_000u32,
                 acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
             };
             // No NATS client — WasmRuntime::new, not with_nats.
             let runtime = WasmRuntime::new(&cfg).unwrap();
@@ -1656,6 +1695,223 @@ async fn wasm_module_request_permission_no_nats_denied() {
                 exit.exit_status.exit_code,
                 Some(0),
                 "request_permission with no NATS and auto_allow=false should return -1 (denied)"
+            );
+        })
+        .await;
+}
+
+// ── Fix 3: Backpressure ────────────────────────────────────────────────────────
+
+/// Verify that a runtime with `wasm_max_concurrent_tasks: 2` can still run 4
+/// tasks successfully (the semaphore serializes them, not rejects them).
+#[tokio::test]
+async fn wasm_backpressure_limits_concurrent_tasks() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 2,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // A simple module that exits immediately.
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "backpressure_test.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 0))
+                    unreachable
+                  )
+                )
+                "#,
+            );
+
+            // Launch 4 tasks — only 2 run concurrently due to semaphore.
+            let mut terminal_ids = Vec::new();
+            let session_ids = ["s0", "s1", "s2", "s3"];
+            let session_names = ["bp-session-0", "bp-session-1", "bp-session-2", "bp-session-3"];
+            for i in 0..4usize {
+                let req = CreateTerminalRequest::new(
+                    SessionId::from(session_ids[i]),
+                    wasm_path.to_str().unwrap(),
+                );
+                let resp = runtime
+                    .handle_create_terminal(session_names[i], req)
+                    .await
+                    .expect("terminal should be created");
+                terminal_ids.push(resp.terminal_id);
+            }
+
+            // Wait for all 4 to complete successfully.
+            for tid in terminal_ids {
+                let wait_req =
+                    WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
+                let exit = runtime
+                    .handle_wait_for_terminal_exit(wait_req)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    exit.exit_status.exit_code,
+                    Some(0),
+                    "all 4 tasks should complete with exit_code 0"
+                );
+            }
+        })
+        .await;
+}
+
+// ── Fix 4: Fuel exhaustion distinguishable ────────────────────────────────────
+
+/// A module that runs an infinite loop with a very low fuel limit should report
+/// `signal == Some("fuel_exhausted")` specifically (not a generic trap message).
+#[tokio::test]
+async fn wasm_module_fuel_exhausted_returns_distinct_signal() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 100, // very low — exhausted by the loop
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 100 * 1024 * 1024,
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "fuel_exhausted_signal.wasm",
+                r#"
+                (module
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (loop $continue
+                      (br $continue)
+                    )
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                exit.exit_status.signal.as_deref(),
+                Some("fuel_exhausted"),
+                "fuel exhaustion should produce signal 'fuel_exhausted', got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
+
+// ── Fix 7: Maximum WASM module size ───────────────────────────────────────────
+
+/// Verify that a module larger than `wasm_max_module_size_bytes` is rejected
+/// at `create_terminal` time with an appropriate error.
+#[tokio::test]
+async fn wasm_module_too_large_rejected() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
+                wasm_max_concurrent_tasks: 32,
+                session_idle_timeout_secs: 3600,
+                wasm_max_module_size_bytes: 10, // only 10 bytes — any real .wasm is larger
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // Any valid .wasm file is larger than 10 bytes.
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "too_large.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 0))
+                    unreachable
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let err = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect_err("module exceeding size limit should be rejected");
+
+            assert!(
+                err.message.contains("too large") || err.message.contains("limit"),
+                "error message should mention the size limit: {}",
+                err.message
             );
         })
         .await;
