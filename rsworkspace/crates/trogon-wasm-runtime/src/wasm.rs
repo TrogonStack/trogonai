@@ -66,13 +66,21 @@ pub async fn run_module(
     let exit_status = match start.call_async(&mut store, ()).await {
         Ok(()) => TerminalExitStatus::new().exit_code(Some(0u32)),
         Err(e) => {
-            // A WASI exit code is surfaced as a trap with `I32Exit`.
-            if let Some(exit) = e.downcast_ref::<wasmtime_wasi::I32Exit>() {
-                TerminalExitStatus::new().exit_code(Some(exit.0 as u32))
-            } else {
-                // Other trap (e.g. unreachable, out-of-fuel).
-                TerminalExitStatus::new()
-                    .signal(Some(format!("trap: {e}")))
+            // proc_exit raises I32Exit.  When wasmtime adds a WasmBacktrace
+            // context, I32Exit ends up inside an anyhow::Error wrapper whose
+            // vtable type is `anyhow::Error`, hiding it from downcast_ref on
+            // `dyn Error` chain items.  We try the type-safe path first, then
+            // fall back to parsing I32Exit's Display string
+            // ("Exited with i32 exit status N").
+            // proc_exit raises I32Exit.  The top-level anyhow::Error wraps it
+            // (possibly with a WasmBacktrace context), so downcast_ref on the
+            // anyhow::Error directly peels through context layers correctly.
+            let exit_code = e
+                .downcast_ref::<wasmtime_wasi::I32Exit>()
+                .map(|x| x.0 as u32);
+            match exit_code {
+                Some(code) => TerminalExitStatus::new().exit_code(Some(code)),
+                None => TerminalExitStatus::new().signal(Some(format!("trap: {e}"))),
             }
         }
     };
