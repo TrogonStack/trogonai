@@ -56,6 +56,12 @@ pub struct WasmRuntime {
     nats_client: Option<async_nats::Client>,
     /// Optional memory limit for WASM module execution in bytes.
     wasm_memory_limit_bytes: Option<usize>,
+    /// Maximum fuel (instruction budget) for a single WASM module execution.
+    wasm_fuel_limit: u64,
+    /// Maximum number of trogon.* host function calls per WASM module execution.
+    wasm_host_call_limit: u32,
+    /// ACP subject prefix for WASM permission requests over NATS.
+    acp_prefix: String,
 }
 
 impl WasmRuntime {
@@ -87,6 +93,9 @@ impl WasmRuntime {
             nats_client,
             wasm_memory_limit_bytes: config.wasm_memory_limit_bytes,
             module_cache_dir: config.module_cache_dir.clone(),
+            wasm_fuel_limit: config.wasm_fuel_limit,
+            wasm_host_call_limit: config.wasm_host_call_limit,
+            acp_prefix: config.acp_prefix.clone(),
         })
     }
 
@@ -142,22 +151,38 @@ impl WasmRuntime {
             let key = Self::cache_key(&abs_path);
             let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
             let mtime_path = cache_dir.join(format!("{key}.mtime"));
+            let version_path = cache_dir.join(format!("{key}.version"));
 
             if cwasm_path.exists() && mtime_path.exists() {
-                if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
-                    let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
-                    let current_nanos = current_mtime
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
-                    if stored_nanos != 0 && stored_nanos == current_nanos {
-                        // SAFETY: the engine config is always identical for cached modules
-                        // in this runtime — same wasmtime::Config, same Cranelift settings.
-                        if let Ok(m) = unsafe { Module::deserialize_file(&self.engine, &cwasm_path) } {
-                            self.modules.borrow_mut().insert(abs_path.clone(), (m.clone(), current_mtime));
-                            return Ok(m);
+                // Check version fingerprint first — skip deserialization if version mismatch.
+                let stored_version = std::fs::read_to_string(&version_path).unwrap_or_default();
+                let version_ok = stored_version.trim() == env!("CARGO_PKG_VERSION");
+
+                if version_ok {
+                    if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
+                        let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
+                        let current_nanos = current_mtime
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        if stored_nanos != 0 && stored_nanos == current_nanos {
+                            // SAFETY: the engine config is always identical for cached modules
+                            // in this runtime — same wasmtime::Config, same Cranelift settings.
+                            let cached_module = unsafe { Module::deserialize_file(&self.engine, &cwasm_path) };
+                            match cached_module {
+                                Ok(m) => {
+                                    self.modules.borrow_mut().insert(abs_path.clone(), (m.clone(), current_mtime));
+                                    return Ok(m);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(path = %cwasm_path.display(), error = %e, "on-disk module cache invalid, recompiling");
+                                    // Fall through to recompilation below.
+                                }
+                            }
                         }
                     }
+                } else {
+                    tracing::warn!(path = %cwasm_path.display(), stored = %stored_version.trim(), current = %env!("CARGO_PKG_VERSION"), "module cache version mismatch, recompiling");
                 }
             }
         }
@@ -173,12 +198,14 @@ impl WasmRuntime {
                 if let Ok(serialized) = m.serialize() {
                     let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
                     let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                    let version_path = cache_dir.join(format!("{key}.version"));
                     let current_nanos = current_mtime
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_nanos() as u64)
                         .unwrap_or(0);
                     let _ = std::fs::write(&cwasm_path, &serialized);
                     let _ = std::fs::write(&mtime_path, current_nanos.to_string());
+                    let _ = std::fs::write(&version_path, env!("CARGO_PKG_VERSION"));
                 }
             }
         }
@@ -367,6 +394,9 @@ impl WasmRuntime {
         let nats_for_task = self.nats_client.clone();
         let allow_network = self.wasm_allow_network;
         let auto_allow = self.auto_allow_permissions;
+        let fuel_limit = self.wasm_fuel_limit;
+        let host_call_limit = self.wasm_host_call_limit;
+        let acp_prefix = self.acp_prefix.clone();
         // Build full argv: command (wasm_path) as argv[0], then user-supplied args.
         let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
         argv_cloned.push(command.to_string());
@@ -391,6 +421,9 @@ impl WasmRuntime {
                 session_id_cloned,
                 allow_network,
                 auto_allow,
+                fuel_limit,
+                host_call_limit,
+                acp_prefix,
             )
             .await;
             let exit_status = match result {

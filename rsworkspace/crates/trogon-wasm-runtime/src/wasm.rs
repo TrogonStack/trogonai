@@ -1,5 +1,7 @@
 use crate::terminal::WasmTerminal;
 use agent_client_protocol::TerminalExitStatus;
+use futures::StreamExt as _;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
@@ -18,6 +20,15 @@ pub(crate) struct WasmStoreData {
     pub session_id: String,
     /// When `true`, `request_permission` auto-selects the first option.
     pub auto_allow_permissions: bool,
+    /// Remaining host-call budget. Decremented on each trogon.* call.
+    /// When zero, host functions return -1 without executing.
+    pub host_call_budget: u32,
+    /// Active NATS subscriptions keyed by subscription ID.
+    pub subscriptions: HashMap<i32, async_nats::Subscriber>,
+    /// Counter for next subscription ID.
+    pub next_sub_id: i32,
+    /// ACP subject prefix for permission requests over NATS.
+    pub acp_prefix: String,
 }
 
 /// Memory limit state threaded through the store.
@@ -82,6 +93,12 @@ fn add_trogon_host_functions(
             let msg_ptr = params[2].unwrap_i32() as usize;
             let msg_len = params[3].unwrap_i32() as usize;
             Box::new(async move {
+                // Fix 4: check and decrement host call budget first.
+                if caller.data().host_call_budget == 0 {
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
                         Some(m)
@@ -127,6 +144,13 @@ fn add_trogon_host_functions(
             let payload_ptr = params[2].unwrap_i32() as usize;
             let payload_len = params[3].unwrap_i32() as usize;
             Box::new(async move {
+                // Fix 4: check and decrement host call budget first.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
                         Some(m)
@@ -193,6 +217,13 @@ fn add_trogon_host_functions(
             let out_ptr    = params[5].unwrap_i32() as usize;
             let out_max    = params[6].unwrap_i32() as usize;
             Box::new(async move {
+                // Fix 4: check and decrement host call budget first.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
                 }) {
@@ -239,6 +270,170 @@ fn add_trogon_host_functions(
         },
     )?;
 
+    // trogon.subscribe(subject_ptr, subject_len) -> i32
+    // Returns subscription ID (>= 0) or -1 on error/no NATS.
+    linker.func_new_async(
+        "trogon",
+        "subscribe",
+        wasmtime::FuncType::new(
+            engine,
+            [ValType::I32, ValType::I32],
+            [ValType::I32],
+        ),
+        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+            let subj_ptr = params[0].unwrap_i32() as usize;
+            let subj_len = params[1].unwrap_i32() as usize;
+            Box::new(async move {
+                // Fix 4: check and decrement host call budget first.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
+                let mem = match caller.get_export("memory").and_then(|e| {
+                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                }) {
+                    Some(m) => m,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let subject = {
+                    let data = mem.data(&caller);
+                    match read_str(data, subj_ptr, subj_len) {
+                        Some(s) => s.to_owned(),
+                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    }
+                };
+
+                let nats = match caller.data().nats.clone() {
+                    Some(n) => n,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let sub = match nats.subscribe(subject).await {
+                    Ok(s) => s,
+                    Err(_) => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let id = caller.data().next_sub_id;
+                caller.data_mut().next_sub_id += 1;
+                caller.data_mut().subscriptions.insert(id, sub);
+                results[0] = wasmtime::Val::I32(id);
+                Ok(())
+            })
+        },
+    )?;
+
+    // trogon.recv_message(sub_id, out_subj_ptr, out_subj_max, out_payload_ptr, out_payload_max, timeout_ms) -> i32
+    // Returns total bytes written (subject + payload), 0 on timeout, -1 on error.
+    linker.func_new_async(
+        "trogon",
+        "recv_message",
+        wasmtime::FuncType::new(
+            engine,
+            [ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I32],
+        ),
+        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+            let sub_id         = params[0].unwrap_i32();
+            let out_subj_ptr   = params[1].unwrap_i32() as usize;
+            let out_subj_max   = params[2].unwrap_i32() as usize;
+            let out_payload_ptr = params[3].unwrap_i32() as usize;
+            let out_payload_max = params[4].unwrap_i32() as usize;
+            let timeout_ms     = params[5].unwrap_i32();
+            Box::new(async move {
+                // Fix 4: check and decrement host call budget first.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
+                // Take the subscriber out temporarily for async recv.
+                let mut sub = match caller.data_mut().subscriptions.remove(&sub_id) {
+                    Some(s) => s,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+                let result = tokio::time::timeout(timeout, sub.next()).await;
+
+                // Put subscriber back.
+                caller.data_mut().subscriptions.insert(sub_id, sub);
+
+                let msg = match result {
+                    Ok(Some(m)) => m,
+                    Ok(None) | Err(_) => {
+                        // Closed or timeout.
+                        results[0] = wasmtime::Val::I32(0);
+                        return Ok(());
+                    }
+                };
+
+                let subj_bytes = msg.subject.as_str().as_bytes();
+                let payload_bytes = &msg.payload[..];
+
+                let mem = match caller.get_export("memory").and_then(|e| {
+                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                }) {
+                    Some(m) => m,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let subj_to_write = subj_bytes.len().min(out_subj_max);
+                let payload_to_write = payload_bytes.len().min(out_payload_max);
+
+                let mem_data = mem.data_mut(&mut caller);
+
+                if out_subj_ptr + subj_to_write > mem_data.len()
+                    || out_payload_ptr + payload_to_write > mem_data.len()
+                {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+
+                mem_data[out_subj_ptr..out_subj_ptr + subj_to_write]
+                    .copy_from_slice(&subj_bytes[..subj_to_write]);
+                mem_data[out_payload_ptr..out_payload_ptr + payload_to_write]
+                    .copy_from_slice(&payload_bytes[..payload_to_write]);
+
+                results[0] = wasmtime::Val::I32((subj_to_write + payload_to_write) as i32);
+                Ok(())
+            })
+        },
+    )?;
+
+    // trogon.unsubscribe(sub_id) -> i32
+    // Returns 0 on success, -1 if sub_id not found.
+    linker.func_new_async(
+        "trogon",
+        "unsubscribe",
+        wasmtime::FuncType::new(
+            engine,
+            [ValType::I32],
+            [ValType::I32],
+        ),
+        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+            let sub_id = params[0].unwrap_i32();
+            Box::new(async move {
+                // Fix 4: check and decrement host call budget.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
+                if caller.data_mut().subscriptions.remove(&sub_id).is_some() {
+                    results[0] = wasmtime::Val::I32(0);
+                } else {
+                    results[0] = wasmtime::Val::I32(-1);
+                }
+                Ok(())
+            })
+        },
+    )?;
+
     // trogon.request_permission(options_json_ptr, options_json_len, out_selected_ptr) -> i32
     // Returns 0 on success (writes selected index to out_selected_ptr), -1 on cancel/error.
     linker.func_new_async(
@@ -254,6 +449,13 @@ fn add_trogon_host_functions(
             let opt_len = params[1].unwrap_i32() as usize;
             let out_ptr = params[2].unwrap_i32() as usize;
             Box::new(async move {
+                // Fix 4: check and decrement host call budget.
+                if caller.data().host_call_budget == 0 {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                caller.data_mut().host_call_budget -= 1;
+
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
                 }) {
@@ -261,14 +463,18 @@ fn add_trogon_host_functions(
                     None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                 };
 
-                let (options, auto_allow) = {
+                let (options, auto_allow, nats, session_id, acp_prefix) = {
                     let data = mem.data(&caller);
                     let json_str = match read_str(data, opt_ptr, opt_len) {
                         Some(s) => s.to_owned(),
                         None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                     };
                     let opts: Vec<String> = serde_json::from_str(&json_str).unwrap_or_default();
-                    (opts, caller.data().auto_allow_permissions)
+                    let auto = caller.data().auto_allow_permissions;
+                    let nats = caller.data().nats.clone();
+                    let sid = caller.data().session_id.clone();
+                    let prefix = caller.data().acp_prefix.clone();
+                    (opts, auto, nats, sid, prefix)
                 };
 
                 if options.is_empty() {
@@ -283,7 +489,49 @@ fn add_trogon_host_functions(
                         mem_data[out_ptr..out_ptr + 4].copy_from_slice(&0i32.to_le_bytes());
                     }
                     results[0] = wasmtime::Val::I32(0);
+                } else if let Some(nats_client) = nats {
+                    // Fix 6: send a NATS request to ask for user permission.
+                    let subject = format!("{acp_prefix}.session.{session_id}.wasm.request_permission");
+                    let request_json = serde_json::json!({
+                        "options": options,
+                        "session_id": session_id,
+                    })
+                    .to_string();
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        nats_client.request(subject, bytes::Bytes::from(request_json)),
+                    )
+                    .await
+                    {
+                        Ok(Ok(msg)) => {
+                            if let Ok(resp) =
+                                serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                            {
+                                if resp.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    results[0] = wasmtime::Val::I32(-1);
+                                } else if let Some(idx) =
+                                    resp.get("selected").and_then(|v| v.as_i64())
+                                {
+                                    let mem_data = mem.data_mut(&mut caller);
+                                    if out_ptr + 4 <= mem_data.len() {
+                                        mem_data[out_ptr..out_ptr + 4]
+                                            .copy_from_slice(&(idx as i32).to_le_bytes());
+                                    }
+                                    results[0] = wasmtime::Val::I32(0);
+                                } else {
+                                    results[0] = wasmtime::Val::I32(-1);
+                                }
+                            } else {
+                                results[0] = wasmtime::Val::I32(-1);
+                            }
+                        }
+                        _ => {
+                            // Timeout or NATS error.
+                            results[0] = wasmtime::Val::I32(-1);
+                        }
+                    }
                 } else {
+                    // No NATS and not auto-allow: deny.
                     results[0] = wasmtime::Val::I32(-1);
                 }
                 Ok(())
@@ -302,6 +550,7 @@ fn add_trogon_host_functions(
 /// `env_vars` are set as the WASI environment.
 /// The module is sandboxed to `sandbox_dir` as its preopened root (`/`).
 /// Output is appended directly to `output_buf` as bytes arrive.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_module_compiled(
     engine: &Engine,
     module: Module,
@@ -316,6 +565,9 @@ pub async fn run_module_compiled(
     session_id: String,
     allow_network: bool,
     auto_allow_permissions: bool,
+    fuel_limit: u64,
+    host_call_limit: u32,
+    acp_prefix: String,
 ) -> Result<TerminalExitStatus, anyhow::Error> {
     let mut linker: Linker<WasmStoreData> = Linker::new(engine);
     preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
@@ -353,6 +605,10 @@ pub async fn run_module_compiled(
         nats: nats_client,
         session_id,
         auto_allow_permissions,
+        host_call_budget: host_call_limit,
+        subscriptions: HashMap::new(),
+        next_sub_id: 0,
+        acp_prefix,
     };
     let mut store = Store::new(engine, store_data);
 
@@ -361,8 +617,10 @@ pub async fn run_module_compiled(
         store.limiter(|data| data as &mut dyn ResourceLimiter);
     }
 
-    // Enable fuel consumption to prevent runaway modules (1 billion instructions).
-    store.set_fuel(1_000_000_000)?;
+    // Fix 2: Enable fuel consumption with configurable limit.
+    // If fuel_limit is 0, use u64::MAX (engine has consume_fuel(true) already set).
+    let effective_fuel = if fuel_limit == 0 { u64::MAX } else { fuel_limit };
+    store.set_fuel(effective_fuel)?;
 
     // Spawn reader tasks BEFORE running the module so output streams concurrently.
     let buf_out = Arc::clone(&output_buf);
@@ -469,6 +727,9 @@ pub async fn run_module(
         String::new(),
         false,
         false,
+        1_000_000_000u64,
+        10_000u32,
+        String::new(),
     )
     .await
 }
