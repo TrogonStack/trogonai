@@ -1,0 +1,33 @@
+[package]
+name = "trogon-sink-github"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-sink-github"
+path = "src/main.rs"
+
+[dependencies]
+acp-telemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+axum = { workspace = true }
+bytes = { workspace = true }
+bytesize = "2.3.1"
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+tokio = { workspace = true, features = ["full"] }
+tower-http = { workspace = true, features = ["limit"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = "0.5"
+tracing-subscriber = { workspace = true }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
