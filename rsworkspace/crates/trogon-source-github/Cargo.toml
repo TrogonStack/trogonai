@@ -1,5 +1,5 @@
 [package]
-name = "trogon-sink-github"
+name = "trogon-source-github"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,7 +7,7 @@ edition = "2024"
 workspace = true
 
 [[bin]]
-name = "trogon-sink-github"
+name = "trogon-source-github"
 path = "src/main.rs"
 
 [dependencies]
