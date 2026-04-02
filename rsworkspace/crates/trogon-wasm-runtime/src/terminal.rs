@@ -63,32 +63,20 @@ impl WasmTerminal {
             return cached.clone();
         }
         if let Some(child) = self.child.take() {
-            match child.wait_with_output().await {
-                Ok(output) => {
-                    let status = exit_status_from_std(&output.status);
-                    // Flush remaining output.
-                    if !output.stdout.is_empty() {
-                        Self::append_output(
-                            &self.output_buf,
-                            self.output_byte_limit,
-                            &output.stdout,
-                        );
-                    }
-                    if !output.stderr.is_empty() {
-                        Self::append_output(
-                            &self.output_buf,
-                            self.output_byte_limit,
-                            &output.stderr,
-                        );
-                    }
-                    self.exit_status = Some(status.clone());
-                    status
-                }
+            let status = match child.wait_with_output().await {
+                Ok(output) => exit_status_from_std(&output.status),
                 Err(e) => {
                     warn!(error = %e, "Failed to wait for terminal process");
                     TerminalExitStatus::new()
                 }
+            };
+            // Wait for the background output collector to finish draining
+            // stdout/stderr before returning, so callers see complete output.
+            if let Some(collector) = self.output_collector.take() {
+                let _ = collector.await;
             }
+            self.exit_status = Some(status.clone());
+            status
         } else {
             self.exit_status
                 .clone()
