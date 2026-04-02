@@ -204,6 +204,7 @@ mod tests {
                 .subjects
                 .contains(&"acp.agent.authenticate".to_string())
         );
+        assert!(config.subjects.contains(&"acp.agent.logout".to_string()));
         assert!(
             config
                 .subjects

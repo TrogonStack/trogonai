@@ -9,6 +9,7 @@ mod initialize;
 pub(crate) mod js_request;
 mod list_sessions;
 mod load_session;
+mod logout;
 mod new_session;
 mod prompt;
 mod resume_session;
