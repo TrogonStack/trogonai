@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let expected = InitializeResponse::new(ProtocolVersion::LATEST);
         set_json_response(&mock, "acp.agent.initialize", &expected);
 
@@ -75,7 +75,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_logs_client_name_when_client_info_provided() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let expected = InitializeResponse::new(ProtocolVersion::LATEST);
         set_json_response(&mock, "acp.agent.initialize", &expected);
 
@@ -88,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_returns_error_when_nats_request_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_next_request();
 
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.set_response("acp.agent.initialize", "not json".into());
 
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
@@ -112,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
             "acp.agent.initialize",
@@ -134,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
         let _ = bridge
@@ -152,9 +152,11 @@ mod tests {
 
     #[tokio::test]
     async fn handlers_use_custom_prefix() {
+        use crate::agent::test_support::MockJs;
         let mock = AdvancedMockNatsClient::new();
         let bridge = Bridge::new(
             mock.clone(),
+            MockJs::new(),
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("myorg.prod"),

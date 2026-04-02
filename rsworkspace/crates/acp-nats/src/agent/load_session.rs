@@ -20,7 +20,7 @@ pub async fn handle<
     args: LoadSessionRequest,
 ) -> Result<LoadSessionResponse>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     let start = bridge.clock.now();
 
@@ -63,17 +63,16 @@ where
 mod tests {
     use crate::agent::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        set_js_response,
     };
-    use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, LoadSessionRequest, LoadSessionResponse};
     use std::time::Duration;
 
     #[tokio::test]
     async fn load_session_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (_mock, js, bridge) = mock_bridge();
         let expected = LoadSessionResponse::new();
-        set_json_response(&mock, "acp.session.s1.agent.load", &expected);
+        set_js_response(&js, &expected);
 
         let request = LoadSessionRequest::new("s1", ".");
         let result = bridge.load_session(request).await;
@@ -82,37 +81,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_session_returns_error_when_nats_request_fails() {
-        let (mock, bridge) = mock_bridge();
-        mock.fail_next_request();
+    async fn load_session_returns_error_when_js_fails() {
+        let (_mock, _js, bridge) = mock_bridge();
 
         let request = LoadSessionRequest::new("s1", ".");
         let err = bridge.load_session(request).await.unwrap_err();
 
-        assert!(err.to_string().contains("Agent unavailable"));
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+        assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[tokio::test]
     async fn load_session_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.session.s1.agent.load", "not json".into());
+        let (_mock, js, bridge) = mock_bridge();
+        crate::agent::test_support::set_js_raw_response(&js, b"not json");
 
         let request = LoadSessionRequest::new("s1", ".");
         let err = bridge.load_session(request).await.unwrap_err();
 
-        assert!(err.to_string().contains("Invalid response from agent"));
         assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[tokio::test]
     async fn load_session_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.load",
-            &LoadSessionResponse::new(),
-        );
+        let (_mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &LoadSessionResponse::new());
 
         let _ = bridge
             .load_session(LoadSessionRequest::new("s1", "."))
@@ -130,8 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_next_request();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge
             .load_session(LoadSessionRequest::new("s1", "."))
@@ -148,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_validates_session_id() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let request = LoadSessionRequest::new("invalid.session.id", ".");
         let err = bridge.load_session(request).await.unwrap_err();
         assert!(err.to_string().contains("Invalid session ID"));
@@ -156,12 +147,8 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.load",
-            &LoadSessionResponse::new(),
-        );
+        let (mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &LoadSessionResponse::new());
         mock.fail_publish_count(4);
 
         let _ = bridge
@@ -184,12 +171,8 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.load",
-            &LoadSessionResponse::new(),
-        );
+        let (mock, js, bridge) = mock_bridge();
+        set_js_response(&js, &LoadSessionResponse::new());
 
         let _ = bridge
             .load_session(LoadSessionRequest::new("s1", "."))

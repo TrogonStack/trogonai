@@ -240,6 +240,46 @@ mod tests {
         assert_eq!(all_configs(&p("acp")).len(), 6);
     }
 
+    fn nats_pattern_matches(pattern: &str, subject: &str) -> bool {
+        let pattern_tokens: Vec<&str> = pattern.split('.').collect();
+        let subject_tokens: Vec<&str> = subject.split('.').collect();
+
+        let mut pi = 0;
+        let mut si = 0;
+        while pi < pattern_tokens.len() && si < subject_tokens.len() {
+            match pattern_tokens[pi] {
+                ">" => return true,
+                "*" => {
+                    pi += 1;
+                    si += 1;
+                }
+                token => {
+                    if token != subject_tokens[si] {
+                        return false;
+                    }
+                    pi += 1;
+                    si += 1;
+                }
+            }
+        }
+        pi == pattern_tokens.len() && si == subject_tokens.len()
+    }
+
+    #[test]
+    fn session_list_not_captured_by_any_stream() {
+        let prefix = p("acp");
+        let session_list_subject = "acp.agent.session.list";
+        for stream in AcpStream::ALL {
+            for pattern in stream.subject_patterns(&prefix) {
+                assert!(
+                    !nats_pattern_matches(&pattern, session_list_subject),
+                    "stream {} pattern {pattern} would capture session.list",
+                    stream
+                );
+            }
+        }
+    }
+
     #[test]
     fn no_subject_overlaps_between_streams() {
         let configs = all_configs(&p("acp"));
