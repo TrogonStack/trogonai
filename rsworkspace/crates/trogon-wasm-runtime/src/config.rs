@@ -26,6 +26,16 @@ pub struct Config {
     /// When `true`, WASM modules can access the network via WASI sockets.
     /// Defaults to `false`.
     pub wasm_allow_network: bool,
+    /// Maximum fuel (instruction budget) for a single WASM module execution.
+    /// Defaults to 1 billion. Set to 0 to use u64::MAX (effectively unlimited
+    /// but the engine still has consume_fuel enabled).
+    pub wasm_fuel_limit: u64,
+    /// Maximum number of trogon.* host function calls per WASM module execution.
+    /// When exhausted, host functions silently return -1 without executing.
+    /// Defaults to 10_000.
+    pub wasm_host_call_limit: u32,
+    /// ACP subject prefix used for WASM permission requests over NATS.
+    pub acp_prefix: String,
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
@@ -38,6 +48,9 @@ const ENV_WASM_ONLY: &str = "WASM_ONLY";
 const ENV_WASM_MEMORY_LIMIT_BYTES: &str = "WASM_MEMORY_LIMIT_BYTES";
 const ENV_MODULE_CACHE_DIR: &str = "WASM_MODULE_CACHE_DIR";
 const ENV_WASM_ALLOW_NETWORK: &str = "WASM_ALLOW_NETWORK";
+const ENV_WASM_FUEL_LIMIT: &str = "WASM_FUEL_LIMIT";
+const ENV_WASM_HOST_CALL_LIMIT: &str = "WASM_HOST_CALL_LIMIT";
+const ENV_ACP_PREFIX: &str = "ACP_PREFIX";
 
 impl Config {
     pub fn from_env() -> Self {
@@ -60,7 +73,7 @@ impl Config {
 
         let wasm_only = std::env::var(ENV_WASM_ONLY)
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         let wasm_memory_limit_bytes = std::env::var(ENV_WASM_MEMORY_LIMIT_BYTES)
             .ok()
@@ -74,6 +87,19 @@ impl Config {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
+        let wasm_fuel_limit = std::env::var(ENV_WASM_FUEL_LIMIT)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1_000_000_000u64);
+
+        let wasm_host_call_limit = std::env::var(ENV_WASM_HOST_CALL_LIMIT)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10_000u32);
+
+        let acp_prefix = std::env::var(ENV_ACP_PREFIX)
+            .unwrap_or_else(|_| acp_nats::DEFAULT_ACP_PREFIX.to_string());
+
         Self {
             session_root,
             output_byte_limit,
@@ -83,6 +109,9 @@ impl Config {
             wasm_memory_limit_bytes,
             module_cache_dir,
             wasm_allow_network,
+            wasm_fuel_limit,
+            wasm_host_call_limit,
+            acp_prefix,
         }
     }
 }
