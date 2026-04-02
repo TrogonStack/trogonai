@@ -19,7 +19,15 @@ use tracing::{debug, error, info, warn};
 /// `session_id` in its subject, which is forwarded to every runtime handler.
 /// This is the key difference from `acp_nats::client::run()`, which uses
 /// the `Client` trait and loses session context by the time methods are called.
-pub async fn run(nats: NatsClient, prefix: String, runtime: Rc<WasmRuntime>) {
+///
+/// `shutdown` is a watch channel receiver; when its value becomes `true` the
+/// dispatcher drains in-flight tasks and exits cleanly.
+pub async fn run(
+    nats: NatsClient,
+    prefix: String,
+    runtime: Rc<WasmRuntime>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
     let subject = format!("{prefix}.session.*.client.>");
     info!(%subject, "WASM runtime dispatcher subscribing");
 
@@ -31,28 +39,93 @@ pub async fn run(nats: NatsClient, prefix: String, runtime: Rc<WasmRuntime>) {
         }
     };
 
-    while let Some(msg) = sub.next().await {
-        let subject_str = msg.subject.to_string();
-        let reply = msg.reply.clone();
-        let payload = msg.payload.clone();
+    // Spawn periodic idle-session cleanup task.
+    let runtime_for_cleanup = Rc::clone(&runtime);
+    tokio::task::spawn_local(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            runtime_for_cleanup.cleanup_idle_sessions();
+        }
+    });
 
-        let parsed = match parse_client_subject(&subject_str) {
-            Some(p) => p,
-            None => {
-                warn!(%subject_str, "Could not parse client subject — ignoring");
-                continue;
+    // Spawn periodic metrics log task (every 5 minutes).
+    tokio::task::spawn_local(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let snap = trogon_wasm_runtime::metrics::METRICS.snapshot();
+            tracing::info!(
+                wasm_started = snap.wasm_tasks_started,
+                wasm_completed = snap.wasm_tasks_completed,
+                wasm_faulted = snap.wasm_tasks_faulted,
+                fuel_exhausted = snap.wasm_fuel_exhausted,
+                native_started = snap.native_tasks_started,
+                cache_hits = snap.cache_hits,
+                cache_misses = snap.cache_misses,
+                host_calls = snap.host_calls_total,
+                "runtime metrics"
+            );
+        }
+    });
+
+    // Track in-flight dispatch tasks.
+    let mut tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+
+    loop {
+        // Reap completed tasks to avoid unbounded growth.
+        while tasks.try_join_next().is_some() {}
+
+        tokio::select! {
+            biased;
+
+            // Check for shutdown signal first.
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    info!("Shutdown signal received in dispatcher — draining in-flight tasks");
+                    break;
+                }
             }
-        };
 
-        let session_id = parsed.session_id.as_str().to_string();
-        let method = parsed.method;
-        let runtime = Rc::clone(&runtime);
-        let nats = nats.clone();
+            msg = sub.next() => {
+                let msg = match msg {
+                    Some(m) => m,
+                    None => {
+                        info!("NATS subscription closed");
+                        break;
+                    }
+                };
 
-        tokio::task::spawn_local(async move {
-            dispatch(nats, session_id, method, payload, reply, runtime).await;
-        });
+                let subject_str = msg.subject.to_string();
+                let reply = msg.reply.clone();
+                let payload = msg.payload.clone();
+
+                let parsed = match parse_client_subject(&subject_str) {
+                    Some(p) => p,
+                    None => {
+                        warn!(%subject_str, "Could not parse client subject — ignoring");
+                        continue;
+                    }
+                };
+
+                let session_id = parsed.session_id.as_str().to_string();
+                let method = parsed.method;
+                let runtime = Rc::clone(&runtime);
+                let nats = nats.clone();
+
+                tasks.spawn_local(async move {
+                    dispatch(nats, session_id, method, payload, reply, runtime).await;
+                });
+            }
+        }
     }
+
+    // Drain all in-flight tasks before returning.
+    info!(tasks = tasks.len(), "Waiting for in-flight tasks to complete");
+    tasks.join_all().await;
+
+    // Clean up all sessions on graceful shutdown.
+    runtime.cleanup_all_sessions().await;
 
     info!("WASM runtime dispatcher exited");
 }
