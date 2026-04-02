@@ -1,4 +1,8 @@
 use crate::config::Config;
+
+/// Cache fingerprint combining crate version and wasmtime version.
+/// Update the wasmtime version string whenever the `wasmtime` dependency is bumped.
+const CACHE_FINGERPRINT: &str = concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-30.0.2");
 use crate::metrics::METRICS;
 use crate::session::WasmSession;
 use crate::terminal::WasmTerminal;
@@ -280,7 +284,7 @@ impl WasmRuntime {
             if cwasm_path.exists() && mtime_path.exists() {
                 // Check version fingerprint first — skip deserialization if version mismatch.
                 let stored_version = std::fs::read_to_string(&version_path).unwrap_or_default();
-                let version_ok = stored_version.trim() == env!("CARGO_PKG_VERSION");
+                let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
 
                 if version_ok {
                     if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
@@ -307,7 +311,7 @@ impl WasmRuntime {
                         }
                     }
                 } else {
-                    tracing::warn!(path = %cwasm_path.display(), stored = %stored_version.trim(), current = %env!("CARGO_PKG_VERSION"), "module cache version mismatch, recompiling");
+                    tracing::warn!(path = %cwasm_path.display(), stored = %stored_version.trim(), current = %CACHE_FINGERPRINT, "module cache version mismatch, recompiling");
                 }
             }
         }
@@ -331,7 +335,7 @@ impl WasmRuntime {
                         .unwrap_or(0);
                     let _ = std::fs::write(&cwasm_path, &serialized);
                     let _ = std::fs::write(&mtime_path, current_nanos.to_string());
-                    let _ = std::fs::write(&version_path, env!("CARGO_PKG_VERSION"));
+                    let _ = std::fs::write(&version_path, CACHE_FINGERPRINT);
                 }
             }
         }
