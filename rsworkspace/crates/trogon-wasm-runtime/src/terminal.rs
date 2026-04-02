@@ -11,6 +11,8 @@ use tracing::warn;
 /// from the front to maintain the most recent output.
 pub struct WasmTerminal {
     pub(crate) child: Option<Child>,
+    /// Stdin pipe for native processes. `None` for WASM terminals.
+    pub(crate) stdin: Option<tokio::process::ChildStdin>,
     pub(crate) output_buf: Arc<Mutex<Vec<u8>>>,
     pub(crate) output_byte_limit: usize,
     pub(crate) output_collector: Option<tokio::task::JoinHandle<()>>,
@@ -44,6 +46,22 @@ impl WasmTerminal {
             }
             guard.drain(..trim_at);
         }
+    }
+
+    /// Writes bytes to the stdin pipe of the underlying native process.
+    /// Returns `true` on success, `false` if there is no stdin pipe or the write fails.
+    pub async fn write_stdin(&mut self, data: &[u8]) -> bool {
+        use tokio::io::AsyncWriteExt;
+        if let Some(ref mut stdin) = self.stdin {
+            stdin.write_all(data).await.is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Closes the stdin pipe, sending EOF to the process.
+    pub fn close_stdin(&mut self) {
+        self.stdin.take(); // drops the pipe, sends EOF
     }
 
     /// Kills the child process without releasing the terminal.
