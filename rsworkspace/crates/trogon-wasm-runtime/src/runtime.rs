@@ -842,9 +842,18 @@ impl WasmRuntime {
                 .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
         }
 
-        tokio::fs::write(&dest, req.content.as_bytes())
+        // Write atomically: write to a temp file first, then rename.
+        let tmp_dest = dest.with_extension("tmp");
+        tokio::fs::write(&tmp_dest, req.content.as_bytes())
             .await
-            .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
+            .map_err(|e| agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}")))?;
+        tokio::fs::rename(&tmp_dest, &dest)
+            .await
+            .map_err(|e| {
+                // Clean up temp file on failure (best-effort).
+                let _ = std::fs::remove_file(&tmp_dest);
+                agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
+            })?;
 
         debug!(
             session_id,
@@ -908,6 +917,20 @@ impl WasmRuntime {
         Ok(RequestPermissionResponse::new(
             RequestPermissionOutcome::Cancelled,
         ))
+    }
+
+    /// Returns a snapshot of all active session IDs.
+    pub fn list_sessions(&self) -> Vec<String> {
+        self.sessions.borrow().keys().cloned().collect()
+    }
+
+    /// Returns a snapshot of all terminal IDs and their session IDs.
+    pub fn list_terminals(&self) -> Vec<(String, String)> {
+        self.terminal_session
+            .borrow()
+            .iter()
+            .map(|(tid, sid)| (tid.clone(), sid.clone()))
+            .collect()
     }
 
     // ── Session notification ───────────────────────────────────────────────

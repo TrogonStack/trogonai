@@ -302,6 +302,34 @@ async fn dispatch(
             }
         }
 
+        ClientMethod::Ext(ref name) if name == "runtime.list_sessions" => {
+            let sessions = runtime.list_sessions();
+            let body = serde_json::json!({ "sessions": sessions });
+            if let Some(reply_to) = reply {
+                if let Ok(b) = serde_json::to_vec(&body) {
+                    if let Err(e) = nats.publish(reply_to, b.into()).await {
+                        warn!(error = %e, "Failed to publish list_sessions reply");
+                    }
+                }
+            }
+        }
+
+        ClientMethod::Ext(ref name) if name == "runtime.list_terminals" => {
+            let terminals = runtime.list_terminals();
+            let items: Vec<serde_json::Value> = terminals
+                .into_iter()
+                .map(|(tid, sid)| serde_json::json!({ "terminal_id": tid, "session_id": sid }))
+                .collect();
+            let body = serde_json::json!({ "terminals": items });
+            if let Some(reply_to) = reply {
+                if let Ok(b) = serde_json::to_vec(&body) {
+                    if let Err(e) = nats.publish(reply_to, b.into()).await {
+                        warn!(error = %e, "Failed to publish list_terminals reply");
+                    }
+                }
+            }
+        }
+
         ClientMethod::Ext(_) => {
             debug!("Unhandled Ext method");
             reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
