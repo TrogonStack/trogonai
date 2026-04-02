@@ -25,6 +25,9 @@ fn test_config(session_root: PathBuf) -> Config {
         wasm_memory_limit_bytes: None,
         module_cache_dir: None,
         wasm_allow_network: false,
+        wasm_fuel_limit: 1_000_000_000u64,
+        wasm_host_call_limit: 10_000u32,
+        acp_prefix: "acp".to_string(),
     }
 }
 
@@ -227,6 +230,9 @@ async fn output_byte_limit_truncates() {
         wasm_memory_limit_bytes: None,
         module_cache_dir: None,
         wasm_allow_network: false,
+        wasm_fuel_limit: 1_000_000_000u64,
+        wasm_host_call_limit: 10_000u32,
+        acp_prefix: "acp".to_string(),
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -527,6 +533,9 @@ async fn wasm_module_runs_with_timeout_set() {
                 wasm_memory_limit_bytes: None,
                 module_cache_dir: None,
                 wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -711,6 +720,9 @@ async fn wasm_only_rejects_native_commands() {
         wasm_memory_limit_bytes: None,
         module_cache_dir: None,
         wasm_allow_network: false,
+        wasm_fuel_limit: 1_000_000_000u64,
+        wasm_host_call_limit: 10_000u32,
+        acp_prefix: "acp".to_string(),
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -740,6 +752,9 @@ async fn wasm_only_allows_wasm_commands() {
         wasm_memory_limit_bytes: None,
         module_cache_dir: None,
         wasm_allow_network: false,
+        wasm_fuel_limit: 1_000_000_000u64,
+        wasm_host_call_limit: 10_000u32,
+        acp_prefix: "acp".to_string(),
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -797,6 +812,9 @@ async fn wasm_module_memory_limit_enforced() {
                 wasm_memory_limit_bytes: Some(64 * 1024 * 1024),
                 module_cache_dir: None,
                 wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -934,6 +952,9 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_memory_limit_bytes: None,
                     module_cache_dir: Some(cache_dir.path().to_path_buf()),
                     wasm_allow_network: false,
+                    wasm_fuel_limit: 1_000_000_000u64,
+                    wasm_host_call_limit: 10_000u32,
+                    acp_prefix: "acp".to_string(),
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -979,6 +1000,9 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_memory_limit_bytes: None,
                     module_cache_dir: Some(cache_dir.path().to_path_buf()),
                     wasm_allow_network: false,
+                    wasm_fuel_limit: 1_000_000_000u64,
+                    wasm_host_call_limit: 10_000u32,
+                    acp_prefix: "acp".to_string(),
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1048,6 +1072,9 @@ async fn module_cache_invalidates_on_mtime_change() {
                 wasm_memory_limit_bytes: None,
                 module_cache_dir: Some(cache_dir.path().to_path_buf()),
                 wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1281,6 +1308,9 @@ async fn wasm_module_network_enabled_flag_wires_through() {
                 wasm_memory_limit_bytes: None,
                 module_cache_dir: None,
                 wasm_allow_network: true, // network enabled
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1320,6 +1350,312 @@ async fn wasm_module_network_enabled_flag_wires_through() {
                 exit.exit_status.exit_code,
                 Some(0),
                 "module should exit cleanly with wasm_allow_network=true"
+            );
+        })
+        .await;
+}
+
+// ── Fix 2: Configurable fuel limit ───────────────────────────────────────────
+
+/// A WASM module that runs an infinite loop exhausts a very low fuel limit and
+/// exits with a signal (trap), not exit code 0.
+#[tokio::test]
+async fn wasm_module_custom_fuel_limit() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 1000, // very low — exhausted immediately by the loop
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // Infinite loop — will exhaust 1000 fuel units immediately.
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "fuel_exhaust.wasm",
+                r#"
+                (module
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func $loop (export "_start")
+                    (block $break
+                      (loop $continue
+                        (br $continue)
+                      )
+                    )
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            // Fuel exhaustion is a trap — should NOT be exit code 0.
+            assert_ne!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "module should not exit cleanly when fuel is exhausted"
+            );
+            // Should have a signal (trap) set.
+            assert!(
+                exit.exit_status.signal.is_some(),
+                "fuel exhaustion should produce a signal/trap: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
+
+// ── Fix 4: Host call budget ───────────────────────────────────────────────────
+
+/// A WASM module with a budget of 2 calls trogon.log 5 times.
+/// The first 2 calls succeed (silently), the rest are silently dropped.
+/// The module must still exit with code 0 (budget exhaustion doesn't crash it).
+#[tokio::test]
+async fn wasm_module_host_call_budget_exhausted() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 2, // very low budget
+                acp_prefix: "acp".to_string(),
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // Module calls trogon.log 5 times, then proc_exit(0).
+            // Budget is 2: first 2 calls succeed, remaining 3 silently fail.
+            // The module should still exit cleanly with code 0.
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "budget_exhaust.wasm",
+                r#"
+                (module
+                  (import "trogon" "log" (func $log (param i32 i32 i32 i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "info")
+                  (data (i32.const 4) "msg")
+                  (func (export "_start")
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 3))
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 3))
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 3))
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 3))
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 3))
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "budget exhaustion should not crash the module; it should exit cleanly"
+            );
+        })
+        .await;
+}
+
+// ── Fix 5: trogon.subscribe / recv_message / unsubscribe ──────────────────────
+
+/// Calling trogon.subscribe with no NATS client should return -1,
+/// and the module should still exit cleanly.
+#[tokio::test]
+async fn wasm_module_nats_subscribe_no_nats() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // WasmRuntime::new has no NATS client.
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "subscribe_no_nats.wasm",
+                r#"
+                (module
+                  (import "trogon" "subscribe"
+                    (func $subscribe (param i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "test.subject")
+                  (func (export "_start")
+                    (local $ret i32)
+                    (local.set $ret
+                      (call $subscribe
+                        (i32.const 0)   ;; subject_ptr
+                        (i32.const 12)  ;; subject_len ("test.subject" = 12 bytes)
+                      )
+                    )
+                    ;; expect -1 (no NATS)
+                    (if (i32.ne (local.get $ret) (i32.const -1))
+                      (then (call $proc_exit (i32.const 1)))
+                    )
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with subscribe should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "trogon.subscribe with no NATS should return -1 and module should exit cleanly"
+            );
+        })
+        .await;
+}
+
+// ── Fix 6: request_permission with no NATS and auto_allow=false ───────────────
+
+/// When auto_allow_permissions is false and no NATS client is present,
+/// request_permission should return -1 (denied/cancelled).
+/// The module detects -1 and exits cleanly with code 0.
+#[tokio::test]
+async fn wasm_module_request_permission_no_nats_denied() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: false, // not auto-allowing
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
+                wasm_fuel_limit: 1_000_000_000u64,
+                wasm_host_call_limit: 10_000u32,
+                acp_prefix: "acp".to_string(),
+            };
+            // No NATS client — WasmRuntime::new, not with_nats.
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "request_permission_no_nats.wasm",
+                r#"
+                (module
+                  (import "trogon" "request_permission"
+                    (func $request_permission (param i32 i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "[\22Allow\22,\22Deny\22]")
+                  (func (export "_start")
+                    (local $ret i32)
+                    (local.set $ret
+                      (call $request_permission
+                        (i32.const 0)    ;; options_json_ptr
+                        (i32.const 16)   ;; options_json_len
+                        (i32.const 100)  ;; out_selected_ptr
+                      )
+                    )
+                    ;; expect -1 (no NATS, auto_allow=false → denied)
+                    (if (i32.ne (local.get $ret) (i32.const -1))
+                      (then (call $proc_exit (i32.const 1)))
+                    )
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "request_permission with no NATS and auto_allow=false should return -1 (denied)"
             );
         })
         .await;
