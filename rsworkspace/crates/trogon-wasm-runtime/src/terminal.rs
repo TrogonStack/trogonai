@@ -22,7 +22,7 @@ pub struct WasmTerminal {
 impl WasmTerminal {
     /// Collects the current output and exit status without waiting.
     pub fn snapshot(&self) -> TerminalOutputResponse {
-        let buf = self.output_buf.lock().expect("output_buf poisoned");
+        let buf = self.output_buf.lock().unwrap_or_else(|e| e.into_inner());
         let output = String::from_utf8_lossy(&buf).into_owned();
         let truncated = buf.len() >= self.output_byte_limit;
         TerminalOutputResponse::new(output, truncated)
@@ -32,7 +32,7 @@ impl WasmTerminal {
     /// Appends bytes to the output buffer, dropping the oldest bytes if the
     /// limit would be exceeded.
     pub fn append_output(buf: &Arc<Mutex<Vec<u8>>>, limit: usize, data: &[u8]) {
-        let mut guard = buf.lock().expect("output_buf poisoned");
+        let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
         guard.extend_from_slice(data);
         if guard.len() > limit {
             // Drop from the front, keeping the most recent `limit` bytes.

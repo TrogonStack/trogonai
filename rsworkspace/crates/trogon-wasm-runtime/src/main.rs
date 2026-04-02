@@ -31,13 +31,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(%nats_url, %acp_prefix, session_root = %cfg.session_root.display(), "WASM runtime starting");
 
     // Fix 1: Use ConnectOptions with indefinite reconnect.
-    let nats = async_nats::ConnectOptions::new()
-        .max_reconnects(None)
-        .reconnect_delay_callback(|attempts| {
-            std::time::Duration::from_millis((100 * attempts as u64).min(5_000))
-        })
-        .connect(&nats_url)
-        .await?;
+    // Fix 2: Retry the initial connect in a loop — max_reconnects(None) only covers
+    // reconnections after a successful first connect, not startup failures.
+    let nats = {
+        let mut attempts = 0u32;
+        loop {
+            match async_nats::ConnectOptions::new()
+                .max_reconnects(None)
+                .reconnect_delay_callback(|n| {
+                    std::time::Duration::from_millis((100 * n as u64).min(5_000))
+                })
+                .connect(&nats_url)
+                .await
+            {
+                Ok(c) => break c,
+                Err(e) => {
+                    attempts += 1;
+                    let delay = std::time::Duration::from_millis((100 * attempts as u64).min(5_000));
+                    tracing::warn!(error = %e, attempt = attempts, delay_ms = delay.as_millis(), "NATS connect failed, retrying");
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    };
     let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
 
     // Fix 2: Graceful shutdown via watch channel.

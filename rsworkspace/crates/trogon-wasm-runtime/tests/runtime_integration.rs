@@ -1916,3 +1916,64 @@ async fn wasm_module_too_large_rejected() {
         })
         .await;
 }
+
+// ── Fix 3: timeout_ms <= 0 semantics ─────────────────────────────────────────
+
+/// A WASM module that calls `nats_request` with `timeout_ms = -1` (negative)
+/// should get -1 back (no NATS client) without panicking or trapping.
+/// This verifies that the negative-timeout code path is handled gracefully.
+#[tokio::test]
+async fn wasm_nats_request_negative_timeout_handled() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // WasmRuntime::new has no NATS client — nats_request returns -1 immediately.
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "nats_request_neg_timeout.wasm",
+                r#"
+                (module
+                  (import "trogon" "nats_request" (func $nats_request
+                    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+                  (memory 1) (export "memory" (memory 0))
+                  (data (i32.const 0) "test.subject")
+                  (func $_start
+                    (call $nats_request
+                      (i32.const 0) (i32.const 12)  ;; subject
+                      (i32.const 0) (i32.const 0)   ;; empty payload
+                      (i32.const -1)                 ;; timeout_ms = -1 → should use 30s default
+                      (i32.const 512) (i32.const 256)) ;; out buffer
+                    drop
+                    (call $proc_exit (i32.const 0)))
+                  (export "_start" (func $_start)))
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with negative timeout_ms should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "nats_request with timeout_ms=-1 and no NATS should return -1 gracefully; module exits 0"
+            );
+        })
+        .await;
+}

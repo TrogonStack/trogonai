@@ -254,7 +254,11 @@ fn add_trogon_host_functions(
                     None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                 };
 
-                let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+                let timeout = if timeout_ms <= 0 {
+                    std::time::Duration::from_secs(30) // default 30s when not specified
+                } else {
+                    std::time::Duration::from_millis(timeout_ms as u64)
+                };
                 let response = match tokio::time::timeout(timeout, nats.request(subject, payload)).await {
                     Ok(Ok(msg)) => msg.payload,
                     _ => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
@@ -362,7 +366,13 @@ fn add_trogon_host_functions(
                     None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                 };
 
-                let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+                let timeout = if timeout_ms < 0 {
+                    std::time::Duration::from_secs(30) // default 30s
+                } else if timeout_ms == 0 {
+                    std::time::Duration::from_millis(1) // non-blocking: poll
+                } else {
+                    std::time::Duration::from_millis(timeout_ms as u64)
+                };
                 let result = tokio::time::timeout(timeout, sub.next()).await;
 
                 // Put subscriber back.
@@ -527,14 +537,20 @@ fn add_trogon_host_functions(
                                     }
                                     results[0] = wasmtime::Val::I32(0);
                                 } else {
+                                    tracing::warn!(session_id = %session_id, "Permission response missing 'selected' field");
                                     results[0] = wasmtime::Val::I32(-1);
                                 }
                             } else {
+                                tracing::warn!(session_id = %session_id, "Permission response is not valid JSON");
                                 results[0] = wasmtime::Val::I32(-1);
                             }
                         }
-                        _ => {
-                            // Timeout or NATS error.
+                        Ok(Err(e)) => {
+                            tracing::warn!(session_id = %session_id, error = %e, "NATS permission request failed");
+                            results[0] = wasmtime::Val::I32(-1);
+                        }
+                        Err(_elapsed) => {
+                            tracing::warn!(session_id = %session_id, "NATS permission request timed out after 30s");
                             results[0] = wasmtime::Val::I32(-1);
                         }
                     }
