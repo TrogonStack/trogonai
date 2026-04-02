@@ -23,12 +23,21 @@ pub struct WasmTerminal {
 
 impl WasmTerminal {
     /// Collects the current output and exit status without waiting.
+    ///
+    /// For WASM terminals, also peeks at the shared exit-status arc so that
+    /// `terminal_output` can report completion even before `wait_for_terminal_exit`
+    /// is called.
     pub fn snapshot(&self) -> TerminalOutputResponse {
         let buf = self.output_buf.lock().unwrap_or_else(|e| e.into_inner());
         let output = String::from_utf8_lossy(&buf).into_owned();
         let truncated = buf.len() >= self.output_byte_limit;
-        TerminalOutputResponse::new(output, truncated)
-            .exit_status(self.exit_status.clone())
+        let exit_status = self.exit_status.clone().or_else(|| {
+            self.wasm_exit_status
+                .as_ref()
+                .and_then(|arc| arc.lock().ok())
+                .and_then(|g| g.clone())
+        });
+        TerminalOutputResponse::new(output, truncated).exit_status(exit_status)
     }
 
     /// Appends bytes to the output buffer, dropping the oldest bytes if the
@@ -77,44 +86,7 @@ impl WasmTerminal {
         false
     }
 
-    /// Waits for the child process (or background WASM task) to exit and stores the exit status.
-    pub async fn wait(&mut self) -> TerminalExitStatus {
-        if let Some(ref cached) = self.exit_status {
-            return cached.clone();
-        }
-        if let Some(child) = self.child.take() {
-            // Native process path.
-            let status = match child.wait_with_output().await {
-                Ok(output) => exit_status_from_std(&output.status),
-                Err(e) => {
-                    warn!(error = %e, "Failed to wait for terminal process");
-                    TerminalExitStatus::new()
-                }
-            };
-            // Wait for the background output collector to finish draining
-            // stdout/stderr before returning, so callers see complete output.
-            if let Some(collector) = self.output_collector.take() {
-                let _ = collector.await;
-            }
-            self.exit_status = Some(status.clone());
-            return status;
-        }
-        if let Some(collector) = self.output_collector.take() {
-            // WASM background task path — wait for the task to complete.
-            let _ = collector.await;
-            let status = self
-                .wasm_exit_status
-                .as_ref()
-                .and_then(|arc| arc.lock().ok())
-                .and_then(|g| g.clone())
-                .unwrap_or_else(TerminalExitStatus::new);
-            self.exit_status = Some(status.clone());
-            return status;
-        }
-        self.exit_status
-            .clone()
-            .unwrap_or_else(TerminalExitStatus::new)
-    }
+
 }
 
 pub fn exit_status_from_std(status: &std::process::ExitStatus) -> TerminalExitStatus {

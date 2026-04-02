@@ -142,6 +142,13 @@ impl WasmRuntime {
         }
     }
 
+    /// Ticks last_activity for whichever session owns the given terminal.
+    fn tick_last_activity_for_terminal(&self, terminal_id: &str) {
+        if let Some(sid) = self.terminal_session.borrow().get(terminal_id).cloned() {
+            self.tick_last_activity(&sid);
+        }
+    }
+
     /// Cleans up sessions that have been idle longer than `session_idle_timeout_secs`.
     pub fn cleanup_idle_sessions(&self) {
         if self.session_idle_timeout_secs == 0 {
@@ -500,10 +507,29 @@ impl WasmRuntime {
         command: &str,
         args: &[String],
         env_vars: &[agent_client_protocol::EnvVariable],
-        _cwd: &std::path::Path,
+        cwd: &std::path::Path,
         sandbox_dir: &std::path::Path,
     ) -> agent_client_protocol::Result<CreateTerminalResponse> {
-        let wasm_path = PathBuf::from(command);
+        // Resolve relative WASM paths within the session sandbox to prevent path
+        // traversal. Absolute paths are operator-deployed binaries and are allowed.
+        let wasm_path = {
+            let p = PathBuf::from(command);
+            if p.is_absolute() {
+                p
+            } else {
+                let resolved = self
+                    .sessions
+                    .borrow()
+                    .get(session_id)
+                    .and_then(|s| s.resolve_path(&p));
+                resolved.ok_or_else(|| {
+                    agent_client_protocol::Error::new(
+                        -32602,
+                        format!("WASM module path '{command}' escapes session sandbox"),
+                    )
+                })?
+            }
+        };
         let env_pairs: Vec<(String, String)> = env_vars
             .iter()
             .map(|e| (e.name.clone(), e.value.clone()))
@@ -540,6 +566,7 @@ impl WasmRuntime {
         argv_cloned.extend_from_slice(args);
         let env_pairs_cloned = env_pairs.clone();
         let sandbox_dir_cloned = sandbox_dir.to_path_buf();
+        let cwd_cloned = cwd.to_path_buf();
         let session_id_cloned = session_id.to_string();
 
         METRICS.wasm_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -549,12 +576,18 @@ impl WasmRuntime {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
             let _permit = semaphore.acquire_owned().await.expect("semaphore closed unexpectedly");
+            let cwd_opt = if cwd_cloned != sandbox_dir_cloned {
+                Some(cwd_cloned.as_path())
+            } else {
+                None
+            };
             let result = wasm::run_module_compiled(
                 &engine,
                 module,
                 &argv_cloned,
                 &env_pairs_cloned,
                 &sandbox_dir_cloned,
+                cwd_opt,
                 Arc::clone(&buf),
                 limit,
                 timeout,
@@ -619,6 +652,7 @@ impl WasmRuntime {
         req: TerminalOutputRequest,
     ) -> agent_client_protocol::Result<TerminalOutputResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
+        self.tick_last_activity_for_terminal(&terminal_id);
         let terminals = self.terminals.borrow();
         match terminals.get(&terminal_id) {
             Some(t) => Ok(t.snapshot()),
@@ -634,6 +668,7 @@ impl WasmRuntime {
         req: KillTerminalRequest,
     ) -> agent_client_protocol::Result<KillTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
+        self.tick_last_activity_for_terminal(&terminal_id);
         let mut terminals = self.terminals.borrow_mut();
         match terminals.get_mut(&terminal_id) {
             Some(t) => {
@@ -652,6 +687,7 @@ impl WasmRuntime {
         terminal_id: &str,
         data: &[u8],
     ) -> agent_client_protocol::Result<()> {
+        self.tick_last_activity_for_terminal(terminal_id);
         let mut terminals = self.terminals.borrow_mut();
         match terminals.get_mut(terminal_id) {
             Some(t) => {
@@ -677,6 +713,7 @@ impl WasmRuntime {
         &self,
         terminal_id: &str,
     ) -> agent_client_protocol::Result<()> {
+        self.tick_last_activity_for_terminal(terminal_id);
         let mut terminals = self.terminals.borrow_mut();
         match terminals.get_mut(terminal_id) {
             Some(t) => {
@@ -695,6 +732,7 @@ impl WasmRuntime {
         req: ReleaseTerminalRequest,
     ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
+        self.tick_last_activity_for_terminal(&terminal_id);
 
         // Feature 3: Look up the session_id before removing.
         let maybe_session_id = self
@@ -744,11 +782,38 @@ impl WasmRuntime {
         req: WaitForTerminalExitRequest,
     ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
-        // Take the terminal out temporarily to call `.wait()` (needs &mut).
-        let mut terminal = {
+        self.tick_last_activity_for_terminal(&terminal_id);
+
+        // Fast path: return cached exit status without touching the terminal.
+        {
+            let terminals = self.terminals.borrow();
+            match terminals.get(&terminal_id) {
+                Some(t) => {
+                    if let Some(ref cached) = t.exit_status {
+                        return Ok(WaitForTerminalExitResponse::new(cached.clone()));
+                    }
+                }
+                None => {
+                    return Err(agent_client_protocol::Error::new(
+                        -32602,
+                        format!("Unknown terminal: {terminal_id}"),
+                    ));
+                }
+            }
+        }
+
+        // Extract the async pieces while keeping the terminal in the map so that
+        // concurrent `terminal_output` calls keep working during the wait.
+        let (collector, child, wasm_exit_arc) = {
             let mut terminals = self.terminals.borrow_mut();
-            match terminals.remove(&terminal_id) {
-                Some(t) => t,
+            match terminals.get_mut(&terminal_id) {
+                Some(t) => {
+                    // Double-check: may have been set between the two borrows.
+                    if let Some(ref cached) = t.exit_status {
+                        return Ok(WaitForTerminalExitResponse::new(cached.clone()));
+                    }
+                    (t.output_collector.take(), t.child.take(), t.wasm_exit_status.clone())
+                }
                 None => {
                     return Err(agent_client_protocol::Error::new(
                         -32602,
@@ -758,27 +823,60 @@ impl WasmRuntime {
             }
         };
 
+        // Wait outside any borrow — terminal stays in map the whole time.
         let timeout = self.wait_for_exit_timeout_secs;
+        let do_wait = async move {
+            if let Some(child_proc) = child {
+                // Native process: wait for it, then drain the output collector.
+                let s = match child_proc.wait_with_output().await {
+                    Ok(o) => crate::terminal::exit_status_from_std(&o.status),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to wait for terminal process");
+                        TerminalExitStatus::new()
+                    }
+                };
+                if let Some(c) = collector {
+                    let _ = c.await;
+                }
+                s
+            } else if let Some(c) = collector {
+                // WASM background task: wait for the task to finish.
+                let _ = c.await;
+                wasm_exit_arc
+                    .as_ref()
+                    .and_then(|arc| arc.lock().ok())
+                    .and_then(|g| g.clone())
+                    .unwrap_or_else(TerminalExitStatus::new)
+            } else {
+                // Already completed (both child and collector were None).
+                wasm_exit_arc
+                    .as_ref()
+                    .and_then(|arc| arc.lock().ok())
+                    .and_then(|g| g.clone())
+                    .unwrap_or_else(TerminalExitStatus::new)
+            }
+        };
+
         let status = if timeout == 0 {
-            terminal.wait().await
+            do_wait.await
         } else {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(timeout),
-                terminal.wait(),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(timeout), do_wait).await {
                 Ok(s) => s,
                 Err(_) => {
-                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
-                    terminal.kill().await;
+                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s");
                     TerminalExitStatus::new().signal(Some("wait_timeout".to_string()))
                 }
             }
         };
 
-        // Put it back so `terminal_output` can still be called after exit.
-        self.terminals.borrow_mut().insert(terminal_id, terminal);
+        // Cache the exit status back so subsequent calls and snapshots see it.
+        {
+            let mut terminals = self.terminals.borrow_mut();
+            if let Some(t) = terminals.get_mut(&terminal_id) {
+                t.exit_status = Some(status.clone());
+            }
+        }
+
         Ok(WaitForTerminalExitResponse::new(status))
     }
 
