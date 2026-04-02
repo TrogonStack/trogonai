@@ -29,6 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = nats::connect(config.nats(), nats_connect_timeout).await?;
 
+    let js_context = async_nats::jetstream::new(nats_client.clone());
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
+
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
@@ -36,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = local
         .run_until(run_bridge(
             nats_client,
+            js_client,
             &config,
             stdout,
             stdin,
@@ -57,8 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(coverage)]
 fn main() {}
 
-async fn run_bridge<N, W, R>(
+async fn run_bridge<N, J, W, R>(
     nats_client: N,
+    js_client: J,
     config: &acp_nats::Config,
     stdout: W,
     stdin: R,
@@ -70,6 +75,8 @@ where
         + acp_nats::FlushClient
         + acp_nats::SubscribeClient
         + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
     W: futures::AsyncWrite + Unpin + 'static,
     R: futures::AsyncRead + Unpin + 'static,
 {
@@ -77,6 +84,7 @@ where
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
+        js_client,
         SystemClock,
         &meter,
         config.clone(),
@@ -145,6 +153,51 @@ mod tests {
     use super::*;
     use trogon_nats::AdvancedMockNatsClient;
 
+    #[derive(Clone)]
+    struct MockJs {
+        publisher: trogon_nats::jetstream::MockJetStreamPublisher,
+        consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
+    }
+
+    impl MockJs {
+        fn new() -> Self {
+            Self {
+                publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
+                consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
+            }
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+        type PublishError = trogon_nats::mocks::MockError;
+        type AckFuture = std::future::Ready<
+            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
+        >;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
+        type Error = trogon_nats::mocks::MockError;
+        type Stream = trogon_nats::jetstream::MockJetStreamStream;
+
+        async fn get_stream<T: AsRef<str> + Send>(
+            &self,
+            stream_name: T,
+        ) -> Result<trogon_nats::jetstream::MockJetStreamStream, Self::Error> {
+            self.consumer_factory.get_stream(stream_name).await
+        }
+    }
+
     #[tokio::test]
     async fn run_bridge_shuts_down_on_signal() {
         let mock = AdvancedMockNatsClient::new();
@@ -166,6 +219,7 @@ mod tests {
         let result = local
             .run_until(run_bridge(
                 mock,
+                MockJs::new(),
                 &config,
                 stdout,
                 stdin,
@@ -198,6 +252,7 @@ mod tests {
         let result = local
             .run_until(run_bridge(
                 mock,
+                MockJs::new(),
                 &config,
                 stdout,
                 stdin,

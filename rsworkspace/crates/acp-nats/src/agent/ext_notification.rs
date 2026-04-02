@@ -81,7 +81,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_publishes_to_nats() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
 
         let params = RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
         let notification = ExtNotification::new("my_notify", params.into());
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_validates_method_name() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let params = RawValue::from_string("{}".to_string()).unwrap();
         let notification = ExtNotification::new("method.*", params.into());
         let err = bridge.ext_notification(notification).await.unwrap_err();
@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_records_request_metric_on_invalid_method_name() {
-        let (_mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge
             .ext_notification(ExtNotification::new(
@@ -134,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_records_metrics_on_success() {
-        let (_mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge
             .ext_notification(ExtNotification::new(
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_returns_ok_when_publish_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_publish_count(1);
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
@@ -166,7 +166,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_records_error_metric_on_publish_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_publish_count(1);
 
         let _ = bridge

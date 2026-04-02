@@ -113,7 +113,7 @@ where
     )
     where
         J: JetStreamGetStream + 'static,
-        <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
+        trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
@@ -486,7 +486,7 @@ async fn serve_js<N, J, A>(
 where
     N: PublishClient + FlushClient + Clone + 'static,
     J: JetStreamGetStream + 'static,
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsDispatchMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     A: Agent + 'static,
 {
     let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix);
