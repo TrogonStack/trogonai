@@ -22,6 +22,18 @@ use tracing::{debug, error, info, warn};
 ///
 /// `shutdown` is a watch channel receiver; when its value becomes `true` the
 /// dispatcher drains in-flight tasks and exits cleanly.
+///
+/// # Trust model
+///
+/// Session isolation is enforced at the NATS subject layer, not inside the
+/// runtime. A client can only publish to subjects under its own session
+/// (`{prefix}.session.{its_session_id}.client.*`) if NATS per-client ACLs
+/// are configured correctly. The runtime receives messages from all sessions
+/// because it is the server side of the protocol — it does not perform
+/// additional session-ownership checks. This is intentional: adding a
+/// redundant check here would duplicate the NATS ACL boundary and add no
+/// real security. Operators must configure NATS publish permissions to
+/// restrict each client to its own session subject.
 pub async fn run(
     nats: NatsClient,
     prefix: String,
