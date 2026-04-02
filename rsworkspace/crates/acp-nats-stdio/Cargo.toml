@@ -21,6 +21,7 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap"] }
 
 [dev-dependencies]
+bytes = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
