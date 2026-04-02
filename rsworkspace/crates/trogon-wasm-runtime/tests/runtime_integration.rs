@@ -20,6 +20,7 @@ fn test_config(session_root: PathBuf) -> Config {
         session_root,
         output_byte_limit: 1024 * 1024,
         auto_allow_permissions: true,
+        wasm_timeout_secs: None,
     }
 }
 
@@ -217,6 +218,7 @@ async fn output_byte_limit_truncates() {
         session_root: tmp.path().to_path_buf(),
         output_byte_limit: 50,
         auto_allow_permissions: true,
+        wasm_timeout_secs: None,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -245,111 +247,129 @@ async fn output_byte_limit_truncates() {
 #[tokio::test]
 async fn wasm_module_writes_to_stdout() {
     let tmp = TempDir::new().unwrap();
-    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let wasm_path = make_wasm(tmp.path(), "hello.wasm", r#"
-        (module
-          (import "wasi_snapshot_preview1" "fd_write"
-            (func $fd_write (param i32 i32 i32 i32) (result i32)))
-          (memory 1)
-          (export "memory" (memory 0))
-          (data (i32.const 16) "hello from wasm\n")
-          (func (export "_start")
-            (i32.store (i32.const 0) (i32.const 16))
-            (i32.store (i32.const 4) (i32.const 16))
-            (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
-          )
-        )
-    "#);
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = CreateTerminalRequest::new(
-        SessionId::from("s1"),
-        wasm_path.to_str().unwrap(),
-    );
-    let resp = runtime
-        .handle_create_terminal(session_id(), req)
-        .await
-        .expect("wasm module should run");
-    let tid = resp.terminal_id;
+            let wasm_path = make_wasm(tmp.path(), "hello.wasm", r#"
+                (module
+                  (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 16) "hello from wasm\n")
+                  (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const 16))
+                    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+                  )
+                )
+            "#);
 
-    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-    let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
-    assert_eq!(exit.exit_status.exit_code, Some(0));
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("wasm module should run");
+            let tid = resp.terminal_id;
 
-    let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
-    let out = runtime.handle_terminal_output(out_req).await.unwrap();
-    assert!(out.output.contains("hello from wasm"), "stdout should be captured");
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
+            assert_eq!(exit.exit_status.exit_code, Some(0));
+
+            let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
+            let out = runtime.handle_terminal_output(out_req).await.unwrap();
+            assert!(out.output.contains("hello from wasm"), "stdout should be captured");
+        })
+        .await;
 }
 
 #[tokio::test]
 async fn wasm_module_exit_code() {
     let tmp = TempDir::new().unwrap();
-    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let wasm_path = make_wasm(tmp.path(), "exit42.wasm", r#"
-        (module
-          (import "wasi_snapshot_preview1" "proc_exit"
-            (func $proc_exit (param i32)))
-          (memory 1)
-          (export "memory" (memory 0))
-          (func (export "_start")
-            (call $proc_exit (i32.const 42))
-            unreachable
-          )
-        )
-    "#);
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = CreateTerminalRequest::new(
-        SessionId::from("s1"),
-        wasm_path.to_str().unwrap(),
-    );
-    let resp = runtime
-        .handle_create_terminal(session_id(), req)
-        .await
-        .unwrap();
-    let tid = resp.terminal_id;
+            let wasm_path = make_wasm(tmp.path(), "exit42.wasm", r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 42))
+                    unreachable
+                  )
+                )
+            "#);
 
-    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
-    let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
-    assert_eq!(exit.exit_status.exit_code, Some(42));
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .unwrap();
+            let tid = resp.terminal_id;
+
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
+            assert_eq!(exit.exit_status.exit_code, Some(42));
+        })
+        .await;
 }
 
 #[tokio::test]
 async fn wasm_module_stderr_captured() {
     let tmp = TempDir::new().unwrap();
-    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let wasm_path = make_wasm(tmp.path(), "stderr.wasm", r#"
-        (module
-          (import "wasi_snapshot_preview1" "fd_write"
-            (func $fd_write (param i32 i32 i32 i32) (result i32)))
-          (memory 1)
-          (export "memory" (memory 0))
-          (data (i32.const 16) "error output\n")
-          (func (export "_start")
-            (i32.store (i32.const 0) (i32.const 16))
-            (i32.store (i32.const 4) (i32.const 13))
-            (drop (call $fd_write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 8)))
-          )
-        )
-    "#);
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = CreateTerminalRequest::new(
-        SessionId::from("s1"),
-        wasm_path.to_str().unwrap(),
-    );
-    let resp = runtime
-        .handle_create_terminal(session_id(), req)
-        .await
-        .unwrap();
-    let tid = resp.terminal_id;
+            let wasm_path = make_wasm(tmp.path(), "stderr.wasm", r#"
+                (module
+                  (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 16) "error output\n")
+                  (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const 13))
+                    (drop (call $fd_write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 8)))
+                  )
+                )
+            "#);
 
-    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-    runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .unwrap();
+            let tid = resp.terminal_id;
 
-    let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
-    let out = runtime.handle_terminal_output(out_req).await.unwrap();
-    assert!(out.output.contains("error output"), "stderr should be captured");
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
+            runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
+
+            let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
+            let out = runtime.handle_terminal_output(out_req).await.unwrap();
+            assert!(out.output.contains("error output"), "stderr should be captured");
+        })
+        .await;
 }
 
 // ── Permission ─────────────────────────────────────────────────────────────
@@ -408,4 +428,259 @@ async fn auto_deny_when_no_options() {
         .handle_request_permission(req)
         .expect("permission should succeed");
     assert!(matches!(resp.outcome, RequestPermissionOutcome::Cancelled));
+}
+
+// ── Feature 1: Module Compilation Cache ───────────────────────────────────
+
+/// Calls `handle_create_terminal` twice with the same `.wasm` file and verifies
+/// both succeed. The second call exercises the module cache path.
+#[tokio::test]
+async fn wasm_module_cache_reuses_compiled_module() {
+    let tmp = TempDir::new().unwrap();
+
+    // Use a LocalSet because run_wasm_terminal uses spawn_local.
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "cache_test.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 0))
+                    unreachable
+                  )
+                )
+            "#,
+            );
+
+            // First invocation — compiles and caches the module.
+            let req1 = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp1 = runtime
+                .handle_create_terminal("cache-session-1", req1)
+                .await
+                .expect("first wasm run should succeed");
+
+            let wait1 = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp1.terminal_id);
+            let exit1 = runtime
+                .handle_wait_for_terminal_exit(wait1)
+                .await
+                .unwrap();
+            assert_eq!(exit1.exit_status.exit_code, Some(0), "first run: exit 0");
+
+            // Second invocation — should hit the cache (same path, no recompile).
+            let req2 = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp2 = runtime
+                .handle_create_terminal("cache-session-2", req2)
+                .await
+                .expect("second wasm run should succeed (cache hit)");
+
+            let wait2 = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp2.terminal_id);
+            let exit2 = runtime
+                .handle_wait_for_terminal_exit(wait2)
+                .await
+                .unwrap();
+            assert_eq!(exit2.exit_status.exit_code, Some(0), "second run: exit 0");
+        })
+        .await;
+}
+
+// ── Feature 2: WASM Execution Timeout ─────────────────────────────────────
+
+/// Runs a normal WASM module with a generous timeout set — verifies the module
+/// finishes successfully (timeout doesn't fire) and the timeout code path compiles
+/// and executes without error.
+#[tokio::test]
+async fn wasm_module_runs_with_timeout_set() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: Some(30), // generous timeout — should not fire
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "timeout_test.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 16) "timeout ok\n")
+                  (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const 11))
+                    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+                  )
+                )
+            "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("wasm module should run within timeout");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id.clone());
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "module should exit cleanly"
+            );
+
+            let out_req = TerminalOutputRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let out = runtime.handle_terminal_output(out_req).await.unwrap();
+            assert!(out.output.contains("timeout ok"), "output should be captured");
+        })
+        .await;
+}
+
+// ── Feature 3: Session Auto-Cleanup ───────────────────────────────────────
+
+/// Releasing the last terminal for a session should remove the sandbox directory.
+#[tokio::test]
+async fn session_cleanup_removes_sandbox() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
+                .args(vec!["cleanup test".to_string()]);
+            let resp = runtime
+                .handle_create_terminal("cleanup-session", req)
+                .await
+                .expect("echo should succeed");
+            let tid = resp.terminal_id;
+
+            // Let the process finish.
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
+            runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            // Verify the sandbox directory exists before release.
+            let sandbox = tmp.path().join("cleanup-session");
+            assert!(sandbox.exists(), "sandbox should exist before release");
+
+            // Release the only terminal — should trigger session cleanup.
+            let rel = ReleaseTerminalRequest::new(SessionId::from("s1"), tid);
+            runtime
+                .handle_release_terminal(rel)
+                .await
+                .expect("release should succeed");
+
+            // The sandbox directory should have been deleted.
+            assert!(
+                !sandbox.exists(),
+                "sandbox should be removed after last terminal released"
+            );
+        })
+        .await;
+}
+
+// ── Feature 4: Background WASM Execution ─────────────────────────────────
+
+/// `create_terminal` for a WASM module returns immediately; output is available
+/// after `wait_for_terminal_exit` completes.
+#[tokio::test]
+async fn wasm_module_background_execution() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "bg_test.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 16) "background output\n")
+                  (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const 18))
+                    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+                  )
+                )
+            "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            // Feature 4: create_terminal returns immediately.
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("wasm terminal should be created");
+            let tid = resp.terminal_id;
+
+            // The module may or may not have finished — both empty and populated are valid.
+            // We just verify the snapshot call doesn't panic.
+            let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid.clone());
+            let _ = runtime.handle_terminal_output(out_req).await.unwrap();
+
+            // Wait for exit — should complete with exit_code 0.
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "background wasm should exit with code 0"
+            );
+
+            // After wait, output should be fully available.
+            let out_req2 = TerminalOutputRequest::new(SessionId::from("s1"), tid);
+            let out = runtime.handle_terminal_output(out_req2).await.unwrap();
+            assert!(
+                out.output.contains("background output"),
+                "output should be available after wait: {:?}",
+                out.output
+            );
+        })
+        .await;
 }
