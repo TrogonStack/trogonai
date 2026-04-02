@@ -7,15 +7,16 @@ pub struct Config {
     /// Maximum number of bytes kept in the output buffer per terminal.
     /// Oldest bytes are dropped when the limit is exceeded.
     pub output_byte_limit: usize,
-    /// Permission policy: when `true` the first option is auto-selected.
-    /// When `false` all permission requests are rejected (returns `Cancelled`).
+    /// Permission policy: when `true` the first option is auto-selected without
+    /// prompting. When `false` and a NATS client is configured, the request is
+    /// forwarded to the user via NATS for an explicit selection. When `false`
+    /// with no NATS client, the request is denied immediately.
     pub auto_allow_permissions: bool,
     /// Optional wall-clock timeout for WASM module execution in seconds.
     /// When `None`, no timeout is applied (fuel exhaustion still applies).
     pub wasm_timeout_secs: Option<u64>,
     /// When `true`, only `.wasm` commands are accepted; native OS process
-    /// spawning is rejected with an error.  Defaults to `false` for
-    /// backwards-compatibility but should be `true` in production.
+    /// spawning is rejected with an error. Defaults to `true`.
     pub wasm_only: bool,
     /// Optional maximum number of bytes a WASM module's linear memory can grow to.
     /// When `None`, memory growth is unlimited (subject to OS/hardware limits).

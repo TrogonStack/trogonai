@@ -184,9 +184,14 @@ impl WasmRuntime {
             for tid in terminal_ids {
                 self.terminal_session.borrow_mut().remove(&tid);
                 if let Some(mut t) = self.terminals.borrow_mut().remove(&tid) {
-                    if let Some(c) = t.output_collector.take() {
-                        c.abort();
-                    }
+                    // Spawn kill + collector abort so native processes are not orphaned.
+                    // cleanup_idle_sessions is sync, so async work must go to spawn_local.
+                    tokio::task::spawn_local(async move {
+                        t.kill().await;
+                        if let Some(c) = t.output_collector.take() {
+                            c.abort();
+                        }
+                    });
                 }
             }
             if let Some(session) = self.sessions.borrow_mut().remove(&session_id) {
@@ -238,18 +243,26 @@ impl WasmRuntime {
     async fn ensure_session_dir(&self, session_id: &str) -> std::io::Result<PathBuf> {
         let dir = self.session_dir(session_id);
         tokio::fs::create_dir_all(&dir).await?;
+        // Create the tmp sub-directory so that TMPDIR is usable for native processes.
+        tokio::fs::create_dir_all(dir.join("tmp")).await?;
         Ok(dir)
     }
 
     // ── Module cache ───────────────────────────────────────────────────────
 
     /// Derives an on-disk cache key from the absolute path of a `.wasm` file.
-    /// Uses `DefaultHasher` for uniqueness (not cryptographic security).
+    ///
+    /// Uses FNV-1a 64-bit, which is deterministic across Rust versions and
+    /// process restarts. `DefaultHasher` is explicitly avoided because its
+    /// implementation is "subject to change" between compiler versions, which
+    /// would silently invalidate on-disk caches after a toolchain upgrade.
     fn cache_key(path: &std::path::Path) -> String {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        path.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for &byte in path.as_os_str().as_encoded_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("{hash:016x}")
     }
 
     /// Returns a compiled `Module` for `wasm_path`, using in-memory and on-disk
@@ -840,7 +853,9 @@ impl WasmRuntime {
 
         // Wait outside any borrow — terminal stays in map the whole time.
         let timeout = self.wait_for_exit_timeout_secs;
+        let terminal_id_for_wait = terminal_id.clone();
         let do_wait = async move {
+            let terminal_id = terminal_id_for_wait;
             if let Some(child_proc) = child {
                 // Native process: wait for it, then drain the output collector.
                 let s = match child_proc.wait_with_output().await {
@@ -880,6 +895,11 @@ impl WasmRuntime {
                         tokio::task::yield_now().await;
                     }
                 } else {
+                    tracing::warn!(
+                        terminal_id = %terminal_id,
+                        "Concurrent wait_for_terminal_exit on native terminal — \
+                         second caller gets empty status; concurrent native waits are unsupported"
+                    );
                     TerminalExitStatus::new()
                 }
             }
