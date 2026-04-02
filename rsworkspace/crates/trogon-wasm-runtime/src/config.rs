@@ -36,6 +36,15 @@ pub struct Config {
     pub wasm_host_call_limit: u32,
     /// ACP subject prefix used for WASM permission requests over NATS.
     pub acp_prefix: String,
+    /// Maximum number of concurrent WASM terminal executions across all sessions.
+    /// Defaults to 32. Set to 0 for unlimited (not recommended).
+    pub wasm_max_concurrent_tasks: usize,
+    /// How long (in seconds) a session can be idle before it is automatically cleaned up.
+    /// Defaults to 3600 (1 hour). Set to 0 to disable automatic expiry.
+    pub session_idle_timeout_secs: u64,
+    /// Maximum allowed size for a `.wasm` module file in bytes.
+    /// Defaults to 100 MB. Set to 0 for unlimited (not recommended).
+    pub wasm_max_module_size_bytes: usize,
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
@@ -51,6 +60,9 @@ const ENV_WASM_ALLOW_NETWORK: &str = "WASM_ALLOW_NETWORK";
 const ENV_WASM_FUEL_LIMIT: &str = "WASM_FUEL_LIMIT";
 const ENV_WASM_HOST_CALL_LIMIT: &str = "WASM_HOST_CALL_LIMIT";
 const ENV_ACP_PREFIX: &str = "ACP_PREFIX";
+const ENV_WASM_MAX_CONCURRENT_TASKS: &str = "WASM_MAX_CONCURRENT_TASKS";
+const ENV_SESSION_IDLE_TIMEOUT_SECS: &str = "SESSION_IDLE_TIMEOUT_SECS";
+const ENV_WASM_MAX_MODULE_SIZE_BYTES: &str = "WASM_MAX_MODULE_SIZE_BYTES";
 
 impl Config {
     pub fn from_env() -> Self {
@@ -100,6 +112,21 @@ impl Config {
         let acp_prefix = std::env::var(ENV_ACP_PREFIX)
             .unwrap_or_else(|_| acp_nats::DEFAULT_ACP_PREFIX.to_string());
 
+        let wasm_max_concurrent_tasks = std::env::var(ENV_WASM_MAX_CONCURRENT_TASKS)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(32usize);
+
+        let session_idle_timeout_secs = std::env::var(ENV_SESSION_IDLE_TIMEOUT_SECS)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3600u64);
+
+        let wasm_max_module_size_bytes = std::env::var(ENV_WASM_MAX_MODULE_SIZE_BYTES)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(100 * 1024 * 1024usize);
+
         Self {
             session_root,
             output_byte_limit,
@@ -112,6 +139,31 @@ impl Config {
             wasm_fuel_limit,
             wasm_host_call_limit,
             acp_prefix,
+            wasm_max_concurrent_tasks,
+            session_idle_timeout_secs,
+            wasm_max_module_size_bytes,
         }
+    }
+
+    /// Validates configuration values. Returns a list of errors found.
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if self.output_byte_limit == 0 {
+            errors.push("WASM_OUTPUT_BYTE_LIMIT must be > 0".to_string());
+        }
+        if !self.session_root.exists() {
+            if let Err(e) = std::fs::create_dir_all(&self.session_root) {
+                errors.push(format!(
+                    "Cannot create session_root {:?}: {e}",
+                    self.session_root
+                ));
+            }
+        }
+        if let Some(ref dir) = self.module_cache_dir {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                errors.push(format!("Cannot create module_cache_dir {:?}: {e}", dir));
+            }
+        }
+        errors
     }
 }

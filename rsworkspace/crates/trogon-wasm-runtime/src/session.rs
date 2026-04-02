@@ -4,11 +4,16 @@ use std::path::{Path, PathBuf};
 pub struct WasmSession {
     /// Absolute path to this session's sandbox root.
     pub dir: PathBuf,
+    /// Timestamp of the last activity on this session, used for idle expiry.
+    pub last_activity: std::time::Instant,
 }
 
 impl WasmSession {
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        Self {
+            dir,
+            last_activity: std::time::Instant::now(),
+        }
     }
 
     /// Resolves a path from the agent relative to the session sandbox.
