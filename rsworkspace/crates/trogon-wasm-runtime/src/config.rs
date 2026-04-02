@@ -10,6 +10,9 @@ pub struct Config {
     /// Permission policy: when `true` the first option is auto-selected.
     /// When `false` all permission requests are rejected (returns `Cancelled`).
     pub auto_allow_permissions: bool,
+    /// Optional wall-clock timeout for WASM module execution in seconds.
+    /// When `None`, no timeout is applied (fuel exhaustion still applies).
+    pub wasm_timeout_secs: Option<u64>,
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
@@ -17,6 +20,7 @@ const DEFAULT_OUTPUT_BYTE_LIMIT: usize = 10 * 1024 * 1024; // 10 MB
 const ENV_SESSION_ROOT: &str = "WASM_SESSION_ROOT";
 const ENV_OUTPUT_BYTE_LIMIT: &str = "WASM_OUTPUT_BYTE_LIMIT";
 const ENV_AUTO_ALLOW_PERMISSIONS: &str = "WASM_AUTO_ALLOW_PERMISSIONS";
+const ENV_WASM_TIMEOUT_SECS: &str = "WASM_TIMEOUT_SECS";
 
 impl Config {
     pub fn from_env() -> Self {
@@ -33,10 +37,15 @@ impl Config {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(true);
 
+        let wasm_timeout_secs = std::env::var(ENV_WASM_TIMEOUT_SECS)
+            .ok()
+            .and_then(|s| s.parse().ok());
+
         Self {
             session_root,
             output_byte_limit,
             auto_allow_permissions,
+            wasm_timeout_secs,
         }
     }
 }
