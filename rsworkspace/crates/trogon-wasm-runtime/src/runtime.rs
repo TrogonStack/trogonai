@@ -52,9 +52,11 @@ pub struct WasmRuntime {
     /// All terminals across all sessions, keyed by terminal_id.
     terminals: RefCell<HashMap<String, WasmTerminal>>,
     /// In-memory cache of compiled WASM modules keyed by absolute path.
-    /// Value is (module, source_mtime) for invalidation on file change.
-    /// Capped at `MAX_CACHED_MODULES` entries; evicts oldest mtime on overflow.
-    modules: RefCell<HashMap<PathBuf, (Module, std::time::SystemTime)>>,
+    /// Value is `(module, source_mtime, last_accessed)`:
+    ///   - `source_mtime` — used for invalidation when the `.wasm` file changes on disk.
+    ///   - `last_accessed` — updated on every hit; LRU entry is evicted at capacity.
+    /// Capped at `MAX_CACHED_MODULES` entries.
+    modules: RefCell<HashMap<PathBuf, (Module, std::time::SystemTime, std::time::Instant)>>,
     /// Optional directory for on-disk compiled module cache.
     module_cache_dir: Option<PathBuf>,
     /// Maps session_id → set of terminal_ids for session-level auto-cleanup.
@@ -304,9 +306,10 @@ impl WasmRuntime {
 
         // Check in-memory cache (synchronous — just a RefCell borrow).
         {
-            let cached = self.modules.borrow();
-            if let Some((m, mtime)) = cached.get(&abs_path) {
+            let mut cached = self.modules.borrow_mut();
+            if let Some((m, mtime, last_accessed)) = cached.get_mut(&abs_path) {
                 if *mtime == current_mtime {
+                    *last_accessed = std::time::Instant::now();
                     METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Ok(m.clone());
                 }
@@ -399,17 +402,17 @@ impl WasmRuntime {
 
         {
             let mut cache = self.modules.borrow_mut();
-            // Evict the least-recently-modified entry when at capacity.
+            // Evict the least-recently-accessed (LRU) entry when at capacity.
             if cache.len() >= MAX_CACHED_MODULES && !cache.contains_key(&abs_path) {
-                if let Some(oldest) = cache
+                if let Some(lru) = cache
                     .iter()
-                    .min_by_key(|(_, (_, mtime))| *mtime)
+                    .min_by_key(|(_, (_, _, last_accessed))| *last_accessed)
                     .map(|(k, _)| k.clone())
                 {
-                    cache.remove(&oldest);
+                    cache.remove(&lru);
                 }
             }
-            cache.insert(abs_path, (m.clone(), current_mtime));
+            cache.insert(abs_path, (m.clone(), current_mtime, std::time::Instant::now()));
         }
         Ok(m)
     }
