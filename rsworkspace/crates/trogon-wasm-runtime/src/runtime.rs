@@ -1,8 +1,10 @@
 use crate::config::Config;
 
 /// Cache fingerprint combining crate version and wasmtime version.
-/// Update the wasmtime version string whenever the `wasmtime` dependency is bumped.
-const CACHE_FINGERPRINT: &str = concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-30.0.2");
+/// The wasmtime version is injected at build time from Cargo.lock by build.rs,
+/// so it updates automatically when the dependency is bumped.
+const CACHE_FINGERPRINT: &str =
+    concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-", env!("WASMTIME_VERSION"));
 use crate::metrics::METRICS;
 use crate::session::WasmSession;
 use crate::terminal::WasmTerminal;
@@ -569,36 +571,37 @@ impl WasmRuntime {
         let cwd_cloned = cwd.to_path_buf();
         let session_id_cloned = session_id.to_string();
 
-        METRICS.wasm_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
         // Feature 4: Spawn WASM execution as a background local task.
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
             let _permit = semaphore.acquire_owned().await.expect("semaphore closed unexpectedly");
-            let cwd_opt = if cwd_cloned != sandbox_dir_cloned {
-                Some(cwd_cloned.as_path())
-            } else {
-                None
-            };
+            // Count tasks that actually start executing, not just those queued for a permit.
+            METRICS.wasm_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let result = wasm::run_module_compiled(
                 &engine,
-                module,
-                &argv_cloned,
-                &env_pairs_cloned,
-                &sandbox_dir_cloned,
-                cwd_opt,
-                Arc::clone(&buf),
-                limit,
-                timeout,
-                memory_limit,
-                nats_for_task,
-                session_id_cloned,
-                allow_network,
-                auto_allow,
-                fuel_limit,
-                host_call_limit,
-                acp_prefix,
+                wasm::WasmExecConfig {
+                    module,
+                    argv: argv_cloned,
+                    env_vars: env_pairs_cloned,
+                    sandbox_dir: sandbox_dir_cloned.clone(),
+                    cwd: if cwd_cloned != sandbox_dir_cloned {
+                        Some(cwd_cloned)
+                    } else {
+                        None
+                    },
+                    output_buf: Arc::clone(&buf),
+                    output_byte_limit: limit,
+                    timeout_secs: timeout,
+                    memory_limit_bytes: memory_limit,
+                    nats_client: nats_for_task,
+                    session_id: session_id_cloned,
+                    allow_network,
+                    auto_allow_permissions: auto_allow,
+                    fuel_limit,
+                    host_call_limit,
+                    acp_prefix,
+                },
             )
             .await;
             let exit_status = match result {
@@ -854,12 +857,25 @@ impl WasmRuntime {
                     .and_then(|g| g.clone())
                     .unwrap_or_else(TerminalExitStatus::new)
             } else {
-                // Already completed (both child and collector were None).
-                wasm_exit_arc
-                    .as_ref()
-                    .and_then(|arc| arc.lock().ok())
-                    .and_then(|g| g.clone())
-                    .unwrap_or_else(TerminalExitStatus::new)
+                // Both child and collector are None. Two cases:
+                //   a) Terminal already exited — the fast-path above would have caught this;
+                //      we only reach here on a TOCTOU race between the fast-path check and
+                //      the borrow_mut extraction (harmless; wasm_exit_arc will have a value).
+                //   b) Another wait_for_terminal_exit call is running and already took the
+                //      collector/child. For WASM terminals, poll the shared exit arc until
+                //      the background task (and the other caller) populate it. For native
+                //      terminals there is no shared arc — return empty (programming error:
+                //      two concurrent waits on the same native terminal is unsupported).
+                if let Some(arc) = wasm_exit_arc {
+                    loop {
+                        if let Some(status) = arc.lock().ok().and_then(|g| g.clone()) {
+                            break status;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                } else {
+                    TerminalExitStatus::new()
+                }
             }
         };
 
