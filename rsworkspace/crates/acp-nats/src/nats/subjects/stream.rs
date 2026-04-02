@@ -68,6 +68,7 @@ impl AcpStream {
             Self::Global => vec![
                 format!("{p}.agent.initialize"),
                 format!("{p}.agent.authenticate"),
+                format!("{p}.agent.logout"),
                 format!("{p}.agent.session.new"),
             ],
             Self::GlobalExt => vec![format!("{p}.agent.ext.>")],
