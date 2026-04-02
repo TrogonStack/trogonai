@@ -26,7 +26,7 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tracing::{debug, info};
 use uuid::Uuid;
-use wasmtime::{Engine, Module};
+use wasmtime::{Engine, InstancePre, Module};
 
 /// Central execution runtime — one instance per process, shared across sessions.
 ///
@@ -51,12 +51,16 @@ pub struct WasmRuntime {
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
     terminals: RefCell<HashMap<String, WasmTerminal>>,
-    /// In-memory cache of compiled WASM modules keyed by absolute path.
-    /// Value is `(module, source_mtime, last_accessed)`:
+    /// In-memory cache of pre-linked module instances keyed by absolute path.
+    /// Value is `(instance_pre, source_mtime, last_accessed)`:
+    ///   - `instance_pre` — ready for `instantiate_async`; avoids rebuilding the linker per invocation.
     ///   - `source_mtime` — used for invalidation when the `.wasm` file changes on disk.
     ///   - `last_accessed` — updated on every hit; LRU entry is evicted at capacity.
     /// Capped at `MAX_CACHED_MODULES` entries.
-    modules: RefCell<HashMap<PathBuf, (Module, std::time::SystemTime, std::time::Instant)>>,
+    modules: RefCell<HashMap<PathBuf, (InstancePre<wasm::WasmStoreData>, std::time::SystemTime, std::time::Instant)>>,
+    /// Linker with all WASI and `trogon_v1` host functions registered.
+    /// Built once at startup; shared across all module invocations via `instantiate_pre`.
+    linker: wasmtime::Linker<wasm::WasmStoreData>,
     /// Optional directory for on-disk compiled module cache.
     module_cache_dir: Option<PathBuf>,
     /// Maps session_id → set of terminal_ids for session-level auto-cleanup.
@@ -118,6 +122,7 @@ impl WasmRuntime {
         wasm_config.async_support(true);
         wasm_config.consume_fuel(true);
         let engine = Engine::new(&wasm_config)?;
+        let linker = wasm::build_linker(&engine)?;
         let semaphore_permits = if config.wasm_max_concurrent_tasks == 0 {
             tokio::sync::Semaphore::MAX_PERMITS
         } else {
@@ -125,6 +130,7 @@ impl WasmRuntime {
         };
         Ok(Self {
             engine,
+            linker,
             session_root: config.session_root.clone(),
             output_byte_limit: config.output_byte_limit,
             auto_allow_permissions: config.auto_allow_permissions,
@@ -284,7 +290,7 @@ impl WasmRuntime {
     async fn get_or_compile_module(
         &self,
         wasm_path: &std::path::Path,
-    ) -> Result<Module, anyhow::Error> {
+    ) -> Result<InstancePre<wasm::WasmStoreData>, anyhow::Error> {
         let abs_path = wasm_path.canonicalize().unwrap_or_else(|_| wasm_path.to_path_buf());
 
         // Check file size limit and mtime via blocking I/O.
@@ -307,11 +313,11 @@ impl WasmRuntime {
         // Check in-memory cache (synchronous — just a RefCell borrow).
         {
             let mut cached = self.modules.borrow_mut();
-            if let Some((m, mtime, last_accessed)) = cached.get_mut(&abs_path) {
+            if let Some((pre, mtime, last_accessed)) = cached.get_mut(&abs_path) {
                 if *mtime == current_mtime {
                     *last_accessed = std::time::Instant::now();
                     METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return Ok(m.clone());
+                    return Ok(pre.clone());
                 }
             }
         }
@@ -400,6 +406,10 @@ impl WasmRuntime {
         })
         .await??;
 
+        // Build InstancePre on the LocalSet thread — it is !Send and cannot be
+        // created inside spawn_blocking. This call is fast (import resolution only;
+        // Cranelift compilation already happened in the spawn_blocking above).
+        let pre = self.linker.instantiate_pre(&m)?;
         {
             let mut cache = self.modules.borrow_mut();
             // Evict the least-recently-accessed (LRU) entry when at capacity.
@@ -412,9 +422,9 @@ impl WasmRuntime {
                     cache.remove(&lru);
                 }
             }
-            cache.insert(abs_path, (m.clone(), current_mtime, std::time::Instant::now()));
+            cache.insert(abs_path, (pre.clone(), current_mtime, std::time::Instant::now()));
         }
-        Ok(m)
+        Ok(pre)
     }
 
     // ── Terminal operations ────────────────────────────────────────────────
@@ -602,7 +612,7 @@ impl WasmRuntime {
             .map(|e| (e.name.clone(), e.value.clone()))
             .collect();
 
-        let module = self
+        let instance_pre = self
             .get_or_compile_module(&wasm_path)
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
@@ -615,7 +625,6 @@ impl WasmRuntime {
         let terminal_id = Uuid::new_v4().to_string();
 
         // Clone what the background task needs.
-        let engine = self.engine.clone();
         let buf = Arc::clone(&output_buf);
         let trunc = Arc::clone(&was_truncated_flag);
         let exit_arc = Arc::clone(&wasm_exit);
@@ -644,9 +653,8 @@ impl WasmRuntime {
             // Count tasks that actually start executing, not just those queued for a permit.
             METRICS.wasm_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let result = wasm::run_module_compiled(
-                &engine,
                 wasm::WasmExecConfig {
-                    module,
+                    instance_pre,
                     argv: argv_cloned,
                     env_vars: env_pairs,
                     sandbox_dir: sandbox_dir_cloned.clone(),
