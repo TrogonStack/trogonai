@@ -37,12 +37,17 @@ pub struct WasmRuntime {
     wasm_timeout_secs: Option<u64>,
     /// When `true`, reject commands that are not `.wasm` files.
     wasm_only: bool,
+    /// When `true`, WASM modules can access the network via WASI sockets.
+    wasm_allow_network: bool,
     /// Live sessions keyed by ACP session_id.
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
     terminals: RefCell<HashMap<String, WasmTerminal>>,
     /// Feature 1: Cache of compiled WASM modules keyed by absolute path.
-    modules: RefCell<HashMap<PathBuf, Module>>,
+    /// Value is (module, source_mtime) for invalidation on file change.
+    modules: RefCell<HashMap<PathBuf, (Module, std::time::SystemTime)>>,
+    /// Optional directory for on-disk compiled module cache.
+    module_cache_dir: Option<PathBuf>,
     /// Feature 3: Maps session_id → set of terminal_ids for auto-cleanup.
     session_terminals: RefCell<HashMap<String, HashSet<String>>>,
     /// Feature 3: Reverse mapping terminal_id → session_id.
@@ -73,6 +78,7 @@ impl WasmRuntime {
             auto_allow_permissions: config.auto_allow_permissions,
             wasm_timeout_secs: config.wasm_timeout_secs,
             wasm_only: config.wasm_only,
+            wasm_allow_network: config.wasm_allow_network,
             sessions: RefCell::new(HashMap::new()),
             terminals: RefCell::new(HashMap::new()),
             modules: RefCell::new(HashMap::new()),
@@ -80,6 +86,7 @@ impl WasmRuntime {
             terminal_session: RefCell::new(HashMap::new()),
             nats_client,
             wasm_memory_limit_bytes: config.wasm_memory_limit_bytes,
+            module_cache_dir: config.module_cache_dir.clone(),
         })
     }
 
@@ -99,6 +106,85 @@ impl WasmRuntime {
         let dir = self.session_dir(session_id);
         tokio::fs::create_dir_all(&dir).await?;
         Ok(dir)
+    }
+
+    // ── Module cache ───────────────────────────────────────────────────────
+
+    /// Derives an on-disk cache key from the absolute path of a `.wasm` file.
+    /// Uses `DefaultHasher` for uniqueness (not cryptographic security).
+    fn cache_key(path: &std::path::Path) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    /// Returns a compiled `Module` for `wasm_path`, using in-memory and on-disk
+    /// caches. Invalidates both caches when the source file's mtime changes.
+    fn get_or_compile_module(&self, wasm_path: &std::path::Path) -> Result<Module, anyhow::Error> {
+        let abs_path = wasm_path.canonicalize().unwrap_or_else(|_| wasm_path.to_path_buf());
+
+        // Get current mtime of source file.
+        let current_mtime = std::fs::metadata(&abs_path)?.modified()?;
+
+        // Check in-memory cache.
+        {
+            let cached = self.modules.borrow();
+            if let Some((m, mtime)) = cached.get(&abs_path) {
+                if *mtime == current_mtime {
+                    return Ok(m.clone());
+                }
+            }
+        }
+
+        // Check on-disk cache.
+        if let Some(ref cache_dir) = self.module_cache_dir {
+            let key = Self::cache_key(&abs_path);
+            let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+            let mtime_path = cache_dir.join(format!("{key}.mtime"));
+
+            if cwasm_path.exists() && mtime_path.exists() {
+                if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
+                    let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
+                    let current_nanos = current_mtime
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0);
+                    if stored_nanos != 0 && stored_nanos == current_nanos {
+                        // SAFETY: the engine config is always identical for cached modules
+                        // in this runtime — same wasmtime::Config, same Cranelift settings.
+                        if let Ok(m) = unsafe { Module::deserialize_file(&self.engine, &cwasm_path) } {
+                            self.modules.borrow_mut().insert(abs_path.clone(), (m.clone(), current_mtime));
+                            return Ok(m);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compile fresh from source.
+        let m = Module::from_file(&self.engine, &abs_path)?;
+
+        // Write on-disk cache if configured.
+        if let Some(ref cache_dir) = self.module_cache_dir {
+            let key = Self::cache_key(&abs_path);
+            // Ensure the cache directory exists.
+            if std::fs::create_dir_all(cache_dir).is_ok() {
+                if let Ok(serialized) = m.serialize() {
+                    let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+                    let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                    let current_nanos = current_mtime
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0);
+                    let _ = std::fs::write(&cwasm_path, &serialized);
+                    let _ = std::fs::write(&mtime_path, current_nanos.to_string());
+                }
+            }
+        }
+
+        self.modules.borrow_mut().insert(abs_path, (m.clone(), current_mtime));
+        Ok(m)
     }
 
     // ── Terminal operations ────────────────────────────────────────────────
@@ -260,22 +346,10 @@ impl WasmRuntime {
             .map(|e| (e.name.clone(), e.value.clone()))
             .collect();
 
-        // Feature 1: Get or compile the module from the cache.
-        let module = {
-            let cached = self.modules.borrow();
-            cached.get(&wasm_path).cloned()
-        };
-        let module = match module {
-            Some(m) => m,
-            None => {
-                let m = Module::from_file(&self.engine, &wasm_path)
-                    .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
-                self.modules
-                    .borrow_mut()
-                    .insert(wasm_path.clone(), m.clone());
-                m
-            }
-        };
+        // Feature 1: Get or compile the module from the cache (with mtime invalidation).
+        let module = self
+            .get_or_compile_module(&wasm_path)
+            .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
         // Feature 4: Shared output buffer and exit status for background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -291,6 +365,8 @@ impl WasmRuntime {
         let timeout = self.wasm_timeout_secs;
         let memory_limit = self.wasm_memory_limit_bytes;
         let nats_for_task = self.nats_client.clone();
+        let allow_network = self.wasm_allow_network;
+        let auto_allow = self.auto_allow_permissions;
         // Build full argv: command (wasm_path) as argv[0], then user-supplied args.
         let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
         argv_cloned.push(command.to_string());
@@ -313,6 +389,8 @@ impl WasmRuntime {
                 memory_limit,
                 nats_for_task,
                 session_id_cloned,
+                allow_network,
+                auto_allow,
             )
             .await;
             let exit_status = match result {
