@@ -81,6 +81,21 @@ pub struct WasmRuntime {
     wait_for_exit_timeout_secs: u64,
 }
 
+/// Derives an on-disk cache key from the absolute path of a `.wasm` file.
+///
+/// Uses FNV-1a 64-bit, which is deterministic across Rust versions and
+/// process restarts. `DefaultHasher` is explicitly avoided because its
+/// implementation is "subject to change" between compiler versions, which
+/// would silently invalidate on-disk caches after a toolchain upgrade.
+fn cache_key(path: &std::path::Path) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
 impl WasmRuntime {
     pub fn new(config: &Config) -> Result<Self, wasmtime::Error> {
         Self::with_nats(config, None)
@@ -252,42 +267,35 @@ impl WasmRuntime {
 
     // ── Module cache ───────────────────────────────────────────────────────
 
-    /// Derives an on-disk cache key from the absolute path of a `.wasm` file.
-    ///
-    /// Uses FNV-1a 64-bit, which is deterministic across Rust versions and
-    /// process restarts. `DefaultHasher` is explicitly avoided because its
-    /// implementation is "subject to change" between compiler versions, which
-    /// would silently invalidate on-disk caches after a toolchain upgrade.
-    fn cache_key(path: &std::path::Path) -> String {
-        let mut hash: u64 = 0xcbf29ce484222325;
-        for &byte in path.as_os_str().as_encoded_bytes() {
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        format!("{hash:016x}")
-    }
-
     /// Returns a compiled `Module` for `wasm_path`, using in-memory and on-disk
     /// caches. Invalidates both caches when the source file's mtime changes.
-    fn get_or_compile_module(&self, wasm_path: &std::path::Path) -> Result<Module, anyhow::Error> {
+    ///
+    /// Disk I/O and Cranelift compilation run inside `spawn_blocking` so the
+    /// tokio `LocalSet` is not stalled during CPU-intensive JIT compilation.
+    async fn get_or_compile_module(
+        &self,
+        wasm_path: &std::path::Path,
+    ) -> Result<Module, anyhow::Error> {
         let abs_path = wasm_path.canonicalize().unwrap_or_else(|_| wasm_path.to_path_buf());
 
-        // Check file size limit before doing anything else.
-        let meta = std::fs::metadata(&abs_path)?;
-        if self.wasm_max_module_size_bytes > 0
-            && meta.len() as usize > self.wasm_max_module_size_bytes
-        {
+        // Check file size limit and mtime via blocking I/O.
+        let max_size = self.wasm_max_module_size_bytes;
+        let abs_path_b = abs_path.clone();
+        let (meta_len, current_mtime) = tokio::task::spawn_blocking(move || {
+            let meta = std::fs::metadata(&abs_path_b)?;
+            Ok::<_, anyhow::Error>((meta.len(), meta.modified()?))
+        })
+        .await??;
+
+        if max_size > 0 && meta_len as usize > max_size {
             return Err(anyhow::anyhow!(
                 "WASM module too large: {} bytes (limit: {})",
-                meta.len(),
-                self.wasm_max_module_size_bytes
+                meta_len,
+                max_size
             ));
         }
 
-        // Get current mtime of source file.
-        let current_mtime = meta.modified()?;
-
-        // Check in-memory cache.
+        // Check in-memory cache (synchronous — just a RefCell borrow).
         {
             let cached = self.modules.borrow();
             if let Some((m, mtime)) = cached.get(&abs_path) {
@@ -298,73 +306,93 @@ impl WasmRuntime {
             }
         }
 
-        // Check on-disk cache.
-        if let Some(ref cache_dir) = self.module_cache_dir {
-            let key = Self::cache_key(&abs_path);
-            let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
-            let mtime_path = cache_dir.join(format!("{key}.mtime"));
-            let version_path = cache_dir.join(format!("{key}.version"));
+        // Check on-disk cache and compile if needed — all blocking work in one closure.
+        let engine = self.engine.clone();
+        let cache_dir = self.module_cache_dir.clone();
+        let abs_path_b = abs_path.clone();
+        let m = tokio::task::spawn_blocking(move || -> Result<Module, anyhow::Error> {
+            if let Some(ref cache_dir) = cache_dir {
+                let key = cache_key(&abs_path_b);
+                let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+                let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                let version_path = cache_dir.join(format!("{key}.version"));
 
-            if cwasm_path.exists() && mtime_path.exists() {
-                // Check version fingerprint first — skip deserialization if version mismatch.
-                let stored_version = std::fs::read_to_string(&version_path).unwrap_or_default();
-                let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
+                if cwasm_path.exists() && mtime_path.exists() {
+                    let stored_version =
+                        std::fs::read_to_string(&version_path).unwrap_or_default();
+                    let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
 
-                if version_ok {
-                    if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
-                        let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
+                    if version_ok {
+                        if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
+                            let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
+                            let current_nanos = current_mtime
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_nanos() as u64)
+                                .unwrap_or(0);
+                            if stored_nanos != 0 && stored_nanos == current_nanos {
+                                // SAFETY: the engine config is always identical for cached
+                                // modules — same wasmtime::Config, same Cranelift settings.
+                                let cached_module =
+                                    unsafe { Module::deserialize_file(&engine, &cwasm_path) };
+                                match cached_module {
+                                    Ok(m) => {
+                                        METRICS.cache_hits.fetch_add(
+                                            1,
+                                            std::sync::atomic::Ordering::Relaxed,
+                                        );
+                                        return Ok(m);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            path = %cwasm_path.display(),
+                                            error = %e,
+                                            "on-disk module cache invalid, recompiling"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::warn!(
+                            path = %cwasm_path.display(),
+                            stored = %stored_version.trim(),
+                            current = %CACHE_FINGERPRINT,
+                            "module cache version mismatch, recompiling"
+                        );
+                    }
+                }
+            }
+
+            // Compile fresh from source (cache miss).
+            METRICS.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let m = Module::from_file(&engine, &abs_path_b)?;
+
+            // Write on-disk cache if configured (fire-and-forget; errors are non-fatal).
+            if let Some(ref cache_dir) = cache_dir {
+                let key = cache_key(&abs_path_b);
+                if std::fs::create_dir_all(cache_dir).is_ok() {
+                    if let Ok(serialized) = m.serialize() {
+                        let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+                        let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                        let version_path = cache_dir.join(format!("{key}.version"));
                         let current_nanos = current_mtime
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_nanos() as u64)
                             .unwrap_or(0);
-                        if stored_nanos != 0 && stored_nanos == current_nanos {
-                            // SAFETY: the engine config is always identical for cached modules
-                            // in this runtime — same wasmtime::Config, same Cranelift settings.
-                            let cached_module = unsafe { Module::deserialize_file(&self.engine, &cwasm_path) };
-                            match cached_module {
-                                Ok(m) => {
-                                    METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    self.modules.borrow_mut().insert(abs_path.clone(), (m.clone(), current_mtime));
-                                    return Ok(m);
-                                }
-                                Err(e) => {
-                                    tracing::warn!(path = %cwasm_path.display(), error = %e, "on-disk module cache invalid, recompiling");
-                                    // Fall through to recompilation below.
-                                }
-                            }
-                        }
+                        let _ = std::fs::write(&cwasm_path, &serialized);
+                        let _ = std::fs::write(&mtime_path, current_nanos.to_string());
+                        let _ = std::fs::write(&version_path, CACHE_FINGERPRINT);
                     }
-                } else {
-                    tracing::warn!(path = %cwasm_path.display(), stored = %stored_version.trim(), current = %CACHE_FINGERPRINT, "module cache version mismatch, recompiling");
                 }
             }
-        }
 
-        // Compile fresh from source (cache miss).
-        METRICS.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let m = Module::from_file(&self.engine, &abs_path)?;
+            Ok(m)
+        })
+        .await??;
 
-        // Write on-disk cache if configured.
-        if let Some(ref cache_dir) = self.module_cache_dir {
-            let key = Self::cache_key(&abs_path);
-            // Ensure the cache directory exists.
-            if std::fs::create_dir_all(cache_dir).is_ok() {
-                if let Ok(serialized) = m.serialize() {
-                    let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
-                    let mtime_path = cache_dir.join(format!("{key}.mtime"));
-                    let version_path = cache_dir.join(format!("{key}.version"));
-                    let current_nanos = current_mtime
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
-                    let _ = std::fs::write(&cwasm_path, &serialized);
-                    let _ = std::fs::write(&mtime_path, current_nanos.to_string());
-                    let _ = std::fs::write(&version_path, CACHE_FINGERPRINT);
-                }
-            }
-        }
-
-        self.modules.borrow_mut().insert(abs_path, (m.clone(), current_mtime));
+        self.modules
+            .borrow_mut()
+            .insert(abs_path, (m.clone(), current_mtime));
         Ok(m)
     }
 
@@ -415,6 +443,7 @@ impl WasmRuntime {
         // Native process — sandboxed to session directory.
         METRICS.native_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -445,6 +474,7 @@ impl WasmRuntime {
 
         // Spawn background task to collect stdout.
         let buf_stdout = Arc::clone(&output_buf);
+        let trunc_stdout = Arc::clone(&was_truncated_flag);
         let limit = self.output_byte_limit;
         let stdout_handle = if let Some(mut stdout) = child.stdout.take() {
             tokio::task::spawn(async move {
@@ -452,7 +482,7 @@ impl WasmRuntime {
                 loop {
                     match stdout.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(&buf_stdout, limit, &chunk[..n]),
+                        Ok(n) => WasmTerminal::append_output(&buf_stdout, &trunc_stdout, limit, &chunk[..n]),
                         Err(_) => break,
                     }
                 }
@@ -463,13 +493,14 @@ impl WasmRuntime {
 
         // Spawn background task to collect stderr.
         let buf_stderr = Arc::clone(&output_buf);
+        let trunc_stderr = Arc::clone(&was_truncated_flag);
         let stderr_handle = if let Some(mut stderr) = child.stderr.take() {
             tokio::task::spawn(async move {
                 let mut chunk = [0u8; 4096];
                 loop {
                     match stderr.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(&buf_stderr, limit, &chunk[..n]),
+                        Ok(n) => WasmTerminal::append_output(&buf_stderr, &trunc_stderr, limit, &chunk[..n]),
                         Err(_) => break,
                     }
                 }
@@ -486,9 +517,9 @@ impl WasmRuntime {
         let terminal = WasmTerminal {
             kind: TerminalKind::Native { child: Some(child), stdin },
             output_buf,
-            output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
             exit_status: None,
+            was_truncated: was_truncated_flag,
         };
 
         info!(session_id, terminal_id, command, "Terminal created");
@@ -553,10 +584,12 @@ impl WasmRuntime {
         // Feature 1: Get or compile the module from the cache (with mtime invalidation).
         let module = self
             .get_or_compile_module(&wasm_path)
+            .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
         // Feature 4: Shared output buffer and exit status for background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let wasm_exit: Arc<Mutex<Option<TerminalExitStatus>>> = Arc::new(Mutex::new(None));
 
         let terminal_id = Uuid::new_v4().to_string();
@@ -564,6 +597,7 @@ impl WasmRuntime {
         // Clone what the background task needs.
         let engine = self.engine.clone();
         let buf = Arc::clone(&output_buf);
+        let trunc = Arc::clone(&was_truncated_flag);
         let exit_arc = Arc::clone(&wasm_exit);
         let limit = self.output_byte_limit;
         let timeout = self.wasm_timeout_secs;
@@ -604,6 +638,7 @@ impl WasmRuntime {
                         None
                     },
                     output_buf: Arc::clone(&buf),
+                    was_truncated: Arc::clone(&trunc),
                     output_byte_limit: limit,
                     timeout_secs: timeout,
                     memory_limit_bytes: memory_limit,
@@ -636,9 +671,9 @@ impl WasmRuntime {
         let terminal = WasmTerminal {
             kind: TerminalKind::Wasm { exit_arc: wasm_exit },
             output_buf,
-            output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
             exit_status: None,
+            was_truncated: was_truncated_flag,
         };
 
         info!(session_id, terminal_id, command, "WASM module executing (background)");
