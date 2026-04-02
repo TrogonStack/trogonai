@@ -688,7 +688,7 @@ mod tests {
     use super::*;
     use agent_client_protocol::{
         AuthenticateResponse, Error as AcpError, ErrorCode, InitializeResponse, LogoutResponse,
-        PromptResponse, StopReason,
+        NewSessionResponse, PromptResponse, StopReason,
     };
     use std::cell::RefCell;
     use trogon_nats::MockNatsClient;
@@ -859,7 +859,9 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_logout_publishes_response() {
-        assert_dispatch_publishes("acp.agent.logout", &LogoutRequest::new()).await;
+        let (nats, _) = dispatch("acp.agent.logout", &LogoutRequest::new(), Some("_INBOX.r")).await;
+        assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
+        let _: LogoutResponse = published_response(&nats);
     }
 
     #[tokio::test]
@@ -871,7 +873,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(agent.cancelled.borrow().len(), 1);
+        assert_eq!(agent.cancelled.borrow().as_slice(), ["s1"]);
         assert!(nats.published_messages().is_empty());
     }
 
@@ -919,6 +921,11 @@ mod tests {
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["_INBOX.specific"]);
+        let response: InitializeResponse = published_response(&nats);
+        assert_eq!(
+            response.protocol_version,
+            agent_client_protocol::ProtocolVersion::V0
+        );
     }
 
     #[test]
@@ -977,6 +984,8 @@ mod tests {
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["_INBOX.ext"]);
+        let value: serde_json::Value = published_response(&nats);
+        assert!(value.is_null());
     }
 
     #[tokio::test]
@@ -990,19 +999,30 @@ mod tests {
         assert!(nats.published_messages().is_empty());
     }
 
-    async fn assert_dispatch_publishes<T: serde::Serialize>(subject: &str, args: &T) {
+    async fn assert_dispatch_method_not_found<T: serde::Serialize>(subject: &str, args: &T) {
         let (nats, _) = dispatch(subject, args, Some("_INBOX.r")).await;
         assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
+        let error: AcpError = published_response(&nats);
+        assert_eq!(error.code, ErrorCode::MethodNotFound);
     }
 
     #[tokio::test]
     async fn dispatch_new_session_publishes_response() {
-        assert_dispatch_publishes("acp.agent.session.new", &NewSessionRequest::new("/tmp")).await;
+        let (nats, _) = dispatch(
+            "acp.agent.session.new",
+            &NewSessionRequest::new("/tmp"),
+            Some("_INBOX.r"),
+        )
+        .await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
+        let response: NewSessionResponse = published_response(&nats);
+        assert_eq!(response.session_id.to_string(), "sess-1");
     }
 
     #[tokio::test]
     async fn dispatch_session_load_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.load",
             &LoadSessionRequest::new("s1", "/tmp"),
         )
@@ -1011,12 +1031,13 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_list_sessions_publishes_response() {
-        assert_dispatch_publishes("acp.agent.session.list", &ListSessionsRequest::new()).await;
+        assert_dispatch_method_not_found("acp.agent.session.list", &ListSessionsRequest::new())
+            .await;
     }
 
     #[tokio::test]
     async fn dispatch_set_session_mode_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.set_mode",
             &SetSessionModeRequest::new("s1", "code"),
         )
@@ -1025,7 +1046,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_set_session_config_option_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.set_config_option",
             &SetSessionConfigOptionRequest::new("s1", "key", "val"),
         )
@@ -1034,7 +1055,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_set_session_model_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.set_model",
             &SetSessionModelRequest::new("s1", "gpt-4"),
         )
@@ -1043,7 +1064,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_fork_session_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.fork",
             &ForkSessionRequest::new("s1", "/tmp"),
         )
@@ -1052,7 +1073,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_resume_session_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.resume",
             &ResumeSessionRequest::new("s1", "/tmp"),
         )
@@ -1061,7 +1082,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_close_session_publishes_response() {
-        assert_dispatch_publishes(
+        assert_dispatch_method_not_found(
             "acp.session.s1.agent.close",
             &CloseSessionRequest::new("s1"),
         )
@@ -1244,7 +1265,12 @@ mod tests {
                 tokio::task::yield_now().await;
                 tokio::task::yield_now().await;
 
-                assert!(!nats.published_messages().is_empty());
+                assert_eq!(nats.published_messages(), vec!["_INBOX.serve"]);
+                let response: InitializeResponse = published_response(&nats);
+                assert_eq!(
+                    response.protocol_version,
+                    agent_client_protocol::ProtocolVersion::V0
+                );
             })
             .await;
     }
@@ -1294,7 +1320,7 @@ mod tests {
                 tokio::task::yield_now().await;
                 tokio::task::yield_now().await;
 
-                assert!(!nats.published_messages().is_empty());
+                assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
             })
             .await;
     }
@@ -1358,18 +1384,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_js_message_success_acks() {
-        let nats = MockNatsClient::new();
-        let agent = MockAgent::new();
-        let payload = serialize(&LoadSessionRequest::new("s1", "/tmp"));
-        let js_msg = make_js_msg("acp.session.s1.agent.load", &payload, None);
-
-        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-
-        assert!(!nats.published_messages().is_empty());
-    }
-
-    #[tokio::test]
     async fn dispatch_js_message_unknown_subject_terms() {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
@@ -1388,9 +1402,11 @@ mod tests {
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        let payloads = nats.published_payloads();
-        assert_eq!(payloads.len(), 1);
-        let error: agent_client_protocol::Error = serde_json::from_slice(&payloads[0]).unwrap();
+        assert_eq!(
+            nats.published_messages(),
+            vec!["acp.session.s1.agent.response.req-1"]
+        );
+        let error: AcpError = published_response(&nats);
         assert_eq!(error.code, ErrorCode::InvalidParams);
     }
 
@@ -1521,14 +1537,12 @@ mod tests {
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        let subjects = nats.published_messages();
-        assert!(
-            subjects
-                .iter()
-                .any(|s| s.starts_with("acp.session.s1.agent.prompt.response.")),
-            "expected prompt.response subject, got: {:?}",
-            subjects
+        assert_eq!(
+            nats.published_messages(),
+            vec!["acp.session.s1.agent.prompt.response.req-1"]
         );
+        let response: PromptResponse = published_response(&nats);
+        assert_eq!(response.stop_reason, StopReason::EndTurn);
     }
 
     #[tokio::test]
@@ -1540,14 +1554,7 @@ mod tests {
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        let subjects = nats.published_messages();
-        assert!(
-            subjects
-                .iter()
-                .any(|s| s.starts_with("acp.session.s1.agent.response.")),
-            "expected response subject, got: {:?}",
-            subjects
-        );
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1603,8 +1610,12 @@ mod tests {
                 tokio::task::yield_now().await;
                 tokio::task::yield_now().await;
 
-                assert_eq!(nats.published_messages().len(), 1);
-                assert_eq!(nats.published_messages()[0], "_INBOX.serve");
+                assert_eq!(nats.published_messages(), vec!["_INBOX.serve"]);
+                let response: InitializeResponse = published_response(&nats);
+                assert_eq!(
+                    response.protocol_version,
+                    agent_client_protocol::ProtocolVersion::V0
+                );
             })
             .await;
     }
@@ -1681,7 +1692,13 @@ mod tests {
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        assert_eq!(agent.cancelled.borrow().len(), 1);
+        assert_eq!(agent.cancelled.borrow().as_slice(), ["s1"]);
+    }
+
+    fn assert_js_response_method_not_found(nats: &MockNatsClient, expected_subject: &str) {
+        assert_eq!(nats.published_messages(), vec![expected_subject]);
+        let error: AcpError = published_response(nats);
+        assert_eq!(error.code, ErrorCode::MethodNotFound);
     }
 
     #[tokio::test]
@@ -1689,11 +1706,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&SetSessionModeRequest::new("s1", "code"));
-        let js_msg = make_js_msg("acp.session.s1.agent.set_mode", &payload, Some("_INBOX.r"));
+        let js_msg = make_js_msg("acp.session.s1.agent.set_mode", &payload, None);
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        assert!(!nats.published_messages().is_empty());
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1701,11 +1718,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&CloseSessionRequest::new("s1"));
-        let js_msg = make_js_msg("acp.session.s1.agent.close", &payload, Some("_INBOX.r"));
+        let js_msg = make_js_msg("acp.session.s1.agent.close", &payload, None);
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        assert!(!nats.published_messages().is_empty());
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1713,11 +1730,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&ForkSessionRequest::new("s1", "/tmp"));
-        let js_msg = make_js_msg("acp.session.s1.agent.fork", &payload, Some("_INBOX.r"));
+        let js_msg = make_js_msg("acp.session.s1.agent.fork", &payload, None);
 
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-        assert!(!nats.published_messages().is_empty());
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1725,13 +1742,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&SetSessionConfigOptionRequest::new("s1", "key", "val"));
-        let js_msg = make_js_msg(
-            "acp.session.s1.agent.set_config_option",
-            &payload,
-            Some("_INBOX.r"),
-        );
+        let js_msg = make_js_msg("acp.session.s1.agent.set_config_option", &payload, None);
+
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-        assert!(!nats.published_messages().is_empty());
+
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1739,9 +1754,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&SetSessionModelRequest::new("s1", "gpt-4"));
-        let js_msg = make_js_msg("acp.session.s1.agent.set_model", &payload, Some("_INBOX.r"));
+        let js_msg = make_js_msg("acp.session.s1.agent.set_model", &payload, None);
+
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-        assert!(!nats.published_messages().is_empty());
+
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1749,19 +1766,11 @@ mod tests {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let payload = serialize(&ResumeSessionRequest::new("s1", "/tmp"));
-        let js_msg = make_js_msg("acp.session.s1.agent.resume", &payload, Some("_INBOX.r"));
-        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-        assert!(!nats.published_messages().is_empty());
-    }
+        let js_msg = make_js_msg("acp.session.s1.agent.resume", &payload, None);
 
-    #[tokio::test]
-    async fn dispatch_js_message_prompt() {
-        let nats = MockNatsClient::new();
-        let agent = MockAgent::new();
-        let payload = serialize(&PromptRequest::new("s1", vec![]));
-        let js_msg = make_js_msg("acp.session.s1.agent.prompt", &payload, Some("_INBOX.r"));
         dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-        assert!(!nats.published_messages().is_empty());
+
+        assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
     }
 
     #[tokio::test]
@@ -1893,7 +1902,12 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
-        assert!(!nats.published_messages().is_empty());
+        assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
+        let response: InitializeResponse = published_response(&nats);
+        assert_eq!(
+            response.protocol_version,
+            agent_client_protocol::ProtocolVersion::V0
+        );
     }
 
     #[tokio::test]
@@ -1927,7 +1941,9 @@ mod tests {
         let js_msg = make_js_msg("acp.agent.initialize", &payload, Some("_INBOX.1"));
         let result = handle_request_with_keepalive(&msg, &nats, &js_msg, init_handler_error).await;
         assert!(result.is_ok());
-        assert!(!nats.published_messages().is_empty());
+        assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
+        let error: AcpError = published_response(&nats);
+        assert_eq!(error.code, ErrorCode::InternalError);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1977,6 +1993,8 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
-        assert!(!nats.published_messages().is_empty());
+        assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
+        let error: AcpError = published_response(&nats);
+        assert_eq!(error.code, ErrorCode::MethodNotFound);
     }
 }
