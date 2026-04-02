@@ -4365,6 +4365,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

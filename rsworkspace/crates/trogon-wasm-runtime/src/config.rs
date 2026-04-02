@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 /// Runtime configuration, read from environment variables.
+#[derive(Clone)]
 pub struct Config {
     /// Root directory where per-session sandbox directories are created.
     pub session_root: PathBuf,
