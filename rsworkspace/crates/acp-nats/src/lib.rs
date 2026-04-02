@@ -11,6 +11,7 @@ pub mod jetstream;
 pub(crate) mod jsonrpc;
 pub mod nats;
 pub(crate) mod pending_prompt_waiters;
+pub mod req_id;
 pub mod session_id;
 pub(crate) mod telemetry;
 
@@ -23,6 +24,7 @@ pub use config::{
 };
 pub use error::AGENT_UNAVAILABLE;
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+pub use req_id::ReqId;
 pub use session_id::AcpSessionId;
 #[cfg(not(coverage))]
 pub use trogon_nats::jetstream::NatsJetStreamClient;
