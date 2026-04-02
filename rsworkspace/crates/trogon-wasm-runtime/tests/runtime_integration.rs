@@ -31,6 +31,7 @@ fn test_config(session_root: PathBuf) -> Config {
         wasm_max_concurrent_tasks: 32,
         session_idle_timeout_secs: 3600,
         wasm_max_module_size_bytes: 100 * 1024 * 1024,
+        wait_for_exit_timeout_secs: 300,
     }
 }
 
@@ -239,6 +240,7 @@ async fn output_byte_limit_truncates() {
         wasm_max_concurrent_tasks: 32,
         session_idle_timeout_secs: 3600,
         wasm_max_module_size_bytes: 100 * 1024 * 1024,
+        wait_for_exit_timeout_secs: 300,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -545,6 +547,7 @@ async fn wasm_module_runs_with_timeout_set() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -735,6 +738,7 @@ async fn wasm_only_rejects_native_commands() {
         wasm_max_concurrent_tasks: 32,
         session_idle_timeout_secs: 3600,
         wasm_max_module_size_bytes: 100 * 1024 * 1024,
+        wait_for_exit_timeout_secs: 300,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -770,6 +774,7 @@ async fn wasm_only_allows_wasm_commands() {
         wasm_max_concurrent_tasks: 32,
         session_idle_timeout_secs: 3600,
         wasm_max_module_size_bytes: 100 * 1024 * 1024,
+        wait_for_exit_timeout_secs: 300,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -833,6 +838,7 @@ async fn wasm_module_memory_limit_enforced() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -976,6 +982,7 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_max_concurrent_tasks: 32,
                     session_idle_timeout_secs: 3600,
                     wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                    wait_for_exit_timeout_secs: 300,
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1027,6 +1034,7 @@ async fn module_cache_persists_across_runtimes() {
                     wasm_max_concurrent_tasks: 32,
                     session_idle_timeout_secs: 3600,
                     wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                    wait_for_exit_timeout_secs: 300,
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1102,6 +1110,7 @@ async fn module_cache_invalidates_on_mtime_change() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1341,6 +1350,7 @@ async fn wasm_module_network_enabled_flag_wires_through() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1411,6 +1421,7 @@ async fn wasm_module_custom_fuel_limit() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1492,6 +1503,7 @@ async fn wasm_module_host_call_budget_exhausted() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1641,6 +1653,7 @@ async fn wasm_module_request_permission_no_nats_denied() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             // No NATS client — WasmRuntime::new, not with_nats.
             let runtime = WasmRuntime::new(&cfg).unwrap();
@@ -1726,6 +1739,7 @@ async fn wasm_backpressure_limits_concurrent_tasks() {
                 wasm_max_concurrent_tasks: 2,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1807,6 +1821,7 @@ async fn wasm_module_fuel_exhausted_returns_distinct_signal() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 100 * 1024 * 1024,
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1878,6 +1893,7 @@ async fn wasm_module_too_large_rejected() {
                 wasm_max_concurrent_tasks: 32,
                 session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 10, // only 10 bytes — any real .wasm is larger
+                wait_for_exit_timeout_secs: 300,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1976,4 +1992,104 @@ async fn wasm_nats_request_negative_timeout_handled() {
             );
         })
         .await;
+}
+
+// ── Fix 1: wait_for_exit_timeout_secs ────────────────────────────────────────
+
+/// A native process that sleeps forever should be killed and return
+/// `signal = Some("wait_timeout")` after the configured timeout elapses.
+#[tokio::test]
+async fn wait_for_terminal_exit_timeout_kills_hung_process() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = Config {
+        session_root: tmp.path().to_path_buf(),
+        output_byte_limit: 1024 * 1024,
+        auto_allow_permissions: true,
+        wasm_timeout_secs: None,
+        wasm_only: false,
+        wasm_memory_limit_bytes: None,
+        module_cache_dir: None,
+        wasm_allow_network: false,
+        wasm_fuel_limit: 1_000_000_000u64,
+        wasm_host_call_limit: 10_000u32,
+        acp_prefix: "acp".to_string(),
+        wasm_max_concurrent_tasks: 32,
+        session_idle_timeout_secs: 3600,
+        wasm_max_module_size_bytes: 100 * 1024 * 1024,
+        wait_for_exit_timeout_secs: 1, // 1 second — fires quickly in tests
+    };
+    let runtime = WasmRuntime::new(&cfg).unwrap();
+
+    // Spawn a process that sleeps forever.
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep")
+        .args(vec!["9999".to_string()]);
+    let resp = runtime
+        .handle_create_terminal(session_id(), req)
+        .await
+        .expect("sleep process should spawn");
+    let tid = resp.terminal_id;
+
+    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
+    let start = std::time::Instant::now();
+    let exit = runtime
+        .handle_wait_for_terminal_exit(wait_req)
+        .await
+        .expect("wait should return after timeout");
+
+    // Should complete well within 5 seconds (timeout is 1s + kill latency).
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "wait should have returned within ~2s, took {:?}",
+        start.elapsed()
+    );
+    assert_eq!(
+        exit.exit_status.signal.as_deref(),
+        Some("wait_timeout"),
+        "hung process should produce signal 'wait_timeout', got: {:?}",
+        exit.exit_status
+    );
+}
+
+// ── Fix 3: native_terminal_stdin_write ───────────────────────────────────────
+
+/// Spawning `cat` and writing to its stdin should produce the same bytes on stdout.
+#[tokio::test]
+async fn native_terminal_stdin_write() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    // `cat` reads stdin and echoes it to stdout.
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "cat");
+    let resp = runtime
+        .handle_create_terminal(session_id(), req)
+        .await
+        .expect("cat should spawn");
+    let tid = resp.terminal_id;
+
+    // Write "hello\n" to stdin.
+    runtime
+        .handle_write_to_terminal(tid.0.as_ref(), b"hello\n")
+        .await
+        .expect("write to cat stdin should succeed");
+
+    // Close stdin so cat exits.
+    runtime.handle_close_terminal_stdin(tid.0.as_ref());
+
+    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
+    let exit = runtime
+        .handle_wait_for_terminal_exit(wait_req)
+        .await
+        .expect("wait should succeed");
+    assert_eq!(exit.exit_status.exit_code, Some(0), "cat should exit 0");
+
+    let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
+    let out = runtime
+        .handle_terminal_output(out_req)
+        .await
+        .expect("output should succeed");
+    assert!(
+        out.output.contains("hello"),
+        "cat output should contain 'hello', got: {:?}",
+        out.output
+    );
 }

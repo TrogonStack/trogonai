@@ -41,31 +41,49 @@ pub async fn run(
 
     // Spawn periodic idle-session cleanup task.
     let runtime_for_cleanup = Rc::clone(&runtime);
+    let mut shutdown_for_cleanup = shutdown.clone();
     tokio::task::spawn_local(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
-            interval.tick().await;
-            runtime_for_cleanup.cleanup_idle_sessions();
+            tokio::select! {
+                _ = interval.tick() => {
+                    runtime_for_cleanup.cleanup_idle_sessions();
+                }
+                _ = shutdown_for_cleanup.changed() => {
+                    if *shutdown_for_cleanup.borrow() {
+                        break;
+                    }
+                }
+            }
         }
     });
 
     // Spawn periodic metrics log task (every 5 minutes).
+    let mut shutdown_for_metrics = shutdown.clone();
     tokio::task::spawn_local(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         loop {
-            interval.tick().await;
-            let snap = trogon_wasm_runtime::metrics::METRICS.snapshot();
-            tracing::info!(
-                wasm_started = snap.wasm_tasks_started,
-                wasm_completed = snap.wasm_tasks_completed,
-                wasm_faulted = snap.wasm_tasks_faulted,
-                fuel_exhausted = snap.wasm_fuel_exhausted,
-                native_started = snap.native_tasks_started,
-                cache_hits = snap.cache_hits,
-                cache_misses = snap.cache_misses,
-                host_calls = snap.host_calls_total,
-                "runtime metrics"
-            );
+            tokio::select! {
+                _ = interval.tick() => {
+                    let snap = trogon_wasm_runtime::metrics::METRICS.snapshot();
+                    tracing::info!(
+                        wasm_started = snap.wasm_tasks_started,
+                        wasm_completed = snap.wasm_tasks_completed,
+                        wasm_faulted = snap.wasm_tasks_faulted,
+                        fuel_exhausted = snap.wasm_fuel_exhausted,
+                        native_started = snap.native_tasks_started,
+                        cache_hits = snap.cache_hits,
+                        cache_misses = snap.cache_misses,
+                        host_calls = snap.host_calls_total,
+                        "runtime metrics"
+                    );
+                }
+                _ = shutdown_for_metrics.changed() => {
+                    if *shutdown_for_metrics.borrow() {
+                        break;
+                    }
+                }
+            }
         }
     });
 
@@ -244,8 +262,8 @@ async fn dispatch(
         }
 
         ClientMethod::ExtSessionPromptResponse | ClientMethod::Ext(_) => {
-            // Not handled by this runtime — silently ignore.
-            debug!(method = ?std::mem::discriminant(&method), "Unhandled client method");
+            debug!("Unhandled client method");
+            reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
         }
     }
 }
