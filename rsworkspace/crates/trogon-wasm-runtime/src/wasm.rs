@@ -573,6 +573,9 @@ fn add_trogon_host_functions(
 /// `argv` must include argv[0] (the program name) as the first element.
 /// `env_vars` are set as the WASI environment.
 /// The module is sandboxed to `sandbox_dir` as its preopened root (`/`).
+/// If `cwd` is provided and differs from `sandbox_dir`, it is additionally
+/// preopened at `"."` so that WASIp1 programs using `getcwd()` / relative
+/// paths see the correct working directory.
 /// Output is appended directly to `output_buf` as bytes arrive.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_module_compiled(
@@ -581,6 +584,7 @@ pub async fn run_module_compiled(
     argv: &[String],
     env_vars: &[(String, String)],
     sandbox_dir: &Path,
+    cwd: Option<&Path>,
     output_buf: Arc<Mutex<Vec<u8>>>,
     output_byte_limit: usize,
     timeout_secs: Option<u64>,
@@ -611,6 +615,14 @@ pub async fn run_module_compiled(
         .stderr(stderr_stream)
         .args(argv)
         .preopened_dir(sandbox_dir, "/", DirPerms::all(), FilePerms::all())?;
+
+    // Pre-open the requested working directory at "." so that WASIp1 programs
+    // using getcwd() or relative paths see the correct working directory.
+    if let Some(cwd_path) = cwd {
+        if cwd_path != sandbox_dir {
+            builder.preopened_dir(cwd_path, ".", DirPerms::all(), FilePerms::all())?;
+        }
+    }
 
     for (k, v) in env_vars {
         builder.env(k, v);
@@ -721,45 +733,3 @@ pub async fn run_module_compiled(
     Ok(exit_status)
 }
 
-/// Runs a WASIp1 core module (`.wasm` compiled from `wasm32-wasip1` target).
-///
-/// The module is sandboxed to `sandbox_dir` as its preopened root (`/`).
-/// `args[0]` is set to the module path; remaining `args` are forwarded.
-/// `env_vars` are set as the WASI environment.
-///
-/// Output is appended directly to `output_buf` as the module runs.
-#[allow(dead_code)]
-pub async fn run_module(
-    engine: &Engine,
-    wasm_path: &Path,
-    args: &[String],
-    env_vars: &[(String, String)],
-    sandbox_dir: &Path,
-    output_buf: Arc<Mutex<Vec<u8>>>,
-    output_byte_limit: usize,
-    timeout_secs: Option<u64>,
-) -> Result<TerminalExitStatus, anyhow::Error> {
-    let module = Module::from_file(engine, wasm_path)?;
-    let mut argv: Vec<String> = Vec::with_capacity(args.len() + 1);
-    argv.push(wasm_path.to_string_lossy().into_owned());
-    argv.extend_from_slice(args);
-    run_module_compiled(
-        engine,
-        module,
-        &argv,
-        env_vars,
-        sandbox_dir,
-        output_buf,
-        output_byte_limit,
-        timeout_secs,
-        None,
-        None,
-        String::new(),
-        false,
-        false,
-        1_000_000_000u64,
-        10_000u32,
-        String::new(),
-    )
-    .await
-}
