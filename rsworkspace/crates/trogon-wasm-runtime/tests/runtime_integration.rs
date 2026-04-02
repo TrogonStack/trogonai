@@ -227,21 +227,8 @@ async fn kill_terminal_stops_process() {
 async fn output_byte_limit_truncates() {
     let tmp = TempDir::new().unwrap();
     let cfg = Config {
-        session_root: tmp.path().to_path_buf(),
         output_byte_limit: 50,
-        auto_allow_permissions: true,
-        wasm_timeout_secs: None,
-        wasm_only: false,
-        wasm_memory_limit_bytes: None,
-        module_cache_dir: None,
-        wasm_allow_network: false,
-        wasm_fuel_limit: 1_000_000_000u64,
-        wasm_host_call_limit: 10_000u32,
-        acp_prefix: "acp".to_string(),
-        wasm_max_concurrent_tasks: 32,
-        session_idle_timeout_secs: 3600,
-        wasm_max_module_size_bytes: 100 * 1024 * 1024,
-        wait_for_exit_timeout_secs: 300,
+        ..test_config(tmp.path().to_path_buf())
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -534,21 +521,8 @@ async fn wasm_module_runs_with_timeout_set() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
                 wasm_timeout_secs: Some(30), // generous timeout — should not fire
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -724,24 +698,7 @@ async fn wasm_module_background_execution() {
 #[tokio::test]
 async fn wasm_only_rejects_native_commands() {
     let tmp = TempDir::new().unwrap();
-    let cfg = Config {
-        session_root: tmp.path().to_path_buf(),
-        output_byte_limit: 1024 * 1024,
-        auto_allow_permissions: true,
-        wasm_timeout_secs: None,
-        wasm_only: true,
-        wasm_memory_limit_bytes: None,
-        module_cache_dir: None,
-        wasm_allow_network: false,
-        wasm_fuel_limit: 1_000_000_000u64,
-        wasm_host_call_limit: 10_000u32,
-        acp_prefix: "acp".to_string(),
-        wasm_max_concurrent_tasks: 32,
-        session_idle_timeout_secs: 3600,
-        wasm_max_module_size_bytes: 100 * 1024 * 1024,
-        wait_for_exit_timeout_secs: 300,
-    };
-    let runtime = WasmRuntime::new(&cfg).unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
     let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
         .args(vec!["hello".to_string()]);
@@ -760,24 +717,7 @@ async fn wasm_only_rejects_native_commands() {
 #[tokio::test]
 async fn wasm_only_allows_wasm_commands() {
     let tmp = TempDir::new().unwrap();
-    let cfg = Config {
-        session_root: tmp.path().to_path_buf(),
-        output_byte_limit: 1024 * 1024,
-        auto_allow_permissions: true,
-        wasm_timeout_secs: None,
-        wasm_only: true,
-        wasm_memory_limit_bytes: None,
-        module_cache_dir: None,
-        wasm_allow_network: false,
-        wasm_fuel_limit: 1_000_000_000u64,
-        wasm_host_call_limit: 10_000u32,
-        acp_prefix: "acp".to_string(),
-        wasm_max_concurrent_tasks: 32,
-        session_idle_timeout_secs: 3600,
-        wasm_max_module_size_bytes: 100 * 1024 * 1024,
-        wait_for_exit_timeout_secs: 300,
-    };
-    let runtime = WasmRuntime::new(&cfg).unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
     let wasm_path = make_wasm(tmp.path(), "ok.wasm", r#"
         (module
@@ -815,31 +755,19 @@ async fn wasm_only_allows_wasm_commands() {
 // ── Memory cap ─────────────────────────────────────────────────────────────
 
 /// Verify that a generous memory limit does not prevent a module from running.
-/// This tests plumbing without exercising the denial path.
+/// This tests the plumbing; the denial path is covered by `wasm_module_memory_limit_denial`.
 #[tokio::test]
-async fn wasm_module_memory_limit_enforced() {
+async fn wasm_module_memory_limit_allows_small_module() {
     let tmp = TempDir::new().unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
                 wasm_only: false,
                 // 64 MB — generous, should not prevent the 1-page module from running.
                 wasm_memory_limit_bytes: Some(64 * 1024 * 1024),
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -901,7 +829,7 @@ async fn wasm_module_trogon_log_host_function() {
                 "trogon_log.wasm",
                 r#"
                 (module
-                  (import "trogon" "log" (func $log (param i32 i32 i32 i32)))
+                  (import "trogon_v1" "log" (func $log (param i32 i32 i32 i32)))
                   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
                   (memory 1)
                   (export "memory" (memory 0))
@@ -969,21 +897,9 @@ async fn module_cache_persists_across_runtimes() {
         local
             .run_until(async {
                 let cfg = Config {
-                    session_root: tmp.path().join("sessions_a"),
-                    output_byte_limit: 1024 * 1024,
-                    auto_allow_permissions: true,
-                    wasm_timeout_secs: None,
                     wasm_only: false,
-                    wasm_memory_limit_bytes: None,
                     module_cache_dir: Some(cache_dir.path().to_path_buf()),
-                    wasm_allow_network: false,
-                    wasm_fuel_limit: 1_000_000_000u64,
-                    wasm_host_call_limit: 10_000u32,
-                    acp_prefix: "acp".to_string(),
-                    wasm_max_concurrent_tasks: 32,
-                    session_idle_timeout_secs: 3600,
-                    wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                    wait_for_exit_timeout_secs: 300,
+                    ..test_config(tmp.path().join("sessions_a"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1021,21 +937,9 @@ async fn module_cache_persists_across_runtimes() {
         local
             .run_until(async {
                 let cfg = Config {
-                    session_root: tmp.path().join("sessions_b"),
-                    output_byte_limit: 1024 * 1024,
-                    auto_allow_permissions: true,
-                    wasm_timeout_secs: None,
                     wasm_only: false,
-                    wasm_memory_limit_bytes: None,
                     module_cache_dir: Some(cache_dir.path().to_path_buf()),
-                    wasm_allow_network: false,
-                    wasm_fuel_limit: 1_000_000_000u64,
-                    wasm_host_call_limit: 10_000u32,
-                    acp_prefix: "acp".to_string(),
-                    wasm_max_concurrent_tasks: 32,
-                    session_idle_timeout_secs: 3600,
-                    wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                    wait_for_exit_timeout_secs: 300,
+                    ..test_config(tmp.path().join("sessions_b"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
                 let req = CreateTerminalRequest::new(
@@ -1097,21 +1001,9 @@ async fn module_cache_invalidates_on_mtime_change() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().join("sessions"),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
                 wasm_only: false,
-                wasm_memory_limit_bytes: None,
                 module_cache_dir: Some(cache_dir.path().to_path_buf()),
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().join("sessions"))
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1193,7 +1085,7 @@ async fn wasm_module_trogon_nats_request_no_nats() {
                 "nats_request_no_nats.wasm",
                 r#"
                 (module
-                  (import "trogon" "nats_request"
+                  (import "trogon_v1" "nats_request"
                     (func $nats_request (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
                   (import "wasi_snapshot_preview1" "proc_exit"
                     (func $proc_exit (param i32)))
@@ -1270,7 +1162,7 @@ async fn wasm_module_request_permission_auto_allow() {
                 "request_permission_allow.wasm",
                 r#"
                 (module
-                  (import "trogon" "request_permission"
+                  (import "trogon_v1" "request_permission"
                     (func $request_permission (param i32 i32 i32) (result i32)))
                   (import "wasi_snapshot_preview1" "proc_exit"
                     (func $proc_exit (param i32)))
@@ -1337,21 +1229,8 @@ async fn wasm_module_network_enabled_flag_wires_through() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: true, // network enabled
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                wasm_allow_network: true,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1408,21 +1287,8 @@ async fn wasm_module_custom_fuel_limit() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
                 wasm_fuel_limit: 1000, // very low — exhausted immediately by the loop
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1490,25 +1356,12 @@ async fn wasm_module_host_call_budget_exhausted() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
                 wasm_host_call_limit: 2, // very low budget
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
-            // Module calls trogon.log 5 times, then proc_exit(0).
+            // Module calls trogon_v1.log 5 times, then proc_exit(0).
             // Budget is 2: first 2 calls succeed, remaining 3 silently fail.
             // The module should still exit cleanly with code 0.
             let wasm_path = make_wasm(
@@ -1516,7 +1369,7 @@ async fn wasm_module_host_call_budget_exhausted() {
                 "budget_exhaust.wasm",
                 r#"
                 (module
-                  (import "trogon" "log" (func $log (param i32 i32 i32 i32)))
+                  (import "trogon_v1" "log" (func $log (param i32 i32 i32 i32)))
                   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
                   (memory 1)
                   (export "memory" (memory 0))
@@ -1578,7 +1431,7 @@ async fn wasm_module_nats_subscribe_no_nats() {
                 "subscribe_no_nats.wasm",
                 r#"
                 (module
-                  (import "trogon" "subscribe"
+                  (import "trogon_v1" "subscribe"
                     (func $subscribe (param i32 i32) (result i32)))
                   (import "wasi_snapshot_preview1" "proc_exit"
                     (func $proc_exit (param i32)))
@@ -1640,21 +1493,8 @@ async fn wasm_module_request_permission_no_nats_denied() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
                 auto_allow_permissions: false, // not auto-allowing
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             // No NATS client — WasmRuntime::new, not with_nats.
             let runtime = WasmRuntime::new(&cfg).unwrap();
@@ -1664,7 +1504,7 @@ async fn wasm_module_request_permission_no_nats_denied() {
                 "request_permission_no_nats.wasm",
                 r#"
                 (module
-                  (import "trogon" "request_permission"
+                  (import "trogon_v1" "request_permission"
                     (func $request_permission (param i32 i32 i32) (result i32)))
                   (import "wasi_snapshot_preview1" "proc_exit"
                     (func $proc_exit (param i32)))
@@ -1726,21 +1566,8 @@ async fn wasm_backpressure_limits_concurrent_tasks() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
                 wasm_max_concurrent_tasks: 2,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1808,21 +1635,8 @@ async fn wasm_module_fuel_exhausted_returns_distinct_signal() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
                 wasm_fuel_limit: 100, // very low — exhausted by the loop
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
-                wasm_max_module_size_bytes: 100 * 1024 * 1024,
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1880,21 +1694,8 @@ async fn wasm_module_too_large_rejected() {
     local
         .run_until(async {
             let cfg = Config {
-                session_root: tmp.path().to_path_buf(),
-                output_byte_limit: 1024 * 1024,
-                auto_allow_permissions: true,
-                wasm_timeout_secs: None,
-                wasm_only: false,
-                wasm_memory_limit_bytes: None,
-                module_cache_dir: None,
-                wasm_allow_network: false,
-                wasm_fuel_limit: 1_000_000_000u64,
-                wasm_host_call_limit: 10_000u32,
-                acp_prefix: "acp".to_string(),
-                wasm_max_concurrent_tasks: 32,
-                session_idle_timeout_secs: 3600,
                 wasm_max_module_size_bytes: 10, // only 10 bytes — any real .wasm is larger
-                wait_for_exit_timeout_secs: 300,
+                ..test_config(tmp.path().to_path_buf())
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -1954,7 +1755,7 @@ async fn wasm_nats_request_negative_timeout_handled() {
                 "nats_request_neg_timeout.wasm",
                 r#"
                 (module
-                  (import "trogon" "nats_request" (func $nats_request
+                  (import "trogon_v1" "nats_request" (func $nats_request
                     (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
                   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
                   (memory 1) (export "memory" (memory 0))
@@ -2003,21 +1804,9 @@ async fn wasm_nats_request_negative_timeout_handled() {
 async fn wait_for_terminal_exit_timeout_kills_hung_process() {
     let tmp = TempDir::new().unwrap();
     let cfg = Config {
-        session_root: tmp.path().to_path_buf(),
-        output_byte_limit: 1024 * 1024,
-        auto_allow_permissions: true,
-        wasm_timeout_secs: None,
         wasm_only: false,
-        wasm_memory_limit_bytes: None,
-        module_cache_dir: None,
-        wasm_allow_network: false,
-        wasm_fuel_limit: 1_000_000_000u64,
-        wasm_host_call_limit: 10_000u32,
-        acp_prefix: "acp".to_string(),
-        wasm_max_concurrent_tasks: 32,
-        session_idle_timeout_secs: 3600,
-        wasm_max_module_size_bytes: 100 * 1024 * 1024,
         wait_for_exit_timeout_secs: 1, // 1 second — fires quickly in tests
+        ..test_config(tmp.path().to_path_buf())
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -2167,7 +1956,7 @@ async fn wasm_module_nats_publish_with_nats() {
             // WAT module: calls trogon.nats_publish("test.wasm.publish", "hello")
             // subject at offset 0 (17 bytes), payload "hello" at offset 32 (5 bytes).
             let wat = r#"(module
-              (import "trogon" "nats_publish" (func $pub (param i32 i32 i32 i32) (result i32)))
+              (import "trogon_v1" "nats_publish" (func $pub (param i32 i32 i32 i32) (result i32)))
               (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
               (memory 1) (export "memory" (memory 0))
               (data (i32.const 0) "test.wasm.publish")
@@ -2260,7 +2049,7 @@ async fn wasm_module_nats_request_with_nats() {
             // payload "ping" = 4 bytes at offset 32
             // response written at offset 512
             let wat = r#"(module
-              (import "trogon" "nats_request" (func $req
+              (import "trogon_v1" "nats_request" (func $req
                 (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
               (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
               (memory 1) (export "memory" (memory 0))
@@ -2407,4 +2196,175 @@ async fn write_text_file_is_atomic() {
         !session_dir.join("file.txt.tmp").exists(),
         ".tmp file should not be left after successful write"
     );
+}
+
+// ── New: TMPDIR is created for native terminals ───────────────────────────
+
+/// The runtime must create a `tmp/` subdirectory in the session sandbox and
+/// expose it as `$TMPDIR` to native processes.
+#[tokio::test]
+async fn native_terminal_tmpdir_exists() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = Config {
+        wasm_only: false,
+        ..test_config(tmp.path().to_path_buf())
+    };
+    let runtime = WasmRuntime::new(&cfg).unwrap();
+
+    // `sh -c 'test -d "$TMPDIR"'` exits 0 when TMPDIR is a directory, non-zero otherwise.
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sh")
+        .args(vec!["-c".to_string(), r#"test -d "$TMPDIR""#.to_string()]);
+    let resp = runtime
+        .handle_create_terminal(session_id(), req)
+        .await
+        .expect("sh should spawn");
+    let tid = resp.terminal_id;
+
+    let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
+    let exit = runtime
+        .handle_wait_for_terminal_exit(wait_req)
+        .await
+        .expect("wait should succeed");
+
+    assert_eq!(
+        exit.exit_status.exit_code,
+        Some(0),
+        "TMPDIR should be a directory visible to native processes; got: {:?}",
+        exit.exit_status
+    );
+}
+
+// ── New: memory limit denies modules that exceed it ───────────────────────
+
+/// A WASM module that requests more memory than the limit should fail to start.
+/// `memory.grow` must return -1 when the resource limiter denies the request.
+#[tokio::test]
+async fn wasm_module_memory_limit_denial() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // Limit to 1 page (64 KiB). The module declares 2 pages minimum → denied.
+            let cfg = Config {
+                wasm_only: false,
+                wasm_memory_limit_bytes: Some(64 * 1024), // 1 page
+                ..test_config(tmp.path().to_path_buf())
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // Module declares `(memory 2)` — requires 2 pages (128 KiB) at instantiation.
+            // wasmtime's ResourceLimiter will deny memory_growing → trap at instantiation.
+            let wat = r#"(module
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 2)
+              (export "memory" (memory 0))
+              (func (export "_start")
+                (call $exit (i32.const 0))
+              )
+            )"#;
+            let wasm_path = make_wasm(tmp.path(), "mem_denial.wasm", wat);
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("create_terminal should succeed (starts the task)");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .expect("wait should return");
+
+            // Instantiation failure → faulted exit (no exit_code, signal set).
+            assert!(
+                exit.exit_status.exit_code.is_none(),
+                "memory-denied module should not produce a clean exit code; got: {:?}",
+                exit.exit_status
+            );
+            assert!(
+                exit.exit_status.signal.is_some(),
+                "memory-denied module should produce a fault signal; got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
+
+// ── New: recv_message 8-parameter ABI ────────────────────────────────────
+
+/// Verifies the `recv_message` host function accepts the 8-parameter signature
+/// introduced in the `trogon_v1` ABI. The module calls it with an invalid
+/// sub_id (-1) and expects a -1 return value (not a link error).
+#[tokio::test]
+async fn wasm_module_recv_message_abi() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            // Calls recv_message with sub_id=-1 (invalid) → must return -1.
+            // Signature: (sub_id i32, out_subj_ptr i32, out_subj_max i32, out_subj_len_ptr i32,
+            //             out_payload_ptr i32, out_payload_max i32, out_payload_len_ptr i32,
+            //             timeout_ms i32) -> i32
+            // Module exits with the return value cast to i32 via proc_exit.
+            // We expect exit_code = 255 because proc_exit(-1 as u32) = proc_exit(4294967295)
+            // truncates to u8 = 255 on Linux.
+            let wat = r#"(module
+              (import "trogon_v1" "recv_message" (func $recv
+                (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (func (export "_start")
+                (local $r i32)
+                ;; sub_id=-1 (invalid), all pointers into memory, timeout=100ms
+                (local.set $r (call $recv
+                  (i32.const -1)
+                  (i32.const 0)  (i32.const 64)  (i32.const 128)
+                  (i32.const 256) (i32.const 64) (i32.const 320)
+                  (i32.const 100)))
+                ;; pass return value to proc_exit so the test can observe it
+                (call $exit (local.get $r))
+              )
+            )"#;
+
+            let wasm_path = make_wasm(tmp.path(), "recv_abi.wasm", wat);
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("recv_message module should link and start");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .expect("wait should succeed");
+
+            // recv_message returns -1 for invalid sub_id.
+            // proc_exit(-1) → exit_code = 255 (u8 truncation on Linux).
+            // We accept both 255 (Linux) and any non-zero value as proof of -1 return.
+            assert!(
+                exit.exit_status.signal.is_none(),
+                "recv_message ABI call should not trap; got signal: {:?}",
+                exit.exit_status.signal
+            );
+            let code = exit.exit_status.exit_code.unwrap_or(0);
+            assert_ne!(
+                code, 0,
+                "recv_message(-1) should return -1, causing non-zero exit; got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
 }
