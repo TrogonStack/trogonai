@@ -754,7 +754,7 @@ pub async fn run_module_compiled(
         session_id,
         auto_allow_permissions,
         // 0 means unlimited (same convention as wasm_fuel_limit).
-    host_call_budget: if host_call_limit == 0 { u32::MAX } else { host_call_limit },
+        host_call_budget: if host_call_limit == 0 { u32::MAX } else { host_call_limit },
         subscriptions: HashMap::new(),
         next_sub_id: 0,
         acp_prefix,
