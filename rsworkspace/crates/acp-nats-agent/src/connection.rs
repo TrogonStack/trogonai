@@ -7,8 +7,8 @@ use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
     ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, SetSessionModelRequest,
+    LogoutRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -285,6 +285,9 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
                 agent.authenticate(req)
             })
             .await
+        }
+        GlobalAgentMethod::Logout => {
+            handle_request(msg, nats, |req: LogoutRequest| agent.logout(req)).await
         }
         GlobalAgentMethod::SessionNew => {
             handle_request(msg, nats, |req: NewSessionRequest| agent.new_session(req)).await
@@ -692,8 +695,8 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        AuthenticateResponse, Error as AcpError, ErrorCode, InitializeResponse, PromptResponse,
-        StopReason,
+        AuthenticateResponse, Error as AcpError, ErrorCode, InitializeResponse, LogoutResponse,
+        PromptResponse, StopReason,
     };
     use std::cell::RefCell;
     use trogon_nats::MockNatsClient;
@@ -729,6 +732,13 @@ mod tests {
             _args: AuthenticateRequest,
         ) -> agent_client_protocol::Result<AuthenticateResponse> {
             Err(AcpError::method_not_found())
+        }
+
+        async fn logout(
+            &self,
+            _args: LogoutRequest,
+        ) -> agent_client_protocol::Result<LogoutResponse> {
+            Ok(LogoutResponse::new())
         }
 
         async fn new_session(
@@ -840,6 +850,11 @@ mod tests {
 
         let error: AcpError = published_response(&nats);
         assert_eq!(error.code, ErrorCode::MethodNotFound);
+    }
+
+    #[tokio::test]
+    async fn dispatch_logout_publishes_response() {
+        assert_dispatch_publishes("acp.agent.logout", &LogoutRequest::new()).await;
     }
 
     #[tokio::test]

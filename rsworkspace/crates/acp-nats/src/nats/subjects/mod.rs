@@ -10,8 +10,8 @@ pub use stream::{AcpStream, StreamAssignment};
 
 pub mod agent {
     pub use super::global::{
-        AuthenticateSubject, ExtNotifySubject, ExtSubject, InitializeSubject, SessionListSubject,
-        SessionNewSubject,
+        AuthenticateSubject, ExtNotifySubject, ExtSubject, InitializeSubject, LogoutSubject,
+        SessionListSubject, SessionNewSubject,
     };
 
     pub mod wildcards {
@@ -75,6 +75,14 @@ mod tests {
         assert_eq!(
             agent::AuthenticateSubject::new(&p("acp")).to_string(),
             "acp.agent.authenticate"
+        );
+    }
+
+    #[test]
+    fn agent_logout() {
+        assert_eq!(
+            agent::LogoutSubject::new(&p("acp")).to_string(),
+            "acp.agent.logout"
         );
     }
 
@@ -425,6 +433,7 @@ mod tests {
 
         assert_eq!(agent::InitializeSubject::STREAM, Some(AcpStream::Global));
         assert_eq!(agent::AuthenticateSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(agent::LogoutSubject::STREAM, Some(AcpStream::Global));
         assert_eq!(agent::SessionNewSubject::STREAM, Some(AcpStream::Global));
         assert_eq!(agent::SessionListSubject::STREAM, None);
         assert_eq!(agent::ExtSubject::STREAM, Some(AcpStream::GlobalExt));

@@ -8,6 +8,7 @@ use crate::session_id::AcpSessionId;
 pub enum GlobalAgentMethod {
     Initialize,
     Authenticate,
+    Logout,
     SessionNew,
     SessionList,
     Ext(ExtMethodName),
@@ -31,6 +32,7 @@ impl GlobalAgentMethod {
         match suffix {
             "initialize" => Some(Self::Initialize),
             "authenticate" => Some(Self::Authenticate),
+            "logout" => Some(Self::Logout),
             "session.new" => Some(Self::SessionNew),
             "session.list" => Some(Self::SessionList),
             other => {
@@ -179,6 +181,14 @@ mod tests {
         assert_eq!(
             parse_agent_subject("acp.agent.authenticate").unwrap(),
             ParsedAgentSubject::Global(GlobalAgentMethod::Authenticate)
+        );
+    }
+
+    #[test]
+    fn parse_agent_logout() {
+        assert_eq!(
+            parse_agent_subject("acp.agent.logout").unwrap(),
+            ParsedAgentSubject::Global(GlobalAgentMethod::Logout)
         );
     }
 
