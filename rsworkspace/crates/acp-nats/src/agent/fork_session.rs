@@ -39,11 +39,7 @@ where
     let subject = session::agent::ForkSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<ForkSessionRequest, ForkSessionResponse>(
-            &subject,
-            &args,
-            session_id.as_str(),
-        )
+        .session_request::<ForkSessionRequest, ForkSessionResponse>(&subject, &args, &session_id)
         .await;
 
     if let Ok(ref response) = result {

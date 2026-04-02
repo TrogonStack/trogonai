@@ -39,11 +39,7 @@ where
     let subject = session::agent::LoadSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<LoadSessionRequest, LoadSessionResponse>(
-            &subject,
-            &args,
-            session_id.as_str(),
-        )
+        .session_request::<LoadSessionRequest, LoadSessionResponse>(&subject, &args, &session_id)
         .await;
 
     if result.is_ok() {
