@@ -3,13 +3,52 @@ use crate::terminal::WasmTerminal;
 use agent_client_protocol::TerminalExitStatus;
 use futures::StreamExt as _;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
 use wasmtime::{Caller, Engine, Extern, Linker, Module, ResourceLimiter, Store, ValType};
 use wasmtime_wasi::pipe::AsyncWriteStream;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
+
+// ── Execution config ─────────────────────────────────────────────────────────
+
+/// All parameters needed to execute one WASM module invocation.
+/// Replaces the previous 17-argument function signature.
+pub struct WasmExecConfig {
+    /// Pre-compiled wasmtime module to run.
+    pub module: Module,
+    /// Full argv, including argv[0] (the module path / program name).
+    pub argv: Vec<String>,
+    /// Environment variables to expose inside the module.
+    pub env_vars: Vec<(String, String)>,
+    /// Host directory preopened as `/` (the session sandbox root).
+    pub sandbox_dir: PathBuf,
+    /// Optional working directory preopened as `.` when different from `sandbox_dir`.
+    pub cwd: Option<PathBuf>,
+    /// Shared buffer where stdout/stderr are appended.
+    pub output_buf: Arc<Mutex<Vec<u8>>>,
+    /// Maximum bytes kept in `output_buf`; oldest bytes are dropped when exceeded.
+    pub output_byte_limit: usize,
+    /// Optional wall-clock execution timeout.
+    pub timeout_secs: Option<u64>,
+    /// Optional linear-memory limit in bytes.
+    pub memory_limit_bytes: Option<usize>,
+    /// Optional NATS client for trogon.* host functions.
+    pub nats_client: Option<async_nats::Client>,
+    /// Session identifier forwarded to host functions for logging / NATS subjects.
+    pub session_id: String,
+    /// Allow WASI network access (`inherit_network`).
+    pub allow_network: bool,
+    /// Auto-select the first permission option instead of asking over NATS.
+    pub auto_allow_permissions: bool,
+    /// Wasmtime fuel budget (instruction limit). 0 means u64::MAX.
+    pub fuel_limit: u64,
+    /// Maximum number of trogon.* host calls. Returns -1 when exhausted.
+    pub host_call_limit: u32,
+    /// ACP subject prefix for NATS permission requests.
+    pub acp_prefix: String,
+}
 
 // ── Store state ─────────────────────────────────────────────────────────────
 
@@ -570,33 +609,34 @@ fn add_trogon_host_functions(
 
 /// Runs a WASIp1 core module using a pre-compiled `Module`.
 ///
-/// `argv` must include argv[0] (the program name) as the first element.
-/// `env_vars` are set as the WASI environment.
-/// The module is sandboxed to `sandbox_dir` as its preopened root (`/`).
-/// If `cwd` is provided and differs from `sandbox_dir`, it is additionally
-/// preopened at `"."` so that WASIp1 programs using `getcwd()` / relative
-/// paths see the correct working directory.
-/// Output is appended directly to `output_buf` as bytes arrive.
-#[allow(clippy::too_many_arguments)]
+/// All execution parameters are passed via [`WasmExecConfig`].
+/// The module is sandboxed to `config.sandbox_dir` as its preopened root (`/`).
+/// If `config.cwd` differs from `sandbox_dir`, it is additionally preopened at
+/// `"."` so that WASIp1 programs using `getcwd()` / relative paths see the
+/// correct working directory.
+/// Output is appended directly to `config.output_buf` as bytes arrive.
 pub async fn run_module_compiled(
     engine: &Engine,
-    module: Module,
-    argv: &[String],
-    env_vars: &[(String, String)],
-    sandbox_dir: &Path,
-    cwd: Option<&Path>,
-    output_buf: Arc<Mutex<Vec<u8>>>,
-    output_byte_limit: usize,
-    timeout_secs: Option<u64>,
-    memory_limit_bytes: Option<usize>,
-    nats_client: Option<async_nats::Client>,
-    session_id: String,
-    allow_network: bool,
-    auto_allow_permissions: bool,
-    fuel_limit: u64,
-    host_call_limit: u32,
-    acp_prefix: String,
+    config: WasmExecConfig,
 ) -> Result<TerminalExitStatus, anyhow::Error> {
+    let WasmExecConfig {
+        module,
+        argv,
+        env_vars,
+        sandbox_dir,
+        cwd,
+        output_buf,
+        output_byte_limit,
+        timeout_secs,
+        memory_limit_bytes,
+        nats_client,
+        session_id,
+        allow_network,
+        auto_allow_permissions,
+        fuel_limit,
+        host_call_limit,
+        acp_prefix,
+    } = config;
     let mut linker: Linker<WasmStoreData> = Linker::new(engine);
     preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
     add_trogon_host_functions(engine, &mut linker)?;
@@ -613,13 +653,13 @@ pub async fn run_module_compiled(
     builder
         .stdout(stdout_stream)
         .stderr(stderr_stream)
-        .args(argv)
-        .preopened_dir(sandbox_dir, "/", DirPerms::all(), FilePerms::all())?;
+        .args(&argv)
+        .preopened_dir(&sandbox_dir, "/", DirPerms::all(), FilePerms::all())?;
 
     // Pre-open the requested working directory at "." so that WASIp1 programs
     // using getcwd() or relative paths see the correct working directory.
-    if let Some(cwd_path) = cwd {
-        if cwd_path != sandbox_dir {
+    if let Some(ref cwd_path) = cwd {
+        if cwd_path != &sandbox_dir {
             builder.preopened_dir(cwd_path, ".", DirPerms::all(), FilePerms::all())?;
         }
     }
