@@ -153,7 +153,7 @@ where
         Res: serde::de::DeserializeOwned,
     {
         let subject_str = subject.to_string();
-        let req_id = uuid::Uuid::new_v4().to_string();
+        let req_id = crate::req_id::ReqId::new();
         js_request::js_request::<J, _, Res, _>(
             self.js(),
             &subject_str,
