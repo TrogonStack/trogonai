@@ -261,8 +261,49 @@ async fn dispatch(
             }
         }
 
-        ClientMethod::ExtSessionPromptResponse | ClientMethod::Ext(_) => {
-            debug!("Unhandled client method");
+        ClientMethod::ExtSessionPromptResponse => {
+            debug!("ExtSessionPromptResponse — not handled");
+            reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
+        }
+
+        ClientMethod::Ext(ref name) if name == "terminal.write_stdin" => {
+            // Payload: { "terminal_id": "...", "data": [1, 2, 3, ...] }
+            #[derive(serde::Deserialize)]
+            struct WriteStdinRequest {
+                terminal_id: String,
+                /// Data as a JSON array of bytes, e.g. [104, 101, 108, 108, 111].
+                data: Vec<u8>,
+            }
+            match serde_json::from_slice::<WriteStdinRequest>(&payload) {
+                Ok(req) => {
+                    let result = runtime.handle_write_to_terminal(&req.terminal_id, &req.data).await;
+                    reply_result(&nats, reply, result).await;
+                }
+                Err(e) => {
+                    reply_error(&nats, reply, -32600, &format!("Invalid request: {e}")).await;
+                }
+            }
+        }
+
+        ClientMethod::Ext(ref name) if name == "terminal.close_stdin" => {
+            // Payload: { "terminal_id": "..." }
+            #[derive(serde::Deserialize)]
+            struct CloseStdinRequest {
+                terminal_id: String,
+            }
+            match serde_json::from_slice::<CloseStdinRequest>(&payload) {
+                Ok(req) => {
+                    let result = runtime.handle_close_terminal_stdin(&req.terminal_id);
+                    reply_result(&nats, reply, result).await;
+                }
+                Err(e) => {
+                    reply_error(&nats, reply, -32600, &format!("Invalid request: {e}")).await;
+                }
+            }
+        }
+
+        ClientMethod::Ext(_) => {
+            debug!("Unhandled Ext method");
             reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
         }
     }
