@@ -29,7 +29,6 @@ uuid = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 anyhow = "=1.0.98"
-libc = "0.2"
 wasmtime = { version = "=30.0.2", default-features = false, features = ["cranelift", "runtime", "async"] }
 wasmtime-wasi = { version = "=30.0.2" }
 
