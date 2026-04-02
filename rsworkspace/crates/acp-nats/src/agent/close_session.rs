@@ -20,7 +20,7 @@ pub async fn handle<
     args: CloseSessionRequest,
 ) -> Result<CloseSessionResponse>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     let start = bridge.clock.now();
 
@@ -58,16 +58,15 @@ where
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
-    use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
 
     #[tokio::test]
     async fn close_session_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (_mock, js, bridge) = mock_bridge();
         let expected = CloseSessionResponse::new();
-        set_json_response(&mock, "acp.session.s1.agent.close", &expected);
+        set_js_response(&js, &expected);
 
         let request = CloseSessionRequest::new("s1");
         let result = bridge.close_session(request).await;
@@ -75,20 +74,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn close_session_returns_error_when_nats_fails() {
-        let (mock, bridge) = mock_bridge();
-        mock.fail_next_request();
+    async fn close_session_returns_error_when_js_fails() {
+        let (_mock, _js, bridge) = mock_bridge();
 
         let request = CloseSessionRequest::new("s1");
         let err = bridge.close_session(request).await.unwrap_err();
 
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+        assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[tokio::test]
     async fn close_session_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.session.s1.agent.close", "not json".into());
+        let (_mock, js, bridge) = mock_bridge();
+        crate::agent::test_support::set_js_raw_response(&js, b"not json");
 
         let request = CloseSessionRequest::new("s1");
         let err = bridge.close_session(request).await.unwrap_err();
@@ -98,7 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_session_validates_session_id() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let request = CloseSessionRequest::new("invalid.session.id");
         let err = bridge.close_session(request).await.unwrap_err();
 
@@ -108,12 +106,8 @@ mod tests {
 
     #[tokio::test]
     async fn close_session_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.close",
-            &CloseSessionResponse::new(),
-        );
+        let (_mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &CloseSessionResponse::new());
 
         let _ = bridge.close_session(CloseSessionRequest::new("s1")).await;
 
@@ -128,8 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_session_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_next_request();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge.close_session(CloseSessionRequest::new("s1")).await;
 

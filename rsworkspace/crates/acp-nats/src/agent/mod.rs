@@ -26,6 +26,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::Bridge;
+    use crate::agent::test_support::MockJs;
     use crate::config::Config;
     use agent_client_protocol::{
         Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification,
@@ -36,18 +37,21 @@ mod tests {
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+        MockJs,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
     ) {
         let mock = AdvancedMockNatsClient::new();
+        let js = MockJs::new();
         let (tx, _rx) = mpsc::channel::<SessionNotification>(64);
         let bridge = Bridge::new(
             mock.clone(),
+            js.clone(),
             trogon_std::time::SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
             tx,
         );
-        (mock, bridge)
+        (mock, js, bridge)
     }
 
     fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
@@ -56,7 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn drain_background_tasks_completes() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         bridge.spawn_background(tokio::spawn(async {}));
         bridge.drain_background_tasks().await;
         assert!(bridge.background_tasks.borrow().is_empty());
@@ -64,24 +68,30 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_via_agent_trait_returns_done() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, js, bridge) = mock_bridge();
 
-        let _notif_tx = mock.inject_messages();
-        let resp_tx = mock.inject_messages();
+        // cancel sub for core NATS
         let _cancel_tx = mock.inject_messages();
 
+        // notification consumer
+        let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(notif_consumer);
+
+        // response consumer
+        let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(resp_consumer);
+
         let response = PromptResponse::new(StopReason::EndTurn);
-        resp_tx
-            .unbounded_send(async_nats::Message {
-                subject: "test".into(),
-                reply: None,
-                payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
-                headers: None,
-                status: None,
-                description: None,
-                length: 0,
-            })
-            .unwrap();
+        let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
+            subject: "test".into(),
+            reply: None,
+            payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        });
+        resp_tx.unbounded_send(Ok(msg)).unwrap();
 
         let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
         assert!(result.is_ok());
@@ -92,7 +102,7 @@ mod tests {
     async fn ext_method_returns_agent_unavailable_when_nats_fails() {
         use agent_client_protocol::ErrorCode;
 
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let err = bridge
             .ext_method(ExtRequest::new("ext", empty_raw_value()))
             .await
@@ -102,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_notification_returns_ok_even_when_publish_fails() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         assert!(
             bridge
                 .ext_notification(ExtNotification::new("ext", empty_raw_value()))

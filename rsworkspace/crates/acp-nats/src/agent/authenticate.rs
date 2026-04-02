@@ -47,7 +47,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let expected = AuthenticateResponse::new();
         set_json_response(&mock, "acp.agent.authenticate", &expected);
 
@@ -58,7 +58,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_returns_error_when_nats_request_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_next_request();
 
         let request = AuthenticateRequest::new("test");
@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.set_response("acp.agent.authenticate", "not json".into());
 
         let request = AuthenticateRequest::new("test");
@@ -82,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_json_response(
             &mock,
             "acp.agent.authenticate",
@@ -102,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
         let _ = bridge.authenticate(AuthenticateRequest::new("test")).await;

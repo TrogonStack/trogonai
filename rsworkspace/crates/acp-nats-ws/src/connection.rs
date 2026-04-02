@@ -12,9 +12,10 @@ use trogon_std::time::SystemClock;
 use crate::constants::DUPLEX_BUFFER_SIZE;
 
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
-pub async fn handle<N>(
+pub async fn handle<N, J>(
     socket: WebSocket,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
     mut shutdown_rx: watch::Receiver<bool>,
 ) where
@@ -24,6 +25,8 @@ pub async fn handle<N>(
         + acp_nats::SubscribeClient
         + Clone
         + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let (ws_sender, ws_receiver) = socket.split();
 
@@ -37,6 +40,7 @@ pub async fn handle<N>(
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
+        js_client,
         SystemClock,
         &meter,
         config,

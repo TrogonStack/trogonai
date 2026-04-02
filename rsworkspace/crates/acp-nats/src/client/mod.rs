@@ -451,9 +451,12 @@ mod tests {
         }
     }
 
-    fn make_bridge(nats: MockNatsClient) -> Rc<Bridge<MockNatsClient, SystemClock>> {
+    fn make_bridge(
+        nats: MockNatsClient,
+    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
@@ -463,9 +466,10 @@ mod tests {
 
     fn make_bridge_advanced(
         nats: AdvancedMockNatsClient,
-    ) -> Rc<Bridge<AdvancedMockNatsClient, SystemClock>> {
+    ) -> Rc<Bridge<AdvancedMockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
@@ -476,9 +480,10 @@ mod tests {
     fn make_bridge_with_operation_timeout(
         nats: MockNatsClient,
         operation_timeout: std::time::Duration,
-    ) -> Rc<Bridge<MockNatsClient, SystemClock>> {
+    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp").with_operation_timeout(operation_timeout),

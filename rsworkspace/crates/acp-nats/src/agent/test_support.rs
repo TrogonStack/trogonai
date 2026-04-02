@@ -11,17 +11,20 @@ use trogon_nats::AdvancedMockNatsClient;
 
 pub fn mock_bridge() -> (
     AdvancedMockNatsClient,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+    MockJs,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
 ) {
     let mock = AdvancedMockNatsClient::new();
+    let js = MockJs::new();
     let bridge = Bridge::new(
         mock.clone(),
+        js.clone(),
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,
     );
-    (mock, bridge)
+    (mock, js, bridge)
 }
 
 #[derive(Clone)]
@@ -70,7 +73,8 @@ impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
 
 pub fn mock_bridge_with_metrics() -> (
     AdvancedMockNatsClient,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock>,
+    MockJs,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
     InMemoryMetricExporter,
     SdkMeterProvider,
 ) {
@@ -82,14 +86,16 @@ pub fn mock_bridge_with_metrics() -> (
     let meter = provider.meter("acp-nats-test");
 
     let mock = AdvancedMockNatsClient::new();
+    let js = MockJs::new();
     let bridge = Bridge::new(
         mock.clone(),
+        js.clone(),
         trogon_std::time::SystemClock,
         &meter,
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,
     );
-    (mock, bridge, exporter, provider)
+    (mock, js, bridge, exporter, provider)
 }
 
 pub fn set_json_response<T: serde::Serialize>(
@@ -99,6 +105,37 @@ pub fn set_json_response<T: serde::Serialize>(
 ) {
     let bytes = serde_json::to_vec(resp).unwrap();
     mock.set_response(subject, bytes.into());
+}
+
+pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
+    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
+        subject: "test".into(),
+        reply: None,
+        payload: bytes::Bytes::from(payload.to_vec()),
+        headers: None,
+        status: None,
+        description: None,
+        length: 0,
+    });
+    let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    tx.unbounded_send(Ok(msg)).unwrap();
+    js.consumer_factory.add_consumer(consumer);
+}
+
+pub fn set_js_response<T: serde::Serialize>(js: &MockJs, resp: &T) {
+    let bytes = serde_json::to_vec(resp).unwrap();
+    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
+        subject: "test".into(),
+        reply: None,
+        payload: bytes::Bytes::from(bytes),
+        headers: None,
+        status: None,
+        description: None,
+        length: 0,
+    });
+    let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    tx.unbounded_send(Ok(msg)).unwrap();
+    js.consumer_factory.add_consumer(consumer);
 }
 
 pub fn has_request_metric(
