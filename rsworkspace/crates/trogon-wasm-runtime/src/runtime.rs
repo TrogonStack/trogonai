@@ -35,6 +35,8 @@ pub struct WasmRuntime {
     auto_allow_permissions: bool,
     /// Optional wall-clock timeout for WASM module execution.
     wasm_timeout_secs: Option<u64>,
+    /// When `true`, reject commands that are not `.wasm` files.
+    wasm_only: bool,
     /// Live sessions keyed by ACP session_id.
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
@@ -59,6 +61,7 @@ impl WasmRuntime {
             output_byte_limit: config.output_byte_limit,
             auto_allow_permissions: config.auto_allow_permissions,
             wasm_timeout_secs: config.wasm_timeout_secs,
+            wasm_only: config.wasm_only,
             sessions: RefCell::new(HashMap::new()),
             terminals: RefCell::new(HashMap::new()),
             modules: RefCell::new(HashMap::new()),
@@ -120,6 +123,13 @@ impl WasmRuntime {
             return self
                 .run_wasm_terminal(session_id, command, args, &req.env, &cwd, &sandbox_dir)
                 .await;
+        }
+
+        if self.wasm_only {
+            return Err(agent_client_protocol::Error::new(
+                -32602,
+                format!("native process spawning is disabled (wasm_only=true); command must be a .wasm file: {command}"),
+            ));
         }
 
         // Native process — sandboxed to session directory.
