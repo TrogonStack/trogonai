@@ -823,6 +823,12 @@ impl WasmRuntime {
             }
         };
 
+        // Capture the PID before moving `child` into the async block.
+        // If a wait timeout fires and cancels the future, the Child is dropped
+        // without being killed (tokio::process::Child does not kill on drop).
+        // We use the stored PID to send SIGKILL from the timeout arm.
+        let child_pid = child.as_ref().and_then(|c| c.id());
+
         // Wait outside any borrow — terminal stays in map the whole time.
         let timeout = self.wait_for_exit_timeout_secs;
         let do_wait = async move {
@@ -863,7 +869,18 @@ impl WasmRuntime {
             match tokio::time::timeout(std::time::Duration::from_secs(timeout), do_wait).await {
                 Ok(s) => s,
                 Err(_) => {
-                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s");
+                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
+                    // The Child was moved into the cancelled future and is now
+                    // dropped without being killed. Kill by PID to avoid orphans.
+                    #[cfg(unix)]
+                    if let Some(pid) = child_pid {
+                        // SAFETY: pid was obtained from the Child moments ago on
+                        // this single-threaded LocalSet. The process is still
+                        // alive (wait timed out) and we own it exclusively.
+                        unsafe {
+                            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                        }
+                    }
                     TerminalExitStatus::new().signal(Some("wait_timeout".to_string()))
                 }
             }
