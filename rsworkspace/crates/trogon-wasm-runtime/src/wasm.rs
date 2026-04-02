@@ -373,25 +373,46 @@ fn add_trogon_host_functions(
         },
     )?;
 
-    // trogon.recv_message(sub_id, out_subj_ptr, out_subj_max, out_payload_ptr, out_payload_max, timeout_ms) -> i32
-    // Returns total bytes written (subject + payload), 0 on timeout, -1 on error.
+    // trogon.recv_message(sub_id,
+    //                     out_subj_ptr, out_subj_max, out_subj_len_ptr,
+    //                     out_payload_ptr, out_payload_max, out_payload_len_ptr,
+    //                     timeout_ms) -> i32
+    //
+    // On success (1): writes subject bytes into out_subj_ptr and actual subject
+    // length (i32 LE) into out_subj_len_ptr; writes payload bytes into
+    // out_payload_ptr and actual payload length (i32 LE) into out_payload_len_ptr.
+    // Returns 0 on timeout / subscription closed, -1 on error.
+    //
+    // Separate length output pointers replace the old opaque sum return value so
+    // that callers can tell exactly how many bytes were written to each buffer.
     linker.func_new_async(
         "trogon",
         "recv_message",
         wasmtime::FuncType::new(
             engine,
-            [ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [
+                ValType::I32, // sub_id
+                ValType::I32, // out_subj_ptr
+                ValType::I32, // out_subj_max
+                ValType::I32, // out_subj_len_ptr
+                ValType::I32, // out_payload_ptr
+                ValType::I32, // out_payload_max
+                ValType::I32, // out_payload_len_ptr
+                ValType::I32, // timeout_ms
+            ],
             [ValType::I32],
         ),
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
-            let sub_id         = params[0].unwrap_i32();
-            let out_subj_ptr   = params[1].unwrap_i32() as usize;
-            let out_subj_max   = params[2].unwrap_i32() as usize;
-            let out_payload_ptr = params[3].unwrap_i32() as usize;
-            let out_payload_max = params[4].unwrap_i32() as usize;
-            let timeout_ms     = params[5].unwrap_i32();
+            let sub_id           = params[0].unwrap_i32();
+            let out_subj_ptr     = params[1].unwrap_i32() as usize;
+            let out_subj_max     = params[2].unwrap_i32() as usize;
+            let out_subj_len_ptr = params[3].unwrap_i32() as usize;
+            let out_payload_ptr  = params[4].unwrap_i32() as usize;
+            let out_payload_max  = params[5].unwrap_i32() as usize;
+            let out_payload_len_ptr = params[6].unwrap_i32() as usize;
+            let timeout_ms       = params[7].unwrap_i32();
             Box::new(async move {
-                // Fix 4: check and decrement host call budget first.
+                // Check and decrement host call budget first.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -426,8 +447,8 @@ fn add_trogon_host_functions(
                     }
                 };
 
-                let subj_bytes = msg.subject.as_str().as_bytes();
-                let payload_bytes = &msg.payload[..];
+                let subj_bytes = msg.subject.as_str().as_bytes().to_vec();
+                let payload_bytes = msg.payload.clone();
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
@@ -436,24 +457,35 @@ fn add_trogon_host_functions(
                     None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                 };
 
-                let subj_to_write = subj_bytes.len().min(out_subj_max);
+                let subj_to_write    = subj_bytes.len().min(out_subj_max);
                 let payload_to_write = payload_bytes.len().min(out_payload_max);
 
                 let mem_data = mem.data_mut(&mut caller);
 
-                if out_subj_ptr + subj_to_write > mem_data.len()
-                    || out_payload_ptr + payload_to_write > mem_data.len()
+                // Validate all writes fit in WASM memory before touching it.
+                let subj_end    = out_subj_ptr.saturating_add(subj_to_write);
+                let payload_end = out_payload_ptr.saturating_add(payload_to_write);
+                let subj_len_end    = out_subj_len_ptr.saturating_add(4);
+                let payload_len_end = out_payload_len_ptr.saturating_add(4);
+                if subj_end > mem_data.len()
+                    || payload_end > mem_data.len()
+                    || subj_len_end > mem_data.len()
+                    || payload_len_end > mem_data.len()
                 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
                 }
 
-                mem_data[out_subj_ptr..out_subj_ptr + subj_to_write]
+                mem_data[out_subj_ptr..subj_end]
                     .copy_from_slice(&subj_bytes[..subj_to_write]);
-                mem_data[out_payload_ptr..out_payload_ptr + payload_to_write]
+                mem_data[out_payload_ptr..payload_end]
                     .copy_from_slice(&payload_bytes[..payload_to_write]);
+                mem_data[out_subj_len_ptr..subj_len_end]
+                    .copy_from_slice(&(subj_to_write as i32).to_le_bytes());
+                mem_data[out_payload_len_ptr..payload_len_end]
+                    .copy_from_slice(&(payload_to_write as i32).to_le_bytes());
 
-                results[0] = wasmtime::Val::I32((subj_to_write + payload_to_write) as i32);
+                results[0] = wasmtime::Val::I32(1);
                 Ok(())
             })
         },
