@@ -2304,3 +2304,107 @@ async fn wasm_module_nats_request_with_nats() {
 
     let _ = responder.await;
 }
+
+// ── Fix: list_sessions and list_terminals ────────────────────────────────────
+
+/// After a file write creates session "s1", `list_sessions()` should include it.
+#[tokio::test]
+async fn list_sessions_returns_active_sessions() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    // Write a file to session "s1" — this lazily creates the session.
+    let write_req = WriteTextFileRequest::new(
+        SessionId::from("s1"),
+        PathBuf::from("/hello.txt"),
+        "content",
+    );
+    runtime
+        .handle_write_text_file("s1", write_req)
+        .await
+        .expect("write should succeed");
+
+    let sessions = runtime.list_sessions();
+    assert!(
+        sessions.contains(&"s1".to_string()),
+        "list_sessions should contain 's1', got: {:?}",
+        sessions
+    );
+}
+
+/// After creating a native terminal, `list_terminals()` should include its ID.
+#[tokio::test]
+async fn list_terminals_returns_active_terminals() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    // Spawn a long-running native process so the terminal remains live.
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep")
+        .args(vec!["10".to_string()]);
+    let resp = runtime
+        .handle_create_terminal("s1", req)
+        .await
+        .expect("sleep should spawn");
+    let tid = resp.terminal_id.clone();
+
+    let terminals = runtime.list_terminals();
+    assert!(
+        terminals.iter().any(|(t, _)| t == tid.0.as_ref()),
+        "list_terminals should contain terminal {:?}, got: {:?}",
+        tid,
+        terminals
+    );
+
+    // Clean up: kill and release the terminal.
+    let kill_req = KillTerminalRequest::new(SessionId::from("s1"), tid.clone());
+    runtime.handle_kill_terminal(kill_req).await.expect("kill should succeed");
+    let rel = ReleaseTerminalRequest::new(SessionId::from("s1"), tid);
+    let _ = runtime.handle_release_terminal(rel).await;
+}
+
+// ── Fix: atomic file writes ──────────────────────────────────────────────────
+
+/// Writing twice to the same path produces the second content and leaves no
+/// `.tmp` artifact behind.
+#[tokio::test]
+async fn write_text_file_is_atomic() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    // First write.
+    let req1 = WriteTextFileRequest::new(
+        SessionId::from("s1"),
+        PathBuf::from("/file.txt"),
+        "content_v1",
+    );
+    runtime
+        .handle_write_text_file("s1", req1)
+        .await
+        .expect("first write should succeed");
+
+    // Second write — overwrites via atomic rename.
+    let req2 = WriteTextFileRequest::new(
+        SessionId::from("s1"),
+        PathBuf::from("/file.txt"),
+        "content_v2",
+    );
+    runtime
+        .handle_write_text_file("s1", req2)
+        .await
+        .expect("second write should succeed");
+
+    // Read back and verify it's v2.
+    let read_req = ReadTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/file.txt"));
+    let resp = runtime
+        .handle_read_text_file("s1", read_req)
+        .await
+        .expect("read should succeed");
+    assert_eq!(resp.content, "content_v2", "file should contain v2 content");
+
+    // No temp file should be left behind.
+    let session_dir = tmp.path().join("s1");
+    assert!(
+        !session_dir.join("file.txt.tmp").exists(),
+        ".tmp file should not be left after successful write"
+    );
+}
