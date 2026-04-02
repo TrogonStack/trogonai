@@ -7,7 +7,7 @@ const CACHE_FINGERPRINT: &str =
     concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-", env!("WASMTIME_VERSION"));
 use crate::metrics::METRICS;
 use crate::session::WasmSession;
-use crate::terminal::WasmTerminal;
+use crate::terminal::{TerminalKind, WasmTerminal};
 use crate::wasm;
 use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
@@ -469,13 +469,11 @@ impl WasmRuntime {
         });
 
         let terminal = WasmTerminal {
-            child: Some(child),
-            stdin,
+            kind: TerminalKind::Native { child: Some(child), stdin },
             output_buf,
             output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
             exit_status: None,
-            wasm_exit_status: None,
         };
 
         info!(session_id, terminal_id, command, "Terminal created");
@@ -621,13 +619,11 @@ impl WasmRuntime {
         });
 
         let terminal = WasmTerminal {
-            child: None,
-            stdin: None,
+            kind: TerminalKind::Wasm { exit_arc: wasm_exit },
             output_buf,
             output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
             exit_status: None,
-            wasm_exit_status: Some(wasm_exit),
         };
 
         info!(session_id, terminal_id, command, "WASM module executing (background)");
@@ -730,6 +726,12 @@ impl WasmRuntime {
         }
     }
 
+    /// Kills the terminal process (if still running), drops its output buffer, and
+    /// removes it from the session's terminal set.
+    ///
+    /// **Session destruction**: when this is the last terminal in a session, the
+    /// session sandbox directory is deleted from disk. Any files written via
+    /// `write_text_file` are permanently lost once all terminals are released.
     pub async fn handle_release_terminal(
         &self,
         req: ReleaseTerminalRequest,
@@ -815,7 +817,11 @@ impl WasmRuntime {
                     if let Some(ref cached) = t.exit_status {
                         return Ok(WaitForTerminalExitResponse::new(cached.clone()));
                     }
-                    (t.output_collector.take(), t.child.take(), t.wasm_exit_status.clone())
+                    let (child, wasm_exit_arc) = match &mut t.kind {
+                        TerminalKind::Native { child, .. } => (child.take(), None),
+                        TerminalKind::Wasm { exit_arc } => (None, Some(std::sync::Arc::clone(exit_arc))),
+                    };
+                    (t.output_collector.take(), child, wasm_exit_arc)
                 }
                 None => {
                     return Err(agent_client_protocol::Error::new(

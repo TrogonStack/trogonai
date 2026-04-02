@@ -81,7 +81,7 @@ impl Config {
 
         let auto_allow_permissions = std::env::var(ENV_AUTO_ALLOW_PERMISSIONS)
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(true);
+            .unwrap_or(false);
 
         let wasm_timeout_secs = std::env::var(ENV_WASM_TIMEOUT_SECS)
             .ok()
