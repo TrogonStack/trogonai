@@ -1,5 +1,5 @@
 use agent_client_protocol::{TerminalExitStatus, TerminalOutputResponse};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tracing::warn;
 
 /// Distinguishes the two kinds of terminal the runtime can host.
@@ -16,9 +16,9 @@ pub(crate) enum TerminalKind {
     },
     /// A WASM module running as a background `spawn_local` task.
     Wasm {
-        /// Shared cell written by the background task when it exits.
-        /// `None` while the module is still running.
-        exit_arc: Arc<Mutex<Option<TerminalExitStatus>>>,
+        /// Shared cell written once by the background task when it exits.
+        /// Empty while the module is still running; set exactly once on completion or kill.
+        exit_arc: Arc<OnceLock<TerminalExitStatus>>,
     },
 }
 
@@ -51,7 +51,7 @@ impl WasmTerminal {
         let truncated = self.was_truncated.load(std::sync::atomic::Ordering::Relaxed);
         let exit_status = self.exit_status.clone().or_else(|| {
             if let TerminalKind::Wasm { ref exit_arc } = self.kind {
-                exit_arc.lock().ok().and_then(|g| g.clone())
+                exit_arc.get().cloned()
             } else {
                 None
             }
@@ -125,11 +125,9 @@ impl WasmTerminal {
                     // wait_for_terminal_exit call sees a terminal state instead of
                     // spinning forever on yield_now waiting for a task that was
                     // aborted and will never write its own exit status.
-                    if let Ok(mut g) = exit_arc.lock() {
-                        g.get_or_insert_with(|| {
-                            TerminalExitStatus::new().signal(Some("killed".to_string()))
-                        });
-                    }
+                    // OnceLock::set is a no-op if the task already wrote its status
+                    // (race between abort() and the task's final write).
+                    let _ = exit_arc.set(TerminalExitStatus::new().signal(Some("killed".to_string())));
                     true
                 } else {
                     false
