@@ -703,6 +703,7 @@ mod tests {
     struct MockAgent {
         initialized: RefCell<bool>,
         cancelled: RefCell<Vec<String>>,
+        fail_cancel: bool,
     }
 
     impl MockAgent {
@@ -710,6 +711,15 @@ mod tests {
             Self {
                 initialized: RefCell::new(false),
                 cancelled: RefCell::new(Vec::new()),
+                fail_cancel: false,
+            }
+        }
+
+        fn failing_cancel() -> Self {
+            Self {
+                initialized: RefCell::new(false),
+                cancelled: RefCell::new(Vec::new()),
+                fail_cancel: true,
             }
         }
     }
@@ -755,6 +765,9 @@ mod tests {
         }
 
         async fn cancel(&self, args: CancelNotification) -> agent_client_protocol::Result<()> {
+            if self.fail_cancel {
+                return Err(AcpError::internal_error());
+            }
             self.cancelled
                 .borrow_mut()
                 .push(args.session_id.to_string());
@@ -1846,6 +1859,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_js_message_cancel_notification_handler_error_ack_failure() {
+        use tracing_subscriber::util::SubscriberInitExt;
+        let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
+
+        let nats = MockNatsClient::new();
+        let agent = MockAgent::failing_cancel();
+        let payload = serialize(&CancelNotification::new("s1"));
+        let js_msg = MockJsMessage::with_failing_signals(async_nats::Message {
+            subject: "acp.session.s1.agent.cancel".into(),
+            reply: None,
+            payload: Bytes::copy_from_slice(&payload),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload.len(),
+        });
+        dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    }
+
+    fn init_handler_error(
+        _: InitializeRequest,
+    ) -> std::future::Ready<agent_client_protocol::Result<InitializeResponse>> {
+        std::future::ready(Err(AcpError::internal_error()))
+    }
+
+    #[tokio::test]
     async fn handle_request_with_keepalive_completes_fast() {
         let nats = MockNatsClient::new();
         let payload = serialize(&InitializeRequest::new(
@@ -1872,13 +1911,7 @@ mod tests {
         ));
         let msg = make_nats_message("acp.agent.initialize", &payload, None);
         let js_msg = make_js_msg("acp.agent.initialize", &payload, None);
-
-        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| {
-            std::future::ready(Err::<InitializeResponse, _>(
-                agent_client_protocol::Error::new(-1, "not called"),
-            ))
-        })
-        .await;
+        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, init_handler_error).await;
         assert!(result.is_err());
     }
 
@@ -1887,14 +1920,21 @@ mod tests {
         let nats = MockNatsClient::new();
         let msg = make_nats_message("acp.agent.initialize", b"not json", Some("_INBOX.1"));
         let js_msg = make_js_msg("acp.agent.initialize", b"not json", Some("_INBOX.1"));
-
-        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| {
-            std::future::ready(Err::<InitializeResponse, _>(
-                agent_client_protocol::Error::new(-1, "not called"),
-            ))
-        })
-        .await;
+        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, init_handler_error).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn handle_request_with_keepalive_handler_returns_error() {
+        let nats = MockNatsClient::new();
+        let payload = serialize(&InitializeRequest::new(
+            agent_client_protocol::ProtocolVersion::V0,
+        ));
+        let msg = make_nats_message("acp.agent.initialize", &payload, Some("_INBOX.1"));
+        let js_msg = make_js_msg("acp.agent.initialize", &payload, Some("_INBOX.1"));
+        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, init_handler_error).await;
+        assert!(result.is_ok());
+        assert!(!nats.published_messages().is_empty());
     }
 
     #[tokio::test(start_paused = true)]
