@@ -113,14 +113,35 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 }
 
 // ── Host function registration ───────────────────────────────────────────────
+//
+// trogon_v1 Host ABI — stable signatures (breaking changes require "trogon_v2")
+//
+// WASM modules import these functions from the "trogon_v1" module. Any change
+// to parameter count, types, or semantics is a BREAKING CHANGE that must be
+// deployed as a new import module name (trogon_v2, trogon_v3, …) so that old
+// modules get a link error instead of a silent trap.
+//
+// Current stable interface:
+//   log(level_ptr i32, level_len i32, msg_ptr i32, msg_len i32)
+//   nats_publish(subj_ptr i32, subj_len i32, payload_ptr i32, payload_len i32) -> i32
+//   nats_request(subj_ptr i32, subj_len i32, pay_ptr i32, pay_len i32,
+//                timeout_ms i32, out_ptr i32, out_max i32) -> i32
+//   subscribe(subject_ptr i32, subject_len i32) -> i32
+//   recv_message(sub_id i32,
+//                out_subj_ptr i32, out_subj_max i32, out_subj_len_ptr i32,
+//                out_payload_ptr i32, out_payload_max i32, out_payload_len_ptr i32,
+//                timeout_ms i32) -> i32
+//   unsubscribe(sub_id i32) -> i32
+//   request_permission(options_json_ptr i32, options_json_len i32,
+//                      out_selected_ptr i32) -> i32
 
 fn add_trogon_host_functions(
     engine: &Engine,
     linker: &mut Linker<WasmStoreData>,
 ) -> anyhow::Result<()> {
-    // trogon.log(level_ptr, level_len, msg_ptr, msg_len)
+    // trogon_v1.log(level_ptr, level_len, msg_ptr, msg_len)
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "log",
         wasmtime::FuncType::new(
             engine,
@@ -170,9 +191,9 @@ fn add_trogon_host_functions(
         },
     )?;
 
-    // trogon.nats_publish(subj_ptr, subj_len, payload_ptr, payload_len) -> i32
+    // trogon_v1.nats_publish(subj_ptr, subj_len, payload_ptr, payload_len) -> i32
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "nats_publish",
         wasmtime::FuncType::new(
             engine,
@@ -243,7 +264,7 @@ fn add_trogon_host_functions(
 
     // trogon.nats_request(subj_ptr, subj_len, pay_ptr, pay_len, timeout_ms, out_ptr, out_max) -> i32
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "nats_request",
         wasmtime::FuncType::new(
             engine,
@@ -320,7 +341,7 @@ fn add_trogon_host_functions(
     // trogon.subscribe(subject_ptr, subject_len) -> i32
     // Returns subscription ID (>= 0) or -1 on error/no NATS.
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "subscribe",
         wasmtime::FuncType::new(
             engine,
@@ -386,7 +407,7 @@ fn add_trogon_host_functions(
     // Separate length output pointers replace the old opaque sum return value so
     // that callers can tell exactly how many bytes were written to each buffer.
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "recv_message",
         wasmtime::FuncType::new(
             engine,
@@ -494,7 +515,7 @@ fn add_trogon_host_functions(
     // trogon.unsubscribe(sub_id) -> i32
     // Returns 0 on success, -1 if sub_id not found.
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "unsubscribe",
         wasmtime::FuncType::new(
             engine,
@@ -525,7 +546,7 @@ fn add_trogon_host_functions(
     // trogon.request_permission(options_json_ptr, options_json_len, out_selected_ptr) -> i32
     // Returns 0 on success (writes selected index to out_selected_ptr), -1 on cancel/error.
     linker.func_new_async(
-        "trogon",
+        "trogon_v1",
         "request_permission",
         wasmtime::FuncType::new(
             engine,
