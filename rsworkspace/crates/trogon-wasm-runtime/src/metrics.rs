@@ -61,4 +61,16 @@ pub struct MetricsSnapshot {
 }
 
 /// Global singleton metrics instance.
+///
+/// All counters are monotonically increasing for the lifetime of the process.
+/// Tests that assert on metric values must use the delta pattern — snapshot
+/// before and after, then assert the difference — to avoid coupling to
+/// whatever previous tests have incremented:
+///
+/// ```rust
+/// let before = METRICS.wasm_tasks_started.load(Ordering::Relaxed);
+/// // … exercise the code …
+/// let after = METRICS.wasm_tasks_started.load(Ordering::Relaxed);
+/// assert_eq!(after - before, 1);
+/// ```
 pub static METRICS: Metrics = Metrics::new();
