@@ -39,11 +39,7 @@ where
     let subject = session::agent::CloseSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<CloseSessionRequest, CloseSessionResponse>(
-            &subject,
-            &args,
-            session_id.as_str(),
-        )
+        .session_request::<CloseSessionRequest, CloseSessionResponse>(&subject, &args, &session_id)
         .await;
 
     bridge.metrics.record_request(

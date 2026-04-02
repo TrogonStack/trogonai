@@ -146,7 +146,7 @@ where
         &self,
         subject: &impl crate::nats::markers::SessionCommand,
         args: &Req,
-        session_id: &str,
+        session_id: &crate::session_id::AcpSessionId,
     ) -> Result<Res>
     where
         Req: serde::Serialize,
