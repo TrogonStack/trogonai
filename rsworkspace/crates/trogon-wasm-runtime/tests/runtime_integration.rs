@@ -22,6 +22,7 @@ fn test_config(session_root: PathBuf) -> Config {
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
         wasm_only: false,
+        wasm_memory_limit_bytes: None,
     }
 }
 
@@ -221,6 +222,7 @@ async fn output_byte_limit_truncates() {
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
         wasm_only: false,
+        wasm_memory_limit_bytes: None,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -518,6 +520,7 @@ async fn wasm_module_runs_with_timeout_set() {
                 auto_allow_permissions: true,
                 wasm_timeout_secs: Some(30), // generous timeout — should not fire
                 wasm_only: false,
+                wasm_memory_limit_bytes: None,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -699,6 +702,7 @@ async fn wasm_only_rejects_native_commands() {
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
         wasm_only: true,
+        wasm_memory_limit_bytes: None,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -725,6 +729,7 @@ async fn wasm_only_allows_wasm_commands() {
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
         wasm_only: true,
+        wasm_memory_limit_bytes: None,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -757,6 +762,124 @@ async fn wasm_only_allows_wasm_commands() {
                 .await
                 .unwrap();
             assert_eq!(exit.exit_status.exit_code, Some(0));
+        })
+        .await;
+}
+
+// ── Memory cap ─────────────────────────────────────────────────────────────
+
+/// Verify that a generous memory limit does not prevent a module from running.
+/// This tests plumbing without exercising the denial path.
+#[tokio::test]
+async fn wasm_module_memory_limit_enforced() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                // 64 MB — generous, should not prevent the 1-page module from running.
+                wasm_memory_limit_bytes: Some(64 * 1024 * 1024),
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "memlimit.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 0))
+                    unreachable
+                  )
+                )
+            "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with generous memory limit should run");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "module should exit cleanly under generous memory limit"
+            );
+        })
+        .await;
+}
+
+// ── Trogon host functions ─────────────────────────────────────────────────
+
+/// A WASM module that imports `trogon.log` and calls it should exit cleanly.
+#[tokio::test]
+async fn wasm_module_trogon_log_host_function() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "trogon_log.wasm",
+                r#"
+                (module
+                  (import "trogon" "log" (func $log (param i32 i32 i32 i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "info")
+                  (data (i32.const 4) "hello from wasm")
+                  (func (export "_start")
+                    (call $log (i32.const 0) (i32.const 4) (i32.const 4) (i32.const 15))
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+            "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with trogon.log import should run");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "module calling trogon.log should exit cleanly"
+            );
         })
         .await;
 }

@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::session::WasmSession;
 use crate::terminal::WasmTerminal;
-use crate::wasm::{self, WasmOutput};
+use crate::wasm;
 use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
@@ -47,10 +47,21 @@ pub struct WasmRuntime {
     session_terminals: RefCell<HashMap<String, HashSet<String>>>,
     /// Feature 3: Reverse mapping terminal_id → session_id.
     terminal_session: RefCell<HashMap<String, String>>,
+    /// Optional NATS client for trogon host functions in WASM modules.
+    nats_client: Option<async_nats::Client>,
+    /// Optional memory limit for WASM module execution in bytes.
+    wasm_memory_limit_bytes: Option<usize>,
 }
 
 impl WasmRuntime {
     pub fn new(config: &Config) -> Result<Self, wasmtime::Error> {
+        Self::with_nats(config, None)
+    }
+
+    pub fn with_nats(
+        config: &Config,
+        nats_client: Option<async_nats::Client>,
+    ) -> Result<Self, wasmtime::Error> {
         let mut wasm_config = wasmtime::Config::new();
         wasm_config.async_support(true);
         wasm_config.consume_fuel(true);
@@ -67,6 +78,8 @@ impl WasmRuntime {
             modules: RefCell::new(HashMap::new()),
             session_terminals: RefCell::new(HashMap::new()),
             terminal_session: RefCell::new(HashMap::new()),
+            nats_client,
+            wasm_memory_limit_bytes: config.wasm_memory_limit_bytes,
         })
     }
 
@@ -276,12 +289,15 @@ impl WasmRuntime {
         let exit_arc = Arc::clone(&wasm_exit);
         let limit = self.output_byte_limit;
         let timeout = self.wasm_timeout_secs;
+        let memory_limit = self.wasm_memory_limit_bytes;
+        let nats_for_task = self.nats_client.clone();
         // Build full argv: command (wasm_path) as argv[0], then user-supplied args.
         let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
         argv_cloned.push(command.to_string());
         argv_cloned.extend_from_slice(args);
         let env_pairs_cloned = env_pairs.clone();
         let sandbox_dir_cloned = sandbox_dir.to_path_buf();
+        let session_id_cloned = session_id.to_string();
 
         // Feature 4: Spawn WASM execution as a background local task.
         let collector = tokio::task::spawn_local(async move {
@@ -291,22 +307,19 @@ impl WasmRuntime {
                 &argv_cloned,
                 &env_pairs_cloned,
                 &sandbox_dir_cloned,
+                Arc::clone(&buf),
                 limit,
                 timeout,
+                memory_limit,
+                nats_for_task,
+                session_id_cloned,
             )
             .await;
-            let wasm_output = match result {
-                Ok(o) => o,
-                Err(e) => WasmOutput {
-                    stdout: vec![],
-                    stderr: vec![],
-                    exit_status: TerminalExitStatus::new().signal(Some(format!("{e}"))),
-                },
+            let exit_status = match result {
+                Ok(status) => status,
+                Err(e) => TerminalExitStatus::new().signal(Some(format!("{e}"))),
             };
-            // Merge stdout + stderr into shared buffer.
-            let combined = [wasm_output.stdout.as_slice(), wasm_output.stderr.as_slice()].concat();
-            WasmTerminal::append_output(&buf, limit, &combined);
-            *exit_arc.lock().unwrap() = Some(wasm_output.exit_status);
+            *exit_arc.lock().unwrap() = Some(exit_status);
         });
 
         let terminal = WasmTerminal {
