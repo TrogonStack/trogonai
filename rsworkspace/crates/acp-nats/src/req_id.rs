@@ -6,14 +6,14 @@
 
 /// Opaque request correlation ID.
 ///
-/// Created by the bridge via [`ReqId::new`] (UUID v4). The runner reads it from
+/// Created by the bridge via [`ReqId::new`] (UUID v7). The runner reads it from
 /// the `X-Req-Id` header and reconstructs it with [`ReqId::from_header`] to
 /// embed in response subject names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ReqId(String);
 
 impl ReqId {
-    /// Generates a new random request ID (UUID v4).
+    /// Generates a new time-ordered request ID (UUID v7).
     pub fn new() -> Self {
         Self(uuid::Uuid::now_v7().to_string())
     }
