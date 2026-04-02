@@ -166,7 +166,7 @@ fn add_trogon_host_functions(
             let msg_ptr = params[2].unwrap_i32() as usize;
             let msg_len = params[3].unwrap_i32() as usize;
             Box::new(async move {
-                // Fix 4: check and decrement host call budget first.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     return Ok(());
                 }
@@ -218,7 +218,7 @@ fn add_trogon_host_functions(
             let payload_ptr = params[2].unwrap_i32() as usize;
             let payload_len = params[3].unwrap_i32() as usize;
             Box::new(async move {
-                // Fix 4: check and decrement host call budget first.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -292,7 +292,7 @@ fn add_trogon_host_functions(
             let out_ptr    = params[5].unwrap_i32() as usize;
             let out_max    = params[6].unwrap_i32() as usize;
             Box::new(async move {
-                // Fix 4: check and decrement host call budget first.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -364,7 +364,7 @@ fn add_trogon_host_functions(
             let subj_ptr = params[0].unwrap_i32() as usize;
             let subj_len = params[1].unwrap_i32() as usize;
             Box::new(async move {
-                // Fix 4: check and decrement host call budget first.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -543,7 +543,7 @@ fn add_trogon_host_functions(
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
             let sub_id = params[0].unwrap_i32();
             Box::new(async move {
-                // Fix 4: check and decrement host call budget.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -576,7 +576,7 @@ fn add_trogon_host_functions(
             let opt_len = params[1].unwrap_i32() as usize;
             let out_ptr = params[2].unwrap_i32() as usize;
             Box::new(async move {
-                // Fix 4: check and decrement host call budget.
+                // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
@@ -618,7 +618,7 @@ fn add_trogon_host_functions(
                     }
                     results[0] = wasmtime::Val::I32(0);
                 } else if let Some(nats_client) = nats {
-                    // Fix 6: send a NATS request to ask for user permission.
+                    // Send a NATS request to ask for user permission.
                     let subject = format!("{acp_prefix}.session.{session_id}.wasm.request_permission");
                     let request_json = serde_json::json!({
                         "options": options,
@@ -753,7 +753,8 @@ pub async fn run_module_compiled(
         nats: nats_client,
         session_id,
         auto_allow_permissions,
-        host_call_budget: host_call_limit,
+        // 0 means unlimited (same convention as wasm_fuel_limit).
+    host_call_budget: if host_call_limit == 0 { u32::MAX } else { host_call_limit },
         subscriptions: HashMap::new(),
         next_sub_id: 0,
         acp_prefix,
@@ -765,8 +766,8 @@ pub async fn run_module_compiled(
         store.limiter(|data| data as &mut dyn ResourceLimiter);
     }
 
-    // Fix 2: Enable fuel consumption with configurable limit.
-    // If fuel_limit is 0, use u64::MAX (engine has consume_fuel(true) already set).
+    // Enable fuel consumption. 0 means unlimited (use u64::MAX); otherwise use the
+    // configured limit. The engine has consume_fuel(true) enabled via Config.
     let effective_fuel = if fuel_limit == 0 { u64::MAX } else { fuel_limit };
     store.set_fuel(effective_fuel)?;
 

@@ -101,19 +101,32 @@ impl WasmTerminal {
         }
     }
 
-    /// Kills the underlying native process. No-op for WASM terminals.
-    /// Returns `true` if a kill signal was sent.
+    /// Kills the underlying process or aborts the WASM background task.
+    /// Returns `true` if a kill signal was sent (native) or the task was aborted (WASM).
     pub async fn kill(&mut self) -> bool {
-        if let TerminalKind::Native { ref mut child, .. } = self.kind {
-            if let Some(c) = child {
-                if let Err(e) = c.kill().await {
-                    warn!(error = %e, "Failed to kill terminal process");
-                    return false;
+        match self.kind {
+            TerminalKind::Native { ref mut child, .. } => {
+                if let Some(c) = child {
+                    if let Err(e) = c.kill().await {
+                        warn!(error = %e, "Failed to kill terminal process");
+                        return false;
+                    }
+                    return true;
                 }
-                return true;
+                false
+            }
+            TerminalKind::Wasm { .. } => {
+                // Abort the spawn_local task that runs the module. The task's
+                // JoinHandle is stored in output_collector; aborting it causes
+                // wasmtime to drop the Store mid-execution, which is safe.
+                if let Some(c) = self.output_collector.take() {
+                    c.abort();
+                    true
+                } else {
+                    false
+                }
             }
         }
-        false
     }
 }
 

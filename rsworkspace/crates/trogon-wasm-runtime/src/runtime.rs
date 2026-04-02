@@ -51,14 +51,15 @@ pub struct WasmRuntime {
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
     terminals: RefCell<HashMap<String, WasmTerminal>>,
-    /// Feature 1: Cache of compiled WASM modules keyed by absolute path.
+    /// In-memory cache of compiled WASM modules keyed by absolute path.
     /// Value is (module, source_mtime) for invalidation on file change.
+    /// Capped at `MAX_CACHED_MODULES` entries; evicts oldest mtime on overflow.
     modules: RefCell<HashMap<PathBuf, (Module, std::time::SystemTime)>>,
     /// Optional directory for on-disk compiled module cache.
     module_cache_dir: Option<PathBuf>,
-    /// Feature 3: Maps session_id → set of terminal_ids for auto-cleanup.
+    /// Maps session_id → set of terminal_ids for session-level auto-cleanup.
     session_terminals: RefCell<HashMap<String, HashSet<String>>>,
-    /// Feature 3: Reverse mapping terminal_id → session_id.
+    /// Reverse mapping terminal_id → session_id (for O(1) session lookup on terminal ops).
     terminal_session: RefCell<HashMap<String, String>>,
     /// Optional NATS client for trogon host functions in WASM modules.
     nats_client: Option<async_nats::Client>,
@@ -80,6 +81,12 @@ pub struct WasmRuntime {
     /// Maximum seconds to wait for a terminal to exit before killing it. 0 means no timeout.
     wait_for_exit_timeout_secs: u64,
 }
+
+/// Maximum number of compiled modules kept in the per-process in-memory cache.
+/// When this limit is reached, the entry whose source file was modified longest
+/// ago (smallest mtime) is evicted before inserting the new module. Prevents
+/// unbounded memory growth in long-running deployments with many unique modules.
+const MAX_CACHED_MODULES: usize = 64;
 
 /// Derives an on-disk cache key from the absolute path of a `.wasm` file.
 ///
@@ -390,9 +397,20 @@ impl WasmRuntime {
         })
         .await??;
 
-        self.modules
-            .borrow_mut()
-            .insert(abs_path, (m.clone(), current_mtime));
+        {
+            let mut cache = self.modules.borrow_mut();
+            // Evict the least-recently-modified entry when at capacity.
+            if cache.len() >= MAX_CACHED_MODULES && !cache.contains_key(&abs_path) {
+                if let Some(oldest) = cache
+                    .iter()
+                    .min_by_key(|(_, (_, mtime))| *mtime)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&oldest);
+                }
+            }
+            cache.insert(abs_path, (m.clone(), current_mtime));
+        }
         Ok(m)
     }
 
@@ -527,7 +545,7 @@ impl WasmRuntime {
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
 
-        // Feature 3: track terminal → session mapping.
+        // Track terminal → session mapping for session-level cleanup.
         self.session_terminals
             .borrow_mut()
             .entry(session_id.to_string())
@@ -544,9 +562,9 @@ impl WasmRuntime {
 
     /// Runs a `.wasm` module as a background tokio task.
     ///
-    /// Feature 1: Uses the compiled module cache to avoid re-compilation.
-    /// Feature 2: Applies `wasm_timeout_secs` if configured.
-    /// Feature 4: `create_terminal` returns immediately; WASM runs in background.
+    /// Uses the compiled module cache to avoid re-compilation on repeated invocations.
+    /// Applies `wasm_timeout_secs` if configured. Returns immediately — WASM execution
+    /// continues in a background `spawn_local` task until the module exits or is killed.
     async fn run_wasm_terminal(
         &self,
         session_id: &str,
@@ -581,13 +599,12 @@ impl WasmRuntime {
             .map(|e| (e.name.clone(), e.value.clone()))
             .collect();
 
-        // Feature 1: Get or compile the module from the cache (with mtime invalidation).
         let module = self
             .get_or_compile_module(&wasm_path)
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
-        // Feature 4: Shared output buffer and exit status for background task.
+        // Shared output buffer and exit status arc for the background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let wasm_exit: Arc<Mutex<Option<TerminalExitStatus>>> = Arc::new(Mutex::new(None));
@@ -613,12 +630,10 @@ impl WasmRuntime {
         let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
         argv_cloned.push(command.to_string());
         argv_cloned.extend_from_slice(args);
-        let env_pairs_cloned = env_pairs.clone();
         let sandbox_dir_cloned = sandbox_dir.to_path_buf();
         let cwd_cloned = cwd.to_path_buf();
         let session_id_cloned = session_id.to_string();
 
-        // Feature 4: Spawn WASM execution as a background local task.
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
@@ -630,7 +645,7 @@ impl WasmRuntime {
                 wasm::WasmExecConfig {
                     module,
                     argv: argv_cloned,
-                    env_vars: env_pairs_cloned,
+                    env_vars: env_pairs,
                     sandbox_dir: sandbox_dir_cloned.clone(),
                     cwd: if cwd_cloned != sandbox_dir_cloned {
                         Some(cwd_cloned)
@@ -681,7 +696,7 @@ impl WasmRuntime {
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
 
-        // Feature 3: track terminal → session mapping.
+        // Track terminal → session mapping for session-level cleanup.
         self.session_terminals
             .borrow_mut()
             .entry(session_id.to_string())
@@ -789,7 +804,7 @@ impl WasmRuntime {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
         self.tick_last_activity_for_terminal(&terminal_id);
 
-        // Feature 3: Look up the session_id before removing.
+        // Look up the owning session before removing the terminal.
         let maybe_session_id = self
             .terminal_session
             .borrow()
@@ -805,7 +820,7 @@ impl WasmRuntime {
                 }
                 debug!(terminal_id, "Terminal released");
 
-                // Feature 3: Clean up tracking maps and trigger session cleanup if needed.
+                // Clean up tracking maps and trigger session cleanup if this was the last terminal.
                 drop(terminals); // Release borrow before potentially cleaning up session.
                 if let Some(sid) = maybe_session_id {
                     self.terminal_session.borrow_mut().remove(&terminal_id);
@@ -987,7 +1002,7 @@ impl WasmRuntime {
         Ok(WaitForTerminalExitResponse::new(status))
     }
 
-    /// Feature 3: Clean up all state for a session after all its terminals are released.
+    /// Cleans up all state for a session after all its terminals are released.
     async fn cleanup_session(&self, session_id: &str) {
         // Remove any remaining terminal tracking entries for this session
         // (should be empty at this point, but be defensive).
