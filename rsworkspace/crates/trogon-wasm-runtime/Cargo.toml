@@ -29,11 +29,12 @@ uuid = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 anyhow = "=1.0.98"
-wasmtime = { version = "=30.0.2", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime = { version = "=30.0.2", default-features = false, features = ["cranelift", "runtime", "async"] }
 wasmtime-wasi = { version = "=30.0.2" }
 
 [dev-dependencies]
 tempfile = "=3.27.0"
+wat = "=1.224.1"
 
 [lints]
 workspace = true

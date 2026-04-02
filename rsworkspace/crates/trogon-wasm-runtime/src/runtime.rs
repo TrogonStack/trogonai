@@ -45,7 +45,10 @@ pub struct WasmRuntime {
 
 impl WasmRuntime {
     pub fn new(config: &Config) -> Result<Self, wasmtime::Error> {
-        let engine = Engine::default();
+        let mut wasm_config = wasmtime::Config::new();
+        wasm_config.async_support(true);
+        wasm_config.consume_fuel(true);
+        let engine = Engine::new(&wasm_config)?;
         Ok(Self {
             engine,
             session_root: config.session_root.clone(),
