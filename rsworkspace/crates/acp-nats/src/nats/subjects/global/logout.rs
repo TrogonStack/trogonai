@@ -6,7 +6,9 @@ pub struct LogoutSubject {
 
 impl LogoutSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self { prefix: prefix.clone() }
+        Self {
+            prefix: prefix.clone(),
+        }
     }
 }
 
@@ -19,5 +21,6 @@ impl std::fmt::Display for LogoutSubject {
 impl super::super::markers::Requestable for LogoutSubject {}
 
 impl super::super::stream::StreamAssignment for LogoutSubject {
-    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Global);
+    const STREAM: Option<super::super::stream::AcpStream> =
+        Some(super::super::stream::AcpStream::Global);
 }
