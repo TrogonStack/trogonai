@@ -87,7 +87,8 @@ impl Config {
 
         let wasm_timeout_secs = std::env::var(ENV_WASM_TIMEOUT_SECS)
             .ok()
-            .and_then(|s| s.parse().ok());
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v > 0);
 
         let wasm_only = std::env::var(ENV_WASM_ONLY)
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
