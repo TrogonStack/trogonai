@@ -51,7 +51,7 @@ impl JetStreamPublisher for NatsJetStreamClient {
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAckFuture, PublishError> {
+    ) -> Result<Self::AckFuture, Self::PublishError> {
         self.context
             .publish_with_headers(subject, headers, payload)
             .await
