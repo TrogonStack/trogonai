@@ -1,34 +1,31 @@
 use crate::config::Config;
 use crate::session::WasmSession;
 use crate::terminal::WasmTerminal;
-use crate::wasm;
+use crate::wasm::{self, WasmOutput};
 use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, TerminalId,
+    SelectedPermissionOutcome, SessionNotification, TerminalExitStatus, TerminalId,
     TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tracing::{debug, info};
 use uuid::Uuid;
-use wasmtime::Engine;
+use wasmtime::{Engine, Module};
 
 /// Central execution runtime — one instance per process, shared across sessions.
 ///
 /// Manages per-session sandbox directories and terminal processes.
-/// The wasmtime `Engine` is pre-initialized for WASM module execution;
-/// actual `.wasm` dispatch is added in the next step (see `run_wasm`).
+/// The wasmtime `Engine` is pre-initialized for WASM module execution.
 pub struct WasmRuntime {
     /// Shared wasmtime engine (Cranelift JIT, reuses compiled module cache).
-    /// Scaffolded for WASM module execution; `.wasm` dispatch is the next step.
-    #[allow(dead_code)]
     pub engine: Engine,
     /// Root directory under which per-session sandboxes are created.
     session_root: PathBuf,
@@ -36,11 +33,18 @@ pub struct WasmRuntime {
     output_byte_limit: usize,
     /// When `true`, the first permission option is auto-selected.
     auto_allow_permissions: bool,
+    /// Optional wall-clock timeout for WASM module execution.
+    wasm_timeout_secs: Option<u64>,
     /// Live sessions keyed by ACP session_id.
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
-    /// Indexed globally so `terminal_output` / `kill` don't need session_id.
     terminals: RefCell<HashMap<String, WasmTerminal>>,
+    /// Feature 1: Cache of compiled WASM modules keyed by absolute path.
+    modules: RefCell<HashMap<PathBuf, Module>>,
+    /// Feature 3: Maps session_id → set of terminal_ids for auto-cleanup.
+    session_terminals: RefCell<HashMap<String, HashSet<String>>>,
+    /// Feature 3: Reverse mapping terminal_id → session_id.
+    terminal_session: RefCell<HashMap<String, String>>,
 }
 
 impl WasmRuntime {
@@ -54,8 +58,12 @@ impl WasmRuntime {
             session_root: config.session_root.clone(),
             output_byte_limit: config.output_byte_limit,
             auto_allow_permissions: config.auto_allow_permissions,
+            wasm_timeout_secs: config.wasm_timeout_secs,
             sessions: RefCell::new(HashMap::new()),
             terminals: RefCell::new(HashMap::new()),
+            modules: RefCell::new(HashMap::new()),
+            session_terminals: RefCell::new(HashMap::new()),
+            terminal_session: RefCell::new(HashMap::new()),
         })
     }
 
@@ -186,6 +194,7 @@ impl WasmRuntime {
             output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
             exit_status: None,
+            wasm_exit_status: None,
         };
 
         info!(session_id, terminal_id, command, "Terminal created");
@@ -193,16 +202,26 @@ impl WasmRuntime {
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
 
+        // Feature 3: track terminal → session mapping.
+        self.session_terminals
+            .borrow_mut()
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(terminal_id.clone());
+        self.terminal_session
+            .borrow_mut()
+            .insert(terminal_id.clone(), session_id.to_string());
+
         Ok(CreateTerminalResponse::new(TerminalId::new(
             terminal_id.as_str(),
         )))
     }
 
-    /// Runs a `.wasm` module synchronously using wasmtime + WASIp1.
+    /// Runs a `.wasm` module as a background tokio task.
     ///
-    /// The module's stdout+stderr are buffered. A synthetic `WasmTerminal`
-    /// is registered so callers can retrieve output via `terminal_output` and
-    /// `wait_for_terminal_exit` using the same API as native terminals.
+    /// Feature 1: Uses the compiled module cache to avoid re-compilation.
+    /// Feature 2: Applies `wasm_timeout_secs` if configured.
+    /// Feature 4: `create_terminal` returns immediately; WASM runs in background.
     async fn run_wasm_terminal(
         &self,
         session_id: &str,
@@ -212,40 +231,97 @@ impl WasmRuntime {
         _cwd: &std::path::Path,
         sandbox_dir: &std::path::Path,
     ) -> agent_client_protocol::Result<CreateTerminalResponse> {
-        let wasm_path = std::path::Path::new(command);
+        let wasm_path = PathBuf::from(command);
         let env_pairs: Vec<(String, String)> = env_vars
             .iter()
             .map(|e| (e.name.clone(), e.value.clone()))
             .collect();
 
-        let output: crate::wasm::WasmOutput = wasm::run_module(
-            &self.engine,
-            wasm_path,
-            args,
-            &env_pairs,
-            sandbox_dir,
-            self.output_byte_limit,
-        )
-        .await
-        .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
-
-        // Merge stdout + stderr into the output buffer (stdout first).
-        let combined = [output.stdout.as_slice(), output.stderr.as_slice()].concat();
-        let output_buf = std::sync::Arc::new(std::sync::Mutex::new(combined));
-
-        let terminal_id = Uuid::new_v4().to_string();
-        let terminal = WasmTerminal {
-            child: None, // already exited
-            output_buf,
-            output_byte_limit: self.output_byte_limit,
-            output_collector: None,
-            exit_status: Some(output.exit_status),
+        // Feature 1: Get or compile the module from the cache.
+        let module = {
+            let cached = self.modules.borrow();
+            cached.get(&wasm_path).cloned()
+        };
+        let module = match module {
+            Some(m) => m,
+            None => {
+                let m = Module::from_file(&self.engine, &wasm_path)
+                    .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
+                self.modules
+                    .borrow_mut()
+                    .insert(wasm_path.clone(), m.clone());
+                m
+            }
         };
 
-        info!(session_id, terminal_id, command, "WASM module executed");
+        // Feature 4: Shared output buffer and exit status for background task.
+        let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let wasm_exit: Arc<Mutex<Option<TerminalExitStatus>>> = Arc::new(Mutex::new(None));
+
+        let terminal_id = Uuid::new_v4().to_string();
+
+        // Clone what the background task needs.
+        let engine = self.engine.clone();
+        let buf = Arc::clone(&output_buf);
+        let exit_arc = Arc::clone(&wasm_exit);
+        let limit = self.output_byte_limit;
+        let timeout = self.wasm_timeout_secs;
+        // Build full argv: command (wasm_path) as argv[0], then user-supplied args.
+        let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
+        argv_cloned.push(command.to_string());
+        argv_cloned.extend_from_slice(args);
+        let env_pairs_cloned = env_pairs.clone();
+        let sandbox_dir_cloned = sandbox_dir.to_path_buf();
+
+        // Feature 4: Spawn WASM execution as a background local task.
+        let collector = tokio::task::spawn_local(async move {
+            let result = wasm::run_module_compiled(
+                &engine,
+                module,
+                &argv_cloned,
+                &env_pairs_cloned,
+                &sandbox_dir_cloned,
+                limit,
+                timeout,
+            )
+            .await;
+            let wasm_output = match result {
+                Ok(o) => o,
+                Err(e) => WasmOutput {
+                    stdout: vec![],
+                    stderr: vec![],
+                    exit_status: TerminalExitStatus::new().signal(Some(format!("{e}"))),
+                },
+            };
+            // Merge stdout + stderr into shared buffer.
+            let combined = [wasm_output.stdout.as_slice(), wasm_output.stderr.as_slice()].concat();
+            WasmTerminal::append_output(&buf, limit, &combined);
+            *exit_arc.lock().unwrap() = Some(wasm_output.exit_status);
+        });
+
+        let terminal = WasmTerminal {
+            child: None,
+            output_buf,
+            output_byte_limit: self.output_byte_limit,
+            output_collector: Some(collector),
+            exit_status: None,
+            wasm_exit_status: Some(wasm_exit),
+        };
+
+        info!(session_id, terminal_id, command, "WASM module executing (background)");
         self.terminals
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
+
+        // Feature 3: track terminal → session mapping.
+        self.session_terminals
+            .borrow_mut()
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(terminal_id.clone());
+        self.terminal_session
+            .borrow_mut()
+            .insert(terminal_id.clone(), session_id.to_string());
 
         Ok(CreateTerminalResponse::new(TerminalId::new(
             terminal_id.as_str(),
@@ -290,6 +366,14 @@ impl WasmRuntime {
         req: ReleaseTerminalRequest,
     ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
+
+        // Feature 3: Look up the session_id before removing.
+        let maybe_session_id = self
+            .terminal_session
+            .borrow()
+            .get(&terminal_id)
+            .cloned();
+
         let mut terminals = self.terminals.borrow_mut();
         match terminals.remove(&terminal_id) {
             Some(mut t) => {
@@ -298,6 +382,25 @@ impl WasmRuntime {
                     collector.abort();
                 }
                 debug!(terminal_id, "Terminal released");
+
+                // Feature 3: Clean up tracking maps and trigger session cleanup if needed.
+                drop(terminals); // Release borrow before potentially cleaning up session.
+                if let Some(sid) = maybe_session_id {
+                    self.terminal_session.borrow_mut().remove(&terminal_id);
+                    let should_cleanup = {
+                        let mut st = self.session_terminals.borrow_mut();
+                        if let Some(ids) = st.get_mut(&sid) {
+                            ids.remove(&terminal_id);
+                            ids.is_empty()
+                        } else {
+                            false
+                        }
+                    };
+                    if should_cleanup {
+                        self.cleanup_session(&sid).await;
+                    }
+                }
+
                 Ok(ReleaseTerminalResponse::new())
             }
             None => Err(agent_client_protocol::Error::new(
@@ -330,6 +433,35 @@ impl WasmRuntime {
         // Put it back so `terminal_output` can still be called after exit.
         self.terminals.borrow_mut().insert(terminal_id, terminal);
         Ok(WaitForTerminalExitResponse::new(status))
+    }
+
+    /// Feature 3: Clean up all state for a session after all its terminals are released.
+    async fn cleanup_session(&self, session_id: &str) {
+        // Remove any remaining terminal tracking entries for this session
+        // (should be empty at this point, but be defensive).
+        let terminal_ids: Vec<String> = self
+            .session_terminals
+            .borrow_mut()
+            .remove(session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        for tid in terminal_ids {
+            self.terminal_session.borrow_mut().remove(&tid);
+            if let Some(mut t) = self.terminals.borrow_mut().remove(&tid) {
+                t.kill().await;
+                if let Some(c) = t.output_collector.take() {
+                    c.abort();
+                }
+            }
+        }
+
+        // Delete the sandbox directory and free session state.
+        if let Some(session) = self.sessions.borrow_mut().remove(session_id) {
+            let _ = tokio::fs::remove_dir_all(&session.dir).await;
+            debug!(session_id, "Session sandbox cleaned up");
+        }
     }
 
     // ── Filesystem operations ──────────────────────────────────────────────

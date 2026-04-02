@@ -15,6 +15,8 @@ pub struct WasmTerminal {
     pub(crate) output_byte_limit: usize,
     pub(crate) output_collector: Option<tokio::task::JoinHandle<()>>,
     pub(crate) exit_status: Option<TerminalExitStatus>,
+    /// For WASM background tasks: shared exit status written by the background task.
+    pub(crate) wasm_exit_status: Option<Arc<Mutex<Option<TerminalExitStatus>>>>,
 }
 
 impl WasmTerminal {
@@ -57,12 +59,13 @@ impl WasmTerminal {
         false
     }
 
-    /// Waits for the child process to exit and stores the exit status.
+    /// Waits for the child process (or background WASM task) to exit and stores the exit status.
     pub async fn wait(&mut self) -> TerminalExitStatus {
         if let Some(ref cached) = self.exit_status {
             return cached.clone();
         }
         if let Some(child) = self.child.take() {
+            // Native process path.
             let status = match child.wait_with_output().await {
                 Ok(output) => exit_status_from_std(&output.status),
                 Err(e) => {
@@ -76,12 +79,23 @@ impl WasmTerminal {
                 let _ = collector.await;
             }
             self.exit_status = Some(status.clone());
-            status
-        } else {
-            self.exit_status
-                .clone()
-                .unwrap_or_else(TerminalExitStatus::new)
+            return status;
         }
+        if let Some(collector) = self.output_collector.take() {
+            // WASM background task path — wait for the task to complete.
+            let _ = collector.await;
+            let status = self
+                .wasm_exit_status
+                .as_ref()
+                .and_then(|arc| arc.lock().ok())
+                .and_then(|g| g.clone())
+                .unwrap_or_else(TerminalExitStatus::new);
+            self.exit_status = Some(status.clone());
+            return status;
+        }
+        self.exit_status
+            .clone()
+            .unwrap_or_else(TerminalExitStatus::new)
     }
 }
 
