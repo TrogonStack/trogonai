@@ -21,7 +21,8 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
     type PublishError: Error + Send + Sync;
-    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>> + Send;
+    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send>
+        + Send;
 
     fn publish_with_headers<S: ToSubject + Send>(
         &self,

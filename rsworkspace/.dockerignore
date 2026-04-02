@@ -1,0 +1,27 @@
+# Rust build artifacts — largest offender, can be many GBs
+target/
+
+# Dev tooling
+.git/
+.github/
+.cargo/
+
+# Test/CI artifacts
+lcov.info
+coverage.xml
+*.profraw
+*.profdata
+mutants.out*/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Environment files with secrets
+.env
+.env.*
+!.env.example
