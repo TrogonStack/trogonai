@@ -607,7 +607,7 @@ impl WasmRuntime {
         // Shared output buffer and exit status arc for the background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let wasm_exit: Arc<Mutex<Option<TerminalExitStatus>>> = Arc::new(Mutex::new(None));
+        let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> = Arc::new(std::sync::OnceLock::new());
 
         let terminal_id = Uuid::new_v4().to_string();
 
@@ -680,7 +680,7 @@ impl WasmRuntime {
             } else {
                 METRICS.wasm_tasks_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            *exit_arc.lock().unwrap() = Some(exit_status);
+            let _ = exit_arc.set(exit_status);
         });
 
         let terminal = WasmTerminal {
@@ -961,8 +961,7 @@ impl WasmRuntime {
             let _ = c.await;
             wasm_exit_arc
                 .as_ref()
-                .and_then(|arc| arc.lock().ok())
-                .and_then(|g| g.clone())
+                .and_then(|arc| arc.get().cloned())
                 .unwrap_or_else(TerminalExitStatus::new)
         } else {
             // Both child and collector are None. Two cases:
@@ -976,7 +975,7 @@ impl WasmRuntime {
             //      two concurrent waits on the same native terminal is unsupported).
             if let Some(arc) = wasm_exit_arc {
                 loop {
-                    if let Some(status) = arc.lock().ok().and_then(|g| g.clone()) {
+                    if let Some(status) = arc.get().cloned() {
                         break status;
                     }
                     tokio::task::yield_now().await;
@@ -1067,7 +1066,7 @@ impl WasmRuntime {
         }
 
         // Write atomically: write to a temp file first, then rename.
-        let tmp_dest = dest.with_extension("tmp");
+        let tmp_dest = dest.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
         tokio::fs::write(&tmp_dest, req.content.as_bytes())
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}")))?;
