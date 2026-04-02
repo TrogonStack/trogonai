@@ -569,7 +569,7 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
         .headers
         .as_ref()
         .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
-        .map(|v| v.as_str().to_string());
+        .map(|v| acp_nats::ReqId::from_header(v.as_str()));
 
     let reply_subject: Option<String> = match (&req_id, &method) {
         (Some(rid), SessionAgentMethod::Prompt) => Some(
