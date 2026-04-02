@@ -1,7 +1,13 @@
+use acp_nats::jetstream::consumers::commands_observer;
+use acp_nats::jetstream::streams::commands_stream_name;
+use acp_nats::nats::agent::wildcards::GlobalAllSubject;
+use acp_nats::nats::session::wildcards::{AllAgentExtSubject, AllAgentSubject};
 use acp_nats::nats::{
     GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject,
 };
-use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy};
+use acp_nats::{
+    AcpPrefix, AcpSessionId, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject,
+};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
     ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
@@ -158,8 +164,8 @@ where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: Agent + 'static,
 {
-    let global_wildcard = acp_nats::nats::agent::wildcards::GlobalAllSubject::new(prefix);
-    let session_wildcard = acp_nats::nats::session::wildcards::AllAgentSubject::new(prefix);
+    let global_wildcard = GlobalAllSubject::new(prefix);
+    let session_wildcard = AllAgentSubject::new(prefix);
 
     info!(
         global = %global_wildcard,
@@ -204,8 +210,8 @@ where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: Agent + 'static,
 {
-    let global_wildcard = acp_nats::nats::agent::wildcards::GlobalAllSubject::new(prefix);
-    let ext_wildcard = acp_nats::nats::session::wildcards::AllAgentExtSubject::new(prefix);
+    let global_wildcard = GlobalAllSubject::new(prefix);
+    let ext_wildcard = AllAgentExtSubject::new(prefix);
 
     info!(
         global = %global_wildcard,
@@ -490,8 +496,8 @@ where
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     A: Agent + 'static,
 {
-    let stream_name = acp_nats::jetstream::streams::commands_stream_name(prefix);
-    let config = acp_nats::jetstream::consumers::commands_observer();
+    let stream_name = commands_stream_name(prefix);
+    let config = commands_observer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
@@ -567,18 +573,14 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
         .headers
         .as_ref()
         .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
-        .map(|v| acp_nats::ReqId::from_header(v.as_str()));
+        .map(|v| ReqId::from_header(v.as_str()));
 
     let reply_subject: Option<String> = match (&req_id, &method) {
-        (Some(rid), SessionAgentMethod::Prompt) => Some(
-            acp_nats::nats::session::agent::PromptResponseSubject::new(prefix, &session_id, rid)
-                .to_string(),
-        ),
+        (Some(rid), SessionAgentMethod::Prompt) => {
+            Some(PromptResponseSubject::new(prefix, &session_id, rid).to_string())
+        }
         (_, SessionAgentMethod::Cancel) => None,
-        (Some(rid), _) => Some(
-            acp_nats::nats::session::agent::ResponseSubject::new(prefix, &session_id, rid)
-                .to_string(),
-        ),
+        (Some(rid), _) => Some(ResponseSubject::new(prefix, &session_id, rid).to_string()),
         (None, _) => {
             warn!(subject, "JetStream message missing X-Req-Id header");
             None
