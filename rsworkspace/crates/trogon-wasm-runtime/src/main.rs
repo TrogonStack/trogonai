@@ -55,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
+    runtime.cleanup_stale_sessions().await;
 
     // Fix 2: Graceful shutdown via watch channel.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);

@@ -195,6 +195,32 @@ impl WasmRuntime {
         }
     }
 
+    /// Removes any leftover session sandbox directories from a previous run.
+    /// Called once at startup before accepting any requests.
+    pub async fn cleanup_stale_sessions(&self) {
+        let root = &self.session_root;
+        let mut rd = match tokio::fs::read_dir(root).await {
+            Ok(r) => r,
+            Err(_) => return, // root doesn't exist yet, nothing to clean
+        };
+        let mut cleaned = 0u32;
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            let path = entry.path();
+            if path.is_dir() {
+                if tokio::fs::remove_dir_all(&path).await.is_ok() {
+                    cleaned += 1;
+                }
+            }
+        }
+        if cleaned > 0 {
+            tracing::info!(
+                count = cleaned,
+                root = %root.display(),
+                "Cleaned up stale session directories from previous run"
+            );
+        }
+    }
+
     /// Ensures the sandbox directory for a session exists on disk.
     async fn ensure_session_dir(&self, session_id: &str) -> std::io::Result<PathBuf> {
         let dir = self.session_dir(session_id);
@@ -643,10 +669,20 @@ impl WasmRuntime {
     }
 
     /// Closes the stdin pipe of a terminal, sending EOF to the process.
-    pub fn handle_close_terminal_stdin(&self, terminal_id: &str) {
+    pub fn handle_close_terminal_stdin(
+        &self,
+        terminal_id: &str,
+    ) -> agent_client_protocol::Result<()> {
         let mut terminals = self.terminals.borrow_mut();
-        if let Some(t) = terminals.get_mut(terminal_id) {
-            t.close_stdin();
+        match terminals.get_mut(terminal_id) {
+            Some(t) => {
+                t.close_stdin();
+                Ok(())
+            }
+            None => Err(agent_client_protocol::Error::new(
+                -32602,
+                format!("Unknown terminal: {terminal_id}"),
+            )),
         }
     }
 

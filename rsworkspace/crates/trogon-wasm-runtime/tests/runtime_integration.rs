@@ -3,6 +3,7 @@ use agent_client_protocol::{
     RequestPermissionRequest, SessionId, TerminalId, TerminalOutputRequest,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
+use futures::StreamExt as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use trogon_wasm_runtime::{Config, WasmRuntime};
@@ -2073,7 +2074,7 @@ async fn native_terminal_stdin_write() {
         .expect("write to cat stdin should succeed");
 
     // Close stdin so cat exits.
-    runtime.handle_close_terminal_stdin(tid.0.as_ref());
+    runtime.handle_close_terminal_stdin(tid.0.as_ref()).expect("close stdin should succeed");
 
     let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
     let exit = runtime
@@ -2092,4 +2093,214 @@ async fn native_terminal_stdin_write() {
         "cat output should contain 'hello', got: {:?}",
         out.output
     );
+}
+
+// ── Fix: Startup cleanup of stale session directories ────────────────────────
+
+/// After calling `cleanup_stale_sessions`, any pre-existing subdirectories
+/// inside `session_root` should be removed.
+#[tokio::test]
+async fn startup_cleanup_removes_stale_dirs() {
+    let tmp = TempDir::new().unwrap();
+
+    // Create two fake stale session directories.
+    let stale1 = tmp.path().join("old-session-1");
+    let stale2 = tmp.path().join("old-session-2");
+    std::fs::create_dir_all(&stale1).unwrap();
+    std::fs::create_dir_all(&stale2).unwrap();
+
+    // A stale file at the root level should be left alone (only dirs removed).
+    let stale_file = tmp.path().join("some-file.txt");
+    std::fs::write(&stale_file, "data").unwrap();
+
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+    runtime.cleanup_stale_sessions().await;
+
+    assert!(
+        !stale1.exists(),
+        "old-session-1 should have been removed by cleanup_stale_sessions"
+    );
+    assert!(
+        !stale2.exists(),
+        "old-session-2 should have been removed by cleanup_stale_sessions"
+    );
+    // Non-directory items at the root are left untouched.
+    assert!(
+        stale_file.exists(),
+        "non-directory file at session_root should not be removed"
+    );
+}
+
+// ── Fix: NATS integration tests for host functions ───────────────────────────
+
+fn nats_test_url() -> Option<String> {
+    std::env::var("NATS_TEST_URL").ok()
+}
+
+/// WASM module calling `trogon.nats_publish` against a real NATS server.
+/// Skipped when `NATS_TEST_URL` is not set.
+#[tokio::test]
+async fn wasm_module_nats_publish_with_nats() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping wasm_module_nats_publish_with_nats");
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+    let mut sub = nats
+        .subscribe("test.wasm.publish")
+        .await
+        .expect("subscribe");
+
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime =
+                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
+                    .unwrap();
+
+            // WAT module: calls trogon.nats_publish("test.wasm.publish", "hello")
+            // subject at offset 0 (17 bytes), payload "hello" at offset 32 (5 bytes).
+            let wat = r#"(module
+              (import "trogon" "nats_publish" (func $pub (param i32 i32 i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (data (i32.const 0) "test.wasm.publish")
+              (data (i32.const 32) "hello")
+              (func $_start
+                (drop (call $pub (i32.const 0) (i32.const 17) (i32.const 32) (i32.const 5)))
+                (call $exit (i32.const 0)))
+              (export "_start" (func $_start)))
+            "#;
+
+            let wasm_path = make_wasm(tmp.path(), "nats_publish.wasm", wat);
+            let req =
+                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal("nats-pub-session", req)
+                .await
+                .expect("wasm publish module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+        })
+        .await;
+
+    // Verify NATS received the published message.
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(3), sub.next())
+        .await
+        .expect("timed out waiting for NATS message")
+        .expect("subscription closed without message");
+
+    assert_eq!(
+        msg.payload.as_ref(),
+        b"hello",
+        "NATS message payload should be 'hello', got: {:?}",
+        msg.payload
+    );
+}
+
+/// WASM module calling `trogon.nats_request` against a real NATS server.
+/// Skipped when `NATS_TEST_URL` is not set.
+///
+/// Strategy: use `proc_exit` with the number of bytes received as the exit code.
+/// A responder sends "world" (5 bytes), so we expect exit_code = Some(5).
+#[tokio::test]
+async fn wasm_module_nats_request_with_nats() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping wasm_module_nats_request_with_nats");
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+
+    // Spawn a responder that replies "world" to any message on "test.wasm.request".
+    let responder_nats = nats.clone();
+    let responder = tokio::spawn(async move {
+        let mut sub = responder_nats
+            .subscribe("test.wasm.request")
+            .await
+            .expect("responder subscribe");
+        if let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let _ = responder_nats
+                    .publish(reply, bytes::Bytes::from_static(b"world"))
+                    .await;
+            }
+        }
+    });
+
+    // Give the responder a moment to subscribe.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime =
+                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
+                    .unwrap();
+
+            // WAT module: calls nats_request("test.wasm.request", "ping", 2000ms, out@512, 64)
+            // then exits with the number of bytes received as the exit code.
+            // subject "test.wasm.request" = 18 bytes at offset 0
+            // payload "ping" = 4 bytes at offset 32
+            // response written at offset 512
+            let wat = r#"(module
+              (import "trogon" "nats_request" (func $req
+                (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (data (i32.const 0) "test.wasm.request")
+              (data (i32.const 32) "ping")
+              (func $_start
+                (local $n i32)
+                (local.set $n (call $req
+                  (i32.const 0) (i32.const 17)
+                  (i32.const 32) (i32.const 4)
+                  (i32.const 2000)
+                  (i32.const 512) (i32.const 64)))
+                (call $exit (local.get $n)))
+              (export "_start" (func $_start)))
+            "#;
+
+            let wasm_path = make_wasm(tmp.path(), "nats_request.wasm", wat);
+            let req =
+                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal("nats-req-session", req)
+                .await
+                .expect("wasm request module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            // "world" is 5 bytes → proc_exit(5) → exit_code = Some(5).
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(5),
+                "nats_request should receive 'world' (5 bytes), module exits with that count; got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+
+    let _ = responder.await;
 }
