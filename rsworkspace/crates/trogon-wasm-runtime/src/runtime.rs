@@ -71,6 +71,8 @@ pub struct WasmRuntime {
     session_idle_timeout_secs: u64,
     /// Maximum allowed size for a `.wasm` module file in bytes. 0 means unlimited.
     wasm_max_module_size_bytes: usize,
+    /// Maximum seconds to wait for a terminal to exit before killing it. 0 means no timeout.
+    wait_for_exit_timeout_secs: u64,
 }
 
 impl WasmRuntime {
@@ -113,6 +115,7 @@ impl WasmRuntime {
             task_semaphore: Arc::new(Semaphore::new(semaphore_permits)),
             session_idle_timeout_secs: config.session_idle_timeout_secs,
             wasm_max_module_size_bytes: config.wasm_max_module_size_bytes,
+            wait_for_exit_timeout_secs: config.wait_for_exit_timeout_secs,
         })
     }
 
@@ -373,12 +376,16 @@ impl WasmRuntime {
         }
 
         // Capture stdout + stderr separately, merge into output_buf.
+        // Pipe stdin so callers can write to the process via handle_write_to_terminal.
+        cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn().map_err(|e| {
             agent_client_protocol::Error::new(-32603, format!("Failed to spawn process: {e}"))
         })?;
+
+        let stdin = child.stdin.take();
 
         let terminal_id = Uuid::new_v4().to_string();
 
@@ -424,6 +431,7 @@ impl WasmRuntime {
 
         let terminal = WasmTerminal {
             child: Some(child),
+            stdin,
             output_buf,
             output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
@@ -548,6 +556,7 @@ impl WasmRuntime {
 
         let terminal = WasmTerminal {
             child: None,
+            stdin: None,
             output_buf,
             output_byte_limit: self.output_byte_limit,
             output_collector: Some(collector),
@@ -605,6 +614,39 @@ impl WasmRuntime {
                 -32602,
                 format!("Unknown terminal: {terminal_id}"),
             )),
+        }
+    }
+
+    pub async fn handle_write_to_terminal(
+        &self,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> agent_client_protocol::Result<()> {
+        let mut terminals = self.terminals.borrow_mut();
+        match terminals.get_mut(terminal_id) {
+            Some(t) => {
+                if t.write_stdin(data).await {
+                    Ok(())
+                } else {
+                    Err(agent_client_protocol::Error::new(
+                        -32603,
+                        "Failed to write to terminal stdin (WASM terminals do not support stdin)"
+                            .to_string(),
+                    ))
+                }
+            }
+            None => Err(agent_client_protocol::Error::new(
+                -32602,
+                format!("Unknown terminal: {terminal_id}"),
+            )),
+        }
+    }
+
+    /// Closes the stdin pipe of a terminal, sending EOF to the process.
+    pub fn handle_close_terminal_stdin(&self, terminal_id: &str) {
+        let mut terminals = self.terminals.borrow_mut();
+        if let Some(t) = terminals.get_mut(terminal_id) {
+            t.close_stdin();
         }
     }
 
@@ -676,7 +718,25 @@ impl WasmRuntime {
             }
         };
 
-        let status = terminal.wait().await;
+        let timeout = self.wait_for_exit_timeout_secs;
+        let status = if timeout == 0 {
+            terminal.wait().await
+        } else {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout),
+                terminal.wait(),
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(_) => {
+                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
+                    terminal.kill().await;
+                    TerminalExitStatus::new().signal(Some("wait_timeout".to_string()))
+                }
+            }
+        };
+
         // Put it back so `terminal_output` can still be called after exit.
         self.terminals.borrow_mut().insert(terminal_id, terminal);
         Ok(WaitForTerminalExitResponse::new(status))
