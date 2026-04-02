@@ -66,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         let raw = RawValue::from_string(r#"{"result":"ok"}"#.to_string()).unwrap();
         let expected = ExtResponse::new(raw.into());
         set_json_response(&mock, "acp.agent.ext.my_method", &expected);
@@ -80,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_returns_error_when_nats_fails() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.fail_next_request();
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
@@ -92,7 +92,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
+        let (mock, _js, bridge) = mock_bridge();
         mock.set_response("acp.agent.ext.my_method", "not json".into());
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
@@ -104,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_validates_method_name() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let params = RawValue::from_string("{}".to_string()).unwrap();
         let request = ExtRequest::new("method.*", params.into());
         let err = bridge.ext_method(request).await.unwrap_err();
@@ -115,7 +115,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_records_error_metric_on_invalid_method_name() {
-        let (_mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let params = RawValue::from_string("{}".to_string()).unwrap();
         let request = ExtRequest::new("invalid method", params.into());
 
@@ -136,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let raw = RawValue::from_string("{}".to_string()).unwrap();
         set_json_response(
             &mock,
@@ -160,7 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
         let params = RawValue::from_string("{}".to_string()).unwrap();

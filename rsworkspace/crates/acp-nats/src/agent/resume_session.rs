@@ -22,7 +22,7 @@ pub async fn handle<
     args: ResumeSessionRequest,
 ) -> Result<ResumeSessionResponse>
 where
-    <<J::Stream as trogon_nats::jetstream::JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Message: JsRequestMessage,
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     let start = bridge.clock.now();
 
@@ -65,17 +65,16 @@ where
 mod tests {
     use crate::agent::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        set_js_response,
     };
-    use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, ResumeSessionRequest, ResumeSessionResponse};
     use std::time::Duration;
 
     #[tokio::test]
     async fn resume_session_forwards_request_and_returns_response() {
-        let (mock, bridge) = mock_bridge();
+        let (_mock, js, bridge) = mock_bridge();
         let expected = ResumeSessionResponse::new();
-        set_json_response(&mock, "acp.session.s1.agent.resume", &expected);
+        set_js_response(&js, &expected);
 
         let request = ResumeSessionRequest::new("s1", ".");
         let result = bridge.resume_session(request).await;
@@ -83,20 +82,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resume_session_returns_error_when_nats_fails() {
-        let (mock, bridge) = mock_bridge();
-        mock.fail_next_request();
+    async fn resume_session_returns_error_when_js_fails() {
+        let (_mock, _js, bridge) = mock_bridge();
 
         let request = ResumeSessionRequest::new("s1", ".");
         let err = bridge.resume_session(request).await.unwrap_err();
 
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+        assert_eq!(err.code, ErrorCode::InternalError);
     }
 
     #[tokio::test]
     async fn resume_session_returns_error_when_response_is_invalid_json() {
-        let (mock, bridge) = mock_bridge();
-        mock.set_response("acp.session.s1.agent.resume", "not json".into());
+        let (_mock, js, bridge) = mock_bridge();
+        crate::agent::test_support::set_js_raw_response(&js, b"not json");
 
         let request = ResumeSessionRequest::new("s1", ".");
         let err = bridge.resume_session(request).await.unwrap_err();
@@ -106,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_validates_session_id() {
-        let (_mock, bridge) = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
         let request = ResumeSessionRequest::new("invalid.session.id", ".");
         let err = bridge.resume_session(request).await.unwrap_err();
 
@@ -116,12 +114,8 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_publishes_session_ready_to_correct_subject() {
-        let (mock, bridge) = mock_bridge();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.resume",
-            &ResumeSessionResponse::new(),
-        );
+        let (mock, js, bridge) = mock_bridge();
+        set_js_response(&js, &ResumeSessionResponse::new());
 
         let _ = bridge
             .resume_session(ResumeSessionRequest::new("s1", "."))
@@ -138,12 +132,8 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_records_metrics_on_success() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.resume",
-            &ResumeSessionResponse::new(),
-        );
+        let (_mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &ResumeSessionResponse::new());
 
         let _ = bridge
             .resume_session(ResumeSessionRequest::new("s1", "."))
@@ -161,8 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_records_metrics_on_failure() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_next_request();
+        let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
         let _ = bridge
             .resume_session(ResumeSessionRequest::new("s1", "."))
@@ -179,12 +168,8 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_records_error_when_session_ready_publish_fails() {
-        let (mock, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.session.s1.agent.resume",
-            &ResumeSessionResponse::new(),
-        );
+        let (mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        set_js_response(&js, &ResumeSessionResponse::new());
         mock.fail_publish_count(4);
 
         let _ = bridge
