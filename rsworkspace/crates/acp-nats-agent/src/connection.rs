@@ -475,9 +475,8 @@ where
                 };
             }
             _ = keepalive.tick() => {
-                if let Err(e) = js_msg.ack_with(AckKind::Progress).await {
-                    warn!(error = %e, "Failed to send in_progress keepalive");
-                }
+                let _ = js_msg.ack_with(AckKind::Progress).await
+                    .inspect_err(|e| warn!(error = %e, "Failed to send in_progress keepalive"));
             }
         }
     }
@@ -675,20 +674,20 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
             }
         }
         Err(DispatchError::NotificationHandler(_)) => {
-            if let Err(e) = js_msg.ack().await {
-                warn!(subject, error = %e, "Failed to ack after notification handler error");
-            }
+            let _ = js_msg.ack().await.inspect_err(
+                |e| warn!(subject, error = %e, "Failed to ack after notification handler error"),
+            );
         }
     }
 
-    if let Err(e) = result {
+    let _ = result.inspect_err(|e| {
         warn!(
             subject,
             session_id = session_id.as_str(),
             error = %e,
             "Error handling JetStream request"
         );
-    }
+    });
 }
 
 #[cfg(test)]
@@ -1874,11 +1873,12 @@ mod tests {
         let msg = make_nats_message("acp.agent.initialize", &payload, None);
         let js_msg = make_js_msg("acp.agent.initialize", &payload, None);
 
-        let result =
-            handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| async {
-                Err::<InitializeResponse, _>(agent_client_protocol::Error::new(-1, "not called"))
-            })
-            .await;
+        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| {
+            std::future::ready(Err::<InitializeResponse, _>(
+                agent_client_protocol::Error::new(-1, "not called"),
+            ))
+        })
+        .await;
         assert!(result.is_err());
     }
 
@@ -1888,11 +1888,12 @@ mod tests {
         let msg = make_nats_message("acp.agent.initialize", b"not json", Some("_INBOX.1"));
         let js_msg = make_js_msg("acp.agent.initialize", b"not json", Some("_INBOX.1"));
 
-        let result =
-            handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| async {
-                Err::<InitializeResponse, _>(agent_client_protocol::Error::new(-1, "not called"))
-            })
-            .await;
+        let result = handle_request_with_keepalive(&msg, &nats, &js_msg, |_: InitializeRequest| {
+            std::future::ready(Err::<InitializeResponse, _>(
+                agent_client_protocol::Error::new(-1, "not called"),
+            ))
+        })
+        .await;
         assert!(result.is_err());
     }
 
