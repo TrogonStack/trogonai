@@ -2,14 +2,17 @@
 #[derive(Debug)]
 pub struct ExtSubject {
     prefix: crate::acp_prefix::AcpPrefix,
-    method: String,
+    method: crate::ext_method_name::ExtMethodName,
 }
 
 impl ExtSubject {
-    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &str) -> Self {
+    pub fn new(
+        prefix: &crate::acp_prefix::AcpPrefix,
+        method: &crate::ext_method_name::ExtMethodName,
+    ) -> Self {
         Self {
             prefix: prefix.clone(),
-            method: method.to_string(),
+            method: method.clone(),
         }
     }
 }

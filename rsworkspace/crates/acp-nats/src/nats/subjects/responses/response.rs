@@ -3,19 +3,19 @@
 pub struct ResponseSubject {
     prefix: crate::acp_prefix::AcpPrefix,
     session_id: crate::session_id::AcpSessionId,
-    req_id: String,
+    req_id: crate::req_id::ReqId,
 }
 
 impl ResponseSubject {
     pub fn new(
         prefix: &crate::acp_prefix::AcpPrefix,
         session_id: &crate::session_id::AcpSessionId,
-        req_id: &str,
+        req_id: &crate::req_id::ReqId,
     ) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
-            req_id: req_id.to_string(),
+            req_id: req_id.clone(),
         }
     }
 }

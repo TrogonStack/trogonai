@@ -52,6 +52,8 @@ pub mod session {
 mod tests {
     use super::{AcpStream, StreamAssignment, agent, session};
     use crate::acp_prefix::AcpPrefix;
+    use crate::ext_method_name::ExtMethodName;
+    use crate::req_id::ReqId;
     use crate::session_id::AcpSessionId;
 
     fn p(s: &str) -> AcpPrefix {
@@ -60,6 +62,14 @@ mod tests {
 
     fn sid(s: &str) -> AcpSessionId {
         AcpSessionId::new(s).expect("test session id")
+    }
+
+    fn method(s: &str) -> ExtMethodName {
+        ExtMethodName::new(s).expect("test method name")
+    }
+
+    fn rid(s: &str) -> ReqId {
+        ReqId::from_test(s)
     }
 
     #[test]
@@ -105,7 +115,7 @@ mod tests {
     #[test]
     fn agent_ext() {
         assert_eq!(
-            agent::ExtSubject::new(&p("acp"), "my_tool").to_string(),
+            agent::ExtSubject::new(&p("acp"), &method("my_tool")).to_string(),
             "acp.agent.ext.my_tool"
         );
     }
@@ -113,7 +123,7 @@ mod tests {
     #[test]
     fn agent_ext_dotted() {
         assert_eq!(
-            agent::ExtSubject::new(&p("acp"), "vendor.op").to_string(),
+            agent::ExtSubject::new(&p("acp"), &method("vendor.op")).to_string(),
             "acp.agent.ext.vendor.op"
         );
     }
@@ -225,7 +235,7 @@ mod tests {
     #[test]
     fn session_agent_update() {
         assert_eq!(
-            session::agent::UpdateSubject::new(&p("acp"), &sid("s1"), "req-abc").to_string(),
+            session::agent::UpdateSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
             "acp.session.s1.agent.update.req-abc"
         );
     }
@@ -233,7 +243,7 @@ mod tests {
     #[test]
     fn session_agent_prompt_response() {
         assert_eq!(
-            session::agent::PromptResponseSubject::new(&p("acp"), &sid("s1"), "req-abc")
+            session::agent::PromptResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc"))
                 .to_string(),
             "acp.session.s1.agent.prompt.response.req-abc"
         );
@@ -242,7 +252,8 @@ mod tests {
     #[test]
     fn session_agent_response() {
         assert_eq!(
-            session::agent::ResponseSubject::new(&p("acp"), &sid("s1"), "req-abc").to_string(),
+            session::agent::ResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc"))
+                .to_string(),
             "acp.session.s1.agent.response.req-abc"
         );
     }
@@ -694,7 +705,7 @@ mod tests {
         );
         // ExtNotifySubject doesn't impl ToSubject — verify via Display
         assert_eq!(
-            agent::ExtNotifySubject::new(&prefix, "my_tool").to_string(),
+            agent::ExtNotifySubject::new(&prefix, &method("my_tool")).to_string(),
             "acp.agent.ext.my_tool"
         );
 
@@ -732,7 +743,7 @@ mod tests {
 
         // Response subject
         assert_eq!(
-            session::agent::ResponseSubject::new(&prefix, &sid, "req-abc")
+            session::agent::ResponseSubject::new(&prefix, &sid, &rid("req-abc"))
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.response.req-abc"
