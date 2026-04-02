@@ -21,6 +21,7 @@ fn test_config(session_root: PathBuf) -> Config {
         output_byte_limit: 1024 * 1024,
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
+        wasm_only: false,
     }
 }
 
@@ -219,6 +220,7 @@ async fn output_byte_limit_truncates() {
         output_byte_limit: 50,
         auto_allow_permissions: true,
         wasm_timeout_secs: None,
+        wasm_only: false,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -515,6 +517,7 @@ async fn wasm_module_runs_with_timeout_set() {
                 output_byte_limit: 1024 * 1024,
                 auto_allow_permissions: true,
                 wasm_timeout_secs: Some(30), // generous timeout — should not fire
+                wasm_only: false,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -681,6 +684,79 @@ async fn wasm_module_background_execution() {
                 "output should be available after wait: {:?}",
                 out.output
             );
+        })
+        .await;
+}
+
+// ── WASM-only mode ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn wasm_only_rejects_native_commands() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = Config {
+        session_root: tmp.path().to_path_buf(),
+        output_byte_limit: 1024 * 1024,
+        auto_allow_permissions: true,
+        wasm_timeout_secs: None,
+        wasm_only: true,
+    };
+    let runtime = WasmRuntime::new(&cfg).unwrap();
+
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
+        .args(vec!["hello".to_string()]);
+    let err = runtime
+        .handle_create_terminal(session_id(), req)
+        .await
+        .expect_err("native command should be rejected in wasm_only mode");
+
+    assert!(
+        err.message.contains("wasm_only"),
+        "error should mention wasm_only: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn wasm_only_allows_wasm_commands() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = Config {
+        session_root: tmp.path().to_path_buf(),
+        output_byte_limit: 1024 * 1024,
+        auto_allow_permissions: true,
+        wasm_timeout_secs: None,
+        wasm_only: true,
+    };
+    let runtime = WasmRuntime::new(&cfg).unwrap();
+
+    let wasm_path = make_wasm(tmp.path(), "ok.wasm", r#"
+        (module
+          (import "wasi_snapshot_preview1" "proc_exit"
+            (func $proc_exit (param i32)))
+          (memory 1)
+          (export "memory" (memory 0))
+          (func (export "_start")
+            (call $proc_exit (i32.const 0))
+          )
+        )
+    "#);
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect(".wasm should be allowed in wasm_only mode");
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(exit.exit_status.exit_code, Some(0));
         })
         .await;
 }
