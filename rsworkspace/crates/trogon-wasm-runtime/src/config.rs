@@ -45,6 +45,9 @@ pub struct Config {
     /// Maximum allowed size for a `.wasm` module file in bytes.
     /// Defaults to 100 MB. Set to 0 for unlimited (not recommended).
     pub wasm_max_module_size_bytes: usize,
+    /// Maximum seconds to wait for a terminal to exit before killing it.
+    /// Defaults to 300 (5 minutes). Set to 0 for no timeout (not recommended).
+    pub wait_for_exit_timeout_secs: u64,
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
@@ -63,6 +66,7 @@ const ENV_ACP_PREFIX: &str = "ACP_PREFIX";
 const ENV_WASM_MAX_CONCURRENT_TASKS: &str = "WASM_MAX_CONCURRENT_TASKS";
 const ENV_SESSION_IDLE_TIMEOUT_SECS: &str = "SESSION_IDLE_TIMEOUT_SECS";
 const ENV_WASM_MAX_MODULE_SIZE_BYTES: &str = "WASM_MAX_MODULE_SIZE_BYTES";
+const ENV_WAIT_FOR_EXIT_TIMEOUT_SECS: &str = "WAIT_FOR_EXIT_TIMEOUT_SECS";
 
 impl Config {
     pub fn from_env() -> Self {
@@ -127,6 +131,11 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(100 * 1024 * 1024usize);
 
+        let wait_for_exit_timeout_secs = std::env::var(ENV_WAIT_FOR_EXIT_TIMEOUT_SECS)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(300u64);
+
         Self {
             session_root,
             output_byte_limit,
@@ -142,6 +151,7 @@ impl Config {
             wasm_max_concurrent_tasks,
             session_idle_timeout_secs,
             wasm_max_module_size_bytes,
+            wait_for_exit_timeout_secs,
         }
     }
 
