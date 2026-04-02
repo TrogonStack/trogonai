@@ -15,7 +15,7 @@ pub struct ReqId(String);
 impl ReqId {
     /// Generates a new random request ID (UUID v4).
     pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        Self(uuid::Uuid::now_v7().to_string())
     }
 
     /// Wraps a raw string read from a NATS header.
