@@ -5,6 +5,7 @@
 pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsWs,
+    TrogonSinkGithub,
 }
 
 impl ServiceName {
@@ -12,6 +13,7 @@ impl ServiceName {
         match self {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsWs => "acp-nats-ws",
+            Self::TrogonSinkGithub => "trogon-sink-github",
         }
     }
 }
@@ -30,11 +32,16 @@ mod tests {
     fn as_str_returns_expected_values() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
+        assert_eq!(ServiceName::TrogonSinkGithub.as_str(), "trogon-sink-github");
     }
 
     #[test]
     fn display_delegates_to_as_str() {
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
+        assert_eq!(
+            format!("{}", ServiceName::TrogonSinkGithub),
+            "trogon-sink-github"
+        );
     }
 }

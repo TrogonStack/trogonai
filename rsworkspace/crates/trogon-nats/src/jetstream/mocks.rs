@@ -246,6 +246,10 @@ impl MockJetStreamPublisher {
             .map(|m| m.payload.clone())
             .collect()
     }
+
+    pub fn published_messages(&self) -> Vec<MockPublishedJsMessage> {
+        self.published.lock().unwrap().clone()
+    }
 }
 
 impl Default for MockJetStreamPublisher {
