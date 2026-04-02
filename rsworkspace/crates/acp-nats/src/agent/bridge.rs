@@ -11,11 +11,11 @@ use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
     ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, Result, ResumeSessionRequest,
-    ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -26,7 +26,7 @@ use trogon_std::time::GetElapsed;
 
 use super::{
     authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize,
-    js_request, list_sessions, load_session, new_session, prompt, resume_session,
+    js_request, list_sessions, load_session, logout, new_session, prompt, resume_session,
     set_session_config_option, set_session_mode, set_session_model,
 };
 
@@ -183,6 +183,10 @@ where
 
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
         authenticate::handle(self, args).await
+    }
+
+    async fn logout(&self, args: LogoutRequest) -> Result<LogoutResponse> {
+        logout::handle(self, args).await
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
