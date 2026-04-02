@@ -28,6 +28,8 @@ pub struct WasmExecConfig {
     pub cwd: Option<PathBuf>,
     /// Shared buffer where stdout/stderr are appended.
     pub output_buf: Arc<Mutex<Vec<u8>>>,
+    /// Set to `true` by the I/O reader tasks when bytes are dropped due to the limit.
+    pub was_truncated: Arc<std::sync::atomic::AtomicBool>,
     /// Maximum bytes kept in `output_buf`; oldest bytes are dropped when exceeded.
     pub output_byte_limit: usize,
     /// Optional wall-clock execution timeout.
@@ -138,6 +140,12 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 //   unsubscribe(sub_id i32) -> i32
 //   request_permission(options_json_ptr i32, options_json_len i32,
 //                      out_selected_ptr i32) -> i32
+
+/// Maximum number of simultaneous active NATS subscriptions a single WASM module
+/// execution may hold. Prevents a runaway module from exhausting the shared NATS
+/// connection with thousands of idle subscribers. The host_call_limit provides
+/// a secondary bound on total calls but not on concurrent live subscribers.
+const MAX_SUBSCRIPTIONS_PER_MODULE: usize = 64;
 
 fn add_trogon_host_functions(
     engine: &Engine,
@@ -363,6 +371,12 @@ fn add_trogon_host_functions(
                 }
                 caller.data_mut().host_call_budget -= 1;
                 METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                // Enforce per-module subscription cap to prevent NATS connection exhaustion.
+                if caller.data().subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_MODULE {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e { Some(m) } else { None }
@@ -683,6 +697,7 @@ pub async fn run_module_compiled(
         sandbox_dir,
         cwd,
         output_buf,
+        was_truncated,
         output_byte_limit,
         timeout_secs,
         memory_limit_bytes,
@@ -757,24 +772,26 @@ pub async fn run_module_compiled(
 
     // Spawn reader tasks BEFORE running the module so output streams concurrently.
     let buf_out = Arc::clone(&output_buf);
+    let trunc_out = Arc::clone(&was_truncated);
     let limit_out = output_byte_limit;
     let stdout_task = tokio::task::spawn(async move {
         let mut chunk = [0u8; 4096];
         loop {
             match stdout_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => WasmTerminal::append_output(&buf_out, limit_out, &chunk[..n]),
+                Ok(n) => WasmTerminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n]),
             }
         }
     });
 
     let buf_err = Arc::clone(&output_buf);
+    let trunc_err = Arc::clone(&was_truncated);
     let stderr_task = tokio::task::spawn(async move {
         let mut chunk = [0u8; 4096];
         loop {
             match stderr_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => WasmTerminal::append_output(&buf_err, limit_out, &chunk[..n]),
+                Ok(n) => WasmTerminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n]),
             }
         }
     });

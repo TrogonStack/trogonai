@@ -30,11 +30,14 @@ pub(crate) enum TerminalKind {
 pub struct WasmTerminal {
     pub(crate) kind: TerminalKind,
     pub(crate) output_buf: Arc<Mutex<Vec<u8>>>,
-    pub(crate) output_byte_limit: usize,
     /// Background task that drains stdout/stderr (native) or runs the WASM module.
     pub(crate) output_collector: Option<tokio::task::JoinHandle<()>>,
     /// Cached exit status — set after `handle_wait_for_terminal_exit` completes.
     pub(crate) exit_status: Option<TerminalExitStatus>,
+    /// Set to `true` the first time `append_output` drops bytes due to the limit.
+    /// Semantics: "has any output been lost?" — distinct from "is the buffer full?"
+    /// which can be true even when no bytes were ever dropped.
+    pub(crate) was_truncated: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl WasmTerminal {
@@ -45,7 +48,7 @@ impl WasmTerminal {
     pub fn snapshot(&self) -> TerminalOutputResponse {
         let buf = self.output_buf.lock().unwrap_or_else(|e| e.into_inner());
         let output = String::from_utf8_lossy(&buf).into_owned();
-        let truncated = buf.len() >= self.output_byte_limit;
+        let truncated = self.was_truncated.load(std::sync::atomic::Ordering::Relaxed);
         let exit_status = self.exit_status.clone().or_else(|| {
             if let TerminalKind::Wasm { ref exit_arc } = self.kind {
                 exit_arc.lock().ok().and_then(|g| g.clone())
@@ -58,7 +61,13 @@ impl WasmTerminal {
 
     /// Appends bytes to the output buffer, dropping the oldest bytes if the
     /// limit would be exceeded. Preserves UTF-8 char boundaries when trimming.
-    pub fn append_output(buf: &Arc<Mutex<Vec<u8>>>, limit: usize, data: &[u8]) {
+    /// Sets `was_truncated` to `true` the first time bytes are dropped.
+    pub fn append_output(
+        buf: &Arc<Mutex<Vec<u8>>>,
+        was_truncated: &Arc<std::sync::atomic::AtomicBool>,
+        limit: usize,
+        data: &[u8],
+    ) {
         let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
         guard.extend_from_slice(data);
         if guard.len() > limit {
@@ -68,6 +77,7 @@ impl WasmTerminal {
                 trim_at += 1;
             }
             guard.drain(..trim_at);
+            was_truncated.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
