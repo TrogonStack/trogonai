@@ -20,6 +20,12 @@ pub struct Config {
     /// Optional maximum number of bytes a WASM module's linear memory can grow to.
     /// When `None`, memory growth is unlimited (subject to OS/hardware limits).
     pub wasm_memory_limit_bytes: Option<usize>,
+    /// Directory for on-disk compiled module cache (.cwasm files).
+    /// When `None`, on-disk caching is disabled (in-memory cache still active).
+    pub module_cache_dir: Option<PathBuf>,
+    /// When `true`, WASM modules can access the network via WASI sockets.
+    /// Defaults to `false`.
+    pub wasm_allow_network: bool,
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
@@ -30,6 +36,8 @@ const ENV_AUTO_ALLOW_PERMISSIONS: &str = "WASM_AUTO_ALLOW_PERMISSIONS";
 const ENV_WASM_TIMEOUT_SECS: &str = "WASM_TIMEOUT_SECS";
 const ENV_WASM_ONLY: &str = "WASM_ONLY";
 const ENV_WASM_MEMORY_LIMIT_BYTES: &str = "WASM_MEMORY_LIMIT_BYTES";
+const ENV_MODULE_CACHE_DIR: &str = "WASM_MODULE_CACHE_DIR";
+const ENV_WASM_ALLOW_NETWORK: &str = "WASM_ALLOW_NETWORK";
 
 impl Config {
     pub fn from_env() -> Self {
@@ -58,6 +66,14 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok());
 
+        let module_cache_dir = std::env::var(ENV_MODULE_CACHE_DIR)
+            .ok()
+            .map(PathBuf::from);
+
+        let wasm_allow_network = std::env::var(ENV_WASM_ALLOW_NETWORK)
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         Self {
             session_root,
             output_byte_limit,
@@ -65,6 +81,8 @@ impl Config {
             wasm_timeout_secs,
             wasm_only,
             wasm_memory_limit_bytes,
+            module_cache_dir,
+            wasm_allow_network,
         }
     }
 }

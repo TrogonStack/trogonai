@@ -16,6 +16,8 @@ pub(crate) struct WasmStoreData {
     pub limits: StoreLimitsData,
     pub nats: Option<async_nats::Client>,
     pub session_id: String,
+    /// When `true`, `request_permission` auto-selects the first option.
+    pub auto_allow_permissions: bool,
 }
 
 /// Memory limit state threaded through the store.
@@ -173,6 +175,122 @@ fn add_trogon_host_functions(
         },
     )?;
 
+    // trogon.nats_request(subj_ptr, subj_len, pay_ptr, pay_len, timeout_ms, out_ptr, out_max) -> i32
+    linker.func_new_async(
+        "trogon",
+        "nats_request",
+        wasmtime::FuncType::new(
+            engine,
+            [ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I32],
+        ),
+        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+            let subj_ptr   = params[0].unwrap_i32() as usize;
+            let subj_len   = params[1].unwrap_i32() as usize;
+            let pay_ptr    = params[2].unwrap_i32() as usize;
+            let pay_len    = params[3].unwrap_i32() as usize;
+            let timeout_ms = params[4].unwrap_i32();
+            let out_ptr    = params[5].unwrap_i32() as usize;
+            let out_max    = params[6].unwrap_i32() as usize;
+            Box::new(async move {
+                let mem = match caller.get_export("memory").and_then(|e| {
+                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                }) {
+                    Some(m) => m,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                // Read subject and payload BEFORE any await.
+                let (subject, payload) = {
+                    let data = mem.data(&caller);
+                    let subj = match read_str(data, subj_ptr, subj_len) {
+                        Some(s) => s.to_owned(),
+                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    };
+                    let pay = match read_bytes(data, pay_ptr, pay_len) {
+                        Some(b) => bytes::Bytes::copy_from_slice(b),
+                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    };
+                    (subj, pay)
+                };
+
+                let nats = match caller.data().nats.clone() {
+                    Some(n) => n,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+                let response = match tokio::time::timeout(timeout, nats.request(subject, payload)).await {
+                    Ok(Ok(msg)) => msg.payload,
+                    _ => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                // Write response into WASM memory.
+                let to_write = response.len().min(out_max);
+                let mem_data = mem.data_mut(&mut caller);
+                if out_ptr + to_write > mem_data.len() {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+                mem_data[out_ptr..out_ptr + to_write].copy_from_slice(&response[..to_write]);
+                results[0] = wasmtime::Val::I32(to_write as i32);
+                Ok(())
+            })
+        },
+    )?;
+
+    // trogon.request_permission(options_json_ptr, options_json_len, out_selected_ptr) -> i32
+    // Returns 0 on success (writes selected index to out_selected_ptr), -1 on cancel/error.
+    linker.func_new_async(
+        "trogon",
+        "request_permission",
+        wasmtime::FuncType::new(
+            engine,
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I32],
+        ),
+        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+            let opt_ptr = params[0].unwrap_i32() as usize;
+            let opt_len = params[1].unwrap_i32() as usize;
+            let out_ptr = params[2].unwrap_i32() as usize;
+            Box::new(async move {
+                let mem = match caller.get_export("memory").and_then(|e| {
+                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                }) {
+                    Some(m) => m,
+                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                };
+
+                let (options, auto_allow) = {
+                    let data = mem.data(&caller);
+                    let json_str = match read_str(data, opt_ptr, opt_len) {
+                        Some(s) => s.to_owned(),
+                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    };
+                    let opts: Vec<String> = serde_json::from_str(&json_str).unwrap_or_default();
+                    (opts, caller.data().auto_allow_permissions)
+                };
+
+                if options.is_empty() {
+                    results[0] = wasmtime::Val::I32(-1);
+                    return Ok(());
+                }
+
+                if auto_allow {
+                    // Write selected index (0) to WASM memory.
+                    let mem_data = mem.data_mut(&mut caller);
+                    if out_ptr + 4 <= mem_data.len() {
+                        mem_data[out_ptr..out_ptr + 4].copy_from_slice(&0i32.to_le_bytes());
+                    }
+                    results[0] = wasmtime::Val::I32(0);
+                } else {
+                    results[0] = wasmtime::Val::I32(-1);
+                }
+                Ok(())
+            })
+        },
+    )?;
+
     Ok(())
 }
 
@@ -196,6 +314,8 @@ pub async fn run_module_compiled(
     memory_limit_bytes: Option<usize>,
     nats_client: Option<async_nats::Client>,
     session_id: String,
+    allow_network: bool,
+    auto_allow_permissions: bool,
 ) -> Result<TerminalExitStatus, anyhow::Error> {
     let mut linker: Linker<WasmStoreData> = Linker::new(engine);
     preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
@@ -220,6 +340,10 @@ pub async fn run_module_compiled(
         builder.env(k, v);
     }
 
+    if allow_network {
+        builder.inherit_network();
+    }
+
     let wasi_ctx = builder.build_p1();
     let store_data = WasmStoreData {
         wasi: wasi_ctx,
@@ -228,6 +352,7 @@ pub async fn run_module_compiled(
         },
         nats: nats_client,
         session_id,
+        auto_allow_permissions,
     };
     let mut store = Store::new(engine, store_data);
 
@@ -342,6 +467,8 @@ pub async fn run_module(
         None,
         None,
         String::new(),
+        false,
+        false,
     )
     .await
 }

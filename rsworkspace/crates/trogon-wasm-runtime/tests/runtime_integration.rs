@@ -23,6 +23,8 @@ fn test_config(session_root: PathBuf) -> Config {
         wasm_timeout_secs: None,
         wasm_only: false,
         wasm_memory_limit_bytes: None,
+        module_cache_dir: None,
+        wasm_allow_network: false,
     }
 }
 
@@ -223,6 +225,8 @@ async fn output_byte_limit_truncates() {
         wasm_timeout_secs: None,
         wasm_only: false,
         wasm_memory_limit_bytes: None,
+        module_cache_dir: None,
+        wasm_allow_network: false,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -521,6 +525,8 @@ async fn wasm_module_runs_with_timeout_set() {
                 wasm_timeout_secs: Some(30), // generous timeout — should not fire
                 wasm_only: false,
                 wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: false,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -703,6 +709,8 @@ async fn wasm_only_rejects_native_commands() {
         wasm_timeout_secs: None,
         wasm_only: true,
         wasm_memory_limit_bytes: None,
+        module_cache_dir: None,
+        wasm_allow_network: false,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -730,6 +738,8 @@ async fn wasm_only_allows_wasm_commands() {
         wasm_timeout_secs: None,
         wasm_only: true,
         wasm_memory_limit_bytes: None,
+        module_cache_dir: None,
+        wasm_allow_network: false,
     };
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -785,6 +795,8 @@ async fn wasm_module_memory_limit_enforced() {
                 wasm_only: false,
                 // 64 MB — generous, should not prevent the 1-page module from running.
                 wasm_memory_limit_bytes: Some(64 * 1024 * 1024),
+                module_cache_dir: None,
+                wasm_allow_network: false,
             };
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
@@ -879,6 +891,435 @@ async fn wasm_module_trogon_log_host_function() {
                 exit.exit_status.exit_code,
                 Some(0),
                 "module calling trogon.log should exit cleanly"
+            );
+        })
+        .await;
+}
+
+// ── Feature: Persistent on-disk module cache ──────────────────────────────
+
+/// Compile a module with runtime A (writes on-disk cache), then create runtime B
+/// with the same `module_cache_dir` — runtime B should load from disk and succeed.
+#[tokio::test]
+async fn module_cache_persists_across_runtimes() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+
+    let exit_wat = r#"
+        (module
+          (import "wasi_snapshot_preview1" "proc_exit"
+            (func $proc_exit (param i32)))
+          (memory 1)
+          (export "memory" (memory 0))
+          (func (export "_start")
+            (call $proc_exit (i32.const 0))
+            unreachable
+          )
+        )
+    "#;
+
+    let wasm_path = make_wasm(tmp.path(), "persist_cache.wasm", exit_wat);
+
+    // Runtime A: compiles and writes on-disk cache.
+    {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let cfg = Config {
+                    session_root: tmp.path().join("sessions_a"),
+                    output_byte_limit: 1024 * 1024,
+                    auto_allow_permissions: true,
+                    wasm_timeout_secs: None,
+                    wasm_only: false,
+                    wasm_memory_limit_bytes: None,
+                    module_cache_dir: Some(cache_dir.path().to_path_buf()),
+                    wasm_allow_network: false,
+                };
+                let runtime = WasmRuntime::new(&cfg).unwrap();
+                let req = CreateTerminalRequest::new(
+                    SessionId::from("s1"),
+                    wasm_path.to_str().unwrap(),
+                );
+                let resp = runtime
+                    .handle_create_terminal("session-a", req)
+                    .await
+                    .expect("runtime A should compile and run module");
+                let wait_req =
+                    WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+                let exit = runtime
+                    .handle_wait_for_terminal_exit(wait_req)
+                    .await
+                    .unwrap();
+                assert_eq!(exit.exit_status.exit_code, Some(0), "runtime A: exit 0");
+            })
+            .await;
+    }
+
+    // Verify cache files were written.
+    let cache_files: Vec<_> = std::fs::read_dir(cache_dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert!(
+        !cache_files.is_empty(),
+        "cache directory should contain cached module files"
+    );
+
+    // Runtime B: loads from on-disk cache (same module_cache_dir).
+    {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let cfg = Config {
+                    session_root: tmp.path().join("sessions_b"),
+                    output_byte_limit: 1024 * 1024,
+                    auto_allow_permissions: true,
+                    wasm_timeout_secs: None,
+                    wasm_only: false,
+                    wasm_memory_limit_bytes: None,
+                    module_cache_dir: Some(cache_dir.path().to_path_buf()),
+                    wasm_allow_network: false,
+                };
+                let runtime = WasmRuntime::new(&cfg).unwrap();
+                let req = CreateTerminalRequest::new(
+                    SessionId::from("s1"),
+                    wasm_path.to_str().unwrap(),
+                );
+                let resp = runtime
+                    .handle_create_terminal("session-b", req)
+                    .await
+                    .expect("runtime B should load from disk cache and run module");
+                let wait_req =
+                    WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+                let exit = runtime
+                    .handle_wait_for_terminal_exit(wait_req)
+                    .await
+                    .unwrap();
+                assert_eq!(exit.exit_status.exit_code, Some(0), "runtime B: exit 0");
+            })
+            .await;
+    }
+}
+
+/// Overwrite the `.wasm` file with different bytes; verify the runtime recompiles
+/// and the new module runs correctly (old cached version is not used).
+#[tokio::test]
+async fn module_cache_invalidates_on_mtime_change() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+
+    // First WAT: exits with code 7.
+    let wat_v1 = r#"
+        (module
+          (import "wasi_snapshot_preview1" "proc_exit"
+            (func $proc_exit (param i32)))
+          (memory 1)
+          (export "memory" (memory 0))
+          (func (export "_start")
+            (call $proc_exit (i32.const 7))
+            unreachable
+          )
+        )
+    "#;
+
+    // Second WAT: exits with code 42.
+    let wat_v2 = r#"
+        (module
+          (import "wasi_snapshot_preview1" "proc_exit"
+            (func $proc_exit (param i32)))
+          (memory 1)
+          (export "memory" (memory 0))
+          (func (export "_start")
+            (call $proc_exit (i32.const 42))
+            unreachable
+          )
+        )
+    "#;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().join("sessions"),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: Some(cache_dir.path().to_path_buf()),
+                wasm_allow_network: false,
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            // Write and run v1 (exit code 7).
+            let wasm_path = make_wasm(tmp.path(), "invalidate_test.wasm", wat_v1);
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal("session-v1", req)
+                .await
+                .expect("v1 module should run");
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(exit.exit_status.exit_code, Some(7), "v1 should exit 7");
+
+            // Overwrite the file with v2 bytes and ensure mtime advances.
+            let wasm_bytes_v2 = wat::parse_str(wat_v2).expect("WAT v2 compile failed");
+            // Sleep briefly to guarantee mtime difference.
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            std::fs::write(&wasm_path, &wasm_bytes_v2).unwrap();
+            // Touch file to ensure mtime changes (some filesystems have 1s resolution).
+            // We use filetime manipulation via std to set a future mtime.
+            let new_mtime = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+            // Write again with a slight delay ensures at least different content hash.
+            // On Linux, mtime has nanosecond resolution so writing new bytes is enough.
+            let _ = new_mtime; // we just rely on the write changing mtime
+
+            // Run again — should pick up v2 (exit code 42).
+            let req2 = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp2 = runtime
+                .handle_create_terminal("session-v2", req2)
+                .await
+                .expect("v2 module should run after invalidation");
+            let wait_req2 =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp2.terminal_id);
+            let exit2 = runtime
+                .handle_wait_for_terminal_exit(wait_req2)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit2.exit_status.exit_code,
+                Some(42),
+                "v2 should exit 42 (cache was invalidated)"
+            );
+        })
+        .await;
+}
+
+// ── Feature: trogon.nats_request host function ────────────────────────────
+
+/// A WASM module calling `nats_request` with no NATS client should get -1
+/// and exit cleanly (no panic, no trap).
+#[tokio::test]
+async fn wasm_module_trogon_nats_request_no_nats() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // WasmRuntime::new has no NATS client.
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            // WAT: call nats_request, expect -1, then proc_exit(0).
+            // Memory layout:
+            //   offset 0: subject string "test"
+            //   offset 4: payload (empty, 0 bytes)
+            //   offset 4: out_buf (4 bytes, for potential response)
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "nats_request_no_nats.wasm",
+                r#"
+                (module
+                  (import "trogon" "nats_request"
+                    (func $nats_request (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "test")
+                  (func (export "_start")
+                    ;; nats_request("test", 4, "", 0, 100ms, out_buf@100, 64)
+                    (local $ret i32)
+                    (local.set $ret
+                      (call $nats_request
+                        (i32.const 0)   ;; subject_ptr
+                        (i32.const 4)   ;; subject_len
+                        (i32.const 0)   ;; payload_ptr (empty)
+                        (i32.const 0)   ;; payload_len
+                        (i32.const 100) ;; timeout_ms
+                        (i32.const 100) ;; out_buf_ptr
+                        (i32.const 64)  ;; out_buf_max
+                      )
+                    )
+                    ;; expect -1 (no NATS)
+                    (if (i32.ne (local.get $ret) (i32.const -1))
+                      (then (call $proc_exit (i32.const 1)))
+                    )
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with nats_request should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "nats_request with no NATS should return -1 and module should exit cleanly"
+            );
+        })
+        .await;
+}
+
+// ── Feature: trogon.request_permission host function ─────────────────────
+
+/// A WASM module calling `request_permission` with auto_allow=true should get
+/// return value 0 and out_selected written as 0, then proc_exit(0).
+#[tokio::test]
+async fn wasm_module_request_permission_auto_allow() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // auto_allow_permissions = true (default in test_config).
+            let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+            // JSON options string: ["Allow","Deny"] — 16 bytes
+            // In WAT string literals, " is \22.
+            // ["Allow","Deny"] = [\22Allow\22,\22Deny\22]
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "request_permission_allow.wasm",
+                r#"
+                (module
+                  (import "trogon" "request_permission"
+                    (func $request_permission (param i32 i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "[\22Allow\22,\22Deny\22]")
+                  (func (export "_start")
+                    (local $ret i32)
+                    (local $selected i32)
+                    (local.set $ret
+                      (call $request_permission
+                        (i32.const 0)    ;; options_json_ptr
+                        (i32.const 16)   ;; options_json_len (["Allow","Deny"] = 16 bytes)
+                        (i32.const 100)  ;; out_selected_ptr
+                      )
+                    )
+                    ;; ret should be 0 (success)
+                    (if (i32.ne (local.get $ret) (i32.const 0))
+                      (then (call $proc_exit (i32.const 1)))
+                    )
+                    ;; out_selected (i32 at offset 100) should be 0
+                    (local.set $selected (i32.load (i32.const 100)))
+                    (if (i32.ne (local.get $selected) (i32.const 0))
+                      (then (call $proc_exit (i32.const 2)))
+                    )
+                    (call $proc_exit (i32.const 0))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module with request_permission should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "request_permission with auto_allow should return 0 and write selected=0"
+            );
+        })
+        .await;
+}
+
+// ── Feature: WASI network access ─────────────────────────────────────────
+
+/// Verify that enabling `wasm_allow_network` doesn't break a simple module.
+#[tokio::test]
+async fn wasm_module_network_enabled_flag_wires_through() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                session_root: tmp.path().to_path_buf(),
+                output_byte_limit: 1024 * 1024,
+                auto_allow_permissions: true,
+                wasm_timeout_secs: None,
+                wasm_only: false,
+                wasm_memory_limit_bytes: None,
+                module_cache_dir: None,
+                wasm_allow_network: true, // network enabled
+            };
+            let runtime = WasmRuntime::new(&cfg).unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "network_enabled.wasm",
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (func (export "_start")
+                    (call $proc_exit (i32.const 0))
+                    unreachable
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should run with network enabled");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "module should exit cleanly with wasm_allow_network=true"
             );
         })
         .await;
