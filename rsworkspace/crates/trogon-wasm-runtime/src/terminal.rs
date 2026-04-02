@@ -115,12 +115,21 @@ impl WasmTerminal {
                 }
                 false
             }
-            TerminalKind::Wasm { .. } => {
+            TerminalKind::Wasm { ref exit_arc } => {
                 // Abort the spawn_local task that runs the module. The task's
                 // JoinHandle is stored in output_collector; aborting it causes
                 // wasmtime to drop the Store mid-execution, which is safe.
                 if let Some(c) = self.output_collector.take() {
                     c.abort();
+                    // Populate the exit arc so that any concurrent or subsequent
+                    // wait_for_terminal_exit call sees a terminal state instead of
+                    // spinning forever on yield_now waiting for a task that was
+                    // aborted and will never write its own exit status.
+                    if let Ok(mut g) = exit_arc.lock() {
+                        g.get_or_insert_with(|| {
+                            TerminalExitStatus::new().signal(Some("killed".to_string()))
+                        });
+                    }
                     true
                 } else {
                     false
