@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(%nats_url, %acp_prefix, session_root = %cfg.session_root.display(), "WASM runtime starting");
 
     let nats = async_nats::connect(&nats_url).await?;
-    let runtime = Rc::new(WasmRuntime::new(&cfg)?);
+    let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
 
     let local = tokio::task::LocalSet::new();
     local
