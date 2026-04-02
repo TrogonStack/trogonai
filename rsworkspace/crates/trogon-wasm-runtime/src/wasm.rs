@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
-use wasmtime::{Caller, Engine, Extern, Linker, Module, ResourceLimiter, Store, ValType};
+use wasmtime::{Caller, Engine, Extern, InstancePre, Linker, ResourceLimiter, Store, ValType};
 use wasmtime_wasi::pipe::AsyncWriteStream;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
@@ -16,8 +16,9 @@ use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
 /// All parameters needed to execute one WASM module invocation.
 /// Replaces the previous 17-argument function signature.
 pub struct WasmExecConfig {
-    /// Pre-compiled wasmtime module to run.
-    pub module: Module,
+    /// Pre-linked instance ready for `instantiate_async`.
+    /// Built once per unique module path and cached in `WasmRuntime`.
+    pub instance_pre: InstancePre<WasmStoreData>,
     /// Full argv, including argv[0] (the module path / program name).
     pub argv: Vec<String>,
     /// Environment variables to expose inside the module.
@@ -146,6 +147,18 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 /// connection with thousands of idle subscribers. The host_call_limit provides
 /// a secondary bound on total calls but not on concurrent live subscribers.
 const MAX_SUBSCRIPTIONS_PER_MODULE: usize = 64;
+
+/// Builds a `Linker` with all WASI (WASIp1) and `trogon_v1` host functions registered.
+///
+/// Called once per `WasmRuntime` instance; the resulting linker is stored on the runtime
+/// and reused across all module invocations. Call `linker.instantiate_pre(&module)` to
+/// produce an `InstancePre` that can be cached per-module and cloned per invocation.
+pub(crate) fn build_linker(engine: &Engine) -> anyhow::Result<Linker<WasmStoreData>> {
+    let mut linker: Linker<WasmStoreData> = Linker::new(engine);
+    preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
+    add_trogon_host_functions(engine, &mut linker)?;
+    Ok(linker)
+}
 
 fn add_trogon_host_functions(
     engine: &Engine,
@@ -678,7 +691,7 @@ fn add_trogon_host_functions(
 
 // ── Module execution ─────────────────────────────────────────────────────────
 
-/// Runs a WASIp1 core module using a pre-compiled `Module`.
+/// Runs a WASIp1 core module from a pre-linked `InstancePre`.
 ///
 /// All execution parameters are passed via [`WasmExecConfig`].
 /// The module is sandboxed to `config.sandbox_dir` as its preopened root (`/`).
@@ -687,11 +700,10 @@ fn add_trogon_host_functions(
 /// correct working directory.
 /// Output is appended directly to `config.output_buf` as bytes arrive.
 pub async fn run_module_compiled(
-    engine: &Engine,
     config: WasmExecConfig,
 ) -> Result<TerminalExitStatus, anyhow::Error> {
     let WasmExecConfig {
-        module,
+        instance_pre,
         argv,
         env_vars,
         sandbox_dir,
@@ -709,10 +721,6 @@ pub async fn run_module_compiled(
         host_call_limit,
         acp_prefix,
     } = config;
-    let mut linker: Linker<WasmStoreData> = Linker::new(engine);
-    preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
-    add_trogon_host_functions(engine, &mut linker)?;
-    let pre = linker.instantiate_pre(&module)?;
 
     // Set up streaming stdout/stderr via duplex pipes.
     let (stdout_writer, mut stdout_reader) = tokio::io::duplex(64 * 1024);
@@ -759,7 +767,7 @@ pub async fn run_module_compiled(
         next_sub_id: 0,
         acp_prefix,
     };
-    let mut store = Store::new(engine, store_data);
+    let mut store = Store::new(instance_pre.module().engine(), store_data);
 
     // Wire up the memory limiter if a limit is set.
     if memory_limit_bytes.is_some() {
@@ -797,7 +805,7 @@ pub async fn run_module_compiled(
         }
     });
 
-    let instance = pre.instantiate_async(&mut store).await?;
+    let instance = instance_pre.instantiate_async(&mut store).await?;
     let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
 
     let call_result = if let Some(secs) = timeout_secs {
