@@ -123,6 +123,10 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 //
 // Current stable interface:
 //   log(level_ptr i32, level_len i32, msg_ptr i32, msg_len i32)
+//     NOTE: the level string is forwarded as a structured tracing field but
+//     the host always emits the event at INFO level. This is intentional —
+//     WASM modules must not be able to inject false ERROR/WARN events into
+//     the host's observability pipeline and trigger spurious alerts.
 //   nats_publish(subj_ptr i32, subj_len i32, payload_ptr i32, payload_len i32) -> i32
 //   nats_request(subj_ptr i32, subj_len i32, pay_ptr i32, pay_len i32,
 //                timeout_ms i32, out_ptr i32, out_max i32) -> i32
@@ -262,7 +266,7 @@ fn add_trogon_host_functions(
         },
     )?;
 
-    // trogon.nats_request(subj_ptr, subj_len, pay_ptr, pay_len, timeout_ms, out_ptr, out_max) -> i32
+    // trogon_v1.nats_request(subj_ptr, subj_len, pay_ptr, pay_len, timeout_ms, out_ptr, out_max) -> i32
     linker.func_new_async(
         "trogon_v1",
         "nats_request",
@@ -338,7 +342,7 @@ fn add_trogon_host_functions(
         },
     )?;
 
-    // trogon.subscribe(subject_ptr, subject_len) -> i32
+    // trogon_v1.subscribe(subject_ptr, subject_len) -> i32
     // Returns subscription ID (>= 0) or -1 on error/no NATS.
     linker.func_new_async(
         "trogon_v1",
@@ -543,7 +547,7 @@ fn add_trogon_host_functions(
         },
     )?;
 
-    // trogon.request_permission(options_json_ptr, options_json_len, out_selected_ptr) -> i32
+    // trogon_v1.request_permission(options_json_ptr, options_json_len, out_selected_ptr) -> i32
     // Returns 0 on success (writes selected index to out_selected_ptr), -1 on cancel/error.
     linker.func_new_async(
         "trogon_v1",

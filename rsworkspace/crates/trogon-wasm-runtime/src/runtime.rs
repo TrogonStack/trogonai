@@ -125,7 +125,9 @@ impl WasmRuntime {
         })
     }
 
-    /// Returns (or lazily creates) the sandbox directory for a session.
+    /// Returns (and lazily registers) the sandbox path for a session.
+    ///
+    /// Does **not** create the directory on disk — call [`ensure_session_dir`] for that.
     fn session_dir(&self, session_id: &str) -> PathBuf {
         let mut sessions = self.sessions.borrow_mut();
         if let Some(s) = sessions.get_mut(session_id) {
@@ -845,21 +847,24 @@ impl WasmRuntime {
             }
         };
 
-        // Capture the PID before moving `child` into the async block.
-        // If a wait timeout fires and cancels the future, the Child is dropped
-        // without being killed (tokio::process::Child does not kill on drop).
-        // We use the stored PID to send SIGKILL from the timeout arm.
-        let child_pid = child.as_ref().and_then(|c| c.id());
-
         // Wait outside any borrow — terminal stays in map the whole time.
         let timeout = self.wait_for_exit_timeout_secs;
-        let terminal_id_for_wait = terminal_id.clone();
-        let do_wait = async move {
-            let terminal_id = terminal_id_for_wait;
-            if let Some(child_proc) = child {
-                // Native process: wait for it, then drain the output collector.
-                let s = match child_proc.wait_with_output().await {
-                    Ok(o) => crate::terminal::exit_status_from_std(&o.status),
+        // Keep child_opt in scope (not moved into a future) so that on timeout
+        // we can call child.kill() via the safe Tokio API instead of libc::kill
+        // by PID, which has a PID-reuse race if the process exits just as the
+        // timeout fires.
+        let mut child_opt = child;
+
+        let status = if let Some(ref mut child_proc) = child_opt {
+            // Native process: wait for exit with optional kill-on-timeout.
+            // child_proc.wait() borrows child_proc for the duration of the future;
+            // when the timeout drops the future the borrow ends and child_proc is
+            // accessible again in the Err arm for the safe kill() call.
+            // stdout/stderr are already drained by the background collector task,
+            // so wait() (not wait_with_output()) is sufficient here.
+            if timeout == 0 {
+                let s = match child_proc.wait().await {
+                    Ok(st) => crate::terminal::exit_status_from_std(&st),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to wait for terminal process");
                         TerminalExitStatus::new()
@@ -869,62 +874,70 @@ impl WasmRuntime {
                     let _ = c.await;
                 }
                 s
-            } else if let Some(c) = collector {
-                // WASM background task: wait for the task to finish.
-                let _ = c.await;
-                wasm_exit_arc
-                    .as_ref()
-                    .and_then(|arc| arc.lock().ok())
-                    .and_then(|g| g.clone())
-                    .unwrap_or_else(TerminalExitStatus::new)
             } else {
-                // Both child and collector are None. Two cases:
-                //   a) Terminal already exited — the fast-path above would have caught this;
-                //      we only reach here on a TOCTOU race between the fast-path check and
-                //      the borrow_mut extraction (harmless; wasm_exit_arc will have a value).
-                //   b) Another wait_for_terminal_exit call is running and already took the
-                //      collector/child. For WASM terminals, poll the shared exit arc until
-                //      the background task (and the other caller) populate it. For native
-                //      terminals there is no shared arc — return empty (programming error:
-                //      two concurrent waits on the same native terminal is unsupported).
-                if let Some(arc) = wasm_exit_arc {
-                    loop {
-                        if let Some(status) = arc.lock().ok().and_then(|g| g.clone()) {
-                            break status;
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout),
+                    child_proc.wait(),
+                )
+                .await
+                {
+                    Ok(Ok(exit_status)) => {
+                        if let Some(c) = collector {
+                            let _ = c.await;
                         }
-                        tokio::task::yield_now().await;
+                        crate::terminal::exit_status_from_std(&exit_status)
                     }
-                } else {
-                    tracing::warn!(
-                        terminal_id = %terminal_id,
-                        "Concurrent wait_for_terminal_exit on native terminal — \
-                         second caller gets empty status; concurrent native waits are unsupported"
-                    );
-                    TerminalExitStatus::new()
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "Failed to wait for terminal process");
+                        if let Some(c) = collector {
+                            c.abort();
+                        }
+                        TerminalExitStatus::new()
+                    }
+                    Err(_elapsed) => {
+                        tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
+                        // child_proc.wait() future was dropped by tokio::time::timeout,
+                        // releasing its borrow; child_proc is now accessible for kill().
+                        let _ = child_proc.kill().await;
+                        if let Some(c) = collector {
+                            c.abort();
+                        }
+                        TerminalExitStatus::new().signal(Some("wait_timeout".to_string()))
+                    }
                 }
             }
-        };
-
-        let status = if timeout == 0 {
-            do_wait.await
+        } else if let Some(c) = collector {
+            // WASM background task: wait for the task to finish.
+            let _ = c.await;
+            wasm_exit_arc
+                .as_ref()
+                .and_then(|arc| arc.lock().ok())
+                .and_then(|g| g.clone())
+                .unwrap_or_else(TerminalExitStatus::new)
         } else {
-            match tokio::time::timeout(std::time::Duration::from_secs(timeout), do_wait).await {
-                Ok(s) => s,
-                Err(_) => {
-                    tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
-                    // The Child was moved into the cancelled future and is now
-                    // dropped without being killed. Kill by PID to avoid orphans.
-                    #[cfg(unix)]
-                    if let Some(pid) = child_pid {
-                        // SAFETY: pid was obtained from the Child moments ago on
-                        // this single-threaded LocalSet. The process is still
-                        // alive (wait timed out) and we own it exclusively.
-                        unsafe {
-                            libc::kill(pid as libc::pid_t, libc::SIGKILL);
-                        }
+            // Both child and collector are None. Two cases:
+            //   a) Terminal already exited — the fast-path above would have caught this;
+            //      we only reach here on a TOCTOU race between the fast-path check and
+            //      the borrow_mut extraction (harmless; wasm_exit_arc will have a value).
+            //   b) Another wait_for_terminal_exit call is running and already took the
+            //      collector/child. For WASM terminals, poll the shared exit arc until
+            //      the background task (and the other caller) populate it. For native
+            //      terminals there is no shared arc — return empty (programming error:
+            //      two concurrent waits on the same native terminal is unsupported).
+            if let Some(arc) = wasm_exit_arc {
+                loop {
+                    if let Some(status) = arc.lock().ok().and_then(|g| g.clone()) {
+                        break status;
                     }
-                    TerminalExitStatus::new().signal(Some("wait_timeout".to_string()))
+                    tokio::task::yield_now().await;
                 }
+            } else {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    "Concurrent wait_for_terminal_exit on native terminal — \
+                     second caller gets empty status; concurrent native waits are unsupported"
+                );
+                TerminalExitStatus::new()
             }
         };
 
@@ -1097,6 +1110,9 @@ impl WasmRuntime {
     // ── Session notification ───────────────────────────────────────────────
 
     pub fn handle_session_notification(&self, notif: SessionNotification) {
+        // Tick last_activity so that the idle-session cleanup does not evict
+        // sessions that are actively receiving notifications from the agent.
+        self.tick_last_activity(notif.session_id.0.as_ref());
         // The agent already published this to NATS via NatsClientProxy.
         // IDE clients subscribe to the session update subject directly.
         // We log it here for observability only.
