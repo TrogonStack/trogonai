@@ -1,53 +1,67 @@
 use agent_client_protocol::{TerminalExitStatus, TerminalOutputResponse};
 use std::sync::{Arc, Mutex};
-use tokio::process::Child;
 use tracing::warn;
 
-/// A running process managed by the WASM runtime.
+/// Distinguishes the two kinds of terminal the runtime can host.
+///
+/// Each variant carries only the state relevant to that kind, eliminating
+/// the `Option<>` fields that were required when both lived in one struct.
+pub(crate) enum TerminalKind {
+    /// A native OS process spawned via `tokio::process::Command`.
+    Native {
+        /// The child process handle. Taken out when `wait_with_output` is called.
+        child: Option<tokio::process::Child>,
+        /// Stdin pipe. `None` after `close_stdin()` or if piping failed.
+        stdin: Option<tokio::process::ChildStdin>,
+    },
+    /// A WASM module running as a background `spawn_local` task.
+    Wasm {
+        /// Shared cell written by the background task when it exits.
+        /// `None` while the module is still running.
+        exit_arc: Arc<Mutex<Option<TerminalExitStatus>>>,
+    },
+}
+
+/// A running process (native or WASM) managed by the runtime.
 ///
 /// Spawned by `create_terminal` and tracked by `terminal_id`.
 /// Output (stdout + stderr interleaved) is buffered in `output_buf`.
-/// The buffer is capped at `output_byte_limit`; excess bytes are dropped
-/// from the front to maintain the most recent output.
+/// The buffer is capped at `output_byte_limit`; oldest bytes are dropped.
 pub struct WasmTerminal {
-    pub(crate) child: Option<Child>,
-    /// Stdin pipe for native processes. `None` for WASM terminals.
-    pub(crate) stdin: Option<tokio::process::ChildStdin>,
+    pub(crate) kind: TerminalKind,
     pub(crate) output_buf: Arc<Mutex<Vec<u8>>>,
     pub(crate) output_byte_limit: usize,
+    /// Background task that drains stdout/stderr (native) or runs the WASM module.
     pub(crate) output_collector: Option<tokio::task::JoinHandle<()>>,
+    /// Cached exit status — set after `handle_wait_for_terminal_exit` completes.
     pub(crate) exit_status: Option<TerminalExitStatus>,
-    /// For WASM background tasks: shared exit status written by the background task.
-    pub(crate) wasm_exit_status: Option<Arc<Mutex<Option<TerminalExitStatus>>>>,
 }
 
 impl WasmTerminal {
     /// Collects the current output and exit status without waiting.
     ///
-    /// For WASM terminals, also peeks at the shared exit-status arc so that
-    /// `terminal_output` can report completion even before `wait_for_terminal_exit`
-    /// is called.
+    /// For WASM terminals, peeks at the shared exit arc so that `terminal_output`
+    /// can report completion even before `wait_for_terminal_exit` is called.
     pub fn snapshot(&self) -> TerminalOutputResponse {
         let buf = self.output_buf.lock().unwrap_or_else(|e| e.into_inner());
         let output = String::from_utf8_lossy(&buf).into_owned();
         let truncated = buf.len() >= self.output_byte_limit;
         let exit_status = self.exit_status.clone().or_else(|| {
-            self.wasm_exit_status
-                .as_ref()
-                .and_then(|arc| arc.lock().ok())
-                .and_then(|g| g.clone())
+            if let TerminalKind::Wasm { ref exit_arc } = self.kind {
+                exit_arc.lock().ok().and_then(|g| g.clone())
+            } else {
+                None
+            }
         });
         TerminalOutputResponse::new(output, truncated).exit_status(exit_status)
     }
 
     /// Appends bytes to the output buffer, dropping the oldest bytes if the
-    /// limit would be exceeded.
+    /// limit would be exceeded. Preserves UTF-8 char boundaries when trimming.
     pub fn append_output(buf: &Arc<Mutex<Vec<u8>>>, limit: usize, data: &[u8]) {
         let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
         guard.extend_from_slice(data);
         if guard.len() > limit {
-            // Drop from the front, keeping the most recent `limit` bytes.
-            // Ensure we don't split a UTF-8 multi-byte sequence.
             let excess = guard.len() - limit;
             let mut trim_at = excess;
             while trim_at < guard.len() && (guard[trim_at] & 0xC0) == 0x80 {
@@ -57,36 +71,40 @@ impl WasmTerminal {
         }
     }
 
-    /// Writes bytes to the stdin pipe of the underlying native process.
-    /// Returns `true` on success, `false` if there is no stdin pipe or the write fails.
+    /// Writes bytes to the stdin pipe of a native process.
+    /// Returns `true` on success, `false` for WASM terminals (no stdin) or on error.
     pub async fn write_stdin(&mut self, data: &[u8]) -> bool {
         use tokio::io::AsyncWriteExt;
-        if let Some(ref mut stdin) = self.stdin {
-            stdin.write_all(data).await.is_ok()
-        } else {
-            false
-        }
-    }
-
-    /// Closes the stdin pipe, sending EOF to the process.
-    pub fn close_stdin(&mut self) {
-        self.stdin.take(); // drops the pipe, sends EOF
-    }
-
-    /// Kills the child process without releasing the terminal.
-    /// Returns `true` if a kill signal was sent.
-    pub async fn kill(&mut self) -> bool {
-        if let Some(child) = &mut self.child {
-            if let Err(e) = child.kill().await {
-                warn!(error = %e, "Failed to kill terminal process");
-                return false;
+        if let TerminalKind::Native { ref mut stdin, .. } = self.kind {
+            if let Some(ref mut s) = stdin {
+                return s.write_all(data).await.is_ok();
             }
-            return true;
         }
         false
     }
 
+    /// Closes the stdin pipe of a native process, sending EOF.
+    /// No-op for WASM terminals.
+    pub fn close_stdin(&mut self) {
+        if let TerminalKind::Native { ref mut stdin, .. } = self.kind {
+            stdin.take();
+        }
+    }
 
+    /// Kills the underlying native process. No-op for WASM terminals.
+    /// Returns `true` if a kill signal was sent.
+    pub async fn kill(&mut self) -> bool {
+        if let TerminalKind::Native { ref mut child, .. } = self.kind {
+            if let Some(c) = child {
+                if let Err(e) = c.kill().await {
+                    warn!(error = %e, "Failed to kill terminal process");
+                    return false;
+                }
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub fn exit_status_from_std(status: &std::process::ExitStatus) -> TerminalExitStatus {
