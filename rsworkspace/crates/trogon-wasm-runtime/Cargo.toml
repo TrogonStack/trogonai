@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "trogon-wasm-runtime"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 acp-nats = { workspace = true }
