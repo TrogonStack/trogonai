@@ -15,6 +15,7 @@ use trogon_std::JsonSerialize;
 use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
+use crate::req_id::ReqId;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn js_request<J, Req, Res, S>(
@@ -24,7 +25,7 @@ pub async fn js_request<J, Req, Res, S>(
     serializer: &S,
     prefix: &AcpPrefix,
     session_id: &crate::session_id::AcpSessionId,
-    req_id: &str,
+    req_id: &ReqId,
     operation_timeout: Duration,
 ) -> agent_client_protocol::Result<Res>
 where
@@ -60,7 +61,7 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     js.publish_with_headers(subject.to_string(), headers, Bytes::from(payload_bytes))
@@ -114,6 +115,7 @@ mod tests {
     use trogon_nats::jetstream::mocks::*;
 
     use crate::agent::test_support::MockJs;
+    use crate::req_id::ReqId;
     use crate::session_id::AcpSessionId;
 
     fn test_prefix() -> AcpPrefix {
@@ -153,7 +155,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -179,7 +181,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -199,7 +201,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -226,7 +228,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -251,7 +253,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -273,7 +275,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_millis(10),
         )
         .await;
@@ -310,7 +312,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -335,7 +337,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -367,7 +369,7 @@ mod tests {
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
@@ -389,7 +391,7 @@ mod tests {
             &trogon_std::FailNextSerialize::new(1),
             &test_prefix(),
             &test_sid("s1"),
-            "req-1",
+            &ReqId::from_test("req-1"),
             Duration::from_secs(5),
         )
         .await;
