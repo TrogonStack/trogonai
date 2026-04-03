@@ -6,6 +6,14 @@ edition = "2024"
 [features]
 test-helpers = []
 
+[[test]]
+name = "xai_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "kv_integration"
+required-features = ["test-helpers"]
+
 [lints]
 workspace = true
 
