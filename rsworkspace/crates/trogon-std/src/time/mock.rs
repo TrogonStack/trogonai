@@ -4,7 +4,26 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[cfg(any(test, feature = "test-support"))]
-use super::{GetElapsed, GetNow};
+use super::{EpochClock, GetElapsed, GetNow};
+
+/// Fixed wall-clock time source for deterministic tests.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone)]
+pub struct FixedEpochClock(pub std::time::SystemTime);
+
+#[cfg(any(test, feature = "test-support"))]
+impl FixedEpochClock {
+    pub fn from_secs(secs: u64) -> Self {
+        Self(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl EpochClock for FixedEpochClock {
+    fn system_time(&self) -> std::time::SystemTime {
+        self.0
+    }
+}
 
 /// Time only advances when you call [`advance`](MockClock::advance) or
 /// [`set`](MockClock::set), eliminating flakiness from real-time

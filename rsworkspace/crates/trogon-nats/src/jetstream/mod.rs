@@ -1,6 +1,7 @@
 #[cfg(not(coverage))]
 pub mod client;
 pub mod message;
+pub mod publish;
 pub mod traits;
 
 #[cfg(feature = "test-support")]
@@ -15,6 +16,7 @@ pub use message::{
     JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef,
     JsRequestMessage,
 };
+pub use publish::{PublishOutcome, publish_event};
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
     JetStreamPublisher, JsMessageOf,
