@@ -1184,3 +1184,62 @@ async fn dispatcher_fs_write_read_roundtrip() {
         })
         .await;
 }
+
+/// A NATS message whose subject matches the dispatcher subscription pattern
+/// (`{prefix}.session.*.client.>`) but fails `parse_client_subject` is silently
+/// ignored — the dispatcher logs a warning and continues processing.
+///
+/// Exercises the `None` branch of `parse_client_subject` in dispatcher.rs.
+#[tokio::test]
+async fn dispatcher_malformed_subject_ignored() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_malformed_subject_ignored");
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("malformed");
+    let session_id = "sess-malformed";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Publish to a subject that matches the subscription wildcard but has
+            // no recognisable method suffix — parse_client_subject returns None.
+            // "unknown" is not a valid ClientMethod suffix per acp-nats parsing.
+            let bad_subject = format!("{prefix}.session.{session_id}.client.unknown");
+            nats_publish(&nats, bad_subject, bytes::Bytes::from_static(b"{}")).await;
+
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            // Dispatcher must still be alive after ignoring the malformed subject.
+            let subject =
+                format!("{prefix}.session.{session_id}.client.ext.runtime.list_sessions");
+            let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(
+                resp.get("sessions").is_some(),
+                "dispatcher should be alive after malformed subject: {resp}"
+            );
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
