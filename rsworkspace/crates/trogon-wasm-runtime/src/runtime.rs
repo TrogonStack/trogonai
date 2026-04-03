@@ -34,7 +34,7 @@ use wasmtime::{Engine, InstancePre, Module};
 /// The wasmtime `Engine` is pre-initialized for WASM module execution.
 pub struct WasmRuntime {
     /// Shared wasmtime engine (Cranelift JIT, reuses compiled module cache).
-    pub engine: Engine,
+    pub(crate) engine: Engine,
     /// Root directory under which per-session sandboxes are created.
     session_root: PathBuf,
     /// Maximum output bytes retained per terminal.
@@ -89,9 +89,9 @@ pub struct WasmRuntime {
 }
 
 /// Maximum number of compiled modules kept in the per-process in-memory cache.
-/// When this limit is reached, the entry whose source file was modified longest
-/// ago (smallest mtime) is evicted before inserting the new module. Prevents
-/// unbounded memory growth in long-running deployments with many unique modules.
+/// When this limit is reached, the least-recently-accessed (LRU) entry is evicted
+/// before inserting the new module. Prevents unbounded memory growth in
+/// long-running deployments with many unique modules.
 const MAX_CACHED_MODULES: usize = 64;
 
 /// Derives an on-disk cache key from the absolute path of a `.wasm` file.
@@ -1048,8 +1048,7 @@ impl WasmRuntime {
         session_id: &str,
         req: WriteTextFileRequest,
     ) -> agent_client_protocol::Result<WriteTextFileResponse> {
-        let sandbox_dir = self
-            .ensure_session_dir(session_id)
+        self.ensure_session_dir(session_id)
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
@@ -1095,7 +1094,6 @@ impl WasmRuntime {
             bytes = req.content.len(),
             "File written"
         );
-        let _ = sandbox_dir;
         Ok(WriteTextFileResponse::new())
     }
 

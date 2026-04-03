@@ -141,6 +141,19 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 //   unsubscribe(sub_id i32) -> i32
 //   request_permission(options_json_ptr i32, options_json_len i32,
 //                      out_selected_ptr i32) -> i32
+//     NOTE: when auto_allow_permissions=false, this publishes a NATS request to
+//     `{acp_prefix}.session.{session_id}.wasm.request_permission` with body
+//     `{"options": ["opt1", ...], "session_id": "..."}` and expects a reply of
+//     `{"selected": <index>}` or `{"cancelled": true}`. This is NOT the standard
+//     ACP session.request_permission method — it is a custom trogon extension
+//     subject that requires a dedicated handler on the client side.
+//
+// Lifecycle notes:
+//   - WASM module kill is implemented via task abort() — the module has no
+//     opportunity for cleanup (WASM has no signal handlers). This is intentional
+//     for kill semantics.
+//   - Sessions are not persisted across runtime restarts. cleanup_stale_sessions()
+//     deletes all sandbox directories at startup by design (clean slate).
 
 /// Maximum number of simultaneous active NATS subscriptions a single WASM module
 /// execution may hold. Prevents a runaway module from exhausting the shared NATS
@@ -288,6 +301,9 @@ fn add_trogon_host_functions(
     )?;
 
     // trogon_v1.nats_request(subj_ptr, subj_len, pay_ptr, pay_len, timeout_ms, out_ptr, out_max) -> i32
+    // timeout_ms: > 0 → wait that many ms; <= 0 → default 30s timeout.
+    // Note: unlike recv_message (where 0 means non-blocking poll), here 0 means "use default".
+    // Returns bytes written to out_ptr on success, -1 on error/timeout/no NATS.
     linker.func_new_async(
         "trogon_v1",
         "nats_request",

@@ -13,7 +13,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = Config::from_env();
 
-    // Fix 6: Validate configuration at startup.
     let validation_errors = cfg.validate();
     if !validation_errors.is_empty() {
         for err in &validation_errors {
@@ -28,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(%nats_url, %acp_prefix, session_root = %cfg.session_root.display(), "WASM runtime starting");
 
-    // Fix 1: Use ConnectOptions with indefinite reconnect.
-    // Fix 2: Retry the initial connect in a loop — max_reconnects(None) only covers
+    // Use ConnectOptions with indefinite reconnect.
+    // Retry the initial connect in a loop — max_reconnects(None) only covers
     // reconnections after a successful first connect, not startup failures.
     let nats = {
         let mut attempts = 0u32;
@@ -55,7 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
     runtime.cleanup_stale_sessions().await;
 
-    // Fix 2: Graceful shutdown via watch channel.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
