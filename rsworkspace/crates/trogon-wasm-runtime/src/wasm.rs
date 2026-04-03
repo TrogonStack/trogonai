@@ -778,6 +778,10 @@ pub async fn run_module_compiled(
     // configured limit. The engine has consume_fuel(true) enabled via Config.
     let effective_fuel = if fuel_limit == 0 { u64::MAX } else { fuel_limit };
     store.set_fuel(effective_fuel)?;
+    // Yield to the async executor every 10 000 fuel units so that wall-clock
+    // timeouts (tokio::time::timeout wrapping call_async) can fire even for
+    // pure-compute WASM loops that make no async host calls.
+    store.fuel_async_yield_interval(Some(10_000))?;
 
     // Spawn reader tasks BEFORE running the module so output streams concurrently.
     let buf_out = Arc::clone(&output_buf);
