@@ -1,4 +1,4 @@
-use trogon_wasm_runtime::WasmRuntime;
+use crate::WasmRuntime;
 use acp_nats::nats::{ClientMethod, parse_client_subject};
 use agent_client_protocol::{
     CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
@@ -77,7 +77,7 @@ pub async fn run(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    let snap = trogon_wasm_runtime::metrics::METRICS.snapshot();
+                    let snap = crate::metrics::METRICS.snapshot();
                     tracing::info!(
                         wasm_started = snap.wasm_tasks_started,
                         wasm_completed = snap.wasm_tasks_completed,

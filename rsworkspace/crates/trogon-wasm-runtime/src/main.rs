@@ -1,8 +1,6 @@
-mod dispatcher;
-
 use std::rc::Rc;
 use tracing::info;
-use trogon_wasm_runtime::{Config, WasmRuntime};
+use trogon_wasm_runtime::{Config, WasmRuntime, dispatcher};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
