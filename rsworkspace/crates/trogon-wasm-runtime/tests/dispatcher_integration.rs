@@ -8,6 +8,7 @@ use agent_client_protocol::{
     ContentBlock, ContentChunk, CreateTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
     SessionId, SessionNotification, SessionUpdate, TerminalId, WriteTextFileRequest,
 };
+use futures::future::join_all;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -981,6 +982,146 @@ async fn dispatcher_wasm_end_to_end() {
             assert!(resp.get("error").is_none(), "release error: {resp}");
 
             let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
+/// Sending many concurrent requests via NATS — all must receive a reply.
+#[tokio::test]
+async fn dispatcher_concurrent_requests() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_concurrent_requests");
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("concurrent");
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Fire 10 list_sessions requests concurrently — all must get a reply.
+            let futs: Vec<_> = (0..10)
+                .map(|i| {
+                    let nats = nats.clone();
+                    let subject =
+                        format!("{prefix}.session.sess-{i}.client.ext.runtime.list_sessions");
+                    async move {
+                        let reply =
+                            nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
+                        let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+                        resp.get("sessions").is_some()
+                    }
+                })
+                .collect();
+
+            let results = join_all(futs).await;
+            let all_ok = results.iter().all(|&ok| ok);
+            assert!(all_ok, "not all concurrent requests returned a sessions list");
+
+            // Also fire 5 fs.write requests concurrently.
+            let write_futs: Vec<_> = (0..5)
+                .map(|i| {
+                    let nats = nats.clone();
+                    let sid = format!("sess-concurrent-{i}");
+                    let prefix = prefix.clone();
+                    let req = WriteTextFileRequest::new(
+                        SessionId::from(sid.clone()),
+                        PathBuf::from(format!("/file{i}.txt")),
+                        format!("content-{i}"),
+                    );
+                    let subject = format!("{prefix}.session.{sid}.client.fs.write_text_file");
+                    async move {
+                        let reply =
+                            nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+                        let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+                        resp.get("error").is_none()
+                    }
+                })
+                .collect();
+
+            let write_results = join_all(write_futs).await;
+            let all_writes_ok = write_results.iter().all(|&ok| ok);
+            assert!(all_writes_ok, "not all concurrent write requests succeeded");
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
+/// Dispatcher shutdown with an in-flight WASM task: the task must complete
+/// before the dispatcher returns (graceful drain).
+#[tokio::test]
+async fn dispatcher_shutdown_drains_in_flight_task() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping dispatcher_shutdown_drains_in_flight_task"
+            );
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let wasm_path = make_exit0_wasm(tmp.path());
+    let prefix = test_prefix("drain");
+    let session_id = "sess-drain";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Send a terminal.create request WITHOUT awaiting the reply — it will
+            // be in-flight when we send the shutdown signal.
+            let req = CreateTerminalRequest::new(
+                SessionId::from(session_id),
+                wasm_path.to_str().unwrap(),
+            );
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            // Publish without waiting for a reply so the task is dispatched but
+            // we don't block here.
+            nats_publish(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+
+            // Signal shutdown immediately after dispatching the task.
+            let _ = shutdown_tx.send(true);
+
+            // Dispatcher must drain (wait for the in-flight dispatch task) and exit
+            // within 10 seconds.
+            tokio::time::timeout(Duration::from_secs(10), handle)
+                .await
+                .expect("dispatcher did not exit within 10s after shutdown with in-flight task")
+                .expect("dispatcher task panicked");
         })
         .await;
 }
