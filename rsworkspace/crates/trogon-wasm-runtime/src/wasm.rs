@@ -15,7 +15,7 @@ use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
 
 /// All parameters needed to execute one WASM module invocation.
 /// Replaces the previous 17-argument function signature.
-pub struct WasmExecConfig {
+pub(crate) struct WasmExecConfig {
     /// Pre-linked instance ready for `instantiate_async`.
     /// Built once per unique module path and cached in `WasmRuntime`.
     pub instance_pre: InstancePre<WasmStoreData>,
