@@ -15,8 +15,8 @@ use axum::{
 use std::future::Future;
 use std::pin::Pin;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::{error, info, instrument, warn};
-use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
+use tracing::{info, instrument, warn};
+use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher, PublishOutcome, publish_event};
 
 #[cfg(not(coverage))]
 #[derive(Debug)]
@@ -53,52 +53,13 @@ impl From<std::io::Error> for ServeError {
     }
 }
 
-enum PublishOutcome<E: fmt::Display> {
-    Published,
-    PublishFailed(E),
-    AckFailed(E),
-    AckTimedOut(Duration),
-}
-
-impl<E: fmt::Display> PublishOutcome<E> {
-    fn into_status(self) -> StatusCode {
-        match self {
-            PublishOutcome::Published => {
-                info!("Published GitHub event to NATS");
-                StatusCode::OK
-            }
-            PublishOutcome::PublishFailed(e) => {
-                error!(error = %e, "Failed to publish GitHub event to NATS");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            PublishOutcome::AckFailed(e) => {
-                error!(error = %e, "NATS ack failed");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            PublishOutcome::AckTimedOut(timeout) => {
-                error!(?timeout, "NATS ack timed out");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        }
-    }
-}
-
-async fn publish_event<P: JetStreamPublisher>(
-    js: &P,
-    subject: String,
-    headers: async_nats::HeaderMap,
-    body: Bytes,
-    ack_timeout: Duration,
-) -> PublishOutcome<P::PublishError> {
-    let ack_future = match js.publish_with_headers(subject, headers, body).await {
-        Ok(f) => f,
-        Err(e) => return PublishOutcome::PublishFailed(e),
-    };
-
-    match tokio::time::timeout(ack_timeout, ack_future).await {
-        Ok(Ok(_)) => PublishOutcome::Published,
-        Ok(Err(e)) => PublishOutcome::AckFailed(e),
-        Err(_) => PublishOutcome::AckTimedOut(ack_timeout),
+fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
+    if outcome.is_ok() {
+        info!("Published GitHub event to NATS");
+        StatusCode::OK
+    } else {
+        outcome.log_on_error("github");
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 
@@ -238,15 +199,16 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     nats_headers.insert(NATS_HEADER_EVENT, event.as_str());
     nats_headers.insert(NATS_HEADER_DELIVERY, delivery.as_str());
 
-    publish_event(
+    let outcome = publish_event(
         &state.js,
         subject,
         nats_headers,
         body,
         state.nats_ack_timeout,
     )
-    .await
-    .into_status()
+    .await;
+
+    outcome_to_status(outcome)
 }
 
 #[cfg(test)]

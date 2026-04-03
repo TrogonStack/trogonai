@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Show ngrok tunnel URLs with webhook paths"
+set -euo pipefail
+
+NGROK_API="http://ngrok.trogonai.orb.local:4040/api/tunnels"
+
+if ! tunnels=$(curl -sf "$NGROK_API" 2>/dev/null); then
+  echo "ngrok is not running. Start it with: mise run dev:up"
+  exit 1
+fi
+
+echo ""
+echo "  ngrok tunnels"
+echo "  ─────────────────────────────────────────────────────────"
+echo ""
+
+echo "$tunnels" | jq -r '.tunnels[] | "\(.name)\t\(.public_url)"' | while IFS=$'\t' read -r name url; do
+  printf "  %-10s %s/webhook\n" "$name" "$url"
+done
+
+echo ""
+echo "  dashboard  http://ngrok.trogonai.orb.local:4040"
+echo ""
