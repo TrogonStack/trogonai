@@ -27,7 +27,7 @@ pub(crate) enum TerminalKind {
 /// Spawned by `create_terminal` and tracked by `terminal_id`.
 /// Output (stdout + stderr interleaved) is buffered in `output_buf`.
 /// The buffer is capped at `output_byte_limit`; oldest bytes are dropped.
-pub struct WasmTerminal {
+pub(crate) struct WasmTerminal {
     pub(crate) kind: TerminalKind,
     pub(crate) output_buf: Arc<Mutex<Vec<u8>>>,
     /// Background task that drains stdout/stderr (native) or runs the WASM module.
@@ -127,7 +127,7 @@ impl WasmTerminal {
                     // aborted and will never write its own exit status.
                     // OnceLock::set is a no-op if the task already wrote its status
                     // (race between abort() and the task's final write).
-                    let _ = exit_arc.set(TerminalExitStatus::new().signal(Some("killed".to_string())));
+                    let _ = exit_arc.set(TerminalExitStatus::new().signal(Some("SIGKILL".to_string())));
                     true
                 } else {
                     false
@@ -153,8 +153,18 @@ fn signal_name(sig: i32) -> &'static str {
     match sig {
         1 => "SIGHUP",
         2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        8 => "SIGFPE",
         9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
         15 => "SIGTERM",
+        16 => "SIGUSR1",
+        17 => "SIGUSR2",
         _ => "UNKNOWN",
     }
 }
