@@ -4,7 +4,8 @@ use std::time::Duration;
 use crate::config::SlackConfig;
 use crate::constants::{
     CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID,
-    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_TEAM_ID,
+    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
+    NATS_HEADER_TEAM_ID,
 };
 use crate::signature;
 use trogon_std::SystemClock;
@@ -69,6 +70,22 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
         outcome.log_on_error("slack");
         StatusCode::INTERNAL_SERVER_ERROR
     }
+}
+
+async fn publish_unroutable<P: JetStreamPublisher>(
+    js: &P,
+    subject_prefix: &NatsToken,
+    reason: &str,
+    body: Bytes,
+    ack_timeout: Duration,
+) {
+    let subject = format!("{}.unroutable", subject_prefix);
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(NATS_HEADER_REJECT_REASON, reason);
+    headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
+
+    let outcome = publish_event(js, subject, headers, body, ack_timeout).await;
+    outcome.log_on_error("slack.unroutable");
 }
 
 #[derive(Clone)]
@@ -224,6 +241,14 @@ async fn handle_json_payload<P: JetStreamPublisher>(
 ) -> (StatusCode, String) {
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(body) else {
         warn!("Invalid JSON payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "invalid_json",
+            body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
 
@@ -243,7 +268,15 @@ async fn handle_json_payload<P: JetStreamPublisher>(
     }
 
     if payload_type != "event_callback" {
-        warn!(payload_type, "Ignoring unhandled payload type");
+        warn!(payload_type, "Unhandled payload type");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "unhandled_payload_type",
+            body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::OK, String::new());
     }
 
@@ -253,12 +286,28 @@ async fn handle_json_payload<P: JetStreamPublisher>(
         .and_then(|v| v.as_str())
     else {
         warn!("Missing event.type in event_callback payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "missing_event_type",
+            body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
     let event_type = event_type.to_owned();
 
     let Some(event_id) = payload.get("event_id").and_then(|v| v.as_str()) else {
         warn!("Missing event_id in event_callback payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "missing_event_id",
+            body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
     let event_id = event_id.to_owned();
@@ -306,6 +355,14 @@ async fn handle_form_payload<P: JetStreamPublisher>(
         Ok(s) => s,
         Err(_) => {
             warn!("Invalid UTF-8 in form payload");
+            publish_unroutable(
+                &state.js,
+                &state.subject_prefix,
+                "invalid_utf8_form",
+                body.clone(),
+                state.nats_ack_timeout,
+            )
+            .await;
             return (StatusCode::BAD_REQUEST, String::new());
         }
     };
@@ -330,27 +387,59 @@ async fn handle_form_payload<P: JetStreamPublisher>(
     }
 
     warn!("Unrecognized form payload");
+    publish_unroutable(
+        &state.js,
+        &state.subject_prefix,
+        "unrecognized_form",
+        body.clone(),
+        state.nats_ack_timeout,
+    )
+    .await;
     (StatusCode::BAD_REQUEST, String::new())
 }
 
 async fn handle_interaction<P: JetStreamPublisher>(
     state: &AppState<P, impl EpochClock>,
     payload_json: &str,
-    _raw_body: &Bytes,
+    raw_body: &Bytes,
 ) -> (StatusCode, String) {
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_json) else {
         warn!("Invalid JSON in interaction payload field");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "invalid_interaction_json",
+            raw_body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
 
     let Some(interaction_type) = payload.get("type").and_then(|v| v.as_str()) else {
         warn!("Missing type in interaction payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "missing_interaction_type",
+            raw_body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
     let interaction_type = interaction_type.to_owned();
 
     let Some(trigger_id) = payload.get("trigger_id").and_then(|v| v.as_str()) else {
         warn!("Missing trigger_id in interaction payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "missing_interaction_trigger_id",
+            raw_body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
     let trigger_id = trigger_id.to_owned();
@@ -409,6 +498,14 @@ async fn handle_slash_command<P: JetStreamPublisher>(
         .map(|(_, v)| v.as_str())
     else {
         warn!(command, "Missing trigger_id in slash command payload");
+        publish_unroutable(
+            &state.js,
+            &state.subject_prefix,
+            "missing_command_trigger_id",
+            raw_body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
         return (StatusCode::BAD_REQUEST, String::new());
     };
 
@@ -449,7 +546,9 @@ mod tests {
     use sha2::Sha256;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use trogon_nats::jetstream::{MockJetStreamContext, MockJetStreamPublisher};
+    #[cfg(not(coverage))]
+    use trogon_nats::jetstream::MockJetStreamContext;
+    use trogon_nats::jetstream::MockJetStreamPublisher;
 
     type HmacSha256 = Hmac<Sha256>;
 
@@ -496,6 +595,26 @@ mod tests {
             &test_config(),
             FixedEpochClock::from_secs(TEST_NOW),
         )
+    }
+
+    fn assert_unroutable(publisher: &MockJetStreamPublisher, expected_reason: &str) {
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1, "expected exactly one unroutable publish");
+        assert_eq!(messages[0].subject, "slack.unroutable");
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(NATS_HEADER_REJECT_REASON)
+                .map(|v| v.as_str()),
+            Some(expected_reason),
+        );
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(NATS_HEADER_PAYLOAD_KIND)
+                .map(|v| v.as_str()),
+            Some("unroutable"),
+        );
     }
 
     fn event_callback_body(event_type: &str) -> Vec<u8> {
@@ -546,6 +665,7 @@ mod tests {
         assert!(matches!(io_err, ServeError::Io(_)));
     }
 
+    #[cfg(not(coverage))]
     #[tokio::test]
     async fn provision_creates_stream() {
         let _guard = tracing_guard();
@@ -561,6 +681,7 @@ mod tests {
         assert_eq!(streams[0].max_age, Duration::from_secs(3600));
     }
 
+    #[cfg(not(coverage))]
     #[tokio::test]
     async fn provision_propagates_error() {
         let _guard = tracing_guard();
@@ -746,6 +867,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "invalid_json");
     }
 
     #[tokio::test]
@@ -766,7 +888,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "unhandled_payload_type");
     }
 
     #[tokio::test]
@@ -894,7 +1016,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "missing_event_type");
     }
 
     #[tokio::test]
@@ -917,7 +1039,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "missing_event_id");
     }
 
     mod ack_test_support {
@@ -1175,7 +1297,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "missing_interaction_trigger_id");
     }
 
     #[tokio::test]
@@ -1231,7 +1353,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "missing_command_trigger_id");
     }
 
     #[tokio::test]
@@ -1250,7 +1372,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "invalid_interaction_json");
     }
 
     #[tokio::test]
@@ -1266,7 +1388,7 @@ mod tests {
         let resp = app.oneshot(form_request(body, &ts, &sig)).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "invalid_utf8_form");
     }
 
     #[tokio::test]
@@ -1285,6 +1407,33 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(publisher.published_messages().is_empty());
+        assert_unroutable(&publisher, "unrecognized_form");
+    }
+
+    #[tokio::test]
+    async fn interaction_missing_type_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+
+        let interaction_payload = serde_json::json!({
+            "trigger_id": "trigger123",
+            "team": { "id": "T01ABC" }
+        });
+        let form_body = format!(
+            "payload={}",
+            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes())
+                .collect::<String>()
+        );
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+        let resp = app
+            .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "missing_interaction_type");
     }
 }
