@@ -7,9 +7,6 @@ services:
       - "--jetstream"
       - "--store_dir=/data"
       - "--http_port=8222"
-    ports:
-      - "4222:4222"
-      - "8222:8222"
     volumes:
       - nats_data:/data
     restart: unless-stopped
@@ -23,12 +20,10 @@ services:
   trogon-source-github:
     build:
       context: ../../../rsworkspace
-      dockerfile: crates/trogon-source-github/Dockerfile
-    ports:
-      - "${GITHUB_WEBHOOK_PORT:-8080}:${GITHUB_WEBHOOK_PORT:-8080}"
+      dockerfile: ../devops/docker/compose/services/trogon-source-github/Dockerfile
     environment:
       NATS_URL: "nats:4222"
-      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}"
+      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET:-}"
       GITHUB_WEBHOOK_PORT: "${GITHUB_WEBHOOK_PORT:-8080}"
       GITHUB_SUBJECT_PREFIX: "${GITHUB_SUBJECT_PREFIX:-github}"
       GITHUB_STREAM_NAME: "${GITHUB_STREAM_NAME:-GITHUB}"
@@ -47,17 +42,57 @@ services:
       start_period: 10s
       retries: 3
 
-  smee:
-    image: node:alpine
-    command:
-      - npx
-      - smee-client
-      - --url
-      - "${SMEE_URL:?SMEE_URL is required — create a channel at https://smee.io}"
-      - --target
-      - "http://trogon-source-github:${GITHUB_WEBHOOK_PORT:-8080}/webhook"
+  trogon-source-slack:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/trogon-source-slack/Dockerfile
+    environment:
+      NATS_URL: "nats:4222"
+      SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
+      SLACK_WEBHOOK_PORT: "${SLACK_WEBHOOK_PORT:-3000}"
+      SLACK_SUBJECT_PREFIX: "${SLACK_SUBJECT_PREFIX:-slack}"
+      SLACK_STREAM_NAME: "${SLACK_STREAM_NAME:-SLACK}"
+      SLACK_STREAM_MAX_AGE_SECS: "${SLACK_STREAM_MAX_AGE_SECS:-604800}"
+      SLACK_NATS_ACK_TIMEOUT_SECS: "${SLACK_NATS_ACK_TIMEOUT_SECS:-10}"
+      SLACK_MAX_BODY_SIZE: "${SLACK_MAX_BODY_SIZE:-1048576}"
+      SLACK_TIMESTAMP_MAX_DRIFT_SECS: "${SLACK_TIMESTAMP_MAX_DRIFT_SECS:-300}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${SLACK_WEBHOOK_PORT:-3000}/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  ngrok:
+    image: ngrok/ngrok:alpine
+    environment:
+      NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN:-}"
+      GITHUB_ADDR: "trogon-source-github:${GITHUB_WEBHOOK_PORT:-8080}"
+      SLACK_ADDR: "trogon-source-slack:${SLACK_WEBHOOK_PORT:-3000}"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cat > /tmp/ngrok.yml <<EOF
+        version: 3
+        tunnels:
+          github:
+            addr: $${GITHUB_ADDR}
+            proto: http
+          slack:
+            addr: $${SLACK_ADDR}
+            proto: http
+        EOF
+        exec ngrok start --all --config /tmp/ngrok.yml
     depends_on:
       trogon-source-github:
+        condition: service_healthy
+      trogon-source-slack:
         condition: service_healthy
     restart: unless-stopped
     profiles:
