@@ -1598,6 +1598,175 @@ async fn dispatcher_wait_for_exit_timeout_kills_hung_process() {
         .await;
 }
 
+/// WASM module stdout is captured and returned via `terminal.output` through the
+/// dispatcher. Extends `dispatcher_wasm_end_to_end` by verifying actual content.
+#[tokio::test]
+async fn dispatcher_wasm_stdout_content_is_captured() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping dispatcher_wasm_stdout_content_is_captured"
+            );
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("wasm-stdout");
+    let session_id = "sess-wasm-stdout";
+
+    // WAT that writes "hello wasm\n" to fd 1 (stdout) via WASI fd_write.
+    let wat = r#"(module
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "proc_exit"
+    (func $proc_exit (param i32)))
+  (memory 1) (export "memory" (memory 0))
+  (data (i32.const 16) "hello wasm\n")
+  (func (export "_start")
+    ;; iov: ptr=16, len=11
+    (i32.store (i32.const 0) (i32.const 16))
+    (i32.store (i32.const 4) (i32.const 11))
+    ;; fd_write(fd=1, iovs=0, iovs_len=1, nwritten=8)
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+    (call $proc_exit (i32.const 0))
+  )
+)"#;
+    let wasm_bytes = wat::parse_str(wat).expect("WAT parse");
+    let wasm_path = tmp.path().join("stdout.wasm");
+    std::fs::write(&wasm_path, wasm_bytes).expect("write wasm");
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Create a WASM terminal that writes to stdout.
+            let req = CreateTerminalRequest::new(
+                SessionId::from(session_id),
+                wasm_path.to_str().unwrap(),
+            );
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "create error: {resp}");
+            let tid = resp["terminalId"].as_str().expect("terminalId").to_string();
+
+            // Wait for it to finish.
+            let wait_req = serde_json::json!({ "sessionId": session_id, "terminalId": tid });
+            let subject =
+                format!("{prefix}.session.{session_id}.client.terminal.wait_for_exit");
+            let reply =
+                nats_request(&nats, subject, serde_json::to_vec(&wait_req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "wait_for_exit error: {resp}");
+
+            // Fetch output — must contain the text written by the module.
+            let out_req = serde_json::json!({ "sessionId": session_id, "terminalId": tid });
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.output");
+            let reply =
+                nats_request(&nats, subject, serde_json::to_vec(&out_req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "output error: {resp}");
+            let output = resp["output"].as_str().expect("output field");
+            assert!(
+                output.contains("hello wasm"),
+                "expected 'hello wasm' in WASM stdout output, got: {output:?}"
+            );
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
+/// Writing stdin to a WASM terminal returns a -32603 error via the dispatcher
+/// (WASM terminals do not have a stdin pipe).
+#[tokio::test]
+async fn dispatcher_write_stdin_to_wasm_terminal_returns_error() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_write_stdin_to_wasm_terminal_returns_error");
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("wasm-stdin-err");
+    let session_id = "sess-wasm-stdin-err";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Spawn a WASM terminal that sleeps long enough for the write to arrive.
+            let wat = r#"(module
+  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+  (memory 1) (export "memory" (memory 0))
+  (func (export "_start") (call $proc_exit (i32.const 0)))
+)"#;
+            let wasm_bytes = wat::parse_str(wat).expect("WAT parse");
+            let wasm_path = tmp.path().join("wasm_stdin_err.wasm");
+            std::fs::write(&wasm_path, wasm_bytes).expect("write wasm");
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from(session_id),
+                wasm_path.to_str().unwrap(),
+            );
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "create error: {resp}");
+            let tid = resp["terminalId"].as_str().expect("terminalId").to_string();
+
+            // Attempt to write stdin — must fail with an error (WASM has no stdin pipe).
+            let payload = serde_json::json!({
+                "terminal_id": tid,
+                "data": b"hello".to_vec()
+            });
+            let subject =
+                format!("{prefix}.session.{session_id}.client.ext.terminal.write_stdin");
+            let reply =
+                nats_request(&nats, subject, serde_json::to_vec(&payload).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(
+                resp.get("error").is_some(),
+                "expected error writing stdin to WASM terminal, got: {resp}"
+            );
+            let code = resp["error"]["code"].as_i64().expect("error.code");
+            assert_eq!(code, -32603, "expected -32603, got: {resp}");
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
 /// A NATS message whose subject matches the dispatcher subscription pattern
 /// (`{prefix}.session.*.client.>`) but fails `parse_client_subject` is silently
 /// ignored — the dispatcher logs a warning and continues processing.
