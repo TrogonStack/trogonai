@@ -1,4 +1,5 @@
 pub mod config;
+pub mod dispatcher;
 pub mod metrics;
 pub mod runtime;
 pub(crate) mod session;
