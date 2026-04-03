@@ -9,7 +9,8 @@
 //! | Directories | [`HomeDir`], [`ConfigDir`], [`CacheDir`], [`DataDir`], [`DataLocalDir`], [`StateDir`] | [`SystemDirs`] | `FixedDirs`* |
 //! | Env vars | [`ReadEnv`] | [`SystemEnv`] | `InMemoryEnv`* |
 //! | Filesystem | [`ReadFile`], [`WriteFile`], [`ExistsFile`], [`CreateDirAll`], [`OpenAppendFile`] | [`SystemFs`] | `MemFs`* |
-//! | Time | [`GetNow`], [`GetElapsed`] | [`SystemClock`] | `MockClock`* |
+//! | Time (monotonic) | [`GetNow`], [`GetElapsed`] | [`SystemClock`] | `MockClock`* |
+//! | Time (wall clock) | [`EpochClock`] | [`SystemClock`] | `FixedEpochClock`* |
 //!
 //! *Available with `#[cfg(test)]` or the `"test-support"` feature.
 //!
@@ -47,4 +48,4 @@ pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, Write
 #[cfg(any(test, feature = "test-support"))]
 pub use json::FailNextSerialize;
 pub use json::{JsonSerialize, StdJsonSerialize};
-pub use time::{GetElapsed, GetNow, SystemClock};
+pub use time::{EpochClock, GetElapsed, GetNow, SystemClock};
