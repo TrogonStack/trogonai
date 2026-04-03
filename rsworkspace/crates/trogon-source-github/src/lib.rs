@@ -1,4 +1,4 @@
-//! # trogon-sink-github
+//! # trogon-source-github
 //!
 //! GitHub webhook receiver that publishes events to NATS JetStream.
 //!
