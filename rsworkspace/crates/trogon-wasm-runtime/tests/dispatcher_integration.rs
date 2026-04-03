@@ -1411,6 +1411,193 @@ async fn dispatcher_session_request_permission_auto_deny_returns_cancelled() {
         .await;
 }
 
+/// `wasm_only: true` causes the dispatcher to reject native terminal creation.
+#[tokio::test]
+async fn dispatcher_wasm_only_rejects_native_terminal() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping dispatcher_wasm_only_rejects_native_terminal"
+            );
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("wasm-only");
+    let session_id = "sess-wasm-only";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+
+    let cfg = Config {
+        wasm_only: true,
+        ..dispatcher_config(tmp.path().to_path_buf())
+    };
+    let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone())).unwrap());
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Try to spawn a native process — must be rejected.
+            let req = CreateTerminalRequest::new(session_id, "/bin/echo")
+                .args(vec!["hello".to_string()]);
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(
+                resp.get("error").is_some(),
+                "expected error when spawning native in wasm_only mode, got: {resp}"
+            );
+            let msg = resp["error"]["message"].as_str().unwrap_or("");
+            assert!(
+                msg.contains("wasm_only") || msg.contains("wasm"),
+                "error message should mention wasm_only, got: {msg}"
+            );
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
+/// Native terminal that exits with a non-zero code: `wait_for_exit` reports the
+/// correct exit code in the response.
+#[tokio::test]
+async fn dispatcher_native_terminal_nonzero_exit_code() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping dispatcher_native_terminal_nonzero_exit_code"
+            );
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("nonzero-exit");
+    let session_id = "sess-nonzero";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+    let runtime = Rc::new(
+        WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone()))
+            .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // `/bin/false` exits with code 1.
+            let req = CreateTerminalRequest::new(session_id, "/bin/false");
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "create error: {resp}");
+            let tid = resp["terminalId"].as_str().expect("terminalId").to_string();
+
+            // Wait for exit.
+            let wait_req = serde_json::json!({ "sessionId": session_id, "terminalId": tid });
+            let subject =
+                format!("{prefix}.session.{session_id}.client.terminal.wait_for_exit");
+            let reply =
+                nats_request(&nats, subject, serde_json::to_vec(&wait_req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "wait_for_exit error: {resp}");
+            let exit_code = resp["exitCode"].as_u64();
+            assert_eq!(exit_code, Some(1), "expected exit code 1 from /bin/false, got: {resp}");
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
+/// `wait_for_exit_timeout_secs` kills a hung native process after the configured
+/// timeout and returns a signal exit status via the dispatcher.
+#[tokio::test]
+async fn dispatcher_wait_for_exit_timeout_kills_hung_process() {
+    let nats_url = match nats_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_wait_for_exit_timeout_kills_hung_process");
+            return;
+        }
+    };
+    let tmp = TempDir::new().unwrap();
+    let prefix = test_prefix("wait-timeout");
+    let session_id = "sess-wait-timeout";
+
+    let nats = async_nats::connect(&nats_url).await.expect("connect");
+
+    // 1-second wait timeout so the test finishes quickly.
+    let cfg = Config {
+        wait_for_exit_timeout_secs: 1,
+        ..dispatcher_config(tmp.path().to_path_buf())
+    };
+    let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone())).unwrap());
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(trogon_wasm_runtime::dispatcher::run(
+                nats.clone(),
+                prefix.clone(),
+                Rc::clone(&runtime),
+                shutdown_rx,
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Spawn a process that will never exit on its own.
+            let req = CreateTerminalRequest::new(session_id, "/bin/sleep")
+                .args(vec!["60".to_string()]);
+            let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+            let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+            assert!(resp.get("error").is_none(), "create error: {resp}");
+            let tid = resp["terminalId"].as_str().expect("terminalId").to_string();
+
+            // Wait for exit — the runtime will kill after 1s and return a signal.
+            let wait_req = serde_json::json!({ "sessionId": session_id, "terminalId": tid });
+            let subject =
+                format!("{prefix}.session.{session_id}.client.terminal.wait_for_exit");
+            // Use a generous NATS timeout (10s) — the process kill takes ~1s.
+            let msg = tokio::time::timeout(
+                Duration::from_secs(10),
+                nats.request(subject, serde_json::to_vec(&wait_req).unwrap().into()),
+            )
+            .await
+            .expect("request timed out")
+            .expect("NATS error");
+            let resp: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+            assert!(resp.get("error").is_none(), "wait_for_exit error: {resp}");
+
+            // The process was killed — response must carry a signal (not an exit code).
+            assert!(
+                resp.get("signal").is_some(),
+                "expected signal in response after timeout kill, got: {resp}"
+            );
+
+            let _ = shutdown_tx.send(true);
+        })
+        .await;
+}
+
 /// A NATS message whose subject matches the dispatcher subscription pattern
 /// (`{prefix}.session.*.client.>`) but fails `parse_client_subject` is silently
 /// ignored — the dispatcher logs a warning and continues processing.
