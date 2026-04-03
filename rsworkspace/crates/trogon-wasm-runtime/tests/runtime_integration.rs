@@ -2743,7 +2743,7 @@ async fn cleanup_idle_sessions_removes_expired_sessions() {
 
 /// Killing a running WASM terminal must cause a subsequent
 /// `handle_wait_for_terminal_exit` to return promptly with
-/// `signal = Some("killed")` rather than hanging indefinitely.
+/// `signal = Some("SIGKILL")` rather than hanging indefinitely.
 #[tokio::test]
 async fn kill_wasm_terminal_sets_killed_signal() {
     let tmp = TempDir::new().unwrap();
@@ -2789,7 +2789,7 @@ async fn kill_wasm_terminal_sets_killed_signal() {
                 .await
                 .expect("kill should succeed");
 
-            // wait_for_terminal_exit must return promptly with signal="killed".
+            // wait_for_terminal_exit must return promptly with signal="SIGKILL".
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
             let start = std::time::Instant::now();
             let exit = tokio::time::timeout(
@@ -2807,8 +2807,8 @@ async fn kill_wasm_terminal_sets_killed_signal() {
             );
             assert_eq!(
                 exit.exit_status.signal.as_deref(),
-                Some("killed"),
-                "killed WASM terminal should report signal 'killed', got: {:?}",
+                Some("SIGKILL"),
+                "killed WASM terminal should report signal 'SIGKILL', got: {:?}",
                 exit.exit_status
             );
             assert!(
