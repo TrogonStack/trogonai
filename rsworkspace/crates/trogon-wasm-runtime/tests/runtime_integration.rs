@@ -4885,3 +4885,319 @@ async fn wasm_module_subscribe_recv_unsubscribe_with_nats() {
         })
         .await;
 }
+
+// ── recv_message timeout_ms == 0 is non-blocking ─────────────────────────────
+
+/// `recv_message` called with `timeout_ms = 0` must poll non-blocking (1ms
+/// window) and return 0 immediately when no message is queued.
+/// Exercises the `timeout_ms == 0 → Duration::from_millis(1)` branch in wasm.rs.
+#[tokio::test]
+async fn recv_message_timeout_zero_is_nonblocking() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping recv_message_timeout_zero_is_nonblocking");
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime =
+                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
+                    .unwrap();
+
+            // Module subscribes to a unique subject, then immediately calls
+            // recv_message with timeout_ms=0. No message has been published,
+            // so it should return 0 (timeout/no message) right away.
+            // We encode the result: exit 0 if recv returned 0 (expected), exit 1 otherwise.
+            let wat = r#"(module
+              (import "trogon_v1" "subscribe"    (func $sub  (param i32 i32) (result i32)))
+              (import "trogon_v1" "recv_message" (func $recv
+                (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (data (i32.const 0) "test.nonblocking.recv")
+              (func (export "_start")
+                (local $sid i32)
+                (local $ret i32)
+                (local.set $sid (call $sub (i32.const 0) (i32.const 21)))
+                ;; subscribe failed → not available
+                (if (i32.lt_s (local.get $sid) (i32.const 0))
+                  (then (call $exit (i32.const 99))))
+                ;; recv_message with timeout_ms = 0 (non-blocking poll)
+                (local.set $ret (call $recv
+                  (local.get $sid)
+                  (i32.const 64) (i32.const 128) (i32.const 192)
+                  (i32.const 256) (i32.const 128) (i32.const 384)
+                  (i32.const 0)))
+                ;; expect 0 (no message / timeout)
+                (if (i32.eq (local.get $ret) (i32.const 0))
+                  (then (call $exit (i32.const 0))))
+                (call $exit (i32.const 1))
+              )
+            )"#;
+
+            let wasm_path = make_wasm(tmp.path(), "recv_nonblock.wasm", wat);
+            let req =
+                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .expect("wait should succeed");
+
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(0),
+                "recv_message(timeout=0) with no pending message should return 0; got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
+
+// ── MAX_SUBSCRIPTIONS_PER_MODULE limit ───────────────────────────────────────
+
+/// After 64 successful subscriptions the 65th must return -1.
+/// Exercises the `subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_MODULE` guard.
+#[tokio::test]
+async fn wasm_max_subscriptions_per_module_limit() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping wasm_max_subscriptions_per_module_limit"
+            );
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime =
+                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
+                    .unwrap();
+
+            // Module loops 65 times calling subscribe("test.sub.cap").
+            // It counts how many calls return -1 (should be exactly 1 — the 65th).
+            // Exits with the failure count (expected: 1).
+            let wat = r#"(module
+              (import "trogon_v1" "subscribe" (func $sub (param i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (data (i32.const 0) "test.sub.cap")
+              (func (export "_start")
+                (local $i    i32)
+                (local $r    i32)
+                (local $fail i32)
+                (local.set $i    (i32.const 0))
+                (local.set $fail (i32.const 0))
+                (block $done
+                  (loop $loop
+                    (br_if $done (i32.ge_u (local.get $i) (i32.const 65)))
+                    (local.set $r (call $sub (i32.const 0) (i32.const 12)))
+                    (if (i32.lt_s (local.get $r) (i32.const 0))
+                      (then (local.set $fail (i32.add (local.get $fail) (i32.const 1)))))
+                    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                    (br $loop)
+                  )
+                )
+                (call $exit (local.get $fail))
+              )
+            )"#;
+
+            let wasm_path = make_wasm(tmp.path(), "sub_cap.wasm", wat);
+            let req =
+                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .expect("wait should succeed");
+
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(1),
+                "exactly 1 subscribe call should fail (the 65th); got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
+
+// ── wasm_fuel_limit = 0 means unlimited ──────────────────────────────────────
+
+/// With `wasm_fuel_limit = 0` a module that exhausts a small non-zero budget
+/// should run to completion, exercising the `if fuel == 0 { u64::MAX }` branch.
+#[tokio::test]
+async fn wasm_fuel_limit_zero_means_unlimited() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // With a tiny fuel budget (10) a looping module is killed.
+            let rt_limited = WasmRuntime::new(&Config {
+                wasm_fuel_limit: 10,
+                ..test_config(tmp.path().to_path_buf())
+            })
+            .unwrap();
+
+            let wat = r#"(module
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (func (export "_start")
+                ;; loop 1 000 iterations — definitely exhausts budget=10
+                (local $i i32)
+                (local.set $i (i32.const 1000))
+                (block $done
+                  (loop $lp
+                    (br_if $done (i32.eqz (local.get $i)))
+                    (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+                    (br $lp)
+                  )
+                )
+                (call $exit (i32.const 0))
+              )
+            )"#;
+
+            let wasm_path = make_wasm(tmp.path(), "fuel_loop.wasm", wat);
+
+            let req = CreateTerminalRequest::new(
+                SessionId::from("s1"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp = rt_limited
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("create should succeed");
+            let exit = rt_limited
+                .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(
+                    SessionId::from("s1"),
+                    resp.terminal_id,
+                ))
+                .await
+                .unwrap();
+            // fuel budget=10 → killed by fuel exhaustion
+            assert!(
+                exit.exit_status.signal.is_some(),
+                "fuel budget=10 should kill the loop; got: {:?}",
+                exit.exit_status
+            );
+
+            // With fuel_limit = 0 (→ u64::MAX) the same module runs to completion.
+            let rt_unlimited = WasmRuntime::new(&Config {
+                wasm_fuel_limit: 0,
+                ..test_config(tmp.path().to_path_buf())
+            })
+            .unwrap();
+
+            let req2 = CreateTerminalRequest::new(
+                SessionId::from("s2"),
+                wasm_path.to_str().unwrap(),
+            );
+            let resp2 = rt_unlimited
+                .handle_create_terminal("session-fuel-unlimited", req2)
+                .await
+                .expect("create should succeed");
+            let exit2 = rt_unlimited
+                .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(
+                    SessionId::from("s2"),
+                    resp2.terminal_id,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                exit2.exit_status.exit_code,
+                Some(0),
+                "fuel_limit=0 should allow loop to complete; got: {:?}",
+                exit2.exit_status
+            );
+        })
+        .await;
+}
+
+// ── wasm_max_concurrent_tasks = 0 means unlimited ────────────────────────────
+
+/// With `wasm_max_concurrent_tasks = 0` the runtime uses `Semaphore::MAX_PERMITS`
+/// so any number of tasks can run concurrently. Spawn 64 modules simultaneously
+/// (more than the default of 32) and verify all complete.
+#[tokio::test]
+async fn wasm_max_concurrent_tasks_zero_means_unlimited() {
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime = WasmRuntime::new(&Config {
+                wasm_max_concurrent_tasks: 0,
+                ..test_config(tmp.path().to_path_buf())
+            })
+            .unwrap();
+
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "exit0_unlimited.wasm",
+                r#"(module
+                  (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+                  (memory 1) (export "memory" (memory 0))
+                  (func (export "_start") (call $exit (i32.const 0)))
+                )"#,
+            );
+
+            // Spawn 64 terminals simultaneously.
+            let mut terminal_ids = Vec::new();
+            for i in 0..64u32 {
+                let sid = format!("s{i}");
+                let req = CreateTerminalRequest::new(
+                    SessionId::from(sid.clone()),
+                    wasm_path.to_str().unwrap(),
+                );
+                let resp = runtime
+                    .handle_create_terminal(&format!("sess-unlimited-{i}"), req)
+                    .await
+                    .expect("create should succeed");
+                terminal_ids.push(resp.terminal_id);
+            }
+
+            // All should exit with code 0.
+            let mut all_ok = true;
+            for (i, tid) in terminal_ids.into_iter().enumerate() {
+                let sid = format!("s{i}");
+                let exit = runtime
+                    .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(
+                        SessionId::from(sid),
+                        tid,
+                    ))
+                    .await
+                    .expect("wait should succeed");
+                if exit.exit_status.exit_code != Some(0) {
+                    all_ok = false;
+                    eprintln!("terminal {i} did not exit 0: {:?}", exit.exit_status);
+                }
+            }
+            assert!(all_ok, "all 64 concurrent tasks should exit with code 0");
+        })
+        .await;
+}
