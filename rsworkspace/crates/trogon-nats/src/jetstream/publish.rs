@@ -12,7 +12,6 @@ pub enum PublishOutcome<E: fmt::Display> {
     PublishFailed(E),
     AckFailed(E),
     AckTimedOut(Duration),
-    StoreFailed(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl<E: fmt::Display> PublishOutcome<E> {
@@ -31,9 +30,6 @@ impl<E: fmt::Display> PublishOutcome<E> {
             }
             PublishOutcome::AckTimedOut(timeout) => {
                 error!(?timeout, source = source_name, "NATS ack timed out");
-            }
-            PublishOutcome::StoreFailed(e) => {
-                error!(error = %e, source = source_name, "Failed to store claim check payload");
             }
         }
     }
@@ -59,4 +55,47 @@ pub async fn publish_event<P: JetStreamPublisher>(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "test-support")]
+    mod with_mocks {
+        use super::*;
+        use crate::jetstream::MockJetStreamPublisher;
+
+        #[tokio::test]
+        async fn publish_event_returns_published_on_success() {
+            let publisher = MockJetStreamPublisher::new();
+            let result = publish_event(
+                &publisher,
+                "test.subject".to_string(),
+                async_nats::HeaderMap::new(),
+                Bytes::from_static(b"payload"),
+                Duration::from_secs(10),
+            )
+            .await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn publish_event_returns_publish_failed_on_error() {
+            let publisher = MockJetStreamPublisher::new();
+            publisher.fail_next_js_publish();
+            let result = publish_event(
+                &publisher,
+                "test.subject".to_string(),
+                async_nats::HeaderMap::new(),
+                Bytes::from_static(b"payload"),
+                Duration::from_secs(10),
+            )
+            .await;
+            assert!(matches!(result, PublishOutcome::PublishFailed(_)));
+        }
+    }
+
+    #[test]
+    fn log_on_error_does_nothing_for_published() {
+        let outcome: PublishOutcome<String> = PublishOutcome::Published;
+        outcome.log_on_error("test");
+    }
+}
