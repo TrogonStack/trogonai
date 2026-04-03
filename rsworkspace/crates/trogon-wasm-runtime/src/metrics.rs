@@ -67,7 +67,9 @@ pub struct MetricsSnapshot {
 /// before and after, then assert the difference — to avoid coupling to
 /// whatever previous tests have incremented:
 ///
-/// ```rust
+/// ```rust,no_run
+/// use trogon_wasm_runtime::metrics::METRICS;
+/// use std::sync::atomic::Ordering;
 /// let before = METRICS.wasm_tasks_started.load(Ordering::Relaxed);
 /// // … exercise the code …
 /// let after = METRICS.wasm_tasks_started.load(Ordering::Relaxed);
