@@ -142,11 +142,15 @@ fn read_bytes(mem: &[u8], ptr: usize, len: usize) -> Option<&[u8]> {
 //   request_permission(options_json_ptr i32, options_json_len i32,
 //                      out_selected_ptr i32) -> i32
 //     NOTE: when auto_allow_permissions=false, this publishes a NATS request to
-//     `{acp_prefix}.session.{session_id}.wasm.request_permission` with body
-//     `{"options": ["opt1", ...], "session_id": "..."}` and expects a reply of
-//     `{"selected": <index>}` or `{"cancelled": true}`. This is NOT the standard
-//     ACP session.request_permission method — it is a custom trogon extension
-//     subject that requires a dedicated handler on the client side.
+//     `{acp_prefix}.session.{session_id}.wasm.request_permission` using the
+//     ACP-standard RequestPermissionRequest schema (sessionId, toolCall, options
+//     as [{optionId, title}]) and expects a RequestPermissionOutcome reply:
+//     `{"outcome":"selected","optionId":"<index>"}` or `{"outcome":"cancelled"}`.
+//     The optionId in the request uses the string representation of the array
+//     index so the host can map it back to the WASM ABI's integer output.
+//     This subject is NOT the standard ACP session.request_permission method —
+//     it is a custom trogon extension that requires a dedicated handler on the
+//     client side (the standard method is client→agent, not agent→runtime).
 //
 // Lifecycle notes:
 //   - WASM module kill is implemented via task abort() — the module has no
@@ -647,11 +651,30 @@ fn add_trogon_host_functions(
                     }
                     results[0] = wasmtime::Val::I32(0);
                 } else if let Some(nats_client) = nats {
-                    // Send a NATS request to ask for user permission.
+                    // Send a NATS request using the ACP-standard RequestPermissionRequest schema.
+                    // Each option string becomes a PermissionOption with optionId = its index
+                    // (as a string) and title = the string itself. The toolCall field is a
+                    // synthetic entry required by the schema; it identifies the WASM module as
+                    // the caller. The response is parsed as RequestPermissionOutcome:
+                    //   {"outcome":"selected","optionId":"<index>"} → write index to out_ptr
+                    //   {"outcome":"cancelled"}                     → return -1
                     let subject = format!("{acp_prefix}.session.{session_id}.wasm.request_permission");
+                    let acp_options: Vec<serde_json::Value> = options
+                        .iter()
+                        .enumerate()
+                        .map(|(i, title)| serde_json::json!({
+                            "optionId": i.to_string(),
+                            "title": title,
+                        }))
+                        .collect();
                     let request_json = serde_json::json!({
-                        "options": options,
-                        "session_id": session_id,
+                        "sessionId": session_id,
+                        "toolCall": {
+                            "toolCallId": format!("wasm-perm-{session_id}"),
+                            "name": "request_permission",
+                            "input": {},
+                        },
+                        "options": acp_options,
                     })
                     .to_string();
                     match tokio::time::timeout(
@@ -664,19 +687,31 @@ fn add_trogon_host_functions(
                             if let Ok(resp) =
                                 serde_json::from_slice::<serde_json::Value>(&msg.payload)
                             {
-                                if resp.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                let outcome = resp.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
+                                if outcome == "cancelled" {
                                     results[0] = wasmtime::Val::I32(-1);
-                                } else if let Some(idx) =
-                                    resp.get("selected").and_then(|v| v.as_i64())
-                                {
-                                    let mem_data = mem.data_mut(&mut caller);
-                                    if out_ptr + 4 <= mem_data.len() {
-                                        mem_data[out_ptr..out_ptr + 4]
-                                            .copy_from_slice(&(idx as i32).to_le_bytes());
+                                } else if outcome == "selected" {
+                                    // optionId is the string representation of the index.
+                                    let idx = resp
+                                        .get("optionId")
+                                        .and_then(|v| v.as_str())
+                                        .and_then(|s| s.parse::<i32>().ok());
+                                    match idx {
+                                        Some(i) if i >= 0 && (i as usize) < options.len() => {
+                                            let mem_data = mem.data_mut(&mut caller);
+                                            if out_ptr + 4 <= mem_data.len() {
+                                                mem_data[out_ptr..out_ptr + 4]
+                                                    .copy_from_slice(&i.to_le_bytes());
+                                            }
+                                            results[0] = wasmtime::Val::I32(0);
+                                        }
+                                        _ => {
+                                            tracing::warn!(session_id = %session_id, "Permission response 'optionId' is missing or out of range");
+                                            results[0] = wasmtime::Val::I32(-1);
+                                        }
                                     }
-                                    results[0] = wasmtime::Val::I32(0);
                                 } else {
-                                    tracing::warn!(session_id = %session_id, "Permission response missing 'selected' field");
+                                    tracing::warn!(session_id = %session_id, "Permission response missing or unknown 'outcome' field");
                                     results[0] = wasmtime::Val::I32(-1);
                                 }
                             } else {
