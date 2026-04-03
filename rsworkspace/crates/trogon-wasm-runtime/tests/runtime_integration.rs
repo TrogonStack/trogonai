@@ -4708,3 +4708,180 @@ async fn native_spawn_nonexistent_command_returns_error() {
 
     assert!(!err.message.is_empty(), "error message should be non-empty");
 }
+
+// ── Session isolation ────────────────────────────────────────────────────────
+
+/// Files written in session A must not be readable by session B.
+/// Each session has its own sandbox directory; there is no shared namespace.
+#[tokio::test]
+async fn cross_session_file_isolation() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    // Session A writes a secret file.
+    let write_req = WriteTextFileRequest::new(
+        SessionId::from("sess-a"),
+        PathBuf::from("/secret.txt"),
+        "session-a-secret",
+    );
+    runtime
+        .handle_write_text_file("session-a", write_req)
+        .await
+        .expect("session A write should succeed");
+
+    // Session B tries to read that same path — must fail (different sandbox).
+    let read_req = ReadTextFileRequest::new(
+        SessionId::from("sess-b"),
+        PathBuf::from("/secret.txt"),
+    );
+    let err = runtime
+        .handle_read_text_file("session-b", read_req)
+        .await
+        .expect_err("session B must not be able to read session A's file");
+    assert!(!err.message.is_empty());
+}
+
+// ── Sequential double-release ────────────────────────────────────────────────
+
+/// Releasing a terminal that was already released returns an error.
+#[tokio::test]
+async fn release_terminal_twice_returns_error_on_second() {
+    let tmp = TempDir::new().unwrap();
+    let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
+
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
+        .args(vec!["hi".to_string()]);
+    let resp = runtime
+        .handle_create_terminal(session_id(), req)
+        .await
+        .expect("create should succeed");
+    let tid = resp.terminal_id;
+
+    // First release: must succeed.
+    let rel = ReleaseTerminalRequest::new(SessionId::from("s1"), tid.clone());
+    runtime
+        .handle_release_terminal(rel)
+        .await
+        .expect("first release should succeed");
+
+    // Second release of same terminal: must return an error.
+    let rel2 = ReleaseTerminalRequest::new(SessionId::from("s1"), tid.clone());
+    runtime
+        .handle_release_terminal(rel2)
+        .await
+        .expect_err("second release of same terminal must return an error");
+}
+
+// ── WASM subscribe / recv_message / unsubscribe with real NATS ───────────────
+
+/// Full subscribe → recv_message → unsubscribe lifecycle from inside a WASM
+/// module against a real NATS server.
+///
+/// Strategy: the WAT module subscribes to a subject, the test publishes a
+/// known-length payload ("ping" = 4 bytes) to that subject, the module calls
+/// recv_message (non-blocking, 500 ms timeout), and uses the number of received
+/// payload bytes as the exit code. We assert exit_code == Some(4).
+#[tokio::test]
+async fn wasm_module_subscribe_recv_unsubscribe_with_nats() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!(
+                "NATS_TEST_URL not set — skipping wasm_module_subscribe_recv_unsubscribe_with_nats"
+            );
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+    let tmp = TempDir::new().unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let runtime =
+                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
+                    .unwrap();
+
+            // Module layout:
+            //   offset 0:   "wasm.recv.test" (14 bytes) — subscribe subject
+            //   offset 64:  out_subj buffer  (128 bytes)
+            //   offset 192: out_subj_len_ptr (4 bytes) — written by recv_message
+            //   offset 196: out_payload buf  (128 bytes)
+            //   offset 324: out_payload_len_ptr (4 bytes) — written by recv_message
+            //
+            // recv_message returns 1 on success, 0 on timeout, -1 on error.
+            // Payload length is written to out_payload_len_ptr (i32 LE).
+            //
+            // Logic:
+            //   sub_id = subscribe("wasm.recv.test")  → must be >= 0
+            //   ret = recv_message(sub_id, ...)
+            //   if ret != 1  → exit 98 (no message received)
+            //   unsubscribe(sub_id)
+            //   proc_exit(i32.load(324))  ← exit code = payload bytes written (4 for "ping")
+            let wat = r#"(module
+              (import "trogon_v1" "subscribe"     (func $sub  (param i32 i32) (result i32)))
+              (import "trogon_v1" "recv_message"  (func $recv
+                (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+              (import "trogon_v1" "unsubscribe"   (func $unsub (param i32) (result i32)))
+              (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+              (memory 1) (export "memory" (memory 0))
+              (data (i32.const 0) "wasm.recv.test")
+              (func (export "_start")
+                (local $sid i32)
+                (local $ret i32)
+                ;; subscribe
+                (local.set $sid (call $sub (i32.const 0) (i32.const 14)))
+                ;; if sub_id < 0 → exit 99 (NATS not available)
+                (if (i32.lt_s (local.get $sid) (i32.const 0))
+                  (then (call $exit (i32.const 99))))
+                ;; recv_message with 500ms timeout
+                ;; out_subj_ptr=64, out_subj_max=128, out_subj_len_ptr=192
+                ;; out_payload_ptr=196, out_payload_max=128, out_payload_len_ptr=324
+                (local.set $ret (call $recv
+                  (local.get $sid)
+                  (i32.const 64)  (i32.const 128) (i32.const 192)
+                  (i32.const 196) (i32.const 128) (i32.const 324)
+                  (i32.const 500)))
+                ;; if ret != 1 → exit 98 (timeout or error, no message received)
+                (if (i32.ne (local.get $ret) (i32.const 1))
+                  (then (call $exit (i32.const 98))))
+                ;; unsubscribe
+                (drop (call $unsub (local.get $sid)))
+                ;; exit with payload_len (loaded from out_payload_len_ptr at offset 324)
+                (call $exit (i32.load (i32.const 324)))
+              )
+            )"#;
+
+            let wasm_path = make_wasm(tmp.path(), "sub_recv.wasm", wat);
+            let req =
+                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal(session_id(), req)
+                .await
+                .expect("module should be created");
+
+            // Give the module time to subscribe before publishing.
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+            // Publish a 4-byte payload to the subscribed subject.
+            nats.publish("wasm.recv.test", bytes::Bytes::from_static(b"ping"))
+                .await
+                .expect("publish failed");
+
+            let wait_req =
+                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .expect("wait should succeed");
+
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(4),
+                "recv_message should return 4 (payload len of 'ping'); got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+}
