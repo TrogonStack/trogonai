@@ -1558,6 +1558,131 @@ async fn wasm_module_request_permission_no_nats_denied() {
         .await;
 }
 
+/// `request_permission` host function sends an ACP-standard payload over NATS
+/// and parses the `RequestPermissionOutcome` response. The responder replies with
+/// `{"outcome":"selected","optionId":"1"}` selecting the second option ("Deny"),
+/// so the module exits with code 1.
+#[tokio::test]
+async fn wasm_module_request_permission_via_nats_acp_schema() {
+    let nats_url = match nats_test_url() {
+        Some(u) => u,
+        None => {
+            eprintln!("NATS_TEST_URL not set — skipping wasm_module_request_permission_via_nats_acp_schema");
+            return;
+        }
+    };
+
+    let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
+    let session = "perm-nats-test";
+    let acp_prefix = "acp";
+
+    // Spawn a responder on the custom wasm.request_permission subject.
+    // Validates the request payload uses ACP schema, then replies selecting option index 1.
+    let responder_nats = nats.clone();
+    let subject = format!("{acp_prefix}.session.{session}.wasm.request_permission");
+    let responder = tokio::spawn(async move {
+        let mut sub = responder_nats
+            .subscribe(subject)
+            .await
+            .expect("responder subscribe");
+        if let Some(msg) = sub.next().await {
+            // Validate request uses ACP schema.
+            let req: serde_json::Value =
+                serde_json::from_slice(&msg.payload).expect("valid JSON request");
+            assert!(req.get("sessionId").is_some(), "request must have sessionId");
+            assert!(req.get("toolCall").is_some(), "request must have toolCall");
+            let opts = req["options"].as_array().expect("options must be array");
+            assert_eq!(opts.len(), 2);
+            assert_eq!(opts[0]["optionId"].as_str(), Some("0"));
+            assert_eq!(opts[0]["title"].as_str(), Some("Allow"));
+            assert_eq!(opts[1]["optionId"].as_str(), Some("1"));
+            assert_eq!(opts[1]["title"].as_str(), Some("Deny"));
+
+            if let Some(reply) = msg.reply {
+                let _ = responder_nats
+                    .publish(
+                        reply,
+                        bytes::Bytes::from(r#"{"outcome":"selected","optionId":"1"}"#),
+                    )
+                    .await;
+            }
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let tmp = TempDir::new().unwrap();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let cfg = Config {
+                auto_allow_permissions: false,
+                acp_prefix: acp_prefix.to_string(),
+                ..test_config(tmp.path().to_path_buf())
+            };
+            let runtime =
+                WasmRuntime::with_nats(&cfg, Some(nats.clone())).unwrap();
+
+            // WAT: calls request_permission(["Allow","Deny"]), exits with selected index.
+            let wasm_path = make_wasm(
+                tmp.path(),
+                "request_permission_nats.wasm",
+                r#"
+                (module
+                  (import "trogon_v1" "request_permission"
+                    (func $request_permission (param i32 i32 i32) (result i32)))
+                  (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                  (memory 1)
+                  (export "memory" (memory 0))
+                  (data (i32.const 0) "[\22Allow\22,\22Deny\22]")
+                  (func (export "_start")
+                    (local $ret i32)
+                    (local $selected i32)
+                    (local.set $ret
+                      (call $request_permission
+                        (i32.const 0)    ;; options_json_ptr
+                        (i32.const 16)   ;; options_json_len ("["Allow","Deny"]")
+                        (i32.const 100)  ;; out_selected_ptr
+                      )
+                    )
+                    ;; ret should be 0 (success)
+                    (if (i32.ne (local.get $ret) (i32.const 0))
+                      (then (call $proc_exit (i32.const 99)))
+                    )
+                    ;; exit with the selected index written by the host
+                    (local.set $selected (i32.load (i32.const 100)))
+                    (call $proc_exit (local.get $selected))
+                  )
+                )
+                "#,
+            );
+
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime
+                .handle_create_terminal(session, req)
+                .await
+                .expect("module should be created");
+
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime
+                .handle_wait_for_terminal_exit(wait_req)
+                .await
+                .unwrap();
+
+            // Responder selected optionId "1" → index 1 → proc_exit(1).
+            assert_eq!(
+                exit.exit_status.exit_code,
+                Some(1),
+                "WASM should exit with selected index 1, got: {:?}",
+                exit.exit_status
+            );
+        })
+        .await;
+
+    let _ = responder.await;
+}
+
 // ── Fix 3: Backpressure ────────────────────────────────────────────────────────
 
 /// Verify that a runtime with `wasm_max_concurrent_tasks: 2` can still run 4
