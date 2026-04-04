@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tokio::spawn(start_health_server(config.health_port));
 
     tracing::info!("Connecting to NATS...");
-    let nats_client = connect(&config.nats)
+    let nats_client = connect(&config.nats, Duration::from_secs(10))
         .await
         .map_err(|e| format!("{:?}", e))?;
     // Keep raw client for Core NATS request/reply (stream.start).

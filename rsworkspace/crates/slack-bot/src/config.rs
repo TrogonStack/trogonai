@@ -2,84 +2,24 @@ use std::collections::HashSet;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
-/// How the bot receives events from Slack.
-#[derive(Debug, Clone, PartialEq)]
-pub enum BotMode {
-    /// Socket Mode (default): bot opens a WebSocket connection to Slack.
-    /// Requires SLACK_APP_TOKEN (xapp-...).
-    Socket,
-    /// HTTP Events API: Slack POSTs events to our HTTP endpoint.
-    /// Does not require SLACK_APP_TOKEN; uses SLACK_SIGNING_SECRET for verification.
-    Http,
-}
-
-impl BotMode {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "http" => Self::Http,
-            _ => Self::Socket,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct SlackBotConfig {
-    /// Bot token (xoxb-...) — used to post messages to Slack.
     pub bot_token: String,
-    /// App-level token (xapp-...) — used to open the Socket Mode connection.
     pub app_token: Option<String>,
-    /// Optional bot user ID (UXXXXXXXX). When set, messages from this user
-    /// are filtered in the listener as an additional guard against loops.
     pub bot_user_id: Option<String>,
-    /// When true (default), channel/group messages only reach the agent if the
-    /// bot is @mentioned or if the message is a thread reply. DMs always pass.
-    /// Mirrors OpenClaw's `requireMention` default behaviour.
     pub mention_gating: bool,
-    /// Channels where mention gating is always ON, regardless of `mention_gating`.
-    /// Comma-separated channel IDs in `SLACK_MENTION_GATING_CHANNELS`.
     pub mention_gating_channels: HashSet<String>,
-    /// Channels where mention gating is always OFF, regardless of `mention_gating`.
-    /// Comma-separated channel IDs in `SLACK_NO_MENTION_CHANNELS`.
     pub no_mention_channels: HashSet<String>,
-    /// Custom text patterns (beyond @mention) that activate the bot even when
-    /// mention gating is enabled. Comma-separated substrings in `SLACK_MENTION_PATTERNS`.
     pub mention_patterns: Vec<String>,
-    /// When true, messages from bots are forwarded to NATS instead of being
-    /// silently dropped. Default: false.
     pub allow_bots: bool,
     pub nats: NatsConfig,
-    /// Port for the HTTP health check endpoint. Default: 8080.
     pub health_port: u16,
-    /// Slack signing secret for verifying webhook requests.
-    /// When set, all webhook requests are signature-verified.
-    pub signing_secret: Option<String>,
-    /// Port for the raw HTTP Events API webhook server (for pin events).
-    /// Default: 3001.
-    pub events_port: u16,
-    /// Max outbound Slack API requests per second. Default: 1.0.
-    /// Configurable via SLACK_API_RPS. Clamped to [0.1, 50.0].
     pub slack_api_rps: f32,
-    /// Maximum file size in MB for inbound media downloads. Default: 20.
-    /// Read from SLACK_MEDIA_MAX_MB.
     pub media_max_mb: u64,
-    /// Maximum characters per Slack message chunk. Default: 4000.
-    /// Read from SLACK_TEXT_CHUNK_LIMIT.
     pub text_chunk_limit: usize,
-    /// Text chunking mode: "chars" (default) splits at character limit,
-    /// "newline" prefers splitting on paragraph/line boundaries first.
-    /// Read from SLACK_CHUNK_MODE.
     pub chunk_mode_newline: bool,
-    /// Optional Slack user token (xoxp-...) for read-only API calls that
-    /// require user-level permissions. Read from SLACK_USER_TOKEN.
     pub user_token: Option<String>,
-    /// Optional account identifier for multi-workspace deployments.
-    /// When set, all NATS subjects are namespaced as `slack.<account_id>.<rest>`.
-    /// Read from SLACK_ACCOUNT_ID. Default: None (single-account, backward compatible).
     pub account_id: Option<String>,
-    /// Connection mode. Read from SLACK_MODE ("socket" or "http"). Default: socket.
-    pub mode: BotMode,
-    /// HTTP path for Events API webhook. Read from SLACK_HTTP_PATH. Default: "/slack/events".
-    pub http_path: String,
 }
 
 impl SlackBotConfig {
@@ -125,12 +65,6 @@ impl SlackBotConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(8080);
-        let signing_secret = env.var("SLACK_SIGNING_SECRET").ok();
-        let events_port = env
-            .var("SLACK_EVENTS_PORT")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(3001);
         let slack_api_rps = env
             .var("SLACK_API_RPS")
             .ok()
@@ -159,14 +93,6 @@ impl SlackBotConfig {
             .var("SLACK_ACCOUNT_ID")
             .ok()
             .filter(|v| !v.is_empty());
-        let mode = env
-            .var("SLACK_MODE")
-            .map(|v| BotMode::from_str(&v))
-            .unwrap_or(BotMode::Socket);
-        let http_path = env
-            .var("SLACK_HTTP_PATH")
-            .unwrap_or_else(|_| "/slack/events".to_string());
-
         Self {
             bot_token,
             app_token,
@@ -178,16 +104,12 @@ impl SlackBotConfig {
             allow_bots,
             nats,
             health_port,
-            signing_secret,
-            events_port,
             slack_api_rps,
             media_max_mb,
             text_chunk_limit,
             chunk_mode_newline,
             user_token,
             account_id,
-            mode,
-            http_path,
         }
     }
 }
@@ -293,30 +215,6 @@ mod tests {
         let env2 = base_env();
         env2.set("SLACK_ALLOW_BOTS", "1");
         assert!(SlackBotConfig::from_env(&env2).allow_bots);
-    }
-
-    #[test]
-    fn signing_secret_not_set_is_none() {
-        assert!(SlackBotConfig::from_env(&base_env()).signing_secret.is_none());
-    }
-
-    #[test]
-    fn signing_secret_set() {
-        let env = base_env();
-        env.set("SLACK_SIGNING_SECRET", "secret123");
-        assert_eq!(SlackBotConfig::from_env(&env).signing_secret.as_deref(), Some("secret123"));
-    }
-
-    #[test]
-    fn events_port_default() {
-        assert_eq!(SlackBotConfig::from_env(&base_env()).events_port, 3001);
-    }
-
-    #[test]
-    fn events_port_custom() {
-        let env = base_env();
-        env.set("SLACK_EVENTS_PORT", "4001");
-        assert_eq!(SlackBotConfig::from_env(&env).events_port, 4001);
     }
 
     #[test]
@@ -484,42 +382,6 @@ mod tests {
         env.set("SLACK_USER_TOKEN", "");
         let config = SlackBotConfig::from_env(&env);
         assert!(config.user_token.is_none());
-    }
-
-    #[test]
-    fn mode_defaults_to_socket() {
-        let config = SlackBotConfig::from_env(&base_env());
-        assert_eq!(config.mode, BotMode::Socket);
-    }
-
-    #[test]
-    fn mode_set_to_http() {
-        let env = base_env();
-        env.set("SLACK_MODE", "http");
-        let config = SlackBotConfig::from_env(&env);
-        assert_eq!(config.mode, BotMode::Http);
-    }
-
-    #[test]
-    fn mode_unknown_falls_back_to_socket() {
-        let env = base_env();
-        env.set("SLACK_MODE", "websocket");
-        let config = SlackBotConfig::from_env(&env);
-        assert_eq!(config.mode, BotMode::Socket);
-    }
-
-    #[test]
-    fn http_path_default() {
-        let config = SlackBotConfig::from_env(&base_env());
-        assert_eq!(config.http_path, "/slack/events");
-    }
-
-    #[test]
-    fn http_path_custom() {
-        let env = base_env();
-        env.set("SLACK_HTTP_PATH", "/my/slack/hook");
-        let config = SlackBotConfig::from_env(&env);
-        assert_eq!(config.http_path, "/my/slack/hook");
     }
 
     #[test]

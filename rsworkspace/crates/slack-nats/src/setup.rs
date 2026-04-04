@@ -6,14 +6,12 @@ use std::time::Duration;
 pub const STREAM_NAME: &str = "SLACK";
 
 /// Subjects covered by the stream.
-/// `slack.outbound.stream.start` uses Core NATS request/reply (raw client
-/// publish) and therefore never lands in the JetStream stream even though
-/// `slack.outbound.>` matches it in theory — Core NATS messages are not
-/// persisted to JetStream streams.
-const STREAM_SUBJECTS: &[&str] = &[
-    "slack.inbound.>",
-    "slack.outbound.>",
-];
+///
+/// Uses `slack.>` so that both raw events from `trogon-source-slack`
+/// (`slack.event.*`, `slack.interaction.*`, `slack.command.*`) and enriched
+/// events (`slack.inbound.*`, `slack.outbound.*`) land in the same stream.
+/// Consumers filter by specific subject prefixes.
+const STREAM_SUBJECTS: &[&str] = &["slack.>"];
 
 /// Create (or verify) the `SLACK` JetStream stream.
 ///
