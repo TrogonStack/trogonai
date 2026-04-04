@@ -17,7 +17,7 @@ use slack_types::events::{
     SlackReactionEvent, SlackSlashCommandEvent, SlackThreadBroadcastEvent, SlackViewClosedEvent,
     SlackViewSubmissionEvent,
 };
-use trogon_nats::PublishClient;
+use async_nats::jetstream;
 
 use crate::config::EnricherConfig;
 
@@ -36,14 +36,12 @@ pub struct EnrichContext {
 
 // ── Events API dispatch ─────────────────────────────────────────────────────
 
-pub async fn handle_raw_event<C: PublishClient>(
-    js: &C,
+pub async fn handle_raw_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     payload: &[u8],
     nats_headers: &async_nats::HeaderMap,
-) where
-    C::PublishError: 'static,
-{
+) {
     let event_type = nats_headers
         .get("X-Slack-Event-Type")
         .map(|v| v.as_str());
@@ -92,13 +90,11 @@ pub async fn handle_raw_event<C: PublishClient>(
 
 // ── Interaction dispatch ────────────────────────────────────────────────────
 
-pub async fn handle_raw_interaction<C: PublishClient>(
-    js: &C,
+pub async fn handle_raw_interaction(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     payload: &[u8],
-) where
-    C::PublishError: 'static,
-{
+) {
     let body: serde_json::Value = match serde_json::from_slice(payload) {
         Ok(v) => v,
         Err(e) => {
@@ -204,13 +200,11 @@ pub async fn handle_raw_interaction<C: PublishClient>(
 
 // ── Slash command dispatch ──────────────────────────────────────────────────
 
-pub async fn handle_raw_command<C: PublishClient>(
-    js: &C,
+pub async fn handle_raw_command(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     payload: &[u8],
-) where
-    C::PublishError: 'static,
-{
+) {
     let body_str = std::str::from_utf8(payload).unwrap_or("");
     let params: HashMap<String, String> = form_urlencoded::parse(body_str.as_bytes())
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
@@ -235,13 +229,11 @@ pub async fn handle_raw_command<C: PublishClient>(
 
 // ── Event handlers ──────────────────────────────────────────────────────────
 
-async fn handle_message_event<C: PublishClient>(
-    js: &C,
+async fn handle_message_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
-) where
-    C::PublishError: 'static,
-{
+) {
     if event["bot_id"].is_string() && !ctx.config.allow_bots {
         return;
     }
@@ -384,13 +376,11 @@ async fn handle_message_event<C: PublishClient>(
     }
 }
 
-async fn handle_app_mention_event<C: PublishClient>(
-    js: &C,
+async fn handle_app_mention_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
-) where
-    C::PublishError: 'static,
-{
+) {
     let user = event["user"].as_str().unwrap_or_default().to_string();
     let channel = event["channel"].as_str().unwrap_or_default().to_string();
     let raw_text = event["text"].as_str().unwrap_or_default().to_string();
@@ -433,14 +423,12 @@ async fn handle_app_mention_event<C: PublishClient>(
     }
 }
 
-async fn handle_reaction_event<C: PublishClient>(
-    js: &C,
+async fn handle_reaction_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
     added: bool,
-) where
-    C::PublishError: 'static,
-{
+) {
     let item = &event["item"];
     let channel = if item["type"].as_str() == Some("message") {
         item["channel"].as_str().map(String::from)
@@ -468,14 +456,12 @@ async fn handle_reaction_event<C: PublishClient>(
     }
 }
 
-async fn handle_member_event<C: PublishClient>(
-    js: &C,
+async fn handle_member_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
     joined: bool,
-) where
-    C::PublishError: 'static,
-{
+) {
     let ev = SlackMemberEvent {
         user: event["user"].as_str().unwrap_or_default().to_string(),
         channel: event["channel"].as_str().unwrap_or_default().to_string(),
@@ -490,14 +476,12 @@ async fn handle_member_event<C: PublishClient>(
     }
 }
 
-async fn handle_channel_event<C: PublishClient>(
-    js: &C,
+async fn handle_channel_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
     kind: ChannelEventKind,
-) where
-    C::PublishError: 'static,
-{
+) {
     let (channel_id, channel_name, user) = match kind {
         ChannelEventKind::Created | ChannelEventKind::Renamed => {
             let ch = &event["channel"];
@@ -526,13 +510,11 @@ async fn handle_channel_event<C: PublishClient>(
     }
 }
 
-async fn handle_app_home_event<C: PublishClient>(
-    js: &C,
+async fn handle_app_home_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
-) where
-    C::PublishError: 'static,
-{
+) {
     let ev = SlackAppHomeOpenedEvent {
         user: event["user"].as_str().unwrap_or_default().to_string(),
         tab: event["tab"].as_str().unwrap_or_default().to_string(),
@@ -544,13 +526,11 @@ async fn handle_app_home_event<C: PublishClient>(
     }
 }
 
-async fn handle_link_shared_event<C: PublishClient>(
-    js: &C,
+async fn handle_link_shared_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
-) where
-    C::PublishError: 'static,
-{
+) {
     let links = event["links"]
         .as_array()
         .map(|arr| {
@@ -575,14 +555,12 @@ async fn handle_link_shared_event<C: PublishClient>(
     }
 }
 
-async fn handle_pin_event<C: PublishClient>(
-    js: &C,
+async fn handle_pin_event(
+    js: &jetstream::Context,
     ctx: &EnrichContext,
     event: &serde_json::Value,
     kind: PinEventKind,
-) where
-    C::PublishError: 'static,
-{
+) {
     let channel = event["channel_id"]
         .as_str()
         .or_else(|| event["channel"].as_str())
