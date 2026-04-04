@@ -13,7 +13,7 @@ use slack_types::subjects::{
     SLACK_OUTBOUND_SET_STATUS, SLACK_OUTBOUND_SET_SUGGESTED_PROMPTS,
     SLACK_OUTBOUND_STREAM_APPEND, SLACK_OUTBOUND_STREAM_STOP, SLACK_OUTBOUND_UNFURL,
     SLACK_OUTBOUND_UPDATE, SLACK_OUTBOUND_UPLOAD, SLACK_OUTBOUND_VIEW_OPEN,
-    SLACK_OUTBOUND_VIEW_PUBLISH,
+    SLACK_OUTBOUND_VIEW_PUBLISH, SLACK_RAW_COMMAND, SLACK_RAW_EVENT, SLACK_RAW_INTERACTION,
 };
 
 use crate::setup::STREAM_NAME;
@@ -415,6 +415,44 @@ pub async fn create_response_url_consumer(
     .await
 }
 
+// ── Raw consumers (used by slack-enricher) ────────────────────────────────────
+
+pub async fn create_raw_event_consumer(
+    js: &Context,
+    account_id: Option<&str>,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        &consumer_name("slack-enricher-event", account_id),
+        &for_account(SLACK_RAW_EVENT, account_id),
+    )
+    .await
+}
+
+pub async fn create_raw_interaction_consumer(
+    js: &Context,
+    account_id: Option<&str>,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        &consumer_name("slack-enricher-interaction", account_id),
+        &for_account(SLACK_RAW_INTERACTION, account_id),
+    )
+    .await
+}
+
+pub async fn create_raw_command_consumer(
+    js: &Context,
+    account_id: Option<&str>,
+) -> Result<Consumer<pull::Config>, async_nats::Error> {
+    make_consumer(
+        js,
+        &consumer_name("slack-enricher-command", account_id),
+        &for_account(SLACK_RAW_COMMAND, account_id),
+    )
+    .await
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -489,6 +527,10 @@ mod tests {
             "slack-bot-delete-file",
             "slack-agent-link-shared",
             "slack-bot-unfurl",
+            "slack-bot-response-url",
+            "slack-enricher-event",
+            "slack-enricher-interaction",
+            "slack-enricher-command",
         ];
         let mut seen = std::collections::HashSet::new();
         for base in &bases {

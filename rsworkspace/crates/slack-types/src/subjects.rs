@@ -1,3 +1,15 @@
+// ── Raw (trogon-source-slack → NATS, before enrichment) ─────────────────────
+
+/// Wildcard for all raw Events API events published by `trogon-source-slack`.
+/// Individual events land on `slack.event.<event_type>` (e.g. `slack.event.message`).
+pub const SLACK_RAW_EVENT: &str = "slack.event.>";
+
+/// Wildcard for all raw interactive payloads (block_actions, view_submission, etc.).
+pub const SLACK_RAW_INTERACTION: &str = "slack.interaction.>";
+
+/// Wildcard for all raw slash command payloads.
+pub const SLACK_RAW_COMMAND: &str = "slack.command.>";
+
 // ── Inbound (Slack → NATS → agent) ──────────────────────────────────────────
 
 /// Regular messages and DMs from users.

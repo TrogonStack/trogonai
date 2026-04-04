@@ -8,7 +8,7 @@ name = "slack-agent"
 path = "src/main.rs"
 
 [dependencies]
-async-nats = "0.45.0"
+async-nats = { workspace = true, features = ["ring", "jetstream", "kv"] }
 futures = "0.3"
 llm-types = { path = "../llm-types" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
