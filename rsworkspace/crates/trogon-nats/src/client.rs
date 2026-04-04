@@ -97,10 +97,12 @@ impl PublishClient for async_nats::jetstream::Context {
     async fn publish_with_headers<S: ToSubject + Send>(
         &self,
         subject: S,
-        _headers: HeaderMap,
+        headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), Self::PublishError> {
-        self.publish(subject, payload).await?.await?;
+        self.publish_with_headers(subject, headers, payload)
+            .await?
+            .await?;
         Ok(())
     }
 }
