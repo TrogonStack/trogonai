@@ -486,6 +486,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn inject_trace_context_preserves_existing_headers() {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Custom", "preserved");
+        inject_trace_context(&mut headers);
+        assert_eq!(
+            headers.get("X-Custom").map(|v| v.as_str()),
+            Some("preserved"),
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_policy_execute_does_not_panic_with_high_retry_count() {
+        tokio::time::pause();
+
+        let policy = RetryPolicy {
+            max_retries: 33,
+            initial_retry_delay: Duration::from_millis(1),
+        };
+
+        let result = policy
+            .execute(
+                || async { Err(PublishOperationError("always fails".into())) },
+                "test_op",
+                "test.subject",
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(NatsError::PublishOperationExhausted { attempts: 34, .. })
+        ));
+    }
+
     #[tokio::test]
     #[cfg(feature = "test-support")]
     async fn test_request_with_mock_success() {
