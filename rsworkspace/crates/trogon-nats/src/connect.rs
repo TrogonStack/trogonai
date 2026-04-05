@@ -228,4 +228,18 @@ mod tests {
         ));
         assert!(std::error::Error::source(&err).is_some());
     }
+
+    #[tokio::test]
+    async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
+        let config = NatsConfig::new(
+            vec!["nats://127.0.0.1:4222".to_string()],
+            NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
+        );
+
+        let err = connect(&config, Duration::from_millis(100))
+            .await
+            .expect_err("expected an error for missing credentials file");
+
+        assert!(matches!(err, ConnectError::InvalidCredentials(_)));
+    }
 }
