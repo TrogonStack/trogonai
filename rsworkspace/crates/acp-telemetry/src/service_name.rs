@@ -6,6 +6,7 @@ pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsWs,
     TrogonSourceGithub,
+    TrogonSourceLinear,
     TrogonSourceSlack,
 }
 
@@ -15,6 +16,7 @@ impl ServiceName {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsWs => "acp-nats-ws",
             Self::TrogonSourceGithub => "trogon-source-github",
+            Self::TrogonSourceLinear => "trogon-source-linear",
             Self::TrogonSourceSlack => "trogon-source-slack",
         }
     }
@@ -39,6 +41,10 @@ mod tests {
             "trogon-source-github"
         );
         assert_eq!(
+            ServiceName::TrogonSourceLinear.as_str(),
+            "trogon-source-linear"
+        );
+        assert_eq!(
             ServiceName::TrogonSourceSlack.as_str(),
             "trogon-source-slack"
         );
@@ -51,6 +57,10 @@ mod tests {
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceGithub),
             "trogon-source-github"
+        );
+        assert_eq!(
+            format!("{}", ServiceName::TrogonSourceLinear),
+            "trogon-source-linear"
         );
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceSlack),

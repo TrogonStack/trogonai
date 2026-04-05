@@ -42,6 +42,31 @@ services:
       start_period: 10s
       retries: 3
 
+  trogon-source-linear:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/trogon-source-linear/Dockerfile
+    environment:
+      NATS_URL: "nats:4222"
+      LINEAR_WEBHOOK_SECRET: "${LINEAR_WEBHOOK_SECRET}"
+      LINEAR_WEBHOOK_PORT: "${LINEAR_WEBHOOK_PORT:-8080}"
+      LINEAR_SUBJECT_PREFIX: "${LINEAR_SUBJECT_PREFIX:-linear}"
+      LINEAR_STREAM_NAME: "${LINEAR_STREAM_NAME:-LINEAR}"
+      LINEAR_STREAM_MAX_AGE_SECS: "${LINEAR_STREAM_MAX_AGE_SECS:-604800}"
+      LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS: "${LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS:-60}"
+      LINEAR_NATS_ACK_TIMEOUT_MS: "${LINEAR_NATS_ACK_TIMEOUT_MS:-10000}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${LINEAR_WEBHOOK_PORT:-8080}/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
   trogon-source-slack:
     build:
       context: ../../../rsworkspace
@@ -73,6 +98,7 @@ services:
     environment:
       NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN:-}"
       GITHUB_ADDR: "trogon-source-github:${GITHUB_WEBHOOK_PORT:-8080}"
+      LINEAR_ADDR: "trogon-source-linear:${LINEAR_WEBHOOK_PORT:-8080}"
       SLACK_ADDR: "trogon-source-slack:${SLACK_WEBHOOK_PORT:-3000}"
     entrypoint:
       - /bin/sh
@@ -84,6 +110,9 @@ services:
           github:
             addr: $${GITHUB_ADDR}
             proto: http
+          linear:
+            addr: $${LINEAR_ADDR}
+            proto: http
           slack:
             addr: $${SLACK_ADDR}
             proto: http
@@ -91,6 +120,8 @@ services:
         exec ngrok start --all --config /tmp/ngrok.yml
     depends_on:
       trogon-source-github:
+        condition: service_healthy
+      trogon-source-linear:
         condition: service_healthy
       trogon-source-slack:
         condition: service_healthy

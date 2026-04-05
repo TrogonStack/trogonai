@@ -1,0 +1,35 @@
+[package]
+name = "trogon-source-linear"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-source-linear"
+path = "src/main.rs"
+
+[dependencies]
+acp-telemetry = { workspace = true }
+async-nats = { workspace = true, features = ["ring", "jetstream"] }
+axum = { workspace = true }
+bytes = { workspace = true }
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+futures-util = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
