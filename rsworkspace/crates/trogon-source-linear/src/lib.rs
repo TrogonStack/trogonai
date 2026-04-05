@@ -17,6 +17,10 @@
 //! - **Headers**: `Nats-Msg-Id` (set to Linear's `webhookId` for dedup)
 //! - **Payload**: raw JSON body from Linear
 //!
+//! Payloads that pass signature verification but fail validation (invalid JSON,
+//! missing/invalid `type` or `action`, stale timestamp) are published to
+//! `{LINEAR_SUBJECT_PREFIX}.unroutable` with an `X-Linear-Reject-Reason` header.
+//!
 //! ## Configuration (env vars)
 //!
 //! | Variable | Default | Description |
