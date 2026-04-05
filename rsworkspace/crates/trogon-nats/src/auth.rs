@@ -1,14 +1,10 @@
 use std::path::PathBuf;
 use trogon_std::env::ReadEnv;
 
-const ENV_NATS_URL: &str = "NATS_URL";
-const ENV_NATS_CREDS: &str = "NATS_CREDS";
-const ENV_NATS_NKEY: &str = "NATS_NKEY";
-const ENV_NATS_USER: &str = "NATS_USER";
-const ENV_NATS_PASSWORD: &str = "NATS_PASSWORD";
-const ENV_NATS_TOKEN: &str = "NATS_TOKEN";
-
-const DEFAULT_NATS_URL: &str = "localhost:4222";
+use crate::constants::{
+    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN,
+    ENV_NATS_URL, ENV_NATS_USER,
+};
 
 /// NATS authentication method.
 ///
@@ -173,6 +169,14 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("NATS_USER", "user");
         // no NATS_PASSWORD
+
+        assert!(matches!(NatsConfig::from_env(&env).auth, NatsAuth::None));
+    }
+
+    #[test]
+    fn from_env_requires_both_user_and_password_only_password_set() {
+        let env = InMemoryEnv::new();
+        env.set("NATS_PASSWORD", "pass");
 
         assert!(matches!(NatsConfig::from_env(&env).auth, NatsAuth::None));
     }

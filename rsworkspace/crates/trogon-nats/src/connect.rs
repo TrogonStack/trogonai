@@ -1,4 +1,5 @@
 use crate::auth::{NatsAuth, NatsConfig};
+use crate::constants::MAX_RECONNECT_DELAY;
 use async_nats::{Client, ConnectOptions, Event};
 use std::time::Duration;
 use tracing::{info, instrument, warn};
@@ -38,9 +39,6 @@ impl std::error::Error for ConnectError {
     }
 }
 
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
-
 fn reconnect_delay(attempts: usize) -> Duration {
     let delay = Duration::from_secs(std::cmp::min(
         MAX_RECONNECT_DELAY.as_secs(),
@@ -67,16 +65,18 @@ async fn handle_event(event: Event) {
     }
 }
 
-fn apply_reconnect_options(opts: ConnectOptions) -> ConnectOptions {
+fn apply_reconnect_options(opts: ConnectOptions, connection_timeout: Duration) -> ConnectOptions {
     opts.retry_on_initial_connect()
-        .connection_timeout(CONNECTION_TIMEOUT)
+        .connection_timeout(connection_timeout)
         .reconnect_delay_callback(reconnect_delay)
         .event_callback(|event| async move { handle_event(event).await })
 }
 
-/// Connect to NATS with automatic reconnection and event handling.
-#[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description()))]
-pub async fn connect(config: &NatsConfig) -> Result<Client, ConnectError> {
+#[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+pub async fn connect(
+    config: &NatsConfig,
+    connection_timeout: Duration,
+) -> Result<Client, ConnectError> {
     info!(
         servers = ?config.servers,
         auth = %config.auth.description(),
@@ -87,7 +87,11 @@ pub async fn connect(config: &NatsConfig) -> Result<Client, ConnectError> {
         NatsAuth::Credentials(path) => {
             info!(path = %path.display(), "Using credentials file");
             match ConnectOptions::with_credentials_file(path.clone()).await {
-                Ok(opts) => apply_reconnect_options(opts).connect(&config.servers).await,
+                Ok(opts) => {
+                    apply_reconnect_options(opts, connection_timeout)
+                        .connect(&config.servers)
+                        .await
+                }
                 Err(e) => {
                     warn!(error = %e, path = %path.display(), "Failed to load credentials file");
                     return Err(ConnectError::InvalidCredentials(e));
@@ -95,25 +99,28 @@ pub async fn connect(config: &NatsConfig) -> Result<Client, ConnectError> {
             }
         }
         NatsAuth::NKey(seed) => {
-            apply_reconnect_options(ConnectOptions::with_nkey(seed.clone()))
+            apply_reconnect_options(ConnectOptions::with_nkey(seed.clone()), connection_timeout)
                 .connect(&config.servers)
                 .await
         }
         NatsAuth::UserPassword { user, password } => {
-            apply_reconnect_options(ConnectOptions::with_user_and_password(
-                user.clone(),
-                password.clone(),
-            ))
+            apply_reconnect_options(
+                ConnectOptions::with_user_and_password(user.clone(), password.clone()),
+                connection_timeout,
+            )
             .connect(&config.servers)
             .await
         }
         NatsAuth::Token(token) => {
-            apply_reconnect_options(ConnectOptions::with_token(token.clone()))
-                .connect(&config.servers)
-                .await
+            apply_reconnect_options(
+                ConnectOptions::with_token(token.clone()),
+                connection_timeout,
+            )
+            .connect(&config.servers)
+            .await
         }
         NatsAuth::None => {
-            apply_reconnect_options(ConnectOptions::new())
+            apply_reconnect_options(ConnectOptions::new(), connection_timeout)
                 .connect(&config.servers)
                 .await
         }
@@ -154,11 +161,11 @@ mod tests {
 
     #[test]
     fn test_reconnect_delay_exponential_backoff() {
-        assert_eq!(reconnect_delay(0).as_secs(), 1); // 2^0 = 1
-        assert_eq!(reconnect_delay(1).as_secs(), 2); // 2^1 = 2
-        assert_eq!(reconnect_delay(2).as_secs(), 4); // 2^2 = 4
-        assert_eq!(reconnect_delay(3).as_secs(), 8); // 2^3 = 8
-        assert_eq!(reconnect_delay(4).as_secs(), 16); // 2^4 = 16
+        assert_eq!(reconnect_delay(0).as_secs(), 1);
+        assert_eq!(reconnect_delay(1).as_secs(), 2);
+        assert_eq!(reconnect_delay(2).as_secs(), 4);
+        assert_eq!(reconnect_delay(3).as_secs(), 8);
+        assert_eq!(reconnect_delay(4).as_secs(), 16);
     }
 
     #[test]
@@ -198,11 +205,6 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_timeout_constant() {
-        assert_eq!(CONNECTION_TIMEOUT.as_secs(), 10);
-    }
-
-    #[test]
     fn test_max_reconnect_delay_constant() {
         assert_eq!(MAX_RECONNECT_DELAY.as_secs(), 30);
     }
@@ -225,5 +227,19 @@ mod tests {
             "file not found",
         ));
         assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[tokio::test]
+    async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
+        let config = NatsConfig::new(
+            vec!["nats://127.0.0.1:4222".to_string()],
+            NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
+        );
+
+        let err = connect(&config, Duration::from_millis(100))
+            .await
+            .expect_err("expected an error for missing credentials file");
+
+        assert!(matches!(err, ConnectError::InvalidCredentials(_)));
     }
 }
