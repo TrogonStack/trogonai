@@ -1,5 +1,5 @@
 {
     "scripts": {
-        "setup": "ln -sf \"$CONDUCTOR_ROOT_PATH/devops/docker/compose/.env\" devops/docker/compose/.env"
+        "setup": "bash .conductor/scripts/setup.sh"
     }
 }
