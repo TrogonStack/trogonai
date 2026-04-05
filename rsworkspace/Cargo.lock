@@ -3337,7 +3337,9 @@ dependencies = [
  "sha2",
  "testcontainers-modules",
  "tokio",
+ "tower",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
 ]
