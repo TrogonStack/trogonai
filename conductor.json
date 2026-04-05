@@ -1,4 +1,7 @@
 {
+    "env": {
+        "MISE_YES": "1"
+    },
     "scripts": {
         "setup": "bash .conductor/scripts/setup.sh"
     }
