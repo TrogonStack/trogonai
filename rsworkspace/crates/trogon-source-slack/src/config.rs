@@ -1,12 +1,11 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use trogon_nats::{NatsConfig, NatsToken};
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE,
-    DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX, DEFAULT_TIMESTAMP_MAX_DRIFT_SECS,
+    DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE, DEFAULT_STREAM_NAME,
+    DEFAULT_SUBJECT_PREFIX, DEFAULT_TIMESTAMP_MAX_DRIFT_SECS,
 };
 
 /// Configuration for the Slack Events API webhook server.
@@ -28,7 +27,6 @@ pub struct SlackConfig {
     pub stream_name: NatsToken,
     pub stream_max_age: Duration,
     pub nats_ack_timeout: Duration,
-    pub max_body_size: ByteSize,
     pub timestamp_max_drift: Duration,
     pub nats: NatsConfig,
 }
@@ -69,13 +67,6 @@ impl SlackConfig {
                 .filter(|&v| v > 0)
                 .map(Duration::from_secs)
                 .unwrap_or(DEFAULT_NATS_ACK_TIMEOUT),
-            max_body_size: env
-                .var("SLACK_MAX_BODY_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|&v| v > 0)
-                .map(ByteSize)
-                .unwrap_or(DEFAULT_MAX_BODY_SIZE),
             timestamp_max_drift: env
                 .var("SLACK_TIMESTAMP_MAX_DRIFT_SECS")
                 .ok()
@@ -110,7 +101,6 @@ mod tests {
         assert_eq!(config.stream_name.as_str(), "SLACK");
         assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(10));
-        assert_eq!(config.max_body_size, ByteSize::mib(1));
         assert_eq!(config.timestamp_max_drift, Duration::from_secs(300));
     }
 
@@ -123,7 +113,6 @@ mod tests {
         env.set("SLACK_STREAM_NAME", "SLK_EVENTS");
         env.set("SLACK_STREAM_MAX_AGE_SECS", "3600");
         env.set("SLACK_NATS_ACK_TIMEOUT_SECS", "30");
-        env.set("SLACK_MAX_BODY_SIZE", "2097152");
         env.set("SLACK_TIMESTAMP_MAX_DRIFT_SECS", "60");
 
         let config = SlackConfig::from_env(&env);
@@ -134,7 +123,6 @@ mod tests {
         assert_eq!(config.stream_name.as_str(), "SLK_EVENTS");
         assert_eq!(config.stream_max_age, Duration::from_secs(3600));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(30));
-        assert_eq!(config.max_body_size, ByteSize::mib(2));
         assert_eq!(config.timestamp_max_drift, Duration::from_secs(60));
     }
 
@@ -175,14 +163,6 @@ mod tests {
         env.set("SLACK_NATS_ACK_TIMEOUT_SECS", "not-a-number");
         let config = SlackConfig::from_env(&env);
         assert_eq!(config.nats_ack_timeout, DEFAULT_NATS_ACK_TIMEOUT);
-    }
-
-    #[test]
-    fn invalid_max_body_size_falls_back_to_default() {
-        let env = env_with_secret();
-        env.set("SLACK_MAX_BODY_SIZE", "not-a-number");
-        let config = SlackConfig::from_env(&env);
-        assert_eq!(config.max_body_size, DEFAULT_MAX_BODY_SIZE);
     }
 
     #[test]
@@ -231,14 +211,6 @@ mod tests {
         env.set("SLACK_NATS_ACK_TIMEOUT_SECS", "0");
         let config = SlackConfig::from_env(&env);
         assert_eq!(config.nats_ack_timeout, DEFAULT_NATS_ACK_TIMEOUT);
-    }
-
-    #[test]
-    fn zero_max_body_size_falls_back_to_default() {
-        let env = env_with_secret();
-        env.set("SLACK_MAX_BODY_SIZE", "0");
-        let config = SlackConfig::from_env(&env);
-        assert_eq!(config.max_body_size, DEFAULT_MAX_BODY_SIZE);
     }
 
     #[test]

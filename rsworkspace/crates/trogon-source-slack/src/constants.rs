@@ -1,14 +1,15 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
+use trogon_std::{ByteSize, HttpBodySizeMax};
 
 pub const DEFAULT_PORT: u16 = 3000;
 pub const DEFAULT_SUBJECT_PREFIX: &str = "slack";
 pub const DEFAULT_STREAM_NAME: &str = "SLACK";
 pub const DEFAULT_STREAM_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60); // 7 days
 pub const DEFAULT_NATS_ACK_TIMEOUT: Duration = Duration::from_secs(10);
-pub const DEFAULT_MAX_BODY_SIZE: ByteSize = ByteSize::mib(1);
 pub const DEFAULT_NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(1)).unwrap();
 pub const DEFAULT_TIMESTAMP_MAX_DRIFT_SECS: u64 = 300; // 5 minutes
 
 pub const HEADER_SIGNATURE: &str = "x-slack-signature";

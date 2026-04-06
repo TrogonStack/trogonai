@@ -1,12 +1,11 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE,
-    DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX,
+    DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE, DEFAULT_STREAM_NAME,
+    DEFAULT_SUBJECT_PREFIX,
 };
 
 /// Configuration for the GitHub webhook server.
@@ -18,7 +17,6 @@ use crate::constants::{
 /// - `GITHUB_STREAM_NAME`: JetStream stream name (default: `GITHUB`)
 /// - `GITHUB_STREAM_MAX_AGE_SECS`: max age of messages in the JetStream stream in seconds (default: 604800 / 7 days)
 /// - `GITHUB_NATS_ACK_TIMEOUT_SECS`: NATS ack timeout in seconds (default: 10)
-/// - `GITHUB_MAX_BODY_SIZE`: maximum webhook body size in bytes (default: 26214400 / 25 MB)
 /// - Standard `NATS_*` variables for NATS connection (see `trogon-nats`)
 pub struct GithubConfig {
     pub webhook_secret: String,
@@ -27,7 +25,6 @@ pub struct GithubConfig {
     pub stream_name: String,
     pub stream_max_age: Duration,
     pub nats_ack_timeout: Duration,
-    pub max_body_size: ByteSize,
     pub nats: NatsConfig,
 }
 
@@ -62,12 +59,6 @@ impl GithubConfig {
                 .and_then(|v| v.parse().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(DEFAULT_NATS_ACK_TIMEOUT),
-            max_body_size: env
-                .var("GITHUB_MAX_BODY_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(ByteSize)
-                .unwrap_or(DEFAULT_MAX_BODY_SIZE),
             nats: NatsConfig::from_env(env),
         }
     }
@@ -95,7 +86,6 @@ mod tests {
         assert_eq!(config.stream_name, "GITHUB");
         assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(10));
-        assert_eq!(config.max_body_size, ByteSize::mib(25));
     }
 
     #[test]
@@ -107,7 +97,6 @@ mod tests {
         env.set("GITHUB_STREAM_NAME", "GH_EVENTS");
         env.set("GITHUB_STREAM_MAX_AGE_SECS", "3600");
         env.set("GITHUB_NATS_ACK_TIMEOUT_SECS", "30");
-        env.set("GITHUB_MAX_BODY_SIZE", "1048576");
 
         let config = GithubConfig::from_env(&env);
 
@@ -117,7 +106,6 @@ mod tests {
         assert_eq!(config.stream_name, "GH_EVENTS");
         assert_eq!(config.stream_max_age, Duration::from_secs(3600));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(30));
-        assert_eq!(config.max_body_size, ByteSize::mib(1));
     }
 
     #[test]
@@ -163,15 +151,5 @@ mod tests {
         let config = GithubConfig::from_env(&env);
 
         assert_eq!(config.nats_ack_timeout, DEFAULT_NATS_ACK_TIMEOUT);
-    }
-
-    #[test]
-    fn invalid_max_body_size_falls_back_to_default() {
-        let env = env_with_secret();
-        env.set("GITHUB_MAX_BODY_SIZE", "not-a-number");
-
-        let config = GithubConfig::from_env(&env);
-
-        assert_eq!(config.max_body_size, DEFAULT_MAX_BODY_SIZE);
     }
 }

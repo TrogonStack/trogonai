@@ -3,22 +3,23 @@ use std::time::Duration;
 
 use crate::config::DiscordConfig;
 use crate::constants::{
-    HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_INTERACTION_ID, NATS_HEADER_INTERACTION_TYPE,
-    NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
+    HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_INTERACTION_ID,
+    NATS_HEADER_INTERACTION_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
 };
 use crate::signature;
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateStreamError;
 use axum::{
-    Json, Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode,
-    response::IntoResponse, response::Response, routing::get, routing::post,
+    Json, Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
+    http::StatusCode, response::IntoResponse, response::Response, routing::get, routing::post,
 };
 use ed25519_dalek::VerifyingKey;
 use std::future::Future;
 use std::pin::Pin;
-use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, instrument, warn};
-use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher, PublishOutcome, publish_event};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+};
 use trogon_nats::{NatsToken, RequestClient};
 
 #[cfg(not(coverage))]
@@ -66,8 +67,8 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
     }
 }
 
-async fn publish_unroutable<P: JetStreamPublisher>(
-    js: &P,
+async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: &ClaimCheckPublisher<P, S>,
     subject_prefix: &str,
     reason: &str,
     body: Bytes,
@@ -78,7 +79,9 @@ async fn publish_unroutable<P: JetStreamPublisher>(
     headers.insert(NATS_HEADER_REJECT_REASON, reason);
     headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
 
-    let outcome = publish_event(js, subject, headers, body, ack_timeout).await;
+    let outcome = publisher
+        .publish_event(subject, headers, body, ack_timeout)
+        .await;
     outcome.log_on_error("discord.unroutable");
 }
 
@@ -93,8 +96,8 @@ fn interaction_type_name(type_id: u64) -> Option<&'static str> {
 }
 
 #[derive(Clone)]
-struct AppState<P: JetStreamPublisher, R: RequestClient> {
-    js: P,
+struct AppState<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> {
+    publisher: ClaimCheckPublisher<P, S>,
     nats: R,
     public_key: VerifyingKey,
     subject_prefix: NatsToken,
@@ -122,14 +125,14 @@ pub async fn provision<C: JetStreamContext>(
     Ok(())
 }
 
-pub fn router<P: JetStreamPublisher, R: RequestClient>(
-    js: P,
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    publisher: ClaimCheckPublisher<P, S>,
     nats: R,
     public_key: VerifyingKey,
     config: &DiscordConfig,
 ) -> Router {
     let state = AppState {
-        js,
+        publisher,
         nats,
         public_key,
         subject_prefix: config.subject_prefix.clone(),
@@ -138,30 +141,31 @@ pub fn router<P: JetStreamPublisher, R: RequestClient>(
     };
 
     Router::new()
-        .route("/webhook", post(handle_webhook::<P, R>))
+        .route("/webhook", post(handle_webhook::<P, S, R>))
         .route("/health", get(handle_health))
-        .layer(RequestBodyLimitLayer::new(
-            config.max_body_size.as_u64() as usize
-        ))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
 
 #[cfg(not(coverage))]
-pub async fn serve<J, R>(
-    js: J,
+pub async fn serve<C, P, S, R>(
+    context: C,
+    publisher: ClaimCheckPublisher<P, S>,
     nats: R,
     public_key: VerifyingKey,
     config: DiscordConfig,
 ) -> Result<(), ServeError>
 where
-    J: JetStreamContext<Error = CreateStreamError> + JetStreamPublisher,
+    C: JetStreamContext<Error = CreateStreamError>,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
     R: RequestClient,
 {
-    provision(&js, &config)
+    provision(&context, &config)
         .await
         .map_err(ServeError::Provision)?;
 
-    let app = router(js, nats, public_key, &config);
+    let app = router(publisher, nats, public_key, &config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "Discord webhook server listening");
 
@@ -178,8 +182,8 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
-fn handle_webhook<P: JetStreamPublisher, R: RequestClient>(
-    State(state): State<AppState<P, R>>,
+fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    State(state): State<AppState<P, S, R>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = Response> + Send>> {
@@ -195,8 +199,8 @@ fn handle_webhook<P: JetStreamPublisher, R: RequestClient>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook_inner<P: JetStreamPublisher, R: RequestClient>(
-    state: AppState<P, R>,
+async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    state: AppState<P, S, R>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -218,7 +222,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, R: RequestClient>(
     let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(&body) else {
         warn!("Invalid JSON in Discord interaction body");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "invalid_json",
             body,
@@ -231,7 +235,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, R: RequestClient>(
     let Some(type_id) = parsed.get("type").and_then(|v| v.as_u64()) else {
         warn!("Missing or invalid 'type' field in interaction");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_type",
             body,
@@ -249,7 +253,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, R: RequestClient>(
     let Some(type_name) = interaction_type_name(type_id) else {
         warn!(type_id, "Unknown Discord interaction type");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "unknown_interaction_type",
             body,
@@ -288,14 +292,10 @@ async fn handle_webhook_inner<P: JetStreamPublisher, R: RequestClient>(
         .await;
     }
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        body,
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .await;
 
     let status = outcome_to_status(outcome);
 
@@ -347,12 +347,14 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use bytesize::ByteSize;
     use ed25519_dalek::{Signer, SigningKey};
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::{MockJetStreamContext, MockJetStreamPublisher};
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
+    };
 
     fn test_keypair() -> (SigningKey, VerifyingKey) {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
@@ -378,9 +380,19 @@ mod tests {
             stream_max_age: Duration::from_secs(3600),
             nats_ack_timeout: Duration::from_secs(10),
             nats_request_timeout: Duration::from_secs(2),
-            max_body_size: ByteSize::mib(4),
             nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
+    }
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
     }
 
     fn tracing_guard() -> tracing::subscriber::DefaultGuard {
@@ -389,7 +401,7 @@ mod tests {
 
     fn mock_app(publisher: MockJetStreamPublisher, vk: VerifyingKey) -> Router {
         router(
-            publisher,
+            wrap_publisher(publisher),
             AdvancedMockNatsClient::new(),
             vk,
             &test_config(vk),
@@ -568,7 +580,12 @@ mod tests {
         let choices = r#"{"type":8,"data":{"choices":[{"name":"foo","value":"foo"}]}}"#;
         nats.set_response("discord.autocomplete", bytes::Bytes::from(choices));
 
-        let app = router(publisher.clone(), nats, vk, &test_config(vk));
+        let app = router(
+            wrap_publisher(publisher.clone()),
+            nats,
+            vk,
+            &test_config(vk),
+        );
         let body = br#"{"type":4,"id":"auto-1","data":{"name":"cmd"}}"#;
         let sig = sign(&sk, TEST_TIMESTAMP, body);
 
@@ -600,7 +617,7 @@ mod tests {
         let mut config = test_config(vk);
         config.nats_request_timeout = Duration::from_millis(10);
 
-        let app = router(publisher.clone(), nats, vk, &config);
+        let app = router(wrap_publisher(publisher.clone()), nats, vk, &config);
         let body = br#"{"type":4,"id":"auto-1","data":{"name":"cmd"}}"#;
         let sig = sign(&sk, TEST_TIMESTAMP, body);
 
@@ -623,7 +640,12 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_request();
 
-        let app = router(publisher.clone(), nats, vk, &test_config(vk));
+        let app = router(
+            wrap_publisher(publisher.clone()),
+            nats,
+            vk,
+            &test_config(vk),
+        );
         let body = br#"{"type":4,"id":"auto-1","data":{"name":"cmd"}}"#;
         let sig = sign(&sk, TEST_TIMESTAMP, body);
 
@@ -812,7 +834,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             nats: AdvancedMockNatsClient::new(),
             public_key: vk,
             subject_prefix: NatsToken::new("custom").unwrap(),
@@ -820,12 +842,19 @@ mod tests {
             nats_request_timeout: Duration::from_secs(2),
         };
 
-        let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<MockJetStreamPublisher, AdvancedMockNatsClient>),
-            )
-            .with_state(state);
+        let app =
+            Router::new()
+                .route(
+                    "/webhook",
+                    post(
+                        handle_webhook::<
+                            MockJetStreamPublisher,
+                            MockObjectStore,
+                            AdvancedMockNatsClient,
+                        >,
+                    ),
+                )
+                .with_state(state);
 
         let body = br#"{"type":2,"id":"x","data":{"name":"test"}}"#;
         let sig = sign(&sk, TEST_TIMESTAMP, body);
@@ -891,7 +920,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             nats: AdvancedMockNatsClient::new(),
             public_key: vk,
             subject_prefix: NatsToken::new("discord").unwrap(),
@@ -899,13 +928,20 @@ mod tests {
             nats_request_timeout: Duration::from_secs(2),
         };
 
-        let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<MockJetStreamPublisher, AdvancedMockNatsClient>),
-            )
-            .layer(RequestBodyLimitLayer::new(64))
-            .with_state(state);
+        let app =
+            Router::new()
+                .route(
+                    "/webhook",
+                    post(
+                        handle_webhook::<
+                            MockJetStreamPublisher,
+                            MockObjectStore,
+                            AdvancedMockNatsClient,
+                        >,
+                    ),
+                )
+                .layer(DefaultBodyLimit::max(64))
+                .with_state(state);
 
         let oversized_body = vec![0u8; 128];
         let sig = sign(&sk, TEST_TIMESTAMP, &oversized_body);
@@ -996,10 +1032,16 @@ mod tests {
         }
 
         pub fn ack_fail_app(publisher: AckFailPublisher) -> Router {
+            let vk = publisher.public_key;
             let state = AppState {
-                public_key: publisher.public_key,
-                js: publisher,
+                publisher: ClaimCheckPublisher::new(
+                    publisher,
+                    MockObjectStore::new(),
+                    "test-bucket".to_string(),
+                    MaxPayload::from_server_limit(usize::MAX),
+                ),
                 nats: AdvancedMockNatsClient::new(),
+                public_key: vk,
                 subject_prefix: NatsToken::new("discord").unwrap(),
                 nats_ack_timeout: Duration::from_secs(10),
                 nats_request_timeout: Duration::from_secs(2),
@@ -1008,16 +1050,24 @@ mod tests {
             Router::new()
                 .route(
                     "/webhook",
-                    post(handle_webhook::<AckFailPublisher, AdvancedMockNatsClient>),
+                    post(
+                        handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient>,
+                    ),
                 )
                 .with_state(state)
         }
 
         pub fn ack_hang_app(publisher: AckFailPublisher) -> Router {
+            let vk = publisher.public_key;
             let state = AppState {
-                public_key: publisher.public_key,
-                js: publisher,
+                publisher: ClaimCheckPublisher::new(
+                    publisher,
+                    MockObjectStore::new(),
+                    "test-bucket".to_string(),
+                    MaxPayload::from_server_limit(usize::MAX),
+                ),
                 nats: AdvancedMockNatsClient::new(),
+                public_key: vk,
                 subject_prefix: NatsToken::new("discord").unwrap(),
                 nats_ack_timeout: Duration::from_millis(10),
                 nats_request_timeout: Duration::from_secs(2),
@@ -1026,7 +1076,9 @@ mod tests {
             Router::new()
                 .route(
                     "/webhook",
-                    post(handle_webhook::<AckFailPublisher, AdvancedMockNatsClient>),
+                    post(
+                        handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient>,
+                    ),
                 )
                 .with_state(state)
         }

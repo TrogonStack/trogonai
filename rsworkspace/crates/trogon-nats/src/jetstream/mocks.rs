@@ -12,13 +12,12 @@ use futures::channel::mpsc;
 use futures::stream::BoxStream;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
+use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
     JetStreamPublisher,
 };
 use crate::mocks::MockError;
-
-// --- MockJsMessage ---
 
 pub struct MockJsMessage {
     inner: async_nats::Message,
@@ -139,8 +138,6 @@ impl JsDoubleAckWith for MockJsMessage {
     }
 }
 
-// --- MockJetStreamContext ---
-
 #[derive(Clone, Debug)]
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
@@ -195,8 +192,6 @@ impl JetStreamContext for MockJetStreamContext {
         Ok(())
     }
 }
-
-// --- MockJetStreamPublisher ---
 
 #[derive(Clone, Debug)]
 pub struct MockPublishedJsMessage {
@@ -304,8 +299,6 @@ impl JetStreamPublisher for MockJetStreamPublisher {
         })))
     }
 }
-
-// --- MockJetStreamConsumer ---
 
 pub struct MockJetStreamConsumerFactory {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
@@ -431,6 +424,107 @@ impl JetStreamConsumer for MockJetStreamConsumer {
             .take()
             .ok_or_else(|| MockError("messages() already called".to_string()))?;
         Ok(rx.boxed())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MockObjectStore {
+    objects: Arc<Mutex<Vec<(String, Bytes)>>>,
+    put_fail_count: Arc<Mutex<u32>>,
+    get_fail_count: Arc<Mutex<u32>>,
+}
+
+impl MockObjectStore {
+    pub fn new() -> Self {
+        Self {
+            objects: Arc::new(Mutex::new(Vec::new())),
+            put_fail_count: Arc::new(Mutex::new(0)),
+            get_fail_count: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub fn fail_next_put(&self) {
+        *self.put_fail_count.lock().unwrap() = 1;
+    }
+
+    pub fn fail_next_get(&self) {
+        *self.get_fail_count.lock().unwrap() = 1;
+    }
+
+    pub fn seed(&self, name: &str, data: Bytes) {
+        self.objects.lock().unwrap().push((name.to_string(), data));
+    }
+
+    pub fn stored_objects(&self) -> Vec<(String, Bytes)> {
+        self.objects.lock().unwrap().clone()
+    }
+}
+
+impl Default for MockObjectStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ObjectStorePut for MockObjectStore {
+    type Error = MockError;
+    type Info = ();
+
+    async fn put<R: tokio::io::AsyncRead + Unpin + Send>(
+        &self,
+        name: &str,
+        data: &mut R,
+    ) -> Result<(), MockError> {
+        use tokio::io::AsyncReadExt;
+
+        let should_fail = {
+            let mut count = self.put_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated object store put failure".to_string()));
+        }
+        let mut buf = Vec::new();
+        data.read_to_end(&mut buf)
+            .await
+            .map_err(|e| MockError(e.to_string()))?;
+        self.objects
+            .lock()
+            .unwrap()
+            .push((name.to_string(), Bytes::from(buf)));
+        Ok(())
+    }
+}
+
+impl ObjectStoreGet for MockObjectStore {
+    type Error = MockError;
+    type Reader = std::io::Cursor<Vec<u8>>;
+
+    async fn get(&self, name: &str) -> Result<Self::Reader, MockError> {
+        let should_fail = {
+            let mut count = self.get_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated object store get failure".to_string()));
+        }
+        self.objects
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| std::io::Cursor::new(v.to_vec()))
+            .ok_or_else(|| MockError(format!("object not found: {name}")))
     }
 }
 

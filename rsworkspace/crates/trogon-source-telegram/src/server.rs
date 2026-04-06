@@ -3,20 +3,22 @@ use std::time::Duration;
 
 use crate::config::TelegramSourceConfig;
 use crate::constants::{
-    HEADER_SECRET_TOKEN, NATS_HEADER_UPDATE_ID, NATS_HEADER_UPDATE_TYPE, UPDATE_TYPES,
+    HEADER_SECRET_TOKEN, HTTP_BODY_SIZE_MAX, NATS_HEADER_UPDATE_ID, NATS_HEADER_UPDATE_TYPE,
+    UPDATE_TYPES,
 };
 use crate::signature;
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateStreamError;
 use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
+    http::StatusCode, routing::get, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
-use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, instrument, warn};
-use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher, PublishOutcome, publish_event};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+};
 
 #[cfg(not(coverage))]
 #[derive(Debug)]
@@ -64,8 +66,8 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 }
 
 #[derive(Clone)]
-struct AppState<P: JetStreamPublisher> {
-    js: P,
+struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
+    publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: String,
     subject_prefix: String,
     nats_ack_timeout: Duration,
@@ -91,33 +93,40 @@ pub async fn provision<C: JetStreamContext>(
     Ok(())
 }
 
-pub fn router<P: JetStreamPublisher>(js: P, config: &TelegramSourceConfig) -> Router {
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &TelegramSourceConfig,
+) -> Router {
     let state = AppState {
-        js,
+        publisher,
         webhook_secret: config.webhook_secret.clone(),
         subject_prefix: config.subject_prefix.clone(),
         nats_ack_timeout: config.nats_ack_timeout,
     };
 
     Router::new()
-        .route("/webhook", post(handle_webhook::<P>))
+        .route("/webhook", post(handle_webhook::<P, S>))
         .route("/health", get(handle_health))
-        .layer(RequestBodyLimitLayer::new(
-            config.max_body_size.as_u64() as usize
-        ))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
 
 #[cfg(not(coverage))]
-pub async fn serve<J>(js: J, config: TelegramSourceConfig) -> Result<(), ServeError>
+pub async fn serve<C, P, S>(
+    context: C,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: TelegramSourceConfig,
+) -> Result<(), ServeError>
 where
-    J: JetStreamContext<Error = CreateStreamError> + JetStreamPublisher,
+    C: JetStreamContext<Error = CreateStreamError>,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
 {
-    provision(&js, &config)
+    provision(&context, &config)
         .await
         .map_err(ServeError::Provision)?;
 
-    let app = router(js, &config);
+    let app = router(publisher, &config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "Telegram webhook source listening");
 
@@ -134,8 +143,8 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
-fn handle_webhook<P: JetStreamPublisher>(
-    State(state): State<AppState<P>>,
+fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
@@ -160,8 +169,8 @@ fn extract_update_type(value: &serde_json::Value) -> Option<&'static str> {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook_inner<P: JetStreamPublisher>(
-    state: AppState<P>,
+async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: AppState<P, S>,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
@@ -204,14 +213,10 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     nats_headers.insert(NATS_HEADER_UPDATE_TYPE, update_type);
     nats_headers.insert(NATS_HEADER_UPDATE_ID, update_id.as_str());
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        body,
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .await;
 
     outcome_to_status(outcome)
 }
@@ -221,10 +226,12 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use bytesize::ByteSize;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use trogon_nats::jetstream::{MockJetStreamContext, MockJetStreamPublisher};
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
+    };
 
     const TEST_SECRET: &str = "test-secret";
 
@@ -236,9 +243,19 @@ mod tests {
             stream_name: "TELEGRAM".to_string(),
             stream_max_age: Duration::from_secs(3600),
             nats_ack_timeout: Duration::from_secs(10),
-            max_body_size: ByteSize::mib(10),
             nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
+    }
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
     }
 
     fn tracing_guard() -> tracing::subscriber::DefaultGuard {
@@ -246,7 +263,7 @@ mod tests {
     }
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
-        router(publisher, &test_config())
+        router(wrap_publisher(publisher), &test_config())
     }
 
     fn webhook_request(body: &[u8], secret: Option<&str>) -> Request<Body> {
@@ -479,14 +496,17 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             webhook_secret: TEST_SECRET.to_string(),
             subject_prefix: "custom".to_string(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = update_json("message");
@@ -545,15 +565,18 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             webhook_secret: TEST_SECRET.to_string(),
             subject_prefix: "telegram".to_string(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher>))
-            .layer(RequestBodyLimitLayer::new(64))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockObjectStore>),
+            )
+            .layer(DefaultBodyLimit::max(64))
             .with_state(state);
 
         let oversized_body = vec![0u8; 128];
@@ -664,14 +687,22 @@ mod tests {
         let publisher = AckFailPublisher::failing();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             webhook_secret: TEST_SECRET.to_string(),
             subject_prefix: "telegram".to_string(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<AckFailPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = update_json("message");
@@ -690,14 +721,22 @@ mod tests {
         let publisher = AckFailPublisher::hanging();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             webhook_secret: TEST_SECRET.to_string(),
             subject_prefix: "telegram".to_string(),
             nats_ack_timeout: Duration::from_millis(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<AckFailPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = update_json("message");
