@@ -3322,6 +3322,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-source-gitlab"
+version = "0.1.0"
+dependencies = [
+ "acp-telemetry",
+ "async-nats",
+ "axum",
+ "bytes",
+ "bytesize",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-source-linear"
 version = "0.1.0"
 dependencies = [
