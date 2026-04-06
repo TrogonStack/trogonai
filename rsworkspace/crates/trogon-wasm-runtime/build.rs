@@ -3,11 +3,7 @@ use std::path::Path;
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     // Cargo.lock lives at the workspace root, two levels above this crate.
-    let workspace_root = Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
+    let workspace_root = Path::new(&manifest_dir).parent().unwrap().parent().unwrap();
     let lockfile = workspace_root.join("Cargo.lock");
 
     // Re-run if the lockfile changes (e.g. wasmtime version bump).

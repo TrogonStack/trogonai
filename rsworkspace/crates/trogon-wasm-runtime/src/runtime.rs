@@ -3,8 +3,11 @@ use crate::config::Config;
 /// Cache fingerprint combining crate version and wasmtime version.
 /// The wasmtime version is injected at build time from Cargo.lock by build.rs,
 /// so it updates automatically when the dependency is bumped.
-const CACHE_FINGERPRINT: &str =
-    concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-", env!("WASMTIME_VERSION"));
+const CACHE_FINGERPRINT: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+wasmtime-",
+    env!("WASMTIME_VERSION")
+);
 use crate::metrics::METRICS;
 use crate::session::WasmSession;
 use crate::terminal::{TerminalKind, WasmTerminal};
@@ -27,6 +30,13 @@ use tokio::sync::Semaphore;
 use tracing::{debug, info};
 use uuid::Uuid;
 use wasmtime::{Engine, InstancePre, Module};
+
+/// Tuple stored in the in-memory module cache: `(instance_pre, source_mtime, last_accessed)`.
+type CachedModuleEntry = (
+    InstancePre<wasm::WasmStoreData>,
+    std::time::SystemTime,
+    std::time::Instant,
+);
 
 /// Central execution runtime — one instance per process, shared across sessions.
 ///
@@ -56,8 +66,9 @@ pub struct WasmRuntime {
     ///   - `instance_pre` — ready for `instantiate_async`; avoids rebuilding the linker per invocation.
     ///   - `source_mtime` — used for invalidation when the `.wasm` file changes on disk.
     ///   - `last_accessed` — updated on every hit; LRU entry is evicted at capacity.
+    ///
     /// Capped at `MAX_CACHED_MODULES` entries.
-    modules: RefCell<HashMap<PathBuf, (InstancePre<wasm::WasmStoreData>, std::time::SystemTime, std::time::Instant)>>,
+    modules: RefCell<HashMap<PathBuf, CachedModuleEntry>>,
     /// Linker with all WASI and `trogon_v1` host functions registered.
     /// Built once at startup; shared across all module invocations via `instantiate_pre`.
     linker: wasmtime::Linker<wasm::WasmStoreData>,
@@ -256,10 +267,8 @@ impl WasmRuntime {
         let mut cleaned = 0u32;
         while let Ok(Some(entry)) = rd.next_entry().await {
             let path = entry.path();
-            if path.is_dir() {
-                if tokio::fs::remove_dir_all(&path).await.is_ok() {
-                    cleaned += 1;
-                }
+            if path.is_dir() && tokio::fs::remove_dir_all(&path).await.is_ok() {
+                cleaned += 1;
             }
         }
         if cleaned > 0 {
@@ -291,7 +300,9 @@ impl WasmRuntime {
         &self,
         wasm_path: &std::path::Path,
     ) -> Result<InstancePre<wasm::WasmStoreData>, anyhow::Error> {
-        let abs_path = wasm_path.canonicalize().unwrap_or_else(|_| wasm_path.to_path_buf());
+        let abs_path = wasm_path
+            .canonicalize()
+            .unwrap_or_else(|_| wasm_path.to_path_buf());
 
         // Check file size limit and mtime via blocking I/O.
         let max_size = self.wasm_max_module_size_bytes;
@@ -316,7 +327,9 @@ impl WasmRuntime {
             if let Some((pre, mtime, last_accessed)) = cached.get_mut(&abs_path) {
                 if *mtime == current_mtime {
                     *last_accessed = std::time::Instant::now();
-                    METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    METRICS
+                        .cache_hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Ok(pre.clone());
                 }
             }
@@ -334,8 +347,7 @@ impl WasmRuntime {
                 let version_path = cache_dir.join(format!("{key}.version"));
 
                 if cwasm_path.exists() && mtime_path.exists() {
-                    let stored_version =
-                        std::fs::read_to_string(&version_path).unwrap_or_default();
+                    let stored_version = std::fs::read_to_string(&version_path).unwrap_or_default();
                     let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
 
                     if version_ok {
@@ -352,10 +364,9 @@ impl WasmRuntime {
                                     unsafe { Module::deserialize_file(&engine, &cwasm_path) };
                                 match cached_module {
                                     Ok(m) => {
-                                        METRICS.cache_hits.fetch_add(
-                                            1,
-                                            std::sync::atomic::Ordering::Relaxed,
-                                        );
+                                        METRICS
+                                            .cache_hits
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                         return Ok(m);
                                     }
                                     Err(e) => {
@@ -380,7 +391,9 @@ impl WasmRuntime {
             }
 
             // Compile fresh from source (cache miss).
-            METRICS.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .cache_misses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let m = Module::from_file(&engine, &abs_path_b)?;
 
             // Write on-disk cache if configured (fire-and-forget; errors are non-fatal).
@@ -422,7 +435,10 @@ impl WasmRuntime {
                     cache.remove(&lru);
                 }
             }
-            cache.insert(abs_path, (pre.clone(), current_mtime, std::time::Instant::now()));
+            cache.insert(
+                abs_path,
+                (pre.clone(), current_mtime, std::time::Instant::now()),
+            );
         }
         Ok(pre)
     }
@@ -472,7 +488,9 @@ impl WasmRuntime {
         }
 
         // Native process — sandboxed to session directory.
-        METRICS.native_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        METRICS
+            .native_tasks_started
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -513,7 +531,12 @@ impl WasmRuntime {
                 loop {
                     match stdout.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(&buf_stdout, &trunc_stdout, limit, &chunk[..n]),
+                        Ok(n) => WasmTerminal::append_output(
+                            &buf_stdout,
+                            &trunc_stdout,
+                            limit,
+                            &chunk[..n],
+                        ),
                         Err(_) => break,
                     }
                 }
@@ -531,7 +554,12 @@ impl WasmRuntime {
                 loop {
                     match stderr.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(&buf_stderr, &trunc_stderr, limit, &chunk[..n]),
+                        Ok(n) => WasmTerminal::append_output(
+                            &buf_stderr,
+                            &trunc_stderr,
+                            limit,
+                            &chunk[..n],
+                        ),
                         Err(_) => break,
                     }
                 }
@@ -546,7 +574,10 @@ impl WasmRuntime {
         });
 
         let terminal = WasmTerminal {
-            kind: TerminalKind::Native { child: Some(child), stdin },
+            kind: TerminalKind::Native {
+                child: Some(child),
+                stdin,
+            },
             output_buf,
             output_collector: Some(collector),
             exit_status: None,
@@ -620,7 +651,8 @@ impl WasmRuntime {
         // Shared output buffer and exit status arc for the background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> = Arc::new(std::sync::OnceLock::new());
+        let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> =
+            Arc::new(std::sync::OnceLock::new());
 
         let terminal_id = Uuid::new_v4().to_string();
 
@@ -649,34 +681,37 @@ impl WasmRuntime {
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
-            let _permit = semaphore.acquire_owned().await.expect("semaphore closed unexpectedly");
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .expect("semaphore closed unexpectedly");
             // Count tasks that actually start executing, not just those queued for a permit.
-            METRICS.wasm_tasks_started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let result = wasm::run_module_compiled(
-                wasm::WasmExecConfig {
-                    instance_pre,
-                    argv: argv_cloned,
-                    env_vars: env_pairs,
-                    sandbox_dir: sandbox_dir_cloned.clone(),
-                    cwd: if cwd_cloned != sandbox_dir_cloned {
-                        Some(cwd_cloned)
-                    } else {
-                        None
-                    },
-                    output_buf: Arc::clone(&buf),
-                    was_truncated: Arc::clone(&trunc),
-                    output_byte_limit: limit,
-                    timeout_secs: timeout,
-                    memory_limit_bytes: memory_limit,
-                    nats_client: nats_for_task,
-                    session_id: session_id_cloned,
-                    allow_network,
-                    auto_allow_permissions: auto_allow,
-                    fuel_limit,
-                    host_call_limit,
-                    acp_prefix,
+            METRICS
+                .wasm_tasks_started
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let result = wasm::run_module_compiled(wasm::WasmExecConfig {
+                instance_pre,
+                argv: argv_cloned,
+                env_vars: env_pairs,
+                sandbox_dir: sandbox_dir_cloned.clone(),
+                cwd: if cwd_cloned != sandbox_dir_cloned {
+                    Some(cwd_cloned)
+                } else {
+                    None
                 },
-            )
+                output_buf: Arc::clone(&buf),
+                was_truncated: Arc::clone(&trunc),
+                output_byte_limit: limit,
+                timeout_secs: timeout,
+                memory_limit_bytes: memory_limit,
+                nats_client: nats_for_task,
+                session_id: session_id_cloned,
+                allow_network,
+                auto_allow_permissions: auto_allow,
+                fuel_limit,
+                host_call_limit,
+                acp_prefix,
+            })
             .await;
             let exit_status = match result {
                 Ok(status) => status,
@@ -684,25 +719,36 @@ impl WasmRuntime {
             };
             // Update metrics based on how the task exited.
             if exit_status.signal.is_some() {
-                METRICS.wasm_tasks_faulted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .wasm_tasks_faulted
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if exit_status.signal.as_deref() == Some("fuel_exhausted") {
-                    METRICS.wasm_fuel_exhausted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    METRICS
+                        .wasm_fuel_exhausted
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             } else {
-                METRICS.wasm_tasks_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .wasm_tasks_completed
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             let _ = exit_arc.set(exit_status);
         });
 
         let terminal = WasmTerminal {
-            kind: TerminalKind::Wasm { exit_arc: wasm_exit },
+            kind: TerminalKind::Wasm {
+                exit_arc: wasm_exit,
+            },
             output_buf,
             output_collector: Some(collector),
             exit_status: None,
             was_truncated: was_truncated_flag,
         };
 
-        info!(session_id, terminal_id, command, "WASM module executing (background)");
+        info!(
+            session_id,
+            terminal_id, command, "WASM module executing (background)"
+        );
         self.terminals
             .borrow_mut()
             .insert(terminal_id.clone(), terminal);
@@ -744,10 +790,13 @@ impl WasmRuntime {
     ) -> agent_client_protocol::Result<KillTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
         self.tick_last_activity_for_terminal(&terminal_id);
-        let mut terminals = self.terminals.borrow_mut();
-        match terminals.get_mut(&terminal_id) {
-            Some(t) => {
-                t.kill().await;
+        // Remove the terminal from the map so the borrow is dropped before the await.
+        let t = self.terminals.borrow_mut().remove(&terminal_id);
+        match t {
+            Some(mut terminal) => {
+                terminal.kill().await;
+                // Put the terminal back so it can still be waited on / released.
+                self.terminals.borrow_mut().insert(terminal_id, terminal);
                 Ok(KillTerminalResponse::new())
             }
             None => Err(agent_client_protocol::Error::new(
@@ -763,10 +812,15 @@ impl WasmRuntime {
         data: &[u8],
     ) -> agent_client_protocol::Result<()> {
         self.tick_last_activity_for_terminal(terminal_id);
-        let mut terminals = self.terminals.borrow_mut();
-        match terminals.get_mut(terminal_id) {
-            Some(t) => {
-                if t.write_stdin(data).await {
+        // Remove the terminal from the map so the borrow is dropped before the await.
+        let t = self.terminals.borrow_mut().remove(terminal_id);
+        match t {
+            Some(mut terminal) => {
+                let ok = terminal.write_stdin(data).await;
+                self.terminals
+                    .borrow_mut()
+                    .insert(terminal_id.to_string(), terminal);
+                if ok {
                     Ok(())
                 } else {
                     Err(agent_client_protocol::Error::new(
@@ -816,15 +870,12 @@ impl WasmRuntime {
         self.tick_last_activity_for_terminal(&terminal_id);
 
         // Look up the owning session before removing the terminal.
-        let maybe_session_id = self
-            .terminal_session
-            .borrow()
-            .get(&terminal_id)
-            .cloned();
+        let maybe_session_id = self.terminal_session.borrow().get(&terminal_id).cloned();
 
-        let mut terminals = self.terminals.borrow_mut();
-        match terminals.remove(&terminal_id) {
+        let t = self.terminals.borrow_mut().remove(&terminal_id);
+        match t {
             Some(mut t) => {
+                // The RefCell borrow is already released above; safe to await.
                 t.kill().await;
                 if let Some(collector) = t.output_collector.take() {
                     collector.abort();
@@ -832,7 +883,6 @@ impl WasmRuntime {
                 debug!(terminal_id, "Terminal released");
 
                 // Clean up tracking maps and trigger session cleanup if this was the last terminal.
-                drop(terminals); // Release borrow before potentially cleaning up session.
                 if let Some(sid) = maybe_session_id {
                     self.terminal_session.borrow_mut().remove(&terminal_id);
                     let should_cleanup = {
@@ -895,7 +945,9 @@ impl WasmRuntime {
                     }
                     let (child, wasm_exit_arc) = match &mut t.kind {
                         TerminalKind::Native { child, .. } => (child.take(), None),
-                        TerminalKind::Wasm { exit_arc } => (None, Some(std::sync::Arc::clone(exit_arc))),
+                        TerminalKind::Wasm { exit_arc } => {
+                            (None, Some(std::sync::Arc::clone(exit_arc)))
+                        }
                     };
                     (t.output_collector.take(), child, wasm_exit_arc)
                 }
@@ -956,7 +1008,10 @@ impl WasmRuntime {
                         TerminalExitStatus::new()
                     }
                     Err(_elapsed) => {
-                        tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
+                        tracing::warn!(
+                            terminal_id,
+                            "Terminal wait timed out after {timeout}s — killing"
+                        );
                         // child_proc.wait() future was dropped by tokio::time::timeout,
                         // releasing its borrow; child_proc is now accessible for kill().
                         let _ = child_proc.kill().await;
@@ -1026,7 +1081,9 @@ impl WasmRuntime {
 
         for tid in terminal_ids {
             self.terminal_session.borrow_mut().remove(&tid);
-            if let Some(mut t) = self.terminals.borrow_mut().remove(&tid) {
+            // Remove from the map and immediately drop the RefMut borrow before awaiting.
+            let terminal = self.terminals.borrow_mut().remove(&tid);
+            if let Some(mut t) = terminal {
                 t.kill().await;
                 if let Some(c) = t.output_collector.take() {
                     c.abort();
@@ -1035,8 +1092,10 @@ impl WasmRuntime {
         }
 
         // Delete the sandbox directory and free session state.
-        if let Some(session) = self.sessions.borrow_mut().remove(session_id) {
-            let _ = tokio::fs::remove_dir_all(&session.dir).await;
+        // Clone the dir path out so the RefMut borrow is dropped before the await.
+        let session_dir = self.sessions.borrow_mut().remove(session_id).map(|s| s.dir);
+        if let Some(dir) = session_dir {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
             debug!(session_id, "Session sandbox cleaned up");
         }
     }
@@ -1062,10 +1121,7 @@ impl WasmRuntime {
         let dest = dest.ok_or_else(|| {
             agent_client_protocol::Error::new(
                 -32602,
-                format!(
-                    "Path {} is outside the session sandbox",
-                    req.path.display()
-                ),
+                format!("Path {} is outside the session sandbox", req.path.display()),
             )
         })?;
 
@@ -1079,14 +1135,14 @@ impl WasmRuntime {
         let tmp_dest = dest.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
         tokio::fs::write(&tmp_dest, req.content.as_bytes())
             .await
-            .map_err(|e| agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}")))?;
-        tokio::fs::rename(&tmp_dest, &dest)
-            .await
             .map_err(|e| {
-                // Clean up temp file on failure (best-effort).
-                let _ = std::fs::remove_file(&tmp_dest);
-                agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
+                agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}"))
             })?;
+        tokio::fs::rename(&tmp_dest, &dest).await.map_err(|e| {
+            // Clean up temp file on failure (best-effort).
+            let _ = std::fs::remove_file(&tmp_dest);
+            agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
+        })?;
 
         debug!(
             session_id,
@@ -1116,10 +1172,7 @@ impl WasmRuntime {
         let src = src.ok_or_else(|| {
             agent_client_protocol::Error::new(
                 -32602,
-                format!(
-                    "Path {} is outside the session sandbox",
-                    req.path.display()
-                ),
+                format!("Path {} is outside the session sandbox", req.path.display()),
             )
         })?;
 
@@ -1139,9 +1192,9 @@ impl WasmRuntime {
         if self.auto_allow_permissions {
             // Select the first available option.
             if let Some(first) = req.options.first() {
-                let outcome = RequestPermissionOutcome::Selected(
-                    SelectedPermissionOutcome::new(first.option_id.clone()),
-                );
+                let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    first.option_id.clone(),
+                ));
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }

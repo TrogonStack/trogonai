@@ -201,7 +201,9 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
@@ -254,7 +256,9 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
                     if let Extern::Memory(m) = e {
@@ -313,17 +317,25 @@ fn add_trogon_host_functions(
         "nats_request",
         wasmtime::FuncType::new(
             engine,
-            [ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
             [ValType::I32],
         ),
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
-            let subj_ptr   = params[0].unwrap_i32() as usize;
-            let subj_len   = params[1].unwrap_i32() as usize;
-            let pay_ptr    = params[2].unwrap_i32() as usize;
-            let pay_len    = params[3].unwrap_i32() as usize;
+            let subj_ptr = params[0].unwrap_i32() as usize;
+            let subj_len = params[1].unwrap_i32() as usize;
+            let pay_ptr = params[2].unwrap_i32() as usize;
+            let pay_len = params[3].unwrap_i32() as usize;
             let timeout_ms = params[4].unwrap_i32();
-            let out_ptr    = params[5].unwrap_i32() as usize;
-            let out_max    = params[6].unwrap_i32() as usize;
+            let out_ptr = params[5].unwrap_i32() as usize;
+            let out_max = params[6].unwrap_i32() as usize;
             Box::new(async move {
                 // Check and decrement host call budget; return -1 if exhausted.
                 if caller.data().host_call_budget == 0 {
@@ -331,13 +343,22 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                    if let Extern::Memory(m) = e {
+                        Some(m)
+                    } else {
+                        None
+                    }
                 }) {
                     Some(m) => m,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 // Read subject and payload BEFORE any await.
@@ -345,18 +366,27 @@ fn add_trogon_host_functions(
                     let data = mem.data(&caller);
                     let subj = match read_str(data, subj_ptr, subj_len) {
                         Some(s) => s.to_owned(),
-                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
                     };
                     let pay = match read_bytes(data, pay_ptr, pay_len) {
                         Some(b) => bytes::Bytes::copy_from_slice(b),
-                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
                     };
                     (subj, pay)
                 };
 
                 let nats = match caller.data().nats.clone() {
                     Some(n) => n,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 let timeout = if timeout_ms <= 0 {
@@ -364,10 +394,14 @@ fn add_trogon_host_functions(
                 } else {
                     std::time::Duration::from_millis(timeout_ms as u64)
                 };
-                let response = match tokio::time::timeout(timeout, nats.request(subject, payload)).await {
-                    Ok(Ok(msg)) => msg.payload,
-                    _ => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
-                };
+                let response =
+                    match tokio::time::timeout(timeout, nats.request(subject, payload)).await {
+                        Ok(Ok(msg)) => msg.payload,
+                        _ => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
+                    };
 
                 // Write response into WASM memory.
                 let to_write = response.len().min(out_max);
@@ -388,11 +422,7 @@ fn add_trogon_host_functions(
     linker.func_new_async(
         "trogon_v1",
         "subscribe",
-        wasmtime::FuncType::new(
-            engine,
-            [ValType::I32, ValType::I32],
-            [ValType::I32],
-        ),
+        wasmtime::FuncType::new(engine, [ValType::I32, ValType::I32], [ValType::I32]),
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
             let subj_ptr = params[0].unwrap_i32() as usize;
             let subj_len = params[1].unwrap_i32() as usize;
@@ -403,7 +433,9 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 // Enforce per-module subscription cap to prevent NATS connection exhaustion.
                 if caller.data().subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_MODULE {
@@ -412,28 +444,44 @@ fn add_trogon_host_functions(
                 }
 
                 let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                    if let Extern::Memory(m) = e {
+                        Some(m)
+                    } else {
+                        None
+                    }
                 }) {
                     Some(m) => m,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 let subject = {
                     let data = mem.data(&caller);
                     match read_str(data, subj_ptr, subj_len) {
                         Some(s) => s.to_owned(),
-                        None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
                     }
                 };
 
                 let nats = match caller.data().nats.clone() {
                     Some(n) => n,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 let sub = match nats.subscribe(subject).await {
                     Ok(s) => s,
-                    Err(_) => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    Err(_) => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 let id = caller.data().next_sub_id;
@@ -475,14 +523,14 @@ fn add_trogon_host_functions(
             [ValType::I32],
         ),
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
-            let sub_id           = params[0].unwrap_i32();
-            let out_subj_ptr     = params[1].unwrap_i32() as usize;
-            let out_subj_max     = params[2].unwrap_i32() as usize;
+            let sub_id = params[0].unwrap_i32();
+            let out_subj_ptr = params[1].unwrap_i32() as usize;
+            let out_subj_max = params[2].unwrap_i32() as usize;
             let out_subj_len_ptr = params[3].unwrap_i32() as usize;
-            let out_payload_ptr  = params[4].unwrap_i32() as usize;
-            let out_payload_max  = params[5].unwrap_i32() as usize;
+            let out_payload_ptr = params[4].unwrap_i32() as usize;
+            let out_payload_max = params[5].unwrap_i32() as usize;
             let out_payload_len_ptr = params[6].unwrap_i32() as usize;
-            let timeout_ms       = params[7].unwrap_i32();
+            let timeout_ms = params[7].unwrap_i32();
             Box::new(async move {
                 // Check and decrement host call budget first.
                 if caller.data().host_call_budget == 0 {
@@ -490,12 +538,17 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 // Take the subscriber out temporarily for async recv.
                 let mut sub = match caller.data_mut().subscriptions.remove(&sub_id) {
                     Some(s) => s,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
                 let timeout = if timeout_ms < 0 {
@@ -523,21 +576,28 @@ fn add_trogon_host_functions(
                 let payload_bytes = msg.payload.clone();
 
                 let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e { Some(m) } else { None }
+                    if let Extern::Memory(m) = e {
+                        Some(m)
+                    } else {
+                        None
+                    }
                 }) {
                     Some(m) => m,
-                    None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
+                    None => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
                 };
 
-                let subj_to_write    = subj_bytes.len().min(out_subj_max);
+                let subj_to_write = subj_bytes.len().min(out_subj_max);
                 let payload_to_write = payload_bytes.len().min(out_payload_max);
 
                 let mem_data = mem.data_mut(&mut caller);
 
                 // Validate all writes fit in WASM memory before touching it.
-                let subj_end    = out_subj_ptr.saturating_add(subj_to_write);
+                let subj_end = out_subj_ptr.saturating_add(subj_to_write);
                 let payload_end = out_payload_ptr.saturating_add(payload_to_write);
-                let subj_len_end    = out_subj_len_ptr.saturating_add(4);
+                let subj_len_end = out_subj_len_ptr.saturating_add(4);
                 let payload_len_end = out_payload_len_ptr.saturating_add(4);
                 if subj_end > mem_data.len()
                     || payload_end > mem_data.len()
@@ -548,8 +608,7 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
 
-                mem_data[out_subj_ptr..subj_end]
-                    .copy_from_slice(&subj_bytes[..subj_to_write]);
+                mem_data[out_subj_ptr..subj_end].copy_from_slice(&subj_bytes[..subj_to_write]);
                 mem_data[out_payload_ptr..payload_end]
                     .copy_from_slice(&payload_bytes[..payload_to_write]);
                 mem_data[out_subj_len_ptr..subj_len_end]
@@ -568,11 +627,7 @@ fn add_trogon_host_functions(
     linker.func_new_async(
         "trogon_v1",
         "unsubscribe",
-        wasmtime::FuncType::new(
-            engine,
-            [ValType::I32],
-            [ValType::I32],
-        ),
+        wasmtime::FuncType::new(engine, [ValType::I32], [ValType::I32]),
         |mut caller: Caller<'_, WasmStoreData>, params, results| {
             let sub_id = params[0].unwrap_i32();
             Box::new(async move {
@@ -582,7 +637,9 @@ fn add_trogon_host_functions(
                     return Ok(());
                 }
                 caller.data_mut().host_call_budget -= 1;
-                METRICS.host_calls_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .host_calls_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 if caller.data_mut().subscriptions.remove(&sub_id).is_some() {
                     results[0] = wasmtime::Val::I32(0);
@@ -813,7 +870,11 @@ pub async fn run_module_compiled(
         session_id,
         auto_allow_permissions,
         // 0 means unlimited (same convention as wasm_fuel_limit).
-        host_call_budget: if host_call_limit == 0 { u32::MAX } else { host_call_limit },
+        host_call_budget: if host_call_limit == 0 {
+            u32::MAX
+        } else {
+            host_call_limit
+        },
         subscriptions: HashMap::new(),
         next_sub_id: 0,
         acp_prefix,
@@ -827,7 +888,11 @@ pub async fn run_module_compiled(
 
     // Enable fuel consumption. 0 means unlimited (use u64::MAX); otherwise use the
     // configured limit. The engine has consume_fuel(true) enabled via Config.
-    let effective_fuel = if fuel_limit == 0 { u64::MAX } else { fuel_limit };
+    let effective_fuel = if fuel_limit == 0 {
+        u64::MAX
+    } else {
+        fuel_limit
+    };
     store.set_fuel(effective_fuel)?;
     // Yield to the async executor every 10 000 fuel units so that wall-clock
     // timeouts (tokio::time::timeout wrapping call_async) can fire even for
@@ -910,4 +975,3 @@ pub async fn run_module_compiled(
 
     Ok(exit_status)
 }
-

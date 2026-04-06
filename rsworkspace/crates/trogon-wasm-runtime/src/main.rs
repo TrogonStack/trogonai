@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use tracing::info;
-use trogon_wasm_runtime::{Config, WasmRuntime, dispatcher};
+use trogon_wasm_runtime::{dispatcher, Config, WasmRuntime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,7 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(c) => break c,
                 Err(e) => {
                     attempts += 1;
-                    let delay = std::time::Duration::from_millis((100 * attempts as u64).min(5_000));
+                    let delay =
+                        std::time::Duration::from_millis((100 * attempts as u64).min(5_000));
                     tracing::warn!(error = %e, attempt = attempts, delay_ms = delay.as_millis(), "NATS connect failed, retrying");
                     tokio::time::sleep(delay).await;
                 }
