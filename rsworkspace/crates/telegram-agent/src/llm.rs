@@ -177,18 +177,14 @@ impl ClaudeClient {
                                 if data == "[DONE]" {
                                     return;
                                 }
-                                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                                    if event["type"] == "content_block_delta"
-                                        && event["delta"]["type"] == "text_delta"
-                                    {
-                                        if let Some(text) = event["delta"]["text"].as_str() {
-                                            if !text.is_empty()
-                                                && tx.send(Ok(text.to_string())).await.is_err()
-                                            {
-                                                return; // receiver dropped
-                                            }
-                                        }
-                                    }
+                                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data)
+                                    && event["type"] == "content_block_delta"
+                                    && event["delta"]["type"] == "text_delta"
+                                    && let Some(text) = event["delta"]["text"].as_str()
+                                    && !text.is_empty()
+                                    && tx.send(Ok(text.to_string())).await.is_err()
+                                {
+                                    return;
                                 }
                             }
                         }

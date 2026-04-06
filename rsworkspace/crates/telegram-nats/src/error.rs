@@ -1,11 +1,7 @@
-//! Error types for telegram-nats
-
 use thiserror::Error;
 
-/// Result type alias
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Error types for telegram-nats operations
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("NATS error: {0}")]
@@ -13,9 +9,6 @@ pub enum Error {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-
-    #[error("Connection error: {0}")]
-    Connection(String),
 
     #[error("Subject error: {0}")]
     Subject(String),
@@ -29,21 +22,13 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    #[error("Other error: {0}")]
-    Other(#[from] anyhow::Error),
+    #[error("JetStream setup error: {0}")]
+    Setup(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Display formatting ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_connection_error_display() {
-        let err = Error::Connection("refused".to_string());
-        assert_eq!(err.to_string(), "Connection error: refused");
-    }
 
     #[test]
     fn test_subject_error_display() {
@@ -69,7 +54,11 @@ mod tests {
         assert_eq!(err.to_string(), "Configuration error: missing credentials");
     }
 
-    // ── From conversions ──────────────────────────────────────────────────────
+    #[test]
+    fn test_setup_error_display() {
+        let err = Error::Setup("stream creation failed".to_string());
+        assert_eq!(err.to_string(), "JetStream setup error: stream creation failed");
+    }
 
     #[test]
     fn test_from_serde_json_error() {
@@ -77,15 +66,6 @@ mod tests {
         let err: Error = json_err.into();
         assert!(err.to_string().starts_with("Serialization error:"));
     }
-
-    #[test]
-    fn test_from_anyhow_error() {
-        let anyhow_err = anyhow::anyhow!("something went wrong");
-        let err: Error = anyhow_err.into();
-        assert_eq!(err.to_string(), "Other error: something went wrong");
-    }
-
-    // ── Result type alias ─────────────────────────────────────────────────────
 
     #[test]
     fn test_result_ok() {
@@ -99,9 +79,9 @@ mod tests {
 
     #[test]
     fn test_result_err() {
-        let r: Result<i32> = Err(Error::Connection("fail".to_string()));
+        let r: Result<i32> = Err(Error::Setup("fail".to_string()));
         if let Err(e) = r {
-            assert!(e.to_string().contains("Connection error"));
+            assert!(e.to_string().contains("JetStream setup error"));
         } else {
             panic!("should be err");
         }

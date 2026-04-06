@@ -11,7 +11,7 @@ mod bridge_tests;
 mod bridge_nats_tests;
 
 use anyhow::Result;
-use async_nats::{jetstream::kv::Store, Client};
+use async_nats::{Client, jetstream::kv::Store};
 use telegram_nats::{subjects, MessagePublisher};
 use telegram_types::{
     chat::{
@@ -30,7 +30,7 @@ use crate::session::SessionManager;
 /// Telegram to NATS bridge
 #[derive(Clone)]
 pub struct TelegramBridge {
-    publisher: MessagePublisher,
+    publisher: MessagePublisher<Client>,
     pub access_config: AccessConfig,
     session_manager: SessionManager,
     dedup: DedupStore,

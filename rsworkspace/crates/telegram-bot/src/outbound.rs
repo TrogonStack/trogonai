@@ -57,7 +57,7 @@ struct DispatchContext {
 /// Outbound processor that listens to agent commands and executes them
 pub struct OutboundProcessor {
     pub(crate) bot: Bot,
-    pub(crate) subscriber: MessageSubscriber,
+    pub(crate) subscriber: MessageSubscriber<Client>,
     pub(crate) js: async_nats::jetstream::Context,
     /// Track streaming messages by (chat_id, session_id)
     pub(crate) streaming_messages: Arc<RwLock<HashMap<(i64, String), StreamingMessage>>>,
@@ -135,19 +135,18 @@ impl OutboundProcessor {
                 })
                 .unwrap_or_default();
 
-            if !dedup_key.is_empty() {
-                if let Some(ref dedup) = self.dedup {
-                    if dedup.is_seen(&dedup_key).await {
-                        debug!("Skipping duplicate outbound command (key={})", dedup_key);
-                        if let Err(e) = msg.ack().await {
-                            warn!("Failed to ack duplicate command on '{}': {}", subject, e);
-                        }
-                        continue;
+            if !dedup_key.is_empty()
+                && let Some(dedup) = &self.dedup
+            {
+                if dedup.is_seen(&dedup_key).await {
+                    debug!("Skipping duplicate outbound command (key={})", dedup_key);
+                    if let Err(e) = msg.ack().await {
+                        warn!("Failed to ack duplicate command on '{}': {}", subject, e);
                     }
-                    // Optimistic mark before Telegram API call — prevents racing redelivery
-                    if let Err(e) = dedup.mark_seen(&dedup_key).await {
-                        warn!("Failed to mark command as seen (key={}): {}", dedup_key, e);
-                    }
+                    continue;
+                }
+                if let Err(e) = dedup.mark_seen(&dedup_key).await {
+                    warn!("Failed to mark command as seen (key={}): {}", dedup_key, e);
                 }
             }
             // ── End idempotency guard ──────────────────────────────────────────
@@ -2801,10 +2800,10 @@ fn convert_inline_query_result(
             result.heading = location.heading.map(|h| h as u16);
             result.proximity_alert_radius = location.proximity_alert_radius;
 
-            if let Some(thumb_url_str) = location.thumbnail_url {
-                if let Ok(thumb_url) = Url::parse(&thumb_url_str) {
-                    result.thumbnail_url = Some(thumb_url);
-                }
+            if let Some(thumb_url_str) = location.thumbnail_url
+                && let Ok(thumb_url) = Url::parse(&thumb_url_str)
+            {
+                result.thumbnail_url = Some(thumb_url);
             }
 
             result.thumbnail_width = location.thumbnail_width;
@@ -2827,10 +2826,10 @@ fn convert_inline_query_result(
             result.google_place_id = venue.google_place_id;
             result.google_place_type = venue.google_place_type;
 
-            if let Some(thumb_url_str) = venue.thumbnail_url {
-                if let Ok(thumb_url) = Url::parse(&thumb_url_str) {
-                    result.thumbnail_url = Some(thumb_url);
-                }
+            if let Some(thumb_url_str) = venue.thumbnail_url
+                && let Ok(thumb_url) = Url::parse(&thumb_url_str)
+            {
+                result.thumbnail_url = Some(thumb_url);
             }
 
             result.thumbnail_width = venue.thumbnail_width;
@@ -2846,10 +2845,10 @@ fn convert_inline_query_result(
             result.last_name = contact.last_name;
             result.vcard = contact.vcard;
 
-            if let Some(thumb_url_str) = contact.thumbnail_url {
-                if let Ok(thumb_url) = Url::parse(&thumb_url_str) {
-                    result.thumbnail_url = Some(thumb_url);
-                }
+            if let Some(thumb_url_str) = contact.thumbnail_url
+                && let Ok(thumb_url) = Url::parse(&thumb_url_str)
+            {
+                result.thumbnail_url = Some(thumb_url);
             }
 
             result.thumbnail_width = contact.thumbnail_width;

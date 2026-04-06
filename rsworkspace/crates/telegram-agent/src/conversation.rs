@@ -123,14 +123,14 @@ impl ConversationManager {
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
 
-        if let Some(ref kv) = self.kv {
-            if let Err(e) = kv.delete(&kv_key(session_id)).await {
-                tracing::warn!(
-                    "Failed to delete conversation from KV for {}: {}",
-                    session_id,
-                    e
-                );
-            }
+        if let Some(kv) = &self.kv
+            && let Err(e) = kv.delete(&kv_key(session_id)).await
+        {
+            tracing::warn!(
+                "Failed to delete conversation from KV for {}: {}",
+                session_id,
+                e
+            );
         }
     }
 
