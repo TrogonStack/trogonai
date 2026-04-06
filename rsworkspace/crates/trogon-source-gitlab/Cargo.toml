@@ -15,11 +15,9 @@ acp-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 bytes = { workspace = true }
-bytesize = "2.3.1"
 sha2 = "0.10"
 subtle = "2.6"
 tokio = { workspace = true, features = ["full"] }
-tower-http = { workspace = true, features = ["limit"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }

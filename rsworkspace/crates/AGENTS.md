@@ -7,6 +7,8 @@ Errors must be typed—use structs or enums, never `String` or `format!()`. Ever
 You must use the `test-support` feature to share test helpers between crates.
 Prefer one trait per operation over a single trait with multiple operations.
 
+Production implementations of infrastructure traits must be zero-cost passthroughs to the underlying SDK. No error wrapping (use the SDK's error types directly via associated `type Error`), no return type conversion (add associated types like `type Info` to match the SDK's return), no `map_err`, no `map(|_| ())`. The impl body should be `self.sdk_field.method(args).await` — nothing else. Conversion logic (e.g. `Cursor::new`, `read_to_end`) belongs in the caller, not the passthrough.
+
 For NATS infrastructure and testing, use the `trogon-nats` crate which provides:
 - `NatsClient` trait for testability
 - Connection management with auto-reconnect
