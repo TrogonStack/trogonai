@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use ed25519_dalek::VerifyingKey;
 use trogon_nats::{NatsConfig, NatsToken};
 use trogon_std::env::ReadEnv;
@@ -9,8 +8,8 @@ use twilight_model::gateway::Intents;
 use std::fmt;
 
 use crate::constants::{
-    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_NATS_REQUEST_TIMEOUT, DEFAULT_PORT,
-    DEFAULT_STREAM_MAX_AGE, DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX,
+    DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_NATS_REQUEST_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE,
+    DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX,
 };
 use crate::signature;
 
@@ -27,7 +26,6 @@ pub struct DiscordConfig {
     pub stream_max_age: Duration,
     pub nats_ack_timeout: Duration,
     pub nats_request_timeout: Duration,
-    pub max_body_size: ByteSize,
     pub nats: NatsConfig,
 }
 
@@ -104,12 +102,6 @@ impl DiscordConfig {
                 .and_then(|v| v.parse().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(DEFAULT_NATS_REQUEST_TIMEOUT),
-            max_body_size: env
-                .var("DISCORD_MAX_BODY_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(ByteSize)
-                .unwrap_or(DEFAULT_MAX_BODY_SIZE),
             nats: NatsConfig::from_env(env),
         }
     }
@@ -213,7 +205,6 @@ mod tests {
         assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(10));
         assert_eq!(config.nats_request_timeout, Duration::from_secs(2));
-        assert_eq!(config.max_body_size, ByteSize::mib(4));
     }
 
     #[test]
@@ -284,7 +275,6 @@ mod tests {
         env.set("DISCORD_STREAM_MAX_AGE_SECS", "3600");
         env.set("DISCORD_NATS_ACK_TIMEOUT_SECS", "30");
         env.set("DISCORD_NATS_REQUEST_TIMEOUT_SECS", "5");
-        env.set("DISCORD_MAX_BODY_SIZE", "1048576");
 
         let config = DiscordConfig::from_env(&env);
 
@@ -294,7 +284,6 @@ mod tests {
         assert_eq!(config.stream_max_age, Duration::from_secs(3600));
         assert_eq!(config.nats_ack_timeout, Duration::from_secs(30));
         assert_eq!(config.nats_request_timeout, Duration::from_secs(5));
-        assert_eq!(config.max_body_size, ByteSize::mib(1));
     }
 
     #[test]
@@ -331,15 +320,6 @@ mod tests {
 
         let config = DiscordConfig::from_env(&env);
         assert_eq!(config.nats_request_timeout, DEFAULT_NATS_REQUEST_TIMEOUT);
-    }
-
-    #[test]
-    fn invalid_max_body_size_falls_back_to_default() {
-        let env = env_webhook();
-        env.set("DISCORD_MAX_BODY_SIZE", "not-a-number");
-
-        let config = DiscordConfig::from_env(&env);
-        assert_eq!(config.max_body_size, DEFAULT_MAX_BODY_SIZE);
     }
 
     #[test]

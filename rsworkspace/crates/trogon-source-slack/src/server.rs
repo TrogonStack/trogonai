@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use crate::config::SlackConfig;
 use crate::constants::{
-    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID,
-    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
-    NATS_HEADER_TEAM_ID,
+    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX,
+    NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND,
+    NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
 };
 use crate::signature;
 use trogon_std::SystemClock;
@@ -14,18 +14,19 @@ use trogon_std::time::EpochClock;
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateStreamError;
 use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
+    http::StatusCode, routing::get, routing::post,
 };
 use form_urlencoded;
 use std::future::Future;
 use std::pin::Pin;
-use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
 #[cfg(not(coverage))]
 use trogon_nats::jetstream::JetStreamContext;
-use trogon_nats::jetstream::{JetStreamPublisher, PublishOutcome, publish_event};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+};
 
 #[cfg(not(coverage))]
 #[derive(Debug)]
@@ -72,8 +73,8 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
     }
 }
 
-async fn publish_unroutable<P: JetStreamPublisher>(
-    js: &P,
+async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: &ClaimCheckPublisher<P, S>,
     subject_prefix: &NatsToken,
     reason: &str,
     body: Bytes,
@@ -84,13 +85,15 @@ async fn publish_unroutable<P: JetStreamPublisher>(
     headers.insert(NATS_HEADER_REJECT_REASON, reason);
     headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
 
-    let outcome = publish_event(js, subject, headers, body, ack_timeout).await;
+    let outcome = publisher
+        .publish_event(subject, headers, body, ack_timeout)
+        .await;
     outcome.log_on_error("slack.unroutable");
 }
 
 #[derive(Clone)]
-struct AppState<P: JetStreamPublisher, C: EpochClock> {
-    js: P,
+struct AppState<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock> {
+    publisher: ClaimCheckPublisher<P, S>,
     clock: C,
     signing_secret: String,
     subject_prefix: NatsToken,
@@ -116,17 +119,20 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
     Ok(())
 }
 
-pub fn router<P: JetStreamPublisher>(js: P, config: &SlackConfig) -> Router {
-    router_with_clock(js, config, SystemClock)
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &SlackConfig,
+) -> Router {
+    router_with_clock(publisher, config, SystemClock)
 }
 
-fn router_with_clock<P: JetStreamPublisher, C: EpochClock>(
-    js: P,
+fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
+    publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
     clock: C,
 ) -> Router {
     let state = AppState {
-        js,
+        publisher,
         clock,
         signing_secret: config.signing_secret.clone(),
         subject_prefix: config.subject_prefix.clone(),
@@ -135,24 +141,28 @@ fn router_with_clock<P: JetStreamPublisher, C: EpochClock>(
     };
 
     Router::new()
-        .route("/webhook", post(handle_webhook::<P, C>))
+        .route("/webhook", post(handle_webhook::<P, S, C>))
         .route("/health", get(handle_health))
-        .layer(RequestBodyLimitLayer::new(
-            config.max_body_size.as_u64() as usize
-        ))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
 
 #[cfg(not(coverage))]
-pub async fn serve<J>(js: J, config: SlackConfig) -> Result<(), ServeError>
+pub async fn serve<C, P, S>(
+    context: C,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: SlackConfig,
+) -> Result<(), ServeError>
 where
-    J: JetStreamContext<Error = CreateStreamError> + JetStreamPublisher,
+    C: JetStreamContext<Error = CreateStreamError>,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
 {
-    provision(&js, &config)
+    provision(&context, &config)
         .await
         .map_err(ServeError::Provision)?;
 
-    let app = router(js, &config);
+    let app = router(publisher, &config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "Slack webhook server listening");
 
@@ -169,8 +179,8 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
-fn handle_webhook<P: JetStreamPublisher, C: EpochClock>(
-    State(state): State<AppState<P, C>>,
+fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
+    State(state): State<AppState<P, S, C>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = (StatusCode, String)> + Send>> {
@@ -186,8 +196,8 @@ fn handle_webhook<P: JetStreamPublisher, C: EpochClock>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook_inner<P: JetStreamPublisher, C: EpochClock>(
-    state: AppState<P, C>,
+async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
+    state: AppState<P, S, C>,
     headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, String) {
@@ -235,14 +245,14 @@ async fn handle_webhook_inner<P: JetStreamPublisher, C: EpochClock>(
     }
 }
 
-async fn handle_json_payload<P: JetStreamPublisher>(
-    state: &AppState<P, impl EpochClock>,
+async fn handle_json_payload<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: &AppState<P, S, impl EpochClock>,
     body: &Bytes,
 ) -> (StatusCode, String) {
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(body) else {
         warn!("Invalid JSON payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "invalid_json",
             body.clone(),
@@ -270,7 +280,7 @@ async fn handle_json_payload<P: JetStreamPublisher>(
     if payload_type != "event_callback" {
         warn!(payload_type, "Unhandled payload type");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "unhandled_payload_type",
             body.clone(),
@@ -287,7 +297,7 @@ async fn handle_json_payload<P: JetStreamPublisher>(
     else {
         warn!("Missing event.type in event_callback payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_event_type",
             body.clone(),
@@ -301,7 +311,7 @@ async fn handle_json_payload<P: JetStreamPublisher>(
     let Some(event_id) = payload.get("event_id").and_then(|v| v.as_str()) else {
         warn!("Missing event_id in event_callback payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_event_id",
             body.clone(),
@@ -335,20 +345,16 @@ async fn handle_json_payload<P: JetStreamPublisher>(
     nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
     nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "event");
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        body.clone(),
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body.clone(), state.nats_ack_timeout)
+        .await;
 
     (outcome_to_status(outcome), String::new())
 }
 
-async fn handle_form_payload<P: JetStreamPublisher>(
-    state: &AppState<P, impl EpochClock>,
+async fn handle_form_payload<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: &AppState<P, S, impl EpochClock>,
     body: &Bytes,
 ) -> (StatusCode, String) {
     let form_str = match std::str::from_utf8(body) {
@@ -356,7 +362,7 @@ async fn handle_form_payload<P: JetStreamPublisher>(
         Err(_) => {
             warn!("Invalid UTF-8 in form payload");
             publish_unroutable(
-                &state.js,
+                &state.publisher,
                 &state.subject_prefix,
                 "invalid_utf8_form",
                 body.clone(),
@@ -388,7 +394,7 @@ async fn handle_form_payload<P: JetStreamPublisher>(
 
     warn!("Unrecognized form payload");
     publish_unroutable(
-        &state.js,
+        &state.publisher,
         &state.subject_prefix,
         "unrecognized_form",
         body.clone(),
@@ -398,15 +404,15 @@ async fn handle_form_payload<P: JetStreamPublisher>(
     (StatusCode::BAD_REQUEST, String::new())
 }
 
-async fn handle_interaction<P: JetStreamPublisher>(
-    state: &AppState<P, impl EpochClock>,
+async fn handle_interaction<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: &AppState<P, S, impl EpochClock>,
     payload_json: &str,
     raw_body: &Bytes,
 ) -> (StatusCode, String) {
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_json) else {
         warn!("Invalid JSON in interaction payload field");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "invalid_interaction_json",
             raw_body.clone(),
@@ -419,7 +425,7 @@ async fn handle_interaction<P: JetStreamPublisher>(
     let Some(interaction_type) = payload.get("type").and_then(|v| v.as_str()) else {
         warn!("Missing type in interaction payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_interaction_type",
             raw_body.clone(),
@@ -433,7 +439,7 @@ async fn handle_interaction<P: JetStreamPublisher>(
     let Some(trigger_id) = payload.get("trigger_id").and_then(|v| v.as_str()) else {
         warn!("Missing trigger_id in interaction payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_interaction_trigger_id",
             raw_body.clone(),
@@ -466,20 +472,21 @@ async fn handle_interaction<P: JetStreamPublisher>(
     nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
     nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "interaction");
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        Bytes::from(payload_json.to_owned()),
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(
+            subject,
+            nats_headers,
+            Bytes::from(payload_json.to_owned()),
+            state.nats_ack_timeout,
+        )
+        .await;
 
     (outcome_to_status(outcome), String::new())
 }
 
-async fn handle_slash_command<P: JetStreamPublisher>(
-    state: &AppState<P, impl EpochClock>,
+async fn handle_slash_command<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: &AppState<P, S, impl EpochClock>,
     command: &str,
     fields: &[(String, String)],
     raw_body: &Bytes,
@@ -499,7 +506,7 @@ async fn handle_slash_command<P: JetStreamPublisher>(
     else {
         warn!(command, "Missing trigger_id in slash command payload");
         publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             "missing_command_trigger_id",
             raw_body.clone(),
@@ -524,14 +531,15 @@ async fn handle_slash_command<P: JetStreamPublisher>(
     nats_headers.insert(NATS_HEADER_TEAM_ID, team_id);
     nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "command");
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        raw_body.clone(),
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(
+            subject,
+            nats_headers,
+            raw_body.clone(),
+            state.nats_ack_timeout,
+        )
+        .await;
 
     (outcome_to_status(outcome), String::new())
 }
@@ -541,16 +549,28 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use bytesize::ByteSize;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
     #[cfg(not(coverage))]
     use trogon_nats::jetstream::MockJetStreamContext;
-    use trogon_nats::jetstream::MockJetStreamPublisher;
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+    };
 
     type HmacSha256 = Hmac<Sha256>;
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
 
     const TEST_NOW: u64 = 1_700_000_000;
 
@@ -579,7 +599,6 @@ mod tests {
             stream_name: NatsToken::new("SLACK").unwrap(),
             stream_max_age: Duration::from_secs(3600),
             nats_ack_timeout: Duration::from_secs(10),
-            max_body_size: ByteSize::mib(1),
             timestamp_max_drift: Duration::from_secs(300),
             nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
@@ -591,7 +610,7 @@ mod tests {
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
         router_with_clock(
-            publisher,
+            wrap_publisher(publisher),
             &test_config(),
             FixedEpochClock::from_secs(TEST_NOW),
         )
@@ -915,7 +934,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             clock: FixedEpochClock::from_secs(TEST_NOW),
             signing_secret: TEST_SECRET.to_string(),
             subject_prefix: NatsToken::new("custom").unwrap(),
@@ -926,7 +945,7 @@ mod tests {
         let app = Router::new()
             .route(
                 "/webhook",
-                post(handle_webhook::<MockJetStreamPublisher, FixedEpochClock>),
+                post(handle_webhook::<MockJetStreamPublisher, MockObjectStore, FixedEpochClock>),
             )
             .with_state(state);
 
@@ -959,40 +978,6 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn body_exceeding_limit_returns_413() {
-        let _guard = tracing_guard();
-        let publisher = MockJetStreamPublisher::new();
-
-        let state = AppState {
-            js: publisher.clone(),
-            clock: FixedEpochClock::from_secs(TEST_NOW),
-            signing_secret: TEST_SECRET.to_string(),
-            subject_prefix: NatsToken::new("slack").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-            timestamp_max_drift: Duration::from_secs(300),
-        };
-
-        let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<MockJetStreamPublisher, FixedEpochClock>),
-            )
-            .layer(RequestBodyLimitLayer::new(64))
-            .with_state(state);
-
-        let oversized_body = vec![0u8; 128];
-        let ts = current_timestamp();
-        let sig = compute_sig(TEST_SECRET, &ts, &oversized_body);
-        let resp = app
-            .oneshot(webhook_request(&oversized_body, &ts, Some(&sig)))
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert!(publisher.published_messages().is_empty());
     }
 
     #[tokio::test]
@@ -1121,7 +1106,12 @@ mod tests {
         let publisher = AckFailPublisher::failing();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             clock: FixedEpochClock::from_secs(TEST_NOW),
             signing_secret: TEST_SECRET.to_string(),
             subject_prefix: NatsToken::new("slack").unwrap(),
@@ -1132,7 +1122,7 @@ mod tests {
         let app = Router::new()
             .route(
                 "/webhook",
-                post(handle_webhook::<AckFailPublisher, FixedEpochClock>),
+                post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
             )
             .with_state(state);
 
@@ -1154,7 +1144,12 @@ mod tests {
         let publisher = AckFailPublisher::hanging();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             clock: FixedEpochClock::from_secs(TEST_NOW),
             signing_secret: TEST_SECRET.to_string(),
             subject_prefix: NatsToken::new("slack").unwrap(),
@@ -1165,7 +1160,7 @@ mod tests {
         let app = Router::new()
             .route(
                 "/webhook",
-                post(handle_webhook::<AckFailPublisher, FixedEpochClock>),
+                post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
             )
             .with_state(state);
 

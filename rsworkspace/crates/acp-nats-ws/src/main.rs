@@ -115,12 +115,15 @@ fn run_connection_thread<N, J>(
     let local = tokio::task::LocalSet::new();
     rt.block_on(local.run_until(process_connections(conn_rx, nats_client, js_client, config)));
 
-    // run_until returns once its future completes, but sub-tasks
-    // spawned by connection handlers (pumps, AgentSideConnection
-    // internals) may still be live on the LocalSet. Drive them to
-    // completion so WebSocket close frames are sent and per-connection
-    // cleanup finishes.
-    rt.block_on(local);
+    // run_until returns once process_connections completes, but
+    // sub-tasks spawned by connection handlers (pumps,
+    // AgentSideConnection internals) may still be live on the
+    // LocalSet. Drive them for a bounded window so WebSocket close
+    // frames are sent and per-connection cleanup finishes, without
+    // blocking forever on stuck sub-tasks (e.g. a hanging NATS
+    // request that never resolves).
+    let drain = std::time::Duration::from_secs(5);
+    rt.block_on(local.run_until(async { tokio::time::sleep(drain).await }));
     info!("Local thread exiting");
 }
 
@@ -373,6 +376,8 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), server_task)
             .await
             .expect("server task did not shut down");
+
+        drop(ws_stream);
 
         conn_thread.join().unwrap();
     }

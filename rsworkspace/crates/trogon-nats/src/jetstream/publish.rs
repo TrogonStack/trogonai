@@ -12,6 +12,7 @@ pub enum PublishOutcome<E: fmt::Display> {
     PublishFailed(E),
     AckFailed(E),
     AckTimedOut(Duration),
+    StoreFailed(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl<E: fmt::Display> PublishOutcome<E> {
@@ -30,6 +31,9 @@ impl<E: fmt::Display> PublishOutcome<E> {
             }
             PublishOutcome::AckTimedOut(timeout) => {
                 error!(?timeout, source = source_name, "NATS ack timed out");
+            }
+            PublishOutcome::StoreFailed(e) => {
+                error!(error = %e, source = source_name, "Failed to store claim check payload");
             }
         }
     }

@@ -4,23 +4,24 @@ use std::time::Duration;
 use crate::config::GitlabConfig;
 use crate::constants::{
     HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_TOKEN,
-    HEADER_WEBHOOK_UUID, NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_INSTANCE,
-    NATS_HEADER_REJECT_REASON, NATS_HEADER_WEBHOOK_UUID,
+    HEADER_WEBHOOK_UUID, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID,
+    NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON, NATS_HEADER_WEBHOOK_UUID,
 };
 use crate::signature;
 use crate::webhook_secret::WebhookSecret;
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateStreamError;
 use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
+    http::StatusCode, routing::get, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
-use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher, PublishOutcome, publish_event};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+};
 
 #[cfg(not(coverage))]
 #[derive(Debug)]
@@ -72,8 +73,8 @@ impl RejectReason {
     }
 }
 
-async fn publish_unroutable<P: JetStreamPublisher>(
-    js: &P,
+async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: &ClaimCheckPublisher<P, S>,
     subject_prefix: &NatsToken,
     reason: RejectReason,
     body: Bytes,
@@ -83,7 +84,9 @@ async fn publish_unroutable<P: JetStreamPublisher>(
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
-    let outcome = publish_event(js, subject, headers, body, ack_timeout).await;
+    let outcome = publisher
+        .publish_event(subject, headers, body, ack_timeout)
+        .await;
     if outcome.is_ok() {
         // Return 200 so GitLab doesn't count this as a failure and
         // auto-disable the webhook after repeated 4xx responses.
@@ -105,8 +108,8 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 }
 
 #[derive(Clone)]
-struct AppState<P: JetStreamPublisher> {
-    js: P,
+struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
+    publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: WebhookSecret,
     subject_prefix: NatsToken,
     nats_ack_timeout: Duration,
@@ -127,33 +130,40 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Re
     Ok(())
 }
 
-pub fn router<P: JetStreamPublisher>(js: P, config: &GitlabConfig) -> Router {
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &GitlabConfig,
+) -> Router {
     let state = AppState {
-        js,
+        publisher,
         webhook_secret: config.webhook_secret.clone(),
         subject_prefix: config.subject_prefix.clone(),
         nats_ack_timeout: config.nats_ack_timeout,
     };
 
     Router::new()
-        .route("/webhook", post(handle_webhook::<P>))
+        .route("/webhook", post(handle_webhook::<P, S>))
         .route("/health", get(handle_health))
-        .layer(RequestBodyLimitLayer::new(
-            config.max_body_size.as_u64() as usize
-        ))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
 
 #[cfg(not(coverage))]
-pub async fn serve<J>(js: J, config: GitlabConfig) -> Result<(), ServeError>
+pub async fn serve<C, P, S>(
+    context: C,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: GitlabConfig,
+) -> Result<(), ServeError>
 where
-    J: JetStreamContext<Error = CreateStreamError> + JetStreamPublisher,
+    C: JetStreamContext<Error = CreateStreamError>,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
 {
-    provision(&js, &config)
+    provision(&context, &config)
         .await
         .map_err(ServeError::Provision)?;
 
-    let app = router(js, &config);
+    let app = router(publisher, &config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "GitLab webhook server listening");
 
@@ -170,8 +180,8 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
-fn handle_webhook<P: JetStreamPublisher>(
-    State(state): State<AppState<P>>,
+fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
@@ -187,8 +197,8 @@ fn handle_webhook<P: JetStreamPublisher>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook_inner<P: JetStreamPublisher>(
-    state: AppState<P>,
+async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: AppState<P, S>,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
@@ -210,7 +220,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Some(raw_event) = headers.get(HEADER_EVENT).and_then(|v| v.to_str().ok()) else {
         warn!("Missing X-GitLab-Event header");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::MissingEventHeader,
             body,
@@ -228,7 +238,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Ok(event_token) = NatsToken::new(&event_token) else {
         warn!(raw_event, "X-GitLab-Event normalized to invalid NATS token");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::InvalidEventToken,
             body,
@@ -268,14 +278,10 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
         nats_headers.insert(NATS_HEADER_INSTANCE, inst);
     }
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        body,
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .await;
 
     outcome_to_status(outcome)
 }
@@ -285,12 +291,25 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use bytesize::ByteSize;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use trogon_nats::jetstream::{MockJetStreamContext, MockJetStreamPublisher};
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
+    };
 
     const TEST_SECRET: &str = "test-secret";
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
 
     fn test_config() -> GitlabConfig {
         GitlabConfig {
@@ -300,7 +319,6 @@ mod tests {
             stream_name: NatsToken::new("GITLAB").unwrap(),
             stream_max_age: Duration::from_secs(3600),
             nats_ack_timeout: Duration::from_secs(10),
-            max_body_size: ByteSize::mib(25),
             nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
     }
@@ -310,7 +328,7 @@ mod tests {
     }
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
-        router(publisher, &test_config())
+        router(wrap_publisher(publisher), &test_config())
     }
 
     fn webhook_request(body: &[u8], event: &str, token: Option<&str>) -> Request<Body> {
@@ -539,14 +557,17 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("custom").unwrap(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = b"{}";
@@ -595,14 +616,17 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
 
         let state = AppState {
-            js: publisher.clone(),
+            publisher: wrap_publisher(publisher.clone()),
             webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let req = Request::builder()
@@ -625,33 +649,6 @@ mod tests {
                 .is_none(),
             "should not set Nats-Msg-Id when Idempotency-Key is absent"
         );
-    }
-
-    #[tokio::test]
-    async fn body_exceeding_limit_returns_413() {
-        let _guard = tracing_guard();
-        let publisher = MockJetStreamPublisher::new();
-
-        let state = AppState {
-            js: publisher.clone(),
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
-            subject_prefix: NatsToken::new("gitlab").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-        };
-
-        let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher>))
-            .layer(RequestBodyLimitLayer::new(64))
-            .with_state(state);
-
-        let oversized_body = vec![0u8; 128];
-        let resp = app
-            .oneshot(webhook_request(&oversized_body, "push", Some(TEST_SECRET)))
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert!(publisher.published_messages().is_empty());
     }
 
     #[tokio::test]
@@ -774,14 +771,22 @@ mod tests {
         let publisher = AckFailPublisher::failing();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: Duration::from_secs(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<AckFailPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = b"{}";
@@ -799,14 +804,22 @@ mod tests {
         let publisher = AckFailPublisher::hanging();
 
         let state = AppState {
-            js: publisher,
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
             webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: Duration::from_millis(10),
         };
 
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<AckFailPublisher>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
             .with_state(state);
 
         let body = b"{}";

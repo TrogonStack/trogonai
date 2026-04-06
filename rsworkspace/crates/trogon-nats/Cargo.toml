@@ -7,13 +7,13 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream"] }
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "object-store"] }
 bytes = { workspace = true }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "io-util"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-std = { workspace = true }

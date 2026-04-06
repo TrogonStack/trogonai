@@ -11,6 +11,7 @@ test-support = []
 clap = ["dep:clap"]
 
 [dependencies]
+bytesize = "2.3.1"
 clap = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

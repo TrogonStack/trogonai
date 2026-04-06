@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use trogon_nats::NatsConfig;
 use trogon_nats::NatsToken;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT_MS, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE,
-    DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX,
+    DEFAULT_NATS_ACK_TIMEOUT_MS, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE, DEFAULT_STREAM_NAME,
+    DEFAULT_SUBJECT_PREFIX,
 };
 use crate::webhook_secret::WebhookSecret;
 
@@ -18,7 +17,6 @@ pub struct GitlabConfig {
     pub stream_name: NatsToken,
     pub stream_max_age: Duration,
     pub nats_ack_timeout: Duration,
-    pub max_body_size: ByteSize,
     pub nats: NatsConfig,
 }
 
@@ -56,12 +54,6 @@ impl GitlabConfig {
                 .and_then(|v| v.parse().ok())
                 .map(Duration::from_millis)
                 .unwrap_or(Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS)),
-            max_body_size: env
-                .var("GITLAB_MAX_BODY_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(ByteSize)
-                .unwrap_or(DEFAULT_MAX_BODY_SIZE),
             nats: NatsConfig::from_env(env),
         }
     }
@@ -89,7 +81,6 @@ mod tests {
         assert_eq!(config.stream_name.as_str(), "GITLAB");
         assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.nats_ack_timeout, Duration::from_millis(10_000));
-        assert_eq!(config.max_body_size, ByteSize::mib(25));
     }
 
     #[test]
@@ -101,7 +92,6 @@ mod tests {
         env.set("GITLAB_STREAM_NAME", "GL_EVENTS");
         env.set("GITLAB_STREAM_MAX_AGE_SECS", "3600");
         env.set("GITLAB_NATS_ACK_TIMEOUT_MS", "5000");
-        env.set("GITLAB_MAX_BODY_SIZE", "1048576");
 
         let config = GitlabConfig::from_env(&env);
 
@@ -111,7 +101,6 @@ mod tests {
         assert_eq!(config.stream_name.as_str(), "GL_EVENTS");
         assert_eq!(config.stream_max_age, Duration::from_secs(3600));
         assert_eq!(config.nats_ack_timeout, Duration::from_millis(5000));
-        assert_eq!(config.max_body_size, ByteSize::mib(1));
     }
 
     #[test]
@@ -160,16 +149,6 @@ mod tests {
             config.nats_ack_timeout,
             Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS)
         );
-    }
-
-    #[test]
-    fn invalid_max_body_size_falls_back_to_default() {
-        let env = env_with_secret();
-        env.set("GITLAB_MAX_BODY_SIZE", "not-a-number");
-
-        let config = GitlabConfig::from_env(&env);
-
-        assert_eq!(config.max_body_size, DEFAULT_MAX_BODY_SIZE);
     }
 
     #[test]

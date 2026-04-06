@@ -1,7 +1,9 @@
 #[cfg(not(coverage))]
 use {
     acp_telemetry::ServiceName, tracing::error, tracing::info, trogon_nats::connect,
-    trogon_nats::jetstream::NatsJetStreamClient, trogon_source_telegram::TelegramSourceConfig,
+    trogon_nats::jetstream::ClaimCheckPublisher, trogon_nats::jetstream::MaxPayload,
+    trogon_nats::jetstream::NatsJetStreamClient, trogon_nats::jetstream::NatsObjectStore,
+    trogon_source_telegram::TelegramSourceConfig,
     trogon_source_telegram::constants::DEFAULT_NATS_CONNECT_TIMEOUT, trogon_std::env::SystemEnv,
     trogon_std::fs::SystemFs,
 };
@@ -21,8 +23,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Telegram webhook source starting");
 
     let nats = connect(&config.nats, DEFAULT_NATS_CONNECT_TIMEOUT).await?;
-    let js = NatsJetStreamClient::new(async_nats::jetstream::new(nats));
-    let result = trogon_source_telegram::serve(js, config).await;
+    let max_payload = MaxPayload::from_server_limit(nats.server_info().max_payload);
+    let js_context = async_nats::jetstream::new(nats);
+    let object_store = NatsObjectStore::provision(
+        &js_context,
+        async_nats::jetstream::object_store::Config {
+            bucket: "trogon-claims".to_string(),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let client = NatsJetStreamClient::new(js_context);
+    let publisher = ClaimCheckPublisher::new(
+        client.clone(),
+        object_store,
+        "trogon-claims".to_string(),
+        max_payload,
+    );
+    let result = trogon_source_telegram::serve(client, publisher, config).await;
 
     if let Err(ref e) = result {
         error!(error = %e, "Telegram webhook source stopped with error");
