@@ -3450,23 +3450,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-codex-runner"
-version = "0.0.1"
-dependencies = [
- "acp-nats",
- "acp-nats-agent",
- "agent-client-protocol",
- "async-nats",
- "async-trait",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
