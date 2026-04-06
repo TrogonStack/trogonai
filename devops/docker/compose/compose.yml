@@ -67,6 +67,37 @@ services:
       start_period: 10s
       retries: 3
 
+  trogon-source-discord:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/trogon-source-discord/Dockerfile
+    environment:
+      NATS_URL: "nats:4222"
+      DISCORD_MODE: "${DISCORD_MODE:-gateway}"
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
+      DISCORD_GATEWAY_INTENTS: "${DISCORD_GATEWAY_INTENTS:-}"
+      DISCORD_PUBLIC_KEY: "${DISCORD_PUBLIC_KEY:-}"
+      DISCORD_WEBHOOK_PORT: "${DISCORD_WEBHOOK_PORT:-8080}"
+      DISCORD_SUBJECT_PREFIX: "${DISCORD_SUBJECT_PREFIX:-discord}"
+      DISCORD_STREAM_NAME: "${DISCORD_STREAM_NAME:-DISCORD}"
+      DISCORD_STREAM_MAX_AGE_SECS: "${DISCORD_STREAM_MAX_AGE_SECS:-604800}"
+      DISCORD_NATS_ACK_TIMEOUT_SECS: "${DISCORD_NATS_ACK_TIMEOUT_SECS:-10}"
+      DISCORD_NATS_REQUEST_TIMEOUT_SECS: "${DISCORD_NATS_REQUEST_TIMEOUT_SECS:-2}"
+      DISCORD_MAX_BODY_SIZE: "${DISCORD_MAX_BODY_SIZE:-4194304}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${DISCORD_WEBHOOK_PORT:-8080}/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    profiles:
+      - discord
+
   trogon-source-gitlab:
     build:
       context: ../../../rsworkspace
@@ -147,6 +178,7 @@ services:
     image: ngrok/ngrok:alpine
     environment:
       NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN:-}"
+      DISCORD_ADDR: "trogon-source-discord:${DISCORD_WEBHOOK_PORT:-8080}"
       GITHUB_ADDR: "trogon-source-github:${GITHUB_WEBHOOK_PORT:-8080}"
       GITLAB_ADDR: "trogon-source-gitlab:${GITLAB_WEBHOOK_PORT:-8080}"
       LINEAR_ADDR: "trogon-source-linear:${LINEAR_WEBHOOK_PORT:-8080}"
@@ -159,6 +191,9 @@ services:
         cat > /tmp/ngrok.yml <<EOF
         version: 3
         tunnels:
+          discord:
+            addr: $${DISCORD_ADDR}
+            proto: http
           github:
             addr: $${GITHUB_ADDR}
             proto: http
@@ -177,6 +212,9 @@ services:
         EOF
         exec ngrok start --all --config /tmp/ngrok.yml
     depends_on:
+      trogon-source-discord:
+        condition: service_healthy
+        required: false
       trogon-source-github:
         condition: service_healthy
       trogon-source-gitlab:
