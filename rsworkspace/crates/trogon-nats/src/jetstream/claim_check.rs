@@ -241,6 +241,29 @@ mod tests {
         let stripped = strip_claim_headers(headers);
         assert_eq!(stripped.get("X-Custom").unwrap().as_str(), "value");
     }
+
+    #[test]
+    fn claim_resolve_error_display_missing_key() {
+        let err: ClaimResolveError<String> = ClaimResolveError::MissingKey;
+        let msg = err.to_string();
+        assert!(msg.contains(HEADER_CLAIM_KEY));
+    }
+
+    #[test]
+    fn claim_resolve_error_display_store_failed() {
+        let err: ClaimResolveError<String> =
+            ClaimResolveError::StoreFailed("connection refused".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("connection refused"));
+    }
+
+    #[test]
+    fn claim_resolve_error_display_read_failed() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let err: ClaimResolveError<String> = ClaimResolveError::ReadFailed(io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("pipe broke"));
+    }
 }
 
 #[cfg(all(test, feature = "test-support"))]

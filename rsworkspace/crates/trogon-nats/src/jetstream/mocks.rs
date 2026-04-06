@@ -832,4 +832,22 @@ mod tests {
             vec![AckKindSnapshot::AckWith(AckKindValue::Next)]
         );
     }
+
+    #[test]
+    fn mock_object_store_default() {
+        let store = MockObjectStore::default();
+        assert!(store.stored_objects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mock_object_store_fail_next_get() {
+        let store = MockObjectStore::new();
+        store.seed("key", Bytes::from("data"));
+        store.fail_next_get();
+        let result = ObjectStoreGet::get(&store, "key").await;
+        assert!(result.is_err());
+
+        let result = ObjectStoreGet::get(&store, "key").await;
+        assert!(result.is_ok());
+    }
 }
