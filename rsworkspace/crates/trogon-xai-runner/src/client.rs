@@ -157,9 +157,8 @@ pub enum XaiEvent {
     /// value of `incomplete_details.reason` from the API (e.g. `"max_output_tokens"`
     /// or `"max_turns"`). Used by the agent to choose the right continuation strategy.
     Finished { reason: FinishReason, incomplete_reason: Option<String> },
-    /// A server-side tool call (web_search, x_search, code_interpreter, file_search)
-    /// finished on xAI's infrastructure. Emitted from `response.*_call.completed`
-    /// for all four built-in tool types.
+    /// A server-side tool call (web_search, x_search) finished on xAI's
+    /// infrastructure. Emitted from `response.*_call.completed`.
     ///
     /// Carries the tool `name` (`"web_search"` or `"x_search"`) so the agent
     /// can match against `pending_tool_calls` by name (FIFO). The `item_id`
@@ -383,11 +382,9 @@ fn parse_sse(
 ///   has no dedicated reasoning block type.
 /// - `response.reasoning_summary_text.delta` → logged at debug level, discarded
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
-/// - `response.web_search_call.completed` / `response.x_search_call.completed` /
-///   `response.code_interpreter_call.completed` / `response.file_search_call.completed`
+/// - `response.web_search_call.completed` / `response.x_search_call.completed`
 ///   → `ServerToolCompleted` (tool finished; agent advances tool to Completed)
-/// - `*.in_progress` / `*.searching` / `*.interpreting` variants for all four
-///   built-in tools → explicit no-op (informational; no state change)
+/// - `*.in_progress` / `*.searching` variants → explicit no-op (informational; no state change)
 /// - `response.completed` / `response.done` → `Usage` + `Finished`
 ///   These are the normal-completion events. The `status` field is parsed for
 ///   robustness (xAI may deviate from spec), but the primary path for
@@ -521,11 +518,11 @@ fn process_sse_line(
         }
         // ── Server-side tool call lifecycle events ───────────────────────────
         // xAI emits these while its infrastructure executes a built-in tool
-        // (web_search, x_search, code_interpreter, file_search). The `.completed` event
-        // fires as soon as the search finishes — before the model begins
-        // streaming its text answer. Emit ServerToolCompleted so the agent
-        // can advance the tool call to Completed mid-stream rather than
-        // waiting for [DONE] (which may arrive 10–20 s later after text gen).
+        // (web_search, x_search). The `.completed` event fires as soon as the
+        // search finishes — before the model begins streaming its text answer.
+        // Emit ServerToolCompleted so the agent can advance the tool call to
+        // Completed mid-stream rather than waiting for [DONE] (which may
+        // arrive 10–20 s later after text gen).
         //
         // The in_progress and searching events are purely informational; they
         // carry no actionable data for the agent so they are dropped explicitly
@@ -536,20 +533,10 @@ fn process_sse_line(
         "response.x_search_call.completed" => {
             pending.push_back(XaiEvent::ServerToolCompleted { name: "x_search".to_string() });
         }
-        "response.code_interpreter_call.completed" => {
-            pending.push_back(XaiEvent::ServerToolCompleted { name: "code_interpreter".to_string() });
-        }
-        "response.file_search_call.completed" => {
-            pending.push_back(XaiEvent::ServerToolCompleted { name: "file_search".to_string() });
-        }
         "response.web_search_call.in_progress"
         | "response.web_search_call.searching"
         | "response.x_search_call.in_progress"
-        | "response.x_search_call.searching"
-        | "response.code_interpreter_call.in_progress"
-        | "response.code_interpreter_call.interpreting"
-        | "response.file_search_call.in_progress"
-        | "response.file_search_call.searching" => {}
+        | "response.x_search_call.searching" => {}
         "response.failed" => {
             // OpenAI Responses API defines response.failed as a distinct event
             // type (not nested under response.completed). Map it to Failed so the
@@ -1079,47 +1066,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn code_interpreter_call_completed_emits_search_call_completed() {
-        let line = r#"data: {"type":"response.code_interpreter_call.completed","item_id":"ci_abc","output_index":0}"#;
-        let event = parse_line(line).unwrap();
-        assert!(
-            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "code_interpreter"),
-            "expected ServerToolCompleted(code_interpreter), got {event:?}"
-        );
-    }
-
-    #[test]
-    fn code_interpreter_call_in_progress_is_silent() {
-        let line = r#"data: {"type":"response.code_interpreter_call.in_progress","item_id":"ci_abc","output_index":0}"#;
-        assert!(parse_line(line).is_none(), "code_interpreter_call.in_progress must produce no event");
-    }
-
-    #[test]
-    fn code_interpreter_call_interpreting_is_silent() {
-        let line = r#"data: {"type":"response.code_interpreter_call.interpreting","item_id":"ci_abc","output_index":0}"#;
-        assert!(parse_line(line).is_none(), "code_interpreter_call.interpreting must produce no event");
-    }
-
-    #[test]
-    fn file_search_call_completed_emits_search_call_completed() {
-        let line = r#"data: {"type":"response.file_search_call.completed","item_id":"fs_abc","output_index":0}"#;
-        let event = parse_line(line).unwrap();
-        assert!(
-            matches!(event, XaiEvent::ServerToolCompleted { ref name } if name == "file_search"),
-            "expected ServerToolCompleted(file_search), got {event:?}"
-        );
-    }
-
-    #[test]
-    fn file_search_call_in_progress_is_silent() {
-        let line = r#"data: {"type":"response.file_search_call.in_progress","item_id":"fs_abc","output_index":0}"#;
-        assert!(parse_line(line).is_none(), "file_search_call.in_progress must produce no event");
-    }
-
-    #[test]
-    fn file_search_call_searching_is_silent() {
-        let line = r#"data: {"type":"response.file_search_call.searching","item_id":"fs_abc","output_index":0}"#;
-        assert!(parse_line(line).is_none(), "file_search_call.searching must produce no event");
-    }
 }
