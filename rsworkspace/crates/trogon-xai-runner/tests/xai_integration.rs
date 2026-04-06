@@ -1916,7 +1916,7 @@ async fn fake_xai_sse_with_usage(text_chunks: &[&'static str]) -> String {
 /// SSE server that emits a Responses API `function_call` event (server-side tool
 /// invocation) followed immediately by `[DONE]` with no text.
 ///
-/// Server-side tools (web_search, x_search, code_interpreter) execute on the
+/// Server-side tools (web_search, x_search) execute on the
 /// xAI backend — the runner receives the function_call event for observability
 /// and then the stream ends normally in one connection. No client round-trip.
 async fn fake_xai_sse_with_tool_calls() -> String {
@@ -2080,12 +2080,10 @@ async fn new_session_exposes_all_tool_config_options_as_off() {
     let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 4, "expected 4 tool toggles: {opts:?}");
+    assert_eq!(opts.len(), 2, "expected 2 tool toggles: {opts:?}");
     let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
     assert!(ids.contains(&"web_search".to_string()));
     assert!(ids.contains(&"x_search".to_string()));
-    assert!(ids.contains(&"code_interpreter".to_string()));
-    assert!(ids.contains(&"file_search".to_string()));
     // All off by default.
     for opt in &opts {
         let current = match &opt.kind {
@@ -2107,7 +2105,7 @@ async fn load_session_exposes_tool_config_options() {
     let resp = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
 
     let opts = resp.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 4, "expected 4 tool toggle options");
+    assert_eq!(opts.len(), 2, "expected 2 tool toggle options");
 }
 
 #[tokio::test]
@@ -2127,7 +2125,7 @@ async fn enable_web_search_persists_and_is_reflected_in_response() {
         .await
         .unwrap();
 
-    assert_eq!(resp.config_options.len(), 4);
+    assert_eq!(resp.config_options.len(), 2);
     let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
@@ -2477,7 +2475,7 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
     // Server-side tools are handled on the xAI backend; single connection.
     let body = concat!(
         "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_a\",\"name\":\"web_search\",\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}\n\n",
-        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_b\",\"name\":\"code_interpreter\",\"arguments\":\"{\\\"code\\\":\\\"2+2\\\"}\"}}\n\n",
+        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_b\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"London\\\"}\"}}\n\n",
         "data: [DONE]\n\n",
     );
 
@@ -2550,7 +2548,7 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
         .unwrap();
 
     // Should return all known tool options.
-    assert_eq!(resp.config_options.len(), 4, "should return current state of all known tool options");
+    assert_eq!(resp.config_options.len(), 2, "should return current state of all known tool options");
     let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
@@ -2574,7 +2572,7 @@ async fn load_session_reflects_updated_tool_state() {
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
-            "code_interpreter",
+            "x_search",
             "on",
         ))
         .await
@@ -2582,10 +2580,10 @@ async fn load_session_reflects_updated_tool_state() {
 
     let loaded = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
     let opts = loaded.config_options.expect("config_options should be present");
-    assert_eq!(opts.len(), 4);
-    let ci = opts.iter().find(|o| o.id.to_string() == "code_interpreter")
-        .expect("code_interpreter option must be present");
-    let current = match &ci.kind {
+    assert_eq!(opts.len(), 2);
+    let xs = opts.iter().find(|o| o.id.to_string() == "x_search")
+        .expect("x_search option must be present");
+    let current = match &xs.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };

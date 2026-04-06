@@ -59,8 +59,6 @@ fn store_error(e: impl std::fmt::Display) -> Error {
 const AVAILABLE_TOOLS: &[(&str, &str)] = &[
     ("web_search", "Web Search"),
     ("x_search", "X Search"),
-    ("code_interpreter", "Code Interpreter"),
-    ("file_search", "File Search"),
 ];
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
