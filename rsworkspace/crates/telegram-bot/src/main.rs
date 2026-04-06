@@ -1,9 +1,3 @@
-//! Telegram Bot Bridge for TrogonAi
-//!
-//! This bot acts as a bridge between Telegram and NATS, converting
-//! Telegram updates into NATS events and processing NATS commands
-//! to send messages back to Telegram.
-
 mod bridge;
 mod config;
 mod dedup;
@@ -19,10 +13,7 @@ use clap::Parser;
 use teloxide::prelude::*;
 use teloxide::types::Message;
 use tracing::{error, info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Custom error handler for the polling listener that silences expected
-/// `TerminatedByOtherGetUpdates` errors (409 from Telegram when restarting).
 struct PollingErrorHandler;
 
 impl<E: std::fmt::Debug + Send + Sync + 'static> teloxide::error_handlers::ErrorHandler<E>
@@ -50,91 +41,79 @@ use crate::bridge::TelegramBridge;
 use crate::config::Config;
 use crate::outbound::OutboundProcessor;
 
-/// Telegram Bot Bridge CLI
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to configuration file
     #[arg(short, long, default_value = "config/telegram-bot.toml")]
     config: String,
 
-    /// NATS URL (overrides config file)
-    #[arg(long, env = "NATS_URL")]
-    nats_url: Option<String>,
-
-    /// Telegram bot token (overrides config file)
     #[arg(long, env = "TELEGRAM_BOT_TOKEN")]
     bot_token: Option<String>,
 
-    /// NATS prefix (overrides config file)
     #[arg(long, env = "TELEGRAM_PREFIX")]
     prefix: Option<String>,
 
-    /// Health check server port
     #[arg(long, env = "HEALTH_CHECK_PORT", default_value = "3000")]
     health_port: u16,
 }
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "telegram_bot=debug,telegram_nats=debug,info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    use trogon_std::env::SystemEnv;
+    use trogon_std::fs::SystemFs;
+
+    let telegram_config = telegram_nats::TelegramNatsConfig::from_env(&SystemEnv);
+
+    acp_telemetry::init_logger(
+        acp_telemetry::ServiceName::TelegramBot,
+        &telegram_config.prefix,
+        &SystemEnv,
+        &SystemFs,
+    );
 
     info!("Starting Telegram Bot Bridge");
 
-    // Parse CLI arguments
     let args = Args::parse();
 
-    // Load configuration
     let config = if std::path::Path::new(&args.config).exists() {
         info!("Loading config from file: {}", args.config);
         let mut config = Config::from_file(&args.config)?;
 
-        // Override with CLI arguments
-        if let Some(nats_url) = args.nats_url {
-            config.nats.servers = nats_url.split(',').map(|s| s.to_string()).collect();
-        }
         if let Some(bot_token) = args.bot_token {
             config.telegram.bot_token = bot_token;
         }
         if let Some(prefix) = args.prefix {
-            config.nats.prefix = prefix;
+            config.prefix = prefix;
         }
 
         config
     } else {
         info!("Config file not found, using environment variables");
-        Config::from_env()?
+        Config::from_env(&SystemEnv)?
     };
 
-    info!("Configuration loaded successfully");
-    info!("NATS servers: {:?}", config.nats.servers);
-    info!("NATS prefix: {}", config.nats.prefix);
+    info!("NATS servers: {:?}", telegram_config.nats.servers);
+    info!("NATS prefix: {}", config.prefix);
 
-    // Connect to NATS
     info!("Connecting to NATS...");
-    let nats_client = telegram_nats::connect(&config.nats).await?;
+    let nats_client = trogon_nats::connect(
+        &telegram_config.nats,
+        std::time::Duration::from_secs(10),
+    )
+    .await?;
     info!("Connected to NATS successfully");
 
-    // Setup JetStream
-    let js = telegram_nats::nats::jetstream(&nats_client).await;
-    telegram_nats::nats::setup_event_stream(&js, &config.nats.prefix).await?;
-    telegram_nats::nats::setup_agent_stream(&js, &config.nats.prefix).await?;
-    let kv = telegram_nats::nats::setup_session_kv(&js, &config.nats.prefix).await?;
-    let dedup_kv = telegram_nats::nats::setup_dedup_kv(&js, &config.nats.prefix).await?;
+    let js = async_nats::jetstream::new(nats_client.clone());
+    telegram_nats::nats::setup_event_stream(&js, &config.prefix).await?;
+    telegram_nats::nats::setup_agent_stream(&js, &config.prefix).await?;
+    let kv = telegram_nats::nats::setup_session_kv(&js, &config.prefix).await?;
+    let dedup_kv = telegram_nats::nats::setup_dedup_kv(&js, &config.prefix).await?;
     info!("JetStream setup complete");
 
-    // Create Telegram bot
     info!("Initializing Telegram bot...");
     let bot = Bot::new(&config.telegram.bot_token);
 
-    // Verify bot token
     let bot_username = match bot.get_me().await {
         Ok(me) => {
             let username = me.username().to_string();
@@ -147,13 +126,9 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Create health check state
     let health_state = health::AppState::new(bot_username);
-
-    // Mark NATS as connected
     *health_state.nats_connected.write().await = true;
 
-    // Start health check server
     let health_state_clone = health_state.clone();
     let health_port = args.health_port;
     tokio::spawn(async move {
@@ -165,18 +140,16 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Create bridge
     let bridge = TelegramBridge::new(
         nats_client.clone(),
-        config.nats.prefix.clone(),
+        config.prefix.clone(),
         config.telegram.access.clone(),
         kv,
         crate::dedup::DedupStore::new(dedup_kv),
     );
 
-    // Separate dedup bucket for outbound commands (1h TTL — commands are short-lived)
     let cmd_dedup_kv = {
-        let bucket = format!("telegram_cmd_dedup_{}", config.nats.prefix);
+        let bucket = format!("telegram_cmd_dedup_{}", config.prefix);
         match js.get_key_value(&bucket).await {
             Ok(kv) => {
                 info!("Using existing cmd dedup bucket: {}", bucket);
@@ -204,11 +177,10 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Start outbound processor (NATS → Telegram)
     let outbound = OutboundProcessor::new(
         bot.clone(),
         nats_client.clone(),
-        config.nats.prefix.clone(),
+        config.prefix.clone(),
         js,
         cmd_dedup_kv,
     );
@@ -221,7 +193,6 @@ async fn main() -> Result<()> {
 
     info!("Bot initialized, starting message dispatcher...");
 
-    // Setup dispatcher with proper handler tree
     let handler = Update::filter_message()
         .branch(
             dptree::filter(|msg: Message| msg.text().is_some())
@@ -337,7 +308,6 @@ async fn main() -> Result<()> {
     let shipping_query_handler =
         Update::filter_shipping_query().endpoint(handlers::handle_shipping_query);
 
-    // Successful payments arrive as messages with successful_payment field
     let successful_payment_handler = Update::filter_message()
         .filter(|msg: Message| msg.successful_payment().is_some())
         .endpoint(handlers::handle_successful_payment);
@@ -359,13 +329,11 @@ async fn main() -> Result<()> {
         .branch(edited_channel_post_handler)
         .branch(chat_join_request_handler);
 
-    // Build dispatcher
     let mut dispatcher = Dispatcher::builder(bot.clone(), all_handlers)
         .dependencies(dptree::deps![bridge, health_state])
         .enable_ctrlc_handler()
         .build();
 
-    // Start bot based on update mode
     match &config.telegram.update_mode {
         crate::config::UpdateModeConfig::Polling { timeout, limit } => {
             info!(
@@ -434,5 +402,17 @@ async fn main() -> Result<()> {
     }
 
     info!("Telegram bot stopped");
+    acp_telemetry::shutdown_otel();
     Ok(())
+}
+
+#[cfg(coverage)]
+fn main() {}
+
+#[cfg(all(coverage, test))]
+mod tests {
+    #[test]
+    fn coverage_stub() {
+        super::main();
+    }
 }

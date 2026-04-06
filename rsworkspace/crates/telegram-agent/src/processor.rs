@@ -1,6 +1,7 @@
 //! Message processor - handles business logic for different message types
 
 use anyhow::Result;
+use async_nats::Client;
 use telegram_nats::{subjects, MessagePublisher};
 use telegram_types::commands::{
     AnswerCallbackCommand, ChatAction, CommandMetadata, SendChatActionCommand, SendMessageCommand,
@@ -40,7 +41,7 @@ impl MessageProcessor {
     pub async fn process_text_message(
         &self,
         event: &MessageTextEvent,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
         let session_id = &event.metadata.session_id;
@@ -163,7 +164,7 @@ impl MessageProcessor {
     pub async fn process_photo_message(
         &self,
         event: &MessagePhotoEvent,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
         let session_id = &event.metadata.session_id;
@@ -238,7 +239,7 @@ impl MessageProcessor {
     pub async fn process_command(
         &self,
         event: &CommandEvent,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let chat_id = event.message.chat.id;
         let session_id = &event.metadata.session_id;
@@ -311,7 +312,7 @@ impl MessageProcessor {
     pub async fn process_callback(
         &self,
         event: &CallbackQueryEvent,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let meta = || {
             CommandMetadata::new().with_causation(
@@ -355,7 +356,7 @@ impl MessageProcessor {
     pub async fn process_inline_query(
         &self,
         event: &telegram_types::events::InlineQueryEvent,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         use telegram_types::commands::{
             AnswerInlineQueryCommand, InlineQueryResult, InlineQueryResultArticle,
@@ -448,7 +449,7 @@ impl MessageProcessor {
     async fn send_typing_indicator(
         &self,
         chat_id: i64,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let command = SendChatActionCommand {
             chat_id,
@@ -468,7 +469,7 @@ impl MessageProcessor {
         chat_id: i64,
         reply_to_message_id: i32,
         message_thread_id: Option<i32>,
-        publisher: &MessagePublisher,
+        publisher: &MessagePublisher<Client>,
     ) -> Result<()> {
         let cmd = SendMessageCommand {
             chat_id,

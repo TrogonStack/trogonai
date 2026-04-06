@@ -746,11 +746,11 @@ pub async fn handle_channel_post(
             error!("Failed to publish channel video post: {}", e);
             health.increment_errors().await;
         }
-    } else if msg.document().is_some() {
-        if let Err(e) = bridge.publish_document_message(&msg, update_id).await {
-            error!("Failed to publish channel document post: {}", e);
-            health.increment_errors().await;
-        }
+    } else if msg.document().is_some()
+        && let Err(e) = bridge.publish_document_message(&msg, update_id).await
+    {
+        error!("Failed to publish channel document post: {}", e);
+        health.increment_errors().await;
     }
     Ok(())
 }

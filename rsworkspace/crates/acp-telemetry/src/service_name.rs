@@ -5,6 +5,8 @@
 pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsWs,
+    TelegramBot,
+    TelegramAgent,
     TrogonSourceGithub,
     TrogonSourceGitlab,
     TrogonSourceLinear,
@@ -16,6 +18,8 @@ impl ServiceName {
         match self {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsWs => "acp-nats-ws",
+            Self::TelegramBot => "telegram-bot",
+            Self::TelegramAgent => "telegram-agent",
             Self::TrogonSourceGithub => "trogon-source-github",
             Self::TrogonSourceGitlab => "trogon-source-gitlab",
             Self::TrogonSourceLinear => "trogon-source-linear",
@@ -38,6 +42,8 @@ mod tests {
     fn as_str_returns_expected_values() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
+        assert_eq!(ServiceName::TelegramBot.as_str(), "telegram-bot");
+        assert_eq!(ServiceName::TelegramAgent.as_str(), "telegram-agent");
         assert_eq!(
             ServiceName::TrogonSourceGithub.as_str(),
             "trogon-source-github"
@@ -60,6 +66,8 @@ mod tests {
     fn display_delegates_to_as_str() {
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
+        assert_eq!(format!("{}", ServiceName::TelegramBot), "telegram-bot");
+        assert_eq!(format!("{}", ServiceName::TelegramAgent), "telegram-agent");
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceGithub),
             "trogon-source-github"

@@ -1,33 +1,23 @@
-//! Example test to verify streaming message flow through NATS
-//!
-//! This simulates an agent sending streaming messages to the bot
-
 use anyhow::Result;
-use telegram_nats::{subjects, MessagePublisher, NatsConfig};
+use telegram_nats::{subjects, MessagePublisher};
 use telegram_types::commands::{ParseMode, StreamMessageCommand};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🚀 Testing Streaming Message Flow");
-    println!("=================================\n");
+    println!("Testing Streaming Message Flow");
 
-    // Connect to NATS
-    let config = NatsConfig::from_url("localhost:4222", "test");
-    println!("📡 Connecting to NATS at localhost:4222...");
-
-    let client = telegram_nats::connect(&config).await?;
-    println!("✅ Connected to NATS\n");
+    let client = async_nats::connect("localhost:4222").await?;
+    println!("Connected to NATS");
 
     let publisher = MessagePublisher::new(client, "test".to_string());
 
-    let chat_id = 12345_i64; // Test chat ID
+    let chat_id = 12345_i64;
     let subject = subjects::agent::message_stream("test");
 
-    println!("📝 Simulating streaming response to chat {}", chat_id);
-    println!("📬 Publishing to subject: {}\n", subject);
+    println!("Simulating streaming response to chat {}", chat_id);
+    println!("Publishing to subject: {}", subject);
 
-    // Simulate streaming a response in chunks
     let chunks = vec![
         "Hello! ",
         "This is a ",
@@ -50,16 +40,16 @@ async fn main() -> Result<()> {
 
         let cmd = StreamMessageCommand {
             chat_id,
-            message_id: None, // Bot will track this internally
+            message_id: None,
             text: accumulated.clone(),
             parse_mode: Some(ParseMode::Markdown),
             is_final,
-            session_id: None, // Use default chat-based ID
+            session_id: None,
             message_thread_id: None,
         };
 
         println!(
-            "📤 Chunk {}/{}: \"{}{}\"",
+            "Chunk {}/{}: \"{}{}\"",
             i + 1,
             chunks.len(),
             if accumulated.len() > 50 {
@@ -73,20 +63,13 @@ async fn main() -> Result<()> {
         publisher.publish(&subject, &cmd).await?;
 
         if !is_final {
-            // Wait a bit between chunks to simulate real streaming
             sleep(Duration::from_millis(300)).await;
         }
     }
 
-    println!("\n✅ All chunks sent successfully!");
-    println!("\n📊 Summary:");
-    println!("  - Total chunks: {}", chunks.len());
-    println!("  - Final message length: {} chars", accumulated.len());
-    println!("  - Rate limiting: Active (1 edit/second minimum)");
-    println!("  - Retry logic: Enabled (up to 3 attempts)");
-    println!(
-        "\n✨ The bot should have received and processed these messages with proper rate limiting!"
-    );
+    println!("All chunks sent successfully!");
+    println!("Total chunks: {}", chunks.len());
+    println!("Final message length: {} chars", accumulated.len());
 
     Ok(())
 }

@@ -1,8 +1,3 @@
-//! Telegram Agent - AI agent that processes Telegram messages
-//!
-//! This agent listens to Telegram events from NATS and responds with
-//! AI-generated messages.
-
 mod agent;
 mod conversation;
 mod llm;
@@ -11,31 +6,21 @@ mod processor;
 use anyhow::Result;
 use clap::Parser;
 use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::agent::TelegramAgent;
 
-/// Telegram Agent CLI
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// NATS URL
-    #[arg(long, env = "NATS_URL", default_value = "nats://localhost:4222")]
-    nats_url: String,
-
-    /// NATS prefix
     #[arg(long, env = "TELEGRAM_PREFIX", default_value = "prod")]
     prefix: String,
 
-    /// Agent name (for logging and identification)
     #[arg(long, env = "AGENT_NAME", default_value = "telegram-agent")]
     agent_name: String,
 
-    /// Claude API key
     #[arg(long, env = "ANTHROPIC_API_KEY")]
     anthropic_api_key: Option<String>,
 
-    /// Claude model to use
     #[arg(
         long,
         env = "CLAUDE_MODEL",
@@ -43,56 +28,46 @@ struct Args {
     )]
     claude_model: String,
 
-    /// Enable LLM mode (requires API key)
     #[arg(long, env = "ENABLE_LLM", default_value = "false")]
     enable_llm: bool,
 }
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "telegram_agent=debug,telegram_nats=debug,info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    use trogon_std::env::SystemEnv;
+    use trogon_std::fs::SystemFs;
+
+    let telegram_config = telegram_nats::TelegramNatsConfig::from_env(&SystemEnv);
+
+    acp_telemetry::init_logger(
+        acp_telemetry::ServiceName::TelegramAgent,
+        &telegram_config.prefix,
+        &SystemEnv,
+        &SystemFs,
+    );
 
     info!("Starting Telegram Agent");
 
-    // Parse CLI arguments
     let args = Args::parse();
 
     info!("Agent name: {}", args.agent_name);
-    info!("NATS URL: {}", args.nats_url);
+    info!("NATS servers: {:?}", telegram_config.nats.servers);
     info!("NATS prefix: {}", args.prefix);
 
-    // Connect to NATS
     info!("Connecting to NATS...");
-    let servers: Vec<String> = args.nats_url.split(',').map(|s| s.to_string()).collect();
-    let nats_config = telegram_nats::NatsConfig {
-        servers,
-        prefix: args.prefix.clone(),
-        credentials_file: None,
-        username: None,
-        password: None,
-    };
-
-    let nats_client = telegram_nats::connect(&nats_config).await?;
+    let nats_client = trogon_nats::connect(
+        &telegram_config.nats,
+        std::time::Duration::from_secs(10),
+    )
+    .await?;
     info!("Connected to NATS successfully");
 
-    // Setup JetStream (needed for durable pull consumer)
     let js = async_nats::jetstream::new(nats_client.clone());
 
-    // Ensure both streams exist regardless of which side starts first.
     telegram_nats::nats::setup_event_stream(&js, &args.prefix).await?;
-    // The agent publishes outbound commands to this stream; the bot consumes them.
-    // Creating it here guarantees no commands are dropped when the agent starts
-    // before the bot.
     telegram_nats::nats::setup_agent_stream(&js, &args.prefix).await?;
 
-    // Helper: get-or-create a JetStream KV bucket
     async fn get_or_create_kv(
         js: &async_nats::jetstream::Context,
         bucket: &str,
@@ -128,7 +103,6 @@ async fn main() -> Result<()> {
 
     let js_kv = async_nats::jetstream::new(nats_client.clone());
 
-    // Persistent conversation history (no TTL — conversations are long-lived)
     let conversation_kv = get_or_create_kv(
         &js_kv,
         &format!("telegram_conversations_{}", args.prefix),
@@ -136,7 +110,6 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    // Dedup bucket — 24h TTL matches the JetStream message retention window
     let dedup_kv = get_or_create_kv(
         &js_kv,
         &format!("telegram_dedup_{}", args.prefix),
@@ -144,7 +117,6 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    // Configure LLM if enabled
     let llm_config = if args.enable_llm {
         if let Some(api_key) = args.anthropic_api_key {
             info!("LLM mode enabled with model: {}", args.claude_model);
@@ -165,7 +137,6 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create and run agent
     let agent = TelegramAgent::new(
         nats_client,
         js,
@@ -178,12 +149,23 @@ async fn main() -> Result<()> {
 
     info!("Agent initialized, starting message processing...");
 
-    // Run agent
     if let Err(e) = agent.run().await {
         error!("Agent error: {}", e);
         return Err(e);
     }
 
     info!("Telegram agent stopped");
+    acp_telemetry::shutdown_otel();
     Ok(())
+}
+
+#[cfg(coverage)]
+fn main() {}
+
+#[cfg(all(coverage, test))]
+mod tests {
+    #[test]
+    fn coverage_stub() {
+        super::main();
+    }
 }

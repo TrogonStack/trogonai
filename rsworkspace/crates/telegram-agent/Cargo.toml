@@ -1,39 +1,30 @@
 [package]
 name = "telegram-agent"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lints]
+workspace = true
 
 [dependencies]
-# Local crates
-telegram-types = { path = "../telegram-types" }
-telegram-nats = { path = "../telegram-nats" }
+telegram-types = { workspace = true }
+telegram-nats = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+acp-telemetry = { workspace = true }
 
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-
-# NATS
-async-nats = "0.45"
-
-# Error handling
-anyhow = "1.0"
-thiserror = "2.0"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-
-# CLI
-clap = { version = "4", features = ["derive", "env"] }
-
-# Utils
-futures = "0.3"
-
-# HTTP client for LLM API
-reqwest = { version = "0.12", features = ["json", "stream"] }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
 
 [dev-dependencies]
-uuid = { version = "1", features = ["v4"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+uuid = { workspace = true }

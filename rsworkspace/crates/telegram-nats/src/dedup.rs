@@ -6,9 +6,10 @@
 //! - **telegram-agent consumer**: dedup by `event_id` UUID to prevent processing the same
 //!   JetStream message twice when it gets redelivered after a crash.
 
-use anyhow::Result;
 use async_nats::jetstream::kv::Store;
 use tracing::debug;
+
+use crate::error::Result;
 
 /// Guards against double-processing the same event.
 ///
@@ -39,7 +40,10 @@ impl DedupStore {
     /// Mark `key` as seen. The bucket TTL handles expiry.
     pub async fn mark_seen(&self, key: &str) -> Result<()> {
         let kv_key = format!("dedup.{}", key.replace(':', "."));
-        self.kv.put(&kv_key, b"1".to_vec().into()).await?;
+        self.kv
+            .put(&kv_key, b"1".to_vec().into())
+            .await
+            .map_err(|e| crate::error::Error::Setup(format!("dedup mark_seen failed: {e}")))?;
         Ok(())
     }
 

@@ -22,7 +22,7 @@ use crate::processor::MessageProcessor;
 /// (e.g. crash between LLM response and ACK).  The event_id UUID from
 /// `EventMetadata` is used as the stable dedup key, with a 24h TTL.
 pub struct TelegramAgent {
-    publisher: MessagePublisher,
+    publisher: MessagePublisher<Client>,
     processor: MessageProcessor,
     agent_name: String,
     js: async_nats::jetstream::Context,
@@ -250,7 +250,7 @@ impl TelegramAgent {
                 .map(|e| format!("evt.{}", e.metadata.event_id))
         };
 
-        if let (Some(ref dedup), Some(ref key)) = (&self.dedup, &event_key) {
+        if let (Some(dedup), Some(key)) = (&self.dedup, &event_key) {
             if dedup.is_seen(key).await {
                 debug!("Skipping duplicate event (key={})", key);
                 return Ok(());
