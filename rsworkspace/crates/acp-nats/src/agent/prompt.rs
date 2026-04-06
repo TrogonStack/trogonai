@@ -4,7 +4,7 @@ use agent_client_protocol::{
 };
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
@@ -154,8 +154,8 @@ where
             )
         })?;
 
-    let prompt_payload = PromptPayload {
-        req_id: req_id.clone(),
+    let _prompt_payload = PromptPayload {
+        req_id: req_id.to_string(),
         session_id: args.session_id.to_string(),
         content: content_blocks_to_user(&args.prompt),
         user_message: String::new(),
@@ -196,11 +196,8 @@ where
                 let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
                     Ok(n) => n,
                     Err(e) => {
-                        bridge.metrics.record_error("prompt", "bad_event_payload");
-                        break Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            format!("bad event payload: {e}"),
-                        ));
+                        warn!(error = %e, "bad notification payload; skipping");
+                        continue;
                     }
                 };
                 if bridge.notification_sender.send(notification).await.is_err() {

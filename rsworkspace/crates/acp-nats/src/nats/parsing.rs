@@ -107,6 +107,7 @@ pub enum ClientMethod {
     TerminalOutput,
     TerminalRelease,
     TerminalWaitForExit,
+    ExtSessionPromptResponse,
     Ext(String),
 }
 
