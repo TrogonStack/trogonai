@@ -154,7 +154,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{InitializeResponse, ProtocolVersion};
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -364,8 +363,11 @@ mod tests {
             let local = tokio::task::LocalSet::new();
             let stdin = async_compat::Compat::new(stdin_r);
             let stdout = async_compat::Compat::new(stdout_w);
+            let js_bridge = async_nats::jetstream::new(nats_for_bridge.clone());
+            let js_client_bridge = trogon_nats::jetstream::NatsJetStreamClient::new(js_bridge);
             rt.block_on(local.run_until(run_bridge(
                 nats_for_bridge,
+                js_client_bridge,
                 &config,
                 stdout,
                 stdin,

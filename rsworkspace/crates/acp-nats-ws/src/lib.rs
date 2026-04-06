@@ -1,13 +1,14 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 pub mod config;
 pub mod connection;
+mod constants;
 pub mod upgrade;
 
 use tokio::sync::mpsc;
 use tracing::info;
 use upgrade::ConnectionRequest;
 
-pub const THREAD_NAME: &str = "acp-ws-local";
+pub use constants::THREAD_NAME;
 
 /// Spawns the connection thread and returns its `JoinHandle`.
 ///
@@ -15,9 +16,10 @@ pub const THREAD_NAME: &str = "acp-ws-local";
 /// WebSocket connections live here because the ACP `Agent` trait is `?Send`,
 /// requiring `spawn_local` / `Rc`.
 #[cfg_attr(coverage, coverage(off))]
-pub fn start_connection_thread<N>(
+pub fn start_connection_thread<N, J>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
 ) -> std::thread::JoinHandle<()>
 where
@@ -28,10 +30,12 @@ where
         + Clone
         + Send
         + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     std::thread::Builder::new()
         .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(conn_rx, nats_client, config))
+        .spawn(move || run_connection_thread(conn_rx, nats_client, js_client, config))
         .expect("failed to spawn connection thread")
 }
 
@@ -39,9 +43,10 @@ where
 /// connections are processed here because the ACP `Agent` trait is `?Send`,
 /// requiring `spawn_local` / `Rc`.
 #[cfg_attr(coverage, coverage(off))]
-pub fn run_connection_thread<N>(
+pub fn run_connection_thread<N, J>(
     conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
 ) where
     N: acp_nats::RequestClient
@@ -51,6 +56,8 @@ pub fn run_connection_thread<N>(
         + Clone
         + Send
         + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -58,7 +65,9 @@ pub fn run_connection_thread<N>(
         .expect("failed to create per-connection runtime");
 
     let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(conn_rx, nats_client, config)));
+    rt.block_on(local.run_until(process_connections(
+        conn_rx, nats_client, js_client, config,
+    )));
 
     // run_until returns once its future completes, but sub-tasks
     // spawned by connection handlers (pumps, AgentSideConnection
@@ -70,9 +79,10 @@ pub fn run_connection_thread<N>(
 }
 
 #[cfg_attr(coverage, coverage(off))]
-async fn process_connections<N>(
+async fn process_connections<N, J>(
     mut conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
     nats_client: N,
+    js_client: J,
     config: acp_nats::Config,
 ) where
     N: acp_nats::RequestClient
@@ -82,16 +92,20 @@ async fn process_connections<N>(
         + Clone
         + Send
         + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     while let Some(req) = conn_rx.recv().await {
         conn_handles.retain(|h| !h.is_finished());
         let client = nats_client.clone();
+        let js = js_client.clone();
         let cfg = config.clone();
         conn_handles.push(tokio::task::spawn_local(connection::handle(
             req.socket,
             client,
+            js,
             cfg,
             req.shutdown_rx,
         )));

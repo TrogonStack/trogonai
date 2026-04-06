@@ -7,8 +7,33 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::nats::agent as agent_subjects;
-use acp_nats::nats::client_subjects;
+
+/// Compatibility shims for old function-based subject API.
+mod agent_subjects {
+    use acp_nats::{AcpPrefix, AcpSessionId};
+    pub fn session_prompt(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::session::agent::PromptSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        ).to_string()
+    }
+    pub fn session_cancel(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::session::agent::CancelSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        ).to_string()
+    }
+}
+
+mod client_subjects {
+    use acp_nats::{AcpPrefix, AcpSessionId};
+    pub fn session_update(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::session::client::SessionUpdateSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        ).to_string()
+    }
+}
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{ContentBlock, ImageContent, PromptRequest, TextContent};
 use async_nats::jetstream;
