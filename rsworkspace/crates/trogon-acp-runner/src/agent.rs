@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
-use acp_nats::nats::{ExtSessionReady, agent as subjects};
+use acp_nats::nats::{ExtSessionReady, session as session_subjects};
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
@@ -227,7 +227,8 @@ impl TrogonAgent {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn publish_session_ready(&self, session_id: &str) {
-        let subject = subjects::ext_session_ready(&self.prefix, session_id);
+        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let subject = session_subjects::agent::ExtReadySubject::new(&acp_prefix, &AcpSessionId::new(session_id).expect("valid session_id")).to_string();
         let message = ExtSessionReady::new(SessionId::from(session_id.to_owned()));
         match serde_json::to_vec(&message) {
             Ok(bytes) => {
@@ -820,7 +821,8 @@ impl agent_client_protocol::Agent for TrogonAgent {
         let session_id = req.session_id.to_string();
 
         // Cancel any running prompt for this session.
-        let cancel_subject = subjects::session_cancel(&self.prefix, &session_id);
+        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id"));
         let _ = self.nats.publish(cancel_subject, Bytes::new()).await;
 
         if let Err(e) = self.store.delete(&session_id).await {
@@ -846,7 +848,8 @@ impl agent_client_protocol::Agent for TrogonAgent {
             .map_err(|_| internal_error("session lock closed"))?;
 
         // Subscribe to cancel subject before running the agent.
-        let cancel_subject = subjects::session_cancel(&self.prefix, &session_id);
+        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id")).to_string();
         let cancel_sub = match self.nats.subscribe(cancel_subject.clone()).await {
             Ok(s) => Some(s),
             Err(e) => {
@@ -864,7 +867,8 @@ impl agent_client_protocol::Agent for TrogonAgent {
         req: CancelNotification,
     ) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
-        let subject = subjects::session_cancel(&self.prefix, &session_id);
+        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id"));
         let _ = self.nats.publish(subject, Bytes::new()).await;
         Ok(())
     }

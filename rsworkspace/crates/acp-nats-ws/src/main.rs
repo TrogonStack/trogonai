@@ -403,7 +403,7 @@ mod tests {
         let nats_mock_clone = nats_mock.clone();
         let conn_thread = std::thread::Builder::new()
             .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, config))
+            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, MockJs::new(), config))
             .unwrap();
 
         let state = UpgradeState {
@@ -461,7 +461,7 @@ mod tests {
         );
 
         let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
-        let handle = start_connection_thread(conn_rx, nats_mock, config);
+        let handle = start_connection_thread(conn_rx, nats_mock, MockJs::new(), config);
 
         drop(conn_tx);
 

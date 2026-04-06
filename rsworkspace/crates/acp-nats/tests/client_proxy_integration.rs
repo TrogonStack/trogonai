@@ -156,7 +156,7 @@ async fn nats_client(port: u16) -> async_nats::Client {
         .expect("Failed to connect to NATS")
 }
 
-fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock> {
+fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient> {
     let config = Config::new(
         AcpPrefix::new(prefix).unwrap(),
         NatsConfig {
@@ -165,9 +165,13 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
         },
     )
     .with_operation_timeout(Duration::from_millis(500));
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(
+        async_nats::jetstream::new(nats.clone()),
+    );
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
+        js_client,
         SystemClock,
         &opentelemetry::global::meter("acp-nats-client-proxy-test"),
         config,
