@@ -5,6 +5,7 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
+use agent_client_protocol::Client as _;
 use agent_client_protocol::{
     AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
@@ -18,7 +19,6 @@ use agent_client_protocol::{
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
     StopReason, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
-use agent_client_protocol::Client as _;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -34,7 +34,9 @@ struct ProcessGuard(tokio::sync::OwnedMutexGuard<Option<CodexProcess>>);
 impl std::ops::Deref for ProcessGuard {
     type Target = CodexProcess;
     fn deref(&self) -> &CodexProcess {
-        self.0.as_ref().expect("CodexProcess guaranteed present by process()")
+        self.0
+            .as_ref()
+            .expect("CodexProcess guaranteed present by process()")
     }
 }
 
@@ -90,16 +92,17 @@ impl CodexAgent {
             .ok()
             .map(|s| {
                 s.split(',')
-                    .filter_map(|entry| {
-                        match entry.split_once(':') {
-                            Some((id, label)) => Some(ModelInfo::new(
-                                id.trim().to_string(),
-                                label.trim().to_string(),
-                            )),
-                            None => {
-                                warn!(entry, "CODEX_MODELS: skipping malformed entry (expected 'id:label')");
-                                None
-                            }
+                    .filter_map(|entry| match entry.split_once(':') {
+                        Some((id, label)) => Some(ModelInfo::new(
+                            id.trim().to_string(),
+                            label.trim().to_string(),
+                        )),
+                        None => {
+                            warn!(
+                                entry,
+                                "CODEX_MODELS: skipping malformed entry (expected 'id:label')"
+                            );
+                            None
                         }
                     })
                     .collect()
@@ -115,7 +118,10 @@ impl CodexAgent {
 
         // Ensure the default model appears in the list so session_model_state
         // never reports a current model that the client cannot select.
-        if !available_models.iter().any(|m| m.model_id.0.as_ref() == default_model.as_str()) {
+        if !available_models
+            .iter()
+            .any(|m| m.model_id.0.as_ref() == default_model.as_str())
+        {
             warn!(model = %default_model, "default model not in available list; adding it");
             available_models.push(ModelInfo::new(default_model.clone(), default_model.clone()));
         }
@@ -147,7 +153,9 @@ impl CodexAgent {
             match CodexProcess::spawn().await {
                 Ok(p) => *guard = Some(p),
                 Err(e) => {
-                    return Err(internal_error(format!("failed to spawn codex app-server: {e}")));
+                    return Err(internal_error(format!(
+                        "failed to spawn codex app-server: {e}"
+                    )));
                 }
             }
         }
@@ -221,13 +229,20 @@ impl agent_client_protocol::Agent for CodexAgent {
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         let proc = self.process().await?;
-        let thread_id = proc.thread_start(&cwd).await.map_err(|e| internal_error(e.to_string()))?;
+        let thread_id = proc
+            .thread_start(&cwd)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
         drop(proc); // release process lock before acquiring sessions lock
 
         let session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
             session_id.clone(),
-            CodexSession { thread_id, cwd, model: None },
+            CodexSession {
+                thread_id,
+                cwd,
+                model: None,
+            },
         );
 
         info!(session_id, "codex: new session");
@@ -293,14 +308,20 @@ impl agent_client_protocol::Agent for CodexAgent {
         };
 
         let proc = self.process().await?;
-        let new_thread_id =
-            proc.thread_fork(&source_thread_id).await.map_err(|e| internal_error(e.to_string()))?;
+        let new_thread_id = proc
+            .thread_fork(&source_thread_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
         drop(proc); // release process lock before acquiring sessions lock
 
         let new_session_id = Uuid::new_v4().to_string();
         self.sessions.lock().await.insert(
             new_session_id.clone(),
-            CodexSession { thread_id: new_thread_id, cwd, model: inherited_model.clone() },
+            CodexSession {
+                thread_id: new_thread_id,
+                cwd,
+                model: inherited_model.clone(),
+            },
         );
 
         Ok(ForkSessionResponse::new(new_session_id)
@@ -348,7 +369,11 @@ impl agent_client_protocol::Agent for CodexAgent {
         let session_id = req.session_id.to_string();
         let model_id = req.model_id.to_string();
 
-        if !self.available_models.iter().any(|m| m.model_id.0.as_ref() == model_id) {
+        if !self
+            .available_models
+            .iter()
+            .any(|m| m.model_id.0.as_ref() == model_id)
+        {
             return Err(internal_error(format!("unknown model: {model_id}")));
         }
 
@@ -370,10 +395,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         Ok(SetSessionConfigOptionResponse::new(vec![]))
     }
 
-    async fn prompt(
-        &self,
-        req: PromptRequest,
-    ) -> agent_client_protocol::Result<PromptResponse> {
+    async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
         let nats_client = self.make_nats_client(&req.session_id)?;
 
@@ -390,7 +412,10 @@ impl agent_client_protocol::Agent for CodexAgent {
             .join("\n");
 
         if user_input.is_empty() {
-            warn!(session_id, "codex: prompt contains no text blocks; sending empty input to Codex");
+            warn!(
+                session_id,
+                "codex: prompt contains no text blocks; sending empty input to Codex"
+            );
         }
 
         let (thread_id, model) = {
@@ -429,9 +454,9 @@ impl agent_client_protocol::Agent for CodexAgent {
                 CodexEvent::TextDelta { text } => {
                     let notif = SessionNotification::new(
                         session_id.clone(),
-                        SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                            ContentBlock::from(text),
-                        )),
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
+                            text,
+                        ))),
                     );
                     if let Err(e) = nats_client.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send text notification");
@@ -482,10 +507,7 @@ impl agent_client_protocol::Agent for CodexAgent {
         Ok(PromptResponse::new(stop_reason))
     }
 
-    async fn cancel(
-        &self,
-        req: CancelNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn cancel(&self, req: CancelNotification) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
 
         let thread_id = {
@@ -526,7 +548,11 @@ impl CodexAgent {
     }
 
     async fn test_session_model(&self, id: &str) -> Option<String> {
-        self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.model.clone())
     }
 
     async fn test_session_count(&self) -> usize {
@@ -542,11 +568,10 @@ impl CodexAgent {
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        Agent, AuthenticateRequest, AuthMethodId, CancelNotification, CloseSessionRequest,
+        Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
         ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-        PromptRequest, ProtocolVersion, ResumeSessionRequest,
-        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-        SetSessionModelRequest,
+        PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest,
     };
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
@@ -579,7 +604,9 @@ mod tests {
             }
         });
 
-        async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
+        async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .unwrap()
     }
 
     async fn make_agent() -> CodexAgent {
@@ -595,7 +622,10 @@ mod tests {
         agent.test_insert_session("s1", "/tmp", None).await;
         assert_eq!(agent.test_session_count().await, 1);
 
-        agent.close_session(CloseSessionRequest::new("s1")).await.unwrap();
+        agent
+            .close_session(CloseSessionRequest::new("s1"))
+            .await
+            .unwrap();
         assert_eq!(agent.test_session_count().await, 0);
     }
 
@@ -603,7 +633,10 @@ mod tests {
     async fn close_session_unknown_id_is_noop() {
         let agent = make_agent().await;
         // Must not return an error for unknown session ids.
-        agent.close_session(CloseSessionRequest::new("nonexistent")).await.unwrap();
+        agent
+            .close_session(CloseSessionRequest::new("nonexistent"))
+            .await
+            .unwrap();
     }
 
     // ── load_session ──────────────────────────────────────────────────────────
@@ -611,7 +644,9 @@ mod tests {
     #[tokio::test]
     async fn load_session_returns_state() {
         let agent = make_agent().await;
-        agent.test_insert_session("s2", "/home/user", Some("o3".to_string())).await;
+        agent
+            .test_insert_session("s2", "/home/user", Some("o3".to_string()))
+            .await;
 
         let resp = agent
             .load_session(LoadSessionRequest::new("s2", "/home/user"))
@@ -623,7 +658,12 @@ mod tests {
     #[tokio::test]
     async fn load_session_not_found_returns_error() {
         let agent = make_agent().await;
-        assert!(agent.load_session(LoadSessionRequest::new("missing", "/")).await.is_err());
+        assert!(
+            agent
+                .load_session(LoadSessionRequest::new("missing", "/"))
+                .await
+                .is_err()
+        );
     }
 
     // ── set_session_model ─────────────────────────────────────────────────────
@@ -655,10 +695,12 @@ mod tests {
     #[tokio::test]
     async fn set_session_model_rejects_unknown_session() {
         let agent = make_agent().await;
-        assert!(agent
-            .set_session_model(SetSessionModelRequest::new("missing", "o3"))
-            .await
-            .is_err());
+        assert!(
+            agent
+                .set_session_model(SetSessionModelRequest::new("missing", "o3"))
+                .await
+                .is_err()
+        );
     }
 
     // ── list_sessions ─────────────────────────────────────────────────────────
@@ -670,15 +712,25 @@ mod tests {
         agent.test_insert_session("aaa", "/a", None).await;
         agent.test_insert_session("mmm", "/b", None).await;
 
-        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-        let ids: Vec<_> = resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
+        let resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+        let ids: Vec<_> = resp
+            .sessions
+            .iter()
+            .map(|s| s.session_id.to_string())
+            .collect();
         assert_eq!(ids, vec!["aaa", "mmm", "zzz"]);
     }
 
     #[tokio::test]
     async fn list_sessions_empty() {
         let agent = make_agent().await;
-        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
         assert!(resp.sessions.is_empty());
     }
 
@@ -696,8 +748,15 @@ mod tests {
 
         // session_model_state should include "custom-model" in available list.
         let state = agent.session_model_state(None);
-        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
-        assert!(ids.contains(&"custom-model".to_string()), "available: {ids:?}");
+        let ids: Vec<_> = state
+            .available_models
+            .iter()
+            .map(|m| m.model_id.to_string())
+            .collect();
+        assert!(
+            ids.contains(&"custom-model".to_string()),
+            "available: {ids:?}"
+        );
         assert_eq!(state.current_model_id.to_string(), "custom-model");
     }
 
@@ -720,7 +779,10 @@ mod tests {
             .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .unwrap();
-        assert!(resp.agent_capabilities.load_session, "load_session should be true");
+        assert!(
+            resp.agent_capabilities.load_session,
+            "load_session should be true"
+        );
     }
 
     #[tokio::test]
@@ -733,7 +795,10 @@ mod tests {
         let sc = resp.agent_capabilities.session_capabilities;
         assert!(sc.fork.is_some(), "fork capability should be advertised");
         assert!(sc.list.is_some(), "list capability should be advertised");
-        assert!(sc.resume.is_some(), "resume capability should be advertised");
+        assert!(
+            sc.resume.is_some(),
+            "resume capability should be advertised"
+        );
         assert!(sc.close.is_some(), "close capability should be advertised");
     }
 
@@ -829,12 +894,21 @@ mod tests {
     async fn session_model_state_lists_default_models() {
         let agent = make_agent().await;
         let state = agent.session_model_state(None);
-        let ids: Vec<_> =
-            state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        let ids: Vec<_> = state
+            .available_models
+            .iter()
+            .map(|m| m.model_id.to_string())
+            .collect();
         // Default list is o4-mini, o3, gpt-4o (when CODEX_MODELS env is absent).
-        assert!(ids.contains(&"o4-mini".to_string()), "missing o4-mini: {ids:?}");
+        assert!(
+            ids.contains(&"o4-mini".to_string()),
+            "missing o4-mini: {ids:?}"
+        );
         assert!(ids.contains(&"o3".to_string()), "missing o3: {ids:?}");
-        assert!(ids.contains(&"gpt-4o".to_string()), "missing gpt-4o: {ids:?}");
+        assert!(
+            ids.contains(&"gpt-4o".to_string()),
+            "missing gpt-4o: {ids:?}"
+        );
     }
 
     // ── resume_session error path ─────────────────────────────────────────────
@@ -881,7 +955,10 @@ mod tests {
     async fn cancel_noop_for_unknown_session() {
         let agent = make_agent().await;
         // Should succeed silently — no session to interrupt.
-        agent.cancel(CancelNotification::new("no-such-session")).await.unwrap();
+        agent
+            .cancel(CancelNotification::new("no-such-session"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -889,15 +966,17 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("s-cancel", "/tmp", None).await;
         // Process has never been spawned (None) → no interrupt attempted.
-        agent.cancel(CancelNotification::new("s-cancel")).await.unwrap();
+        agent
+            .cancel(CancelNotification::new("s-cancel"))
+            .await
+            .unwrap();
     }
 
     // ── CODEX_MODELS env var parsing ──────────────────────────────────────────
 
     // These tests mutate the process environment so they use a mutex to prevent
     // races when `cargo test` runs them concurrently within the same process.
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
-        std::sync::OnceLock::new();
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
 
     fn env_lock() -> &'static std::sync::Mutex<()> {
         ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
@@ -913,8 +992,11 @@ mod tests {
         unsafe { std::env::remove_var("CODEX_MODELS") };
 
         let state = agent.session_model_state(None);
-        let ids: Vec<_> =
-            state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        let ids: Vec<_> = state
+            .available_models
+            .iter()
+            .map(|m| m.model_id.to_string())
+            .collect();
         assert_eq!(ids, vec!["m1", "m2"], "models: {ids:?}");
     }
 
@@ -927,11 +1009,20 @@ mod tests {
         unsafe { std::env::remove_var("CODEX_MODELS") };
 
         let state = agent.session_model_state(None);
-        let ids: Vec<_> =
-            state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        let ids: Vec<_> = state
+            .available_models
+            .iter()
+            .map(|m| m.model_id.to_string())
+            .collect();
         // Falls back to hardcoded defaults when all entries are malformed.
-        assert!(ids.contains(&"o4-mini".to_string()), "expected defaults: {ids:?}");
-        assert!(ids.contains(&"o3".to_string()), "expected defaults: {ids:?}");
+        assert!(
+            ids.contains(&"o4-mini".to_string()),
+            "expected defaults: {ids:?}"
+        );
+        assert!(
+            ids.contains(&"o3".to_string()),
+            "expected defaults: {ids:?}"
+        );
     }
 
     #[tokio::test]
@@ -943,12 +1034,18 @@ mod tests {
         unsafe { std::env::remove_var("CODEX_MODELS") };
 
         let state = agent.session_model_state(None);
-        let ids: Vec<_> =
-            state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        let ids: Vec<_> = state
+            .available_models
+            .iter()
+            .map(|m| m.model_id.to_string())
+            .collect();
         // "bad-entry" (no colon) is skipped; the two valid ones are kept.
         assert!(ids.contains(&"good".to_string()), "models: {ids:?}");
         assert!(ids.contains(&"another".to_string()), "models: {ids:?}");
-        assert!(!ids.contains(&"bad-entry".to_string()), "bad-entry should be skipped: {ids:?}");
+        assert!(
+            !ids.contains(&"bad-entry".to_string()),
+            "bad-entry should be skipped: {ids:?}"
+        );
     }
 
     // ── CODEX_PROMPT_TIMEOUT_SECS invalid value ───────────────────────────────
@@ -962,7 +1059,10 @@ mod tests {
         unsafe { std::env::remove_var("CODEX_PROMPT_TIMEOUT_SECS") };
         // Default is 7200 s. Verify prompt_timeout was set (observable via
         // the fact that construction didn't panic and the agent works normally).
-        assert_eq!(agent.test_prompt_timeout(), std::time::Duration::from_secs(7200));
+        assert_eq!(
+            agent.test_prompt_timeout(),
+            std::time::Duration::from_secs(7200)
+        );
     }
 
     // ── load_session returns agent default when session has no model override ──
