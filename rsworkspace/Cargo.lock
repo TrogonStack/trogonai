@@ -3920,6 +3920,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-source-telegram"
+version = "0.1.0"
+dependencies = [
+ "acp-telemetry",
+ "async-nats",
+ "axum",
+ "bytes",
+ "bytesize",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [
