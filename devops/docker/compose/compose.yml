@@ -92,6 +92,31 @@ services:
       start_period: 10s
       retries: 3
 
+  trogon-source-telegram:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/trogon-source-telegram/Dockerfile
+    environment:
+      NATS_URL: "nats:4222"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
+      TELEGRAM_SOURCE_PORT: "${TELEGRAM_SOURCE_PORT:-8080}"
+      TELEGRAM_SUBJECT_PREFIX: "${TELEGRAM_SUBJECT_PREFIX:-telegram}"
+      TELEGRAM_STREAM_NAME: "${TELEGRAM_STREAM_NAME:-TELEGRAM}"
+      TELEGRAM_STREAM_MAX_AGE_SECS: "${TELEGRAM_STREAM_MAX_AGE_SECS:-604800}"
+      TELEGRAM_NATS_ACK_TIMEOUT_SECS: "${TELEGRAM_NATS_ACK_TIMEOUT_SECS:-10}"
+      TELEGRAM_MAX_BODY_SIZE: "${TELEGRAM_MAX_BODY_SIZE:-10485760}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${TELEGRAM_SOURCE_PORT:-8080}/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
   trogon-source-slack:
     build:
       context: ../../../rsworkspace
@@ -126,6 +151,7 @@ services:
       GITLAB_ADDR: "trogon-source-gitlab:${GITLAB_WEBHOOK_PORT:-8080}"
       LINEAR_ADDR: "trogon-source-linear:${LINEAR_WEBHOOK_PORT:-8080}"
       SLACK_ADDR: "trogon-source-slack:${SLACK_WEBHOOK_PORT:-3000}"
+      TELEGRAM_ADDR: "trogon-source-telegram:${TELEGRAM_SOURCE_PORT:-8080}"
     entrypoint:
       - /bin/sh
       - -c
@@ -145,6 +171,9 @@ services:
           slack:
             addr: $${SLACK_ADDR}
             proto: http
+          telegram:
+            addr: $${TELEGRAM_ADDR}
+            proto: http
         EOF
         exec ngrok start --all --config /tmp/ngrok.yml
     depends_on:
@@ -155,6 +184,8 @@ services:
       trogon-source-linear:
         condition: service_healthy
       trogon-source-slack:
+        condition: service_healthy
+      trogon-source-telegram:
         condition: service_healthy
     restart: unless-stopped
     profiles:
