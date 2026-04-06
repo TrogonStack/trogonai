@@ -13,6 +13,7 @@ pub mod jetstream;
 pub(crate) mod jsonrpc;
 pub mod nats;
 pub(crate) mod pending_prompt_waiters;
+pub mod prompt_event;
 pub mod req_id;
 pub mod session_id;
 pub(crate) mod telemetry;
