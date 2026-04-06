@@ -64,7 +64,9 @@ async fn fake_nats() -> async_nats::Client {
         }
     });
 
-    async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
+    async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .unwrap()
 }
 
 /// Build a `CodexAgent` whose `CodexProcess` will spawn the mock server.
@@ -73,7 +75,11 @@ async fn fake_nats() -> async_nats::Client {
 /// concurrent tests don't clobber each other's `CODEX_BIN` value.
 async fn make_agent() -> CodexAgent {
     unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
-    CodexAgent::new(fake_nats().await, AcpPrefix::new("test").unwrap(), "o4-mini")
+    CodexAgent::new(
+        fake_nats().await,
+        AcpPrefix::new("test").unwrap(),
+        "o4-mini",
+    )
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
@@ -86,7 +92,10 @@ async fn new_session_creates_session_and_returns_state() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let resp = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
 
             // Session ID must be non-empty.
             assert!(!resp.session_id.to_string().is_empty());
@@ -96,7 +105,10 @@ async fn new_session_creates_session_and_returns_state() {
             assert_eq!(models.current_model_id.to_string(), "o4-mini");
 
             // The session must now appear in list_sessions.
-            let list = agent.list_sessions(agent_client_protocol::ListSessionsRequest::new()).await.unwrap();
+            let list = agent
+                .list_sessions(agent_client_protocol::ListSessionsRequest::new())
+                .await
+                .unwrap();
             assert_eq!(list.sessions.len(), 1);
         })
         .await;
@@ -112,7 +124,10 @@ async fn resume_session_succeeds_for_existing_session() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let new = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = new.session_id.to_string();
 
             agent
@@ -134,7 +149,10 @@ async fn fork_session_creates_independent_session_inheriting_model() {
             let agent = make_agent().await;
 
             // Create source session and set a non-default model.
-            let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
             let src_id = src.session_id.to_string();
             agent
                 .set_session_model(SetSessionModelRequest::new(src_id.clone(), "o3"))
@@ -156,7 +174,10 @@ async fn fork_session_creates_independent_session_inheriting_model() {
             assert_eq!(models.current_model_id.to_string(), "o3");
 
             // Both sessions must be visible in list_sessions.
-            let list = agent.list_sessions(agent_client_protocol::ListSessionsRequest::new()).await.unwrap();
+            let list = agent
+                .list_sessions(agent_client_protocol::ListSessionsRequest::new())
+                .await
+                .unwrap();
             assert_eq!(list.sessions.len(), 2);
         })
         .await;
@@ -172,7 +193,10 @@ async fn prompt_returns_end_turn_after_mock_completes() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = sess.session_id.to_string();
 
             let content = vec![ContentBlock::Text(TextContent::new("ping"))];
@@ -196,7 +220,10 @@ async fn multiple_prompts_reuse_the_same_process() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = sess.session_id.to_string();
 
             for i in 0..3 {
@@ -205,7 +232,11 @@ async fn multiple_prompts_reuse_the_same_process() {
                     .prompt(PromptRequest::new(session_id.clone(), content))
                     .await
                     .unwrap();
-                assert_eq!(resp.stop_reason, StopReason::EndTurn, "turn {i} should end cleanly");
+                assert_eq!(
+                    resp.stop_reason,
+                    StopReason::EndTurn,
+                    "turn {i} should end cleanly"
+                );
             }
         })
         .await;
@@ -221,7 +252,10 @@ async fn close_session_removes_it_from_list() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = sess.session_id.to_string();
 
             agent
@@ -229,7 +263,10 @@ async fn close_session_removes_it_from_list() {
                 .await
                 .unwrap();
 
-            let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
             assert!(list.sessions.is_empty(), "session should have been removed");
         })
         .await;
@@ -246,7 +283,10 @@ async fn cancel_calls_turn_interrupt_when_process_alive() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             // Process is alive (was just spawned for new_session).
             // cancel should call turn_interrupt on the mock and return Ok.
             agent
@@ -270,7 +310,10 @@ async fn prompt_returns_end_turn_on_error_event() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let resp = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -297,7 +340,10 @@ async fn prompt_unblocks_when_process_exits_mid_turn() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
 
             // The mock exits immediately after acking turn/start.
             // read_loop must detect EOF and send CodexEvent::Error to the channel.
@@ -331,9 +377,20 @@ async fn process_respawns_and_clears_sessions_after_death() {
             let agent = make_agent().await;
 
             // Step 1: create session1, verify it exists.
-            let sess1 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess1 = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let sess1_id = sess1.session_id.to_string();
-            assert_eq!(agent.list_sessions(ListSessionsRequest::new()).await.unwrap().sessions.len(), 1);
+            assert_eq!(
+                agent
+                    .list_sessions(ListSessionsRequest::new())
+                    .await
+                    .unwrap()
+                    .sessions
+                    .len(),
+                1
+            );
 
             // Step 2: run a prompt — process will die after acking turn/start.
             agent
@@ -346,14 +403,20 @@ async fn process_respawns_and_clears_sessions_after_death() {
 
             // Step 3: spawn a new session — process() detects dead process,
             // clears all sessions, and respawns.
-            let sess2 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess2 = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let sess2_id = sess2.session_id.to_string();
 
             // The new session must have a different ID.
             assert_ne!(sess1_id, sess2_id);
 
             // Only the new session must exist — sess1 was cleared on respawn.
-            let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id.to_string(), sess2_id);
 
@@ -380,7 +443,10 @@ async fn resume_session_succeeds_when_thread_resume_fails() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             // Should succeed even though thread/resume returns an error.
             agent
                 .resume_session(ResumeSessionRequest::new(
@@ -406,7 +472,10 @@ async fn prompt_returns_error_when_turn_start_fails() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let err = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -437,7 +506,10 @@ async fn prompt_filters_non_text_content_blocks() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
 
             // Mix a text block with a resource link (non-text).
             let content = vec![
@@ -475,8 +547,14 @@ async fn new_session_returns_error_when_codex_not_found() {
                 AcpPrefix::new("test").unwrap(),
                 "o4-mini",
             );
-            let err = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap_err();
-            assert!(!err.message.is_empty(), "expected a non-empty error message");
+            let err = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap_err();
+            assert!(
+                !err.message.is_empty(),
+                "expected a non-empty error message"
+            );
         })
         .await;
     // Restore CODEX_BIN so subsequent tests work.
@@ -495,7 +573,10 @@ async fn read_loop_skips_malformed_json_and_turn_still_completes() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let resp = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -521,7 +602,10 @@ async fn fork_session_returns_error_when_thread_fork_fails() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
             let err = agent
                 .fork_session(ForkSessionRequest::new(src.session_id.to_string(), "/fork"))
                 .await
@@ -568,7 +652,10 @@ async fn prompt_with_only_non_text_blocks_still_completes() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             // No text blocks at all — user_input will be "".
             let content = vec![ContentBlock::ResourceLink(ResourceLink::new(
                 "some-file",
@@ -595,7 +682,10 @@ async fn read_loop_ignores_response_with_unknown_id() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let resp = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -621,7 +711,10 @@ async fn read_loop_ignores_response_with_noninteger_id() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let resp = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -650,7 +743,10 @@ async fn prompt_times_out_when_no_events_received() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let resp = agent
                 .prompt(PromptRequest::new(
                     sess.session_id.to_string(),
@@ -699,7 +795,10 @@ async fn fork_session_returns_error_when_fork_response_has_no_thread_id() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
             let err = agent
                 .fork_session(ForkSessionRequest::new(src.session_id.to_string(), "/fork"))
                 .await
@@ -771,7 +870,10 @@ async fn operations_on_closed_session_return_errors() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let sid = sess.session_id.to_string();
 
             agent
@@ -821,7 +923,10 @@ async fn full_session_lifecycle() {
             let agent = make_agent().await;
 
             // 1. Create source session and set a non-default model.
-            let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
             let src_id = src.session_id.to_string();
             agent
                 .set_session_model(SetSessionModelRequest::new(src_id.clone(), "o3"))
@@ -858,21 +963,31 @@ async fn full_session_lifecycle() {
             assert_eq!(r.stop_reason, StopReason::EndTurn);
 
             // 5. Close source — fork must survive.
-            agent.close_session(CloseSessionRequest::new(src_id.clone())).await.unwrap();
+            agent
+                .close_session(CloseSessionRequest::new(src_id.clone()))
+                .await
+                .unwrap();
 
-            let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id.to_string(), fork_id);
 
             // 6. Source is gone; fork is still loadable.
-            assert!(agent
-                .load_session(LoadSessionRequest::new(src_id, "/src"))
-                .await
-                .is_err());
-            assert!(agent
-                .load_session(LoadSessionRequest::new(fork_id, "/fork"))
-                .await
-                .is_ok());
+            assert!(
+                agent
+                    .load_session(LoadSessionRequest::new(src_id, "/src"))
+                    .await
+                    .is_err()
+            );
+            assert!(
+                agent
+                    .load_session(LoadSessionRequest::new(fork_id, "/fork"))
+                    .await
+                    .is_ok()
+            );
         })
         .await;
 }
@@ -887,7 +1002,10 @@ async fn prompt_on_forked_session_completes() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
             let fork = agent
                 .fork_session(ForkSessionRequest::new(src.session_id.to_string(), "/fork"))
                 .await
@@ -919,7 +1037,10 @@ async fn prompt_forwards_session_model_to_subprocess() {
     local
         .run_until(async {
             let agent = make_agent().await;
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = sess.session_id.to_string();
 
             agent
@@ -952,7 +1073,10 @@ async fn prompt_after_resume_completes() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
             let session_id = sess.session_id.to_string();
 
             agent
@@ -985,8 +1109,14 @@ async fn concurrent_prompts_on_different_sessions_complete_independently() {
         .run_until(async {
             let agent = make_agent().await;
 
-            let sess1 = agent.new_session(NewSessionRequest::new("/tmp/s1")).await.unwrap();
-            let sess2 = agent.new_session(NewSessionRequest::new("/tmp/s2")).await.unwrap();
+            let sess1 = agent
+                .new_session(NewSessionRequest::new("/tmp/s1"))
+                .await
+                .unwrap();
+            let sess2 = agent
+                .new_session(NewSessionRequest::new("/tmp/s2"))
+                .await
+                .unwrap();
             let sid1 = sess1.session_id.to_string();
             let sid2 = sess2.session_id.to_string();
 

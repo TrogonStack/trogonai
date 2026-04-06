@@ -91,7 +91,11 @@ fn main() {
                     respond(&mut out, &id, serde_json::json!({}));
                 } else {
                     thread_counter += 1;
-                    respond(&mut out, &id, serde_json::json!({"threadId": format!("mock-thread-{thread_counter}")}));
+                    respond(
+                        &mut out,
+                        &id,
+                        serde_json::json!({"threadId": format!("mock-thread-{thread_counter}")}),
+                    );
                 }
             }
             "thread/resume" => {
@@ -108,7 +112,11 @@ fn main() {
                     respond(&mut out, &id, serde_json::json!({}));
                 } else {
                     thread_counter += 1;
-                    respond(&mut out, &id, serde_json::json!({"threadId": format!("mock-fork-{thread_counter}")}));
+                    respond(
+                        &mut out,
+                        &id,
+                        serde_json::json!({"threadId": format!("mock-fork-{thread_counter}")}),
+                    );
                 }
             }
             "turn/start" => {
@@ -129,8 +137,7 @@ fn main() {
                     }
                 }
 
-                let thread_id =
-                    msg["params"]["threadId"].as_str().unwrap_or("").to_string();
+                let thread_id = msg["params"]["threadId"].as_str().unwrap_or("").to_string();
 
                 // Ack the request first.
                 respond(&mut out, &id, Value::Null);
@@ -145,13 +152,17 @@ fn main() {
                 }
 
                 // Emit a TextDelta so callers see at least one real event.
-                emit(&mut out, "item/updated", serde_json::json!({
-                    "threadId": thread_id,
-                    "item": {
-                        "type": "message",
-                        "content": [{"type": "output_text", "text": "hello from mock"}]
-                    }
-                }));
+                emit(
+                    &mut out,
+                    "item/updated",
+                    serde_json::json!({
+                        "threadId": thread_id,
+                        "item": {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "hello from mock"}]
+                        }
+                    }),
+                );
 
                 if malformed_before_complete {
                     writeln!(&mut out, "{{INVALID JSON}}").unwrap();
@@ -171,14 +182,22 @@ fn main() {
                 }
 
                 if turn_sends_error {
-                    emit(&mut out, "error", serde_json::json!({
-                        "threadId": thread_id,
-                        "message": "mock error during turn"
-                    }));
+                    emit(
+                        &mut out,
+                        "error",
+                        serde_json::json!({
+                            "threadId": thread_id,
+                            "message": "mock error during turn"
+                        }),
+                    );
                 } else {
-                    emit(&mut out, "turn/completed", serde_json::json!({
-                        "threadId": thread_id
-                    }));
+                    emit(
+                        &mut out,
+                        "turn/completed",
+                        serde_json::json!({
+                            "threadId": thread_id
+                        }),
+                    );
                 }
             }
             "turn/interrupt" => {
