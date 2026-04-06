@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,7 +49,11 @@ pub enum CodexEvent {
     /// A text message chunk from the model.
     TextDelta { text: String },
     /// A tool/command execution started.
-    ToolStarted { id: String, name: String, input: Value },
+    ToolStarted {
+        id: String,
+        name: String,
+        input: Value,
+    },
     /// A tool/command completed.
     ToolCompleted { id: String, output: String },
     /// The turn finished.
@@ -272,10 +276,7 @@ impl CodexProcess {
         self.send_line(&serde_json::to_string(&msg)?).await
     }
 
-    async fn send_line(
-        &self,
-        line: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_line(&self, line: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut stdin = self.stdin.lock().await;
         stdin.write_all(line.as_bytes()).await?;
         stdin.write_all(b"\n").await?;
@@ -325,13 +326,14 @@ impl CodexProcess {
                     };
                     let _ = tx.send(result);
                 } else {
-                    debug!(id = id_u64, "codex: response arrived for unknown/dropped request");
+                    debug!(
+                        id = id_u64,
+                        "codex: response arrived for unknown/dropped request"
+                    );
                 }
             } else if let Some(method) = &msg.method {
                 // It's a server notification — route to the right thread's channel.
-                if let Some((thread_id, event)) =
-                    Self::parse_event(method, msg.params.as_ref())
-                {
+                if let Some((thread_id, event)) = Self::parse_event(method, msg.params.as_ref()) {
                     let is_terminal =
                         matches!(event, CodexEvent::TurnCompleted | CodexEvent::Error { .. });
                     let mut senders = turn_senders.lock().await;
@@ -394,7 +396,10 @@ impl CodexProcess {
                             }
                         }
                         if text.is_empty() {
-                            trace!(thread_id, "codex: message item had no output_text blocks; skipping");
+                            trace!(
+                                thread_id,
+                                "codex: message item had no output_text blocks; skipping"
+                            );
                             return None;
                         }
                         CodexEvent::TextDelta { text }
@@ -526,7 +531,9 @@ mod tests {
         });
         let (tid, event) = parse("item/completed", params).unwrap();
         assert_eq!(tid, "t5");
-        assert!(matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done"));
+        assert!(
+            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done")
+        );
     }
 
     #[test]
