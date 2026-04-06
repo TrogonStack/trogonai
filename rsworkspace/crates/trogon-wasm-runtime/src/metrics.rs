@@ -20,6 +20,12 @@ pub struct Metrics {
     pub host_calls_total: AtomicU64,
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Metrics {
     pub const fn new() -> Self {
         Self {

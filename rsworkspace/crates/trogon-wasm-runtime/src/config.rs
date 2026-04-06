@@ -98,9 +98,7 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok());
 
-        let module_cache_dir = std::env::var(ENV_MODULE_CACHE_DIR)
-            .ok()
-            .map(PathBuf::from);
+        let module_cache_dir = std::env::var(ENV_MODULE_CACHE_DIR).ok().map(PathBuf::from);
 
         let wasm_allow_network = std::env::var(ENV_WASM_ALLOW_NETWORK)
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
