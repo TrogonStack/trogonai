@@ -1431,4 +1431,22 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_unroutable(&publisher, "missing_interaction_type");
     }
+
+    #[tokio::test]
+    async fn router_with_system_clock_responds_to_health() {
+        let publisher = MockJetStreamPublisher::new();
+        let app = router(wrap_publisher(publisher), &test_config());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
 }
