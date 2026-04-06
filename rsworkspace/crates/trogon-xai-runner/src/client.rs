@@ -40,6 +40,7 @@
 //! domains, safe mode, date ranges).
 
 use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::stream::StreamExt as _;
@@ -178,20 +179,36 @@ pub enum XaiEvent {
 pub struct XaiClient {
     http: reqwest::Client,
     base_url: String,
+    /// Timeout for the initial HTTP round-trip (TCP connect + TLS + server sending
+    /// the first response byte). Does NOT apply to the ongoing SSE stream — that
+    /// is governed by `XAI_PROMPT_TIMEOUT_SECS` per-chunk in the agent layer.
+    request_timeout: Duration,
 }
 
 impl XaiClient {
     pub fn new() -> Self {
         let base_url = std::env::var("XAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-        Self::with_base_url(base_url)
+        let request_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(300));
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build HTTP client");
+        Self { http, base_url, request_timeout }
     }
 
     /// Construct with an explicit base URL. Useful for tests and custom proxies.
+    #[allow(dead_code)]
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
             base_url: base_url.into(),
+            request_timeout: Duration::from_secs(300),
         }
     }
 
@@ -267,14 +284,17 @@ impl XaiClient {
             }
         }
 
-        let response = self
-            .http
-            .post(format!("{}/responses", self.base_url.trim_end_matches('/')))
-            .bearer_auth(api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let response = tokio::time::timeout(
+            self.request_timeout,
+            self.http
+                .post(format!("{}/responses", self.base_url.trim_end_matches('/')))
+                .bearer_auth(api_key)
+                .json(&body)
+                .send(),
+        )
+        .await
+        .map_err(|_| format!("xAI request timed out after {}s (no response headers received)", self.request_timeout.as_secs()))?
+        .map_err(|e| e.to_string())?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -89,10 +89,17 @@ pub struct XaiAgent {
     /// Holds the key extracted from the last `authenticate` call until the
     /// next `new_session` picks it up.
     ///
-    /// FIXME: single-slot — race if two clients authenticate concurrently before
-    /// calling `new_session`. The second `authenticate` overwrites the first key.
-    /// Fixing this properly requires correlating authenticate→new_session per
-    /// connection, which needs framework support.
+    /// **Safe only when a single client is active at a time, or when all clients
+    /// use the `"agent"` auth method (server key).** If multiple clients
+    /// concurrently call `authenticate("xai-api-key")` before either calls
+    /// `new_session`, the second write overwrites the first — the first client
+    /// silently inherits the second client's key.
+    ///
+    /// The root cause is that the ACP protocol carries no per-connection
+    /// identifier: `authenticate` and `new_session` arrive as independent NATS
+    /// messages on shared subjects, so there is no way to correlate them at the
+    /// application layer without a protocol change (e.g. `authenticate` returning
+    /// an opaque correlation token that `new_session` echoes back).
     pending_api_key: Arc<Mutex<Option<String>>>,
     /// Optional system prompt injected at the start of every conversation.
     /// Read from `XAI_SYSTEM_PROMPT` at construction time.
@@ -1258,6 +1265,49 @@ impl XaiAgent {
         Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
     }
 
+    /// Like `new_with_kv_bucket` but points the xAI client at a custom base URL
+    /// instead of reading `XAI_BASE_URL` from the environment. Allows KV
+    /// integration tests to use a fake HTTP server without touching env vars.
+    pub async fn new_with_kv_bucket_and_xai_url(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        bucket: impl Into<String>,
+        xai_base_url: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let js = async_nats::jetstream::new(nats.clone());
+        let store = KvSessionStore::open(js, bucket, Duration::from_secs(7 * 24 * 3600)).await?;
+        let mut agent = Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store));
+        agent.client = Arc::new(crate::client::XaiClient::with_base_url(xai_base_url));
+        Ok(agent)
+    }
+
+    /// Like `new_with_kv_bucket` but with a configurable TTL. For tests only.
+    pub async fn new_with_kv_bucket_ttl(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        bucket: impl Into<String>,
+        ttl: Duration,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let js = async_nats::jetstream::new(nats.clone());
+        let store = KvSessionStore::open(js, bucket, ttl).await?;
+        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+    }
+
+    /// Creates an `XaiAgent` with a caller-supplied session store. For tests only.
+    pub fn new_with_custom_store(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        store: Box<dyn SessionStore>,
+    ) -> Self {
+        Self::new_with_store(nats, acp_prefix, default_model, api_key, store)
+    }
+
     /// Creates an `XaiAgent` backed by an in-memory session store. For tests only.
     pub fn new_in_memory(
         nats: async_nats::Client,
@@ -1289,6 +1339,21 @@ impl XaiAgent {
         self.session_store.get(id).await.and_then(|s| s.model)
     }
 
+    pub async fn test_session_enabled_tools(&self, id: &str) -> Vec<String> {
+        self.session_store.get(id).await.map(|s| s.enabled_tools).unwrap_or_default()
+    }
+
+    pub async fn test_session_last_response_id(&self, id: &str) -> Option<String> {
+        self.session_store.get(id).await.and_then(|s| s.last_response_id)
+    }
+
+    pub async fn test_set_last_response_id(&self, id: &str, response_id: Option<String>) {
+        if let Some(mut data) = self.session_store.get(id).await {
+            data.last_response_id = response_id;
+            self.session_store.put(id, &data).await.expect("test_set_last_response_id: put failed");
+        }
+    }
+
     pub fn test_prompt_timeout(&self) -> Duration {
         self.prompt_timeout
     }
@@ -1299,5 +1364,13 @@ impl XaiAgent {
 
     pub async fn test_cancel_channels_len(&self) -> usize {
         self.cancel_channels.lock().await.len()
+    }
+
+    /// Override `max_history_messages` at runtime. For tests that need a small
+    /// limit without setting `XAI_MAX_HISTORY_MESSAGES` (which is unsafe in
+    /// parallel tests due to env-var races).
+    pub fn with_max_history_messages(mut self, n: usize) -> Self {
+        self.max_history_messages = n;
+        self
     }
 }
