@@ -53,6 +53,9 @@ async fn start_server(
     let nats_client = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("connect to NATS");
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(
+        async_nats::jetstream::new(nats_client.clone()),
+    );
 
     let config = make_config(nats_port);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -60,7 +63,7 @@ async fn start_server(
 
     let conn_thread = std::thread::Builder::new()
         .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(conn_rx, nats_client, config))
+        .spawn(move || run_connection_thread(conn_rx, nats_client, js_client, config))
         .expect("failed to spawn connection thread");
 
     let state = UpgradeState {

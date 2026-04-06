@@ -26,8 +26,9 @@ use agent_client_protocol::{
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
-use acp_nats::Bridge;
-use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
+use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session as session_subjects};
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage, JsMessageOf};
 use agent_client_protocol::McpServer;
 use trogon_acp_runner::{GatewayConfig, SessionState, SessionStore, StoredMcpServer};
 use trogon_agent_core::agent_loop::ContentBlock as AgentContentBlock;
@@ -74,12 +75,14 @@ const AVAILABLE_MODELS: &[(&str, &str)] = &[
 
 /// ACP `Agent` implementation that handles lifecycle methods locally and
 /// routes `prompt`/`cancel` through NATS via the inner `Bridge`.
-pub struct TrogonAcpAgent<N, C>
+pub struct TrogonAcpAgent<N, C, J>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: GetElapsed,
+    J: JetStreamPublisher + JetStreamGetStream,
+    JsMessageOf<J>: JsRequestMessage,
 {
-    pub(crate) bridge: Bridge<N, C>,
+    pub(crate) bridge: Bridge<N, C, J>,
     pub(crate) store: SessionStore,
     pub(crate) nats: async_nats::Client,
     pub(crate) prefix: String,
@@ -93,13 +96,15 @@ where
     pub(crate) terminal_output_cap: std::cell::Cell<bool>,
 }
 
-impl<N, C> TrogonAcpAgent<N, C>
+impl<N, C, J> TrogonAcpAgent<N, C, J>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: GetElapsed,
+    J: JetStreamPublisher + JetStreamGetStream,
+    JsMessageOf<J>: JsRequestMessage,
 {
     pub fn new(
-        bridge: Bridge<N, C>,
+        bridge: Bridge<N, C, J>,
         store: SessionStore,
         nats: async_nats::Client,
         prefix: impl Into<String>,
@@ -523,12 +528,12 @@ where
     /// Delete a session from KV and publish a cancel to abort any running prompt.
     #[cfg_attr(coverage, coverage(off))]
     async fn close_session_impl(&self, session_id: &str) {
-        let cancel_subject = acp_nats::nats::agent::session_cancel(&self.prefix, session_id);
-        let empty: Vec<u8> = vec![];
-        let _ = self.nats.publish(cancel_subject, empty.into()).await;
-        let cancelled_subject = acp_nats::nats::agent::session_cancelled(&self.prefix, session_id);
-        let empty: Vec<u8> = vec![];
-        let _ = self.nats.publish(cancelled_subject, empty.into()).await;
+        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let acp_session_id = AcpSessionId::new(session_id).expect("valid session_id");
+        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id);
+        let _ = self.nats.publish(cancel_subject, vec![].into()).await;
+        let cancelled_subject = session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id);
+        let _ = self.nats.publish(cancelled_subject, vec![].into()).await;
         if let Err(e) = self.store.delete(session_id).await {
             Self::warn_delete_session_failed(session_id, &e);
         }
@@ -561,7 +566,7 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N, C> agent_client_protocol::Agent for TrogonAcpAgent<N, C>
+impl<N, C, J> agent_client_protocol::Agent for TrogonAcpAgent<N, C, J>
 where
     N: RequestClient
         + PublishClient
@@ -572,6 +577,8 @@ where
         + Sync
         + 'static,
     C: GetElapsed + Send + Sync + 'static,
+    J: JetStreamPublisher + JetStreamGetStream + Send + Sync + 'static,
+    JsMessageOf<J>: JsRequestMessage,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         let client = args
@@ -1416,9 +1423,59 @@ fn is_running_as_root() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trogon_nats::jetstream::{
+        MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream,
+    };
+    use trogon_nats::mocks::MockError;
+
+    #[derive(Clone)]
+    struct MockJs {
+        publisher: MockJetStreamPublisher,
+        consumer_factory: MockJetStreamConsumerFactory,
+    }
+
+    impl MockJs {
+        #[allow(dead_code)]
+        fn new() -> Self {
+            Self {
+                publisher: MockJetStreamPublisher::new(),
+                consumer_factory: MockJetStreamConsumerFactory::new(),
+            }
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+        type PublishError = MockError;
+        type AckFuture = std::future::Ready<
+            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
+        >;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
+        type Error = MockError;
+        type Stream = MockJetStreamStream;
+
+        async fn get_stream<T: AsRef<str> + Send>(
+            &self,
+            stream_name: T,
+        ) -> Result<MockJetStreamStream, Self::Error> {
+            self.consumer_factory.get_stream(stream_name).await
+        }
+    }
 
     type TestAgent =
-        TrogonAcpAgent<trogon_nats::AdvancedMockNatsClient, trogon_std::time::SystemClock>;
+        TrogonAcpAgent<trogon_nats::AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>;
 
     // ── slash commands ────────────────────────────────────────────────────────
 
@@ -1817,7 +1874,7 @@ mod tests {
         use trogon_acp_runner::{GatewayConfig, SessionState, SessionStore};
         use trogon_std::time::SystemClock;
 
-        type RealAgent = TrogonAcpAgent<async_nats::Client, SystemClock>;
+        type RealAgent = TrogonAcpAgent<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient>;
 
         async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
             let container: ContainerAsync<Nats> = Nats::default()
@@ -1851,8 +1908,10 @@ mod tests {
                     auth: NatsAuth::None,
                 },
             );
+            let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let bridge = Bridge::new(
                 nats.clone(),
+                js_client,
                 SystemClock,
                 &opentelemetry::global::meter("acp-test"),
                 config,
@@ -3496,7 +3555,7 @@ mod tests {
         nats: async_nats::Client,
         js: jetstream::Context,
     ) -> (
-        TrogonAcpAgent<async_nats::Client, SystemClock>,
+        TrogonAcpAgent<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient>,
         mpsc::Receiver<SessionNotification>,
     ) {
         let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
@@ -3510,7 +3569,8 @@ mod tests {
         .with_operation_timeout(std::time::Duration::from_millis(500));
         let meter = opentelemetry::global::meter("trogon-acp-test");
         let (bridge_notif_tx, _) = mpsc::channel(1);
-        let bridge = Bridge::new(nats.clone(), SystemClock, &meter, config, bridge_notif_tx);
+        let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
+        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config, bridge_notif_tx);
         let gateway_config = std::sync::Arc::new(RwLock::new(None));
         let (tx, rx) = mpsc::channel(64);
         (
@@ -3566,8 +3626,9 @@ mod tests {
             },
         );
         let meter = opentelemetry::global::meter("test");
+        let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js);
         let (bridge_tx, _) = mpsc::channel(1);
-        let bridge = Bridge::new(nats.clone(), SystemClock, &meter, config, bridge_tx);
+        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config, bridge_tx);
         let gateway_config = std::sync::Arc::new(RwLock::new(None));
         let (tx, _rx) = mpsc::channel(64);
         let agent = TrogonAcpAgent::new(

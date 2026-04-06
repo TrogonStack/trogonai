@@ -13,7 +13,56 @@ use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{Agent, PromptRequest};
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
+use trogon_nats::jetstream::{
+    MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream,
+};
+use trogon_nats::mocks::MockError;
 use trogon_std::time::SystemClock;
+
+#[derive(Clone)]
+struct MockJs {
+    publisher: MockJetStreamPublisher,
+    consumer_factory: MockJetStreamConsumerFactory,
+}
+
+impl MockJs {
+    fn new() -> Self {
+        Self {
+            publisher: MockJetStreamPublisher::new(),
+            consumer_factory: MockJetStreamConsumerFactory::new(),
+        }
+    }
+}
+
+impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+    type PublishError = MockError;
+    type AckFuture = std::future::Ready<
+        Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
+    >;
+
+    async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: async_nats::HeaderMap,
+        payload: bytes::Bytes,
+    ) -> Result<Self::AckFuture, Self::PublishError> {
+        self.publisher
+            .publish_with_headers(subject, headers, payload)
+            .await
+    }
+}
+
+impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
+    type Error = MockError;
+    type Stream = MockJetStreamStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(
+        &self,
+        stream_name: T,
+    ) -> Result<MockJetStreamStream, Self::Error> {
+        self.consumer_factory.get_stream(stream_name).await
+    }
+}
 
 // ── minimal multi-stream mock ─────────────────────────────────────────────────
 
@@ -105,7 +154,7 @@ impl trogon_nats::client::RequestClient for MultiStreamMock {
 
 // ── bridge builder ────────────────────────────────────────────────────────────
 
-fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemClock> {
+fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemClock, MockJs> {
     let config = Config::new(
         AcpPrefix::new("acp").unwrap(),
         NatsConfig {
@@ -117,7 +166,7 @@ fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemCloc
     // Drop rx immediately — notification sends during these tests will fail,
     // but we're testing the subscribe/stream/timeout paths, not notifications.
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    Bridge::new(mock, SystemClock, &meter, config, tx)
+    Bridge::new(mock, MockJs::new(), SystemClock, &meter, config, tx)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
