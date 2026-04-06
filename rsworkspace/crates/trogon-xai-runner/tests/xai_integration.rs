@@ -11,11 +11,12 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
-    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, InitializeRequest,
-    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
-    ResumeSessionRequest, ResourceLink, SetSessionConfigOptionRequest, SetSessionModelRequest,
-    StopReason, TextContent, TextResourceContents,
+    Agent, AuthMethod, AuthenticateRequest, BlobResourceContents, CancelNotification,
+    CloseSessionRequest, ContentBlock, EmbeddedResource, EmbeddedResourceResource,
+    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest, ResourceLink,
+    SetSessionConfigOptionRequest, SetSessionModelRequest, StopReason, TextContent,
+    TextResourceContents,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -360,6 +361,29 @@ async fn list_sessions_sorted_by_session_id() {
     assert_eq!(ids, sorted, "sessions must be sorted by id");
 }
 
+#[tokio::test]
+async fn list_sessions_returns_correct_cwd_for_each_session() {
+    // list_sessions must return the cwd that was passed to new_session for each
+    // entry. The cwd is stored in the session data and must round-trip correctly.
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    agent.new_session(NewSessionRequest::new("/project/alpha")).await.unwrap();
+    agent.new_session(NewSessionRequest::new("/project/beta")).await.unwrap();
+    agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    assert_eq!(list.sessions.len(), 3);
+
+    let mut cwds: Vec<String> = list.sessions.iter()
+        .map(|s| s.cwd.to_string_lossy().to_string())
+        .collect();
+    cwds.sort();
+
+    assert_eq!(cwds, vec!["/project/alpha", "/project/beta", "/tmp"],
+        "list_sessions must return the exact cwd for each session: {cwds:?}");
+}
+
 // ── load_session ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -544,6 +568,27 @@ async fn fork_session_clones_conversation_history() {
 }
 
 // ── prompt ────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_invalid_session_id_returns_internal_error() {
+    // Session IDs are embedded as a NATS subject token, so `.`, `*`, `>`,
+    // whitespace, and non-ASCII characters are forbidden. `make_nats_client()`
+    // rejects them with InternalError before the session store is even consulted.
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(None).await;
+
+    for bad_id in &["foo.bar", "foo*bar", "foo>bar", "foo bar", "séssion", ""] {
+        let err = agent
+            .prompt(PromptRequest::new(*bad_id, vec![ContentBlock::Text(TextContent::new("hi"))]))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            agent_client_protocol::ErrorCode::InternalError.into(),
+            "expected InternalError for session_id {:?}, got: {:?}", bad_id, err,
+        );
+    }
+}
 
 #[tokio::test]
 async fn prompt_unknown_session_returns_error() {
@@ -3817,5 +3862,664 @@ async fn response_cancelled_event_surfaces_as_acp_error() {
     // Orphaned user message must be compensated.
     let history = agent.test_session_history(&sid).await;
     assert!(history.is_empty(), "history must be empty after response.cancelled: {history:?}");
+}
+
+// ── stale-ID retry: no double-retry guard ─────────────────────────────────────
+
+#[tokio::test]
+async fn stale_id_retry_does_not_double_retry() {
+    // Verifies that `stale_retry_done` prevents a second transparent retry.
+    //
+    // Turn 1: succeeds, stores last_response_id = "resp_turn1".
+    // Turn 2, attempt 1: carries previous_response_id → HTTP 500 → triggers
+    //   stale-ID retry (stale_retry_done = true).
+    // Turn 2, retry: HTTP 500 again → NOT retried a third time → Err propagated.
+    //
+    // Only 3 HTTP connections must be made. A 4th would indicate the guard is
+    // broken.
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let conn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let conn_count_clone = Arc::clone(&conn_count);
+
+    tokio::spawn(async move {
+        // Connection 1 (turn 1): success.
+        let turn1 = concat!(
+            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
+            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                turn1.len(), turn1,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 2 (turn 2, first attempt): HTTP 500 → triggers stale-ID retry.
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let body = r#"{"error":"response not found"}"#;
+            let http = format!(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 3 (turn 2 retry, full history): HTTP 500 again — must NOT
+        // be retried a second time since stale_retry_done = true.
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let body = r#"{"error":"still failing"}"#;
+            let http = format!(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+        // Server is done. Any 4th connection would fail with "connection refused".
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let r1 = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q1"))]))
+        .await
+        .unwrap();
+    assert_eq!(r1.stop_reason, StopReason::EndTurn, "turn 1 must succeed");
+
+    let r2 = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q2"))]))
+        .await;
+    assert!(r2.is_err(), "turn 2 must fail after stale-ID retry is exhausted");
+
+    // Exactly 3 HTTP connections must have been made — no double-retry.
+    assert_eq!(
+        conn_count.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "expected exactly 3 HTTP connections (turn1 + stale-retry + retry-fail), no 4th"
+    );
+}
+
+// ── continuation: stale-ID retry is blocked ──────────────────────────────────
+
+#[tokio::test]
+async fn continuation_error_is_not_retried_as_stale_id() {
+    // Verifies that `continuation_in_progress = true` blocks the stale-ID retry
+    // when an error arrives on a continuation request.
+    //
+    // Turn 1: succeeds — stores last_response_id = "resp_turn1".
+    // Turn 2:
+    //   - Initial request (previous_response_id="resp_turn1"): Incomplete
+    //     (max_output_tokens), partial text, response id="resp_part".
+    //   - Continuation (previous_response_id="resp_part"): HTTP 500.
+    //     continuation_in_progress=true → guard fires, no stale-ID retry.
+    //     Error propagates to ACP caller.
+    //
+    // Exactly 3 HTTP connections must be made — no 4th retry.
+    let _guard = env_lock().lock().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let conn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let conn_count_clone = Arc::clone(&conn_count);
+    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_clone = Arc::clone(&captured);
+
+    tokio::spawn(async move {
+        // Connection 1 (turn 1): normal success.
+        let turn1 = concat!(
+            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
+            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            drain_request(&mut reader).await;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                turn1.len(), turn1,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 2 (turn 2, initial, carries previous_response_id="resp_turn1"):
+        // returns Incomplete so the agent sends a continuation.
+        let incomplete = concat!(
+            "data: {\"id\":\"resp_part\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"partial \"}}\n\n",
+            "data: {\"id\":\"resp_part\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_part\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut buf = vec![0u8; content_length];
+                reader.read_exact(&mut buf).await.ok();
+                let json = serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                incomplete.len(), incomplete,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+
+        // Connection 3 (continuation, carries previous_response_id="resp_part"):
+        // HTTP 500 — must NOT trigger a stale-ID retry (continuation_in_progress=true).
+        if let Ok((stream, _)) = listener.accept().await {
+            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.is_err() { break; }
+                let t = line.trim_end_matches('\n').trim_end_matches('\r');
+                if t.is_empty() { break; }
+                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
+                    content_length = r.trim().parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut buf = vec![0u8; content_length];
+                reader.read_exact(&mut buf).await.ok();
+                let json = serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null);
+                captured_clone.lock().unwrap().push(json);
+            }
+            let body = r#"{"error":"continuation failed"}"#;
+            let http = format!(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body,
+            );
+            writer.write_all(http.as_bytes()).await.ok();
+        }
+        // Server exits here. A 4th connection would get "connection refused".
+    });
+
+    let agent = make_agent(Some(&url)).await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let r1 = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q1"))]))
+        .await
+        .unwrap();
+    assert_eq!(r1.stop_reason, StopReason::EndTurn, "turn 1 must succeed");
+
+    let r2 = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q2"))]))
+        .await;
+    assert!(r2.is_err(), "turn 2 must fail when continuation errors out");
+
+    // Exactly 3 HTTP connections: turn1 + incomplete + continuation-error.
+    // A 4th would mean the stale-ID retry fired despite continuation_in_progress.
+    assert_eq!(
+        conn_count.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "exactly 3 connections expected — no stale-ID retry during continuation",
+    );
+
+    // The continuation request must have carried previous_response_id="resp_part",
+    // not "resp_turn1" (proves the continuation logic set the right ID).
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 2, "expected bodies captured for conns 2 and 3");
+    assert_eq!(
+        reqs[1].get("previous_response_id").and_then(|v| v.as_str()),
+        Some("resp_part"),
+        "continuation must carry previous_response_id from the incomplete response: {:?}", reqs[1],
+    );
+
+    // History after turn 2 failure: [user1, assistant1] — user2 was compensated.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2, "user2 must be compensated after continuation error: {history:?}");
+    assert_eq!(history[0].content_str(), "q1");
+    assert_eq!(history[1].content_str(), "first reply");
+}
+
+// ── empty prompt content ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn empty_prompt_content_is_forwarded_to_xai() {
+    // When the prompt contains no content blocks (or only empty-text blocks),
+    // user_input is "". The agent logs a warning but still calls xAI and handles
+    // the response normally. This verifies there is no early-return / panic.
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["reply to empty"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // No content blocks at all.
+    let resp = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    // xAI must have received exactly one request.
+    let reqs = bodies.lock().unwrap();
+    assert_eq!(reqs.len(), 1, "one HTTP request must have been made");
+
+    // The user message in the request has empty content.
+    let input = reqs[0]["input"].as_array().expect("input must be an array");
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["role"], "user");
+    assert_eq!(input[0]["content"], "");
+
+    // History: empty user message + assistant reply.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content_str(), "");
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history[1].content_str(), "reply to empty");
+}
+
+// ── blob resource content block ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn embedded_blob_resource_is_formatted_as_binary_placeholder() {
+    // BlobResourceContents cannot be forwarded to a text-only API. The agent
+    // must convert it to a "[Binary resource: <uri> (<mime>)]" placeholder so
+    // the model at least knows a binary file was referenced.
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["got it"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let blob_block = ContentBlock::Resource(EmbeddedResource::new(
+        EmbeddedResourceResource::BlobResourceContents(
+            BlobResourceContents::new("base64data==", "s3://bucket/image.png")
+                .mime_type("image/png"),
+        ),
+    ));
+
+    let resp = agent
+        .prompt(PromptRequest::new(sid.clone(), vec![blob_block]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let reqs = bodies.lock().unwrap();
+    let input = reqs[0]["input"].as_array().expect("input must be an array");
+    let user_content = input[0]["content"].as_str().expect("user content must be a string");
+
+    assert!(
+        user_content.contains("[Binary resource: s3://bucket/image.png (image/png)]"),
+        "expected binary placeholder in user content, got: {user_content}"
+    );
+}
+
+#[tokio::test]
+async fn embedded_blob_resource_without_mime_uses_binary_fallback() {
+    // When mime_type is None, the placeholder must read "(binary)".
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
+    let agent = make_agent(Some(&url)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let blob_block = ContentBlock::Resource(EmbeddedResource::new(
+        EmbeddedResourceResource::BlobResourceContents(
+            // no .mime_type() call → mime_type = None
+            BlobResourceContents::new("rawbytes", "file:///tmp/data.bin"),
+        ),
+    ));
+
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![blob_block]))
+        .await
+        .unwrap();
+
+    let reqs = bodies.lock().unwrap();
+    let input = reqs[0]["input"].as_array().unwrap();
+    let user_content = input[0]["content"].as_str().unwrap();
+
+    assert!(
+        user_content.contains("[Binary resource: file:///tmp/data.bin (binary)]"),
+        "expected '(binary)' fallback mime in placeholder, got: {user_content}"
+    );
+}
+
+// ── XAI_MAX_TURNS env var ─────────────────────────────────────────────────────
+
+async fn make_agent_with_max_turns(base_url: Option<&str>, max_turns: u64) -> XaiAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::set_var("XAI_MAX_TURNS", max_turns.to_string());
+        match base_url {
+            Some(url) => std::env::set_var("XAI_BASE_URL", url),
+            None => std::env::remove_var("XAI_BASE_URL"),
+        }
+    }
+    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+}
+
+#[tokio::test]
+async fn xai_max_turns_is_sent_in_request_when_tools_enabled() {
+    // max_turns must be sent in the request body only when at least one
+    // server-side tool is enabled. Verify the field value matches XAI_MAX_TURNS.
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
+    let agent = make_agent_with_max_turns(Some(&url), 5).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Enable a server-side tool so max_turns is included in the request.
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
+        .await
+        .unwrap();
+
+    let reqs = bodies.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(
+        reqs[0]["max_turns"].as_u64(),
+        Some(5),
+        "max_turns must be 5 when XAI_MAX_TURNS=5 and a tool is enabled, got: {:?}",
+        reqs[0]["max_turns"]
+    );
+}
+
+#[tokio::test]
+async fn xai_max_turns_invalid_string_falls_back_to_default() {
+    // XAI_MAX_TURNS=abc cannot be parsed as u32 — must fall back to 10.
+    // Mirrors the existing xai_prompt_timeout_secs_invalid_falls_back_to_default pattern.
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::set_var("XAI_MAX_TURNS", "not-a-number");
+        std::env::set_var("XAI_BASE_URL", &url);
+    }
+    let agent = XaiAgent::new_in_memory(
+        fake_nats().await,
+        AcpPrefix::new("test").unwrap(),
+        "grok-3",
+        "fake-key",
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
+        .await
+        .unwrap();
+
+    let reqs = bodies.lock().unwrap();
+    assert_eq!(
+        reqs[0]["max_turns"].as_u64(),
+        Some(10),
+        "invalid XAI_MAX_TURNS must fall back to default (10), got: {:?}",
+        reqs[0]["max_turns"]
+    );
+}
+
+#[tokio::test]
+async fn xai_max_turns_zero_falls_back_to_default() {
+    // XAI_MAX_TURNS=0 is treated as "unset" and falls back to the default (10).
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
+    let agent = make_agent_with_max_turns(Some(&url), 0).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
+        .await
+        .unwrap();
+
+    let reqs = bodies.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(
+        reqs[0]["max_turns"].as_u64(),
+        Some(10),
+        "XAI_MAX_TURNS=0 must fall back to default (10), got: {:?}",
+        reqs[0]["max_turns"]
+    );
+}
+
+#[tokio::test]
+async fn xai_max_turns_not_sent_when_no_tools_enabled() {
+    // max_turns is only meaningful with tools — it must be omitted from requests
+    // where no server-side tool is enabled.
+    let _guard = env_lock().lock().unwrap();
+
+    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
+    let agent = make_agent_with_max_turns(Some(&url), 7).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Do NOT enable any tools.
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
+        .await
+        .unwrap();
+
+    let reqs = bodies.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].get("max_turns").map(|v| v.is_null()).unwrap_or(true),
+        "max_turns must be absent from requests with no tools, got: {:?}",
+        reqs[0].get("max_turns")
+    );
+}
+
+// ── session store put failure ─────────────────────────────────────────────────
+
+/// A session store that delegates to `MemorySessionStore` but fails every `put`
+/// call after `fail_after_puts` successful puts. Counter is shared so callers
+/// can observe how many puts were attempted.
+struct FailingSessionStore {
+    inner: trogon_xai_runner::MemorySessionStore,
+    put_count: Arc<std::sync::atomic::AtomicUsize>,
+    fail_after_puts: usize,
+}
+
+impl FailingSessionStore {
+    fn new(fail_after_puts: usize) -> (Self, Arc<std::sync::atomic::AtomicUsize>) {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        (
+            Self {
+                inner: trogon_xai_runner::MemorySessionStore::new(),
+                put_count: Arc::clone(&count),
+                fail_after_puts,
+            },
+            count,
+        )
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl trogon_xai_runner::SessionStore for FailingSessionStore {
+    async fn get(&self, id: &str) -> Option<trogon_xai_runner::XaiSessionData> {
+        self.inner.get(id).await
+    }
+
+    async fn put(
+        &self,
+        id: &str,
+        data: &trogon_xai_runner::XaiSessionData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let n = self.put_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if n >= self.fail_after_puts {
+            return Err("injected store failure".into());
+        }
+        self.inner.put(id, data).await
+    }
+
+    async fn delete(&self, id: &str) {
+        self.inner.delete(id).await
+    }
+
+    async fn list(&self) -> Vec<(String, String)> {
+        self.inner.list().await
+    }
+}
+
+#[tokio::test]
+async fn session_store_put_failure_on_assistant_text_returns_error() {
+    // When the session store fails to persist the assistant reply, prompt()
+    // must return an ACP error. The user message should remain in history
+    // (not compensated) so the next call is treated as a resume.
+    //
+    // Put sequence:
+    //   put #0 (new_session): succeeds
+    //   put #1 (prompt user message): succeeds
+    //   put #2 (prompt assistant text): FAILS → prompt() returns Err
+    let _guard = env_lock().lock().unwrap();
+
+    // Set XAI_BASE_URL so the agent hits the fake SSE server when it calls xAI.
+    let sse_url = fake_xai_sse(&["hello from xai"]).await;
+    unsafe { std::env::set_var("XAI_BASE_URL", &sse_url); }
+
+    let (store, _counter) = FailingSessionStore::new(2); // fail on 3rd put (index 2)
+    let agent = XaiAgent::new_with_custom_store(
+        fake_nats().await,
+        AcpPrefix::new("test").unwrap(),
+        "grok-3",
+        "fake-key",
+        Box::new(store),
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("question"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        err.code,
+        agent_client_protocol::ErrorCode::InternalError.into(),
+        "put failure must surface as ACP InternalError"
+    );
+
+    // The user message must still be in history — it was put successfully before
+    // the xAI call. Compensation does not fire on store errors (only on cancel /
+    // stream error). This means the next prompt() call will be treated as a resume.
+    let history = agent.test_session_history(&sid).await;
+    assert_eq!(history.len(), 1, "user message must survive in history for resume: {history:?}");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(history[0].content_str(), "question");
+}
+
+#[tokio::test]
+async fn session_store_put_failure_on_user_message_returns_error() {
+    // When the store fails immediately on the user-message put (before the xAI
+    // call is even made), prompt() must return an error and history must be empty.
+    //
+    // Put sequence:
+    //   put #0 (new_session): succeeds
+    //   put #1 (prompt user message): FAILS → prompt() returns Err without calling xAI
+    let _guard = env_lock().lock().unwrap();
+
+    // The user-message put fails before xAI is ever called — no SSE server needed.
+    unsafe { std::env::remove_var("XAI_BASE_URL"); }
+
+    let (store, _counter) = FailingSessionStore::new(1); // fail on 2nd put (index 1)
+    let agent = XaiAgent::new_with_custom_store(
+        fake_nats().await,
+        AcpPrefix::new("test").unwrap(),
+        "grok-3",
+        "fake-key",
+        Box::new(store),
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let err = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("question"))],
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        err.code,
+        agent_client_protocol::ErrorCode::InternalError.into(),
+        "user-message put failure must surface as ACP InternalError"
+    );
+
+    // History must be empty — the user message was never persisted (the put failed).
+    let history = agent.test_session_history(&sid).await;
+    assert!(
+        history.is_empty(),
+        "history must be empty when user-message put fails: {history:?}"
+    );
 }
 
