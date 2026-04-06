@@ -160,8 +160,10 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::new(AcpPrefix::new(acp_prefix.clone())?, nats_config);
 
     let meter = opentelemetry::global::meter("trogon-acp");
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
     let bridge = Bridge::new(
         nats.clone(),
+        js_client,
         trogon_std::time::SystemClock,
         &meter,
         config,
@@ -329,6 +331,7 @@ async fn handle_permission_request(
                 let config_options = agent::TrogonAcpAgent::<
                     async_nats::Client,
                     trogon_std::time::SystemClock,
+                    trogon_nats::jetstream::NatsJetStreamClient,
                 >::build_config_options(
                     &mode, current_model, allow_bypass()
                 );
