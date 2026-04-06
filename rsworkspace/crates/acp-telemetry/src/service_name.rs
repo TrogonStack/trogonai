@@ -9,6 +9,7 @@ pub enum ServiceName {
     TrogonSourceGitlab,
     TrogonSourceLinear,
     TrogonSourceSlack,
+    TrogonSourceTelegram,
 }
 
 impl ServiceName {
@@ -20,6 +21,7 @@ impl ServiceName {
             Self::TrogonSourceGitlab => "trogon-source-gitlab",
             Self::TrogonSourceLinear => "trogon-source-linear",
             Self::TrogonSourceSlack => "trogon-source-slack",
+            Self::TrogonSourceTelegram => "trogon-source-telegram",
         }
     }
 }
@@ -54,6 +56,10 @@ mod tests {
             ServiceName::TrogonSourceSlack.as_str(),
             "trogon-source-slack"
         );
+        assert_eq!(
+            ServiceName::TrogonSourceTelegram.as_str(),
+            "trogon-source-telegram"
+        );
     }
 
     #[test]
@@ -75,6 +81,10 @@ mod tests {
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceSlack),
             "trogon-source-slack"
+        );
+        assert_eq!(
+            format!("{}", ServiceName::TrogonSourceTelegram),
+            "trogon-source-telegram"
         );
     }
 }
