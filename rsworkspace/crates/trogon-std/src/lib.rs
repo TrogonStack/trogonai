@@ -34,6 +34,7 @@ pub mod args;
 pub mod dirs;
 pub mod env;
 pub mod fs;
+pub mod http;
 pub mod json;
 pub mod time;
 
@@ -45,6 +46,7 @@ pub use args::ParseArgs;
 pub use dirs::{CacheDir, ConfigDir, DataDir, DataLocalDir, HomeDir, StateDir, SystemDirs};
 pub use env::{ReadEnv, SystemEnv};
 pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, WriteFile};
+pub use http::{ByteSize, HttpBodySizeMax};
 #[cfg(any(test, feature = "test-support"))]
 pub use json::FailNextSerialize;
 pub use json::{JsonSerialize, StdJsonSerialize};

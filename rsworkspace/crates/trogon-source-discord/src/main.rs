@@ -4,11 +4,13 @@ use {
     futures_core::Stream,
     std::future::poll_fn,
     std::pin::Pin,
-    std::sync::Arc,
     tracing::info,
     tracing::warn,
     trogon_nats::connect,
+    trogon_nats::jetstream::ClaimCheckPublisher,
+    trogon_nats::jetstream::MaxPayload,
     trogon_nats::jetstream::NatsJetStreamClient,
+    trogon_nats::jetstream::NatsObjectStore,
     trogon_source_discord::DiscordConfig,
     trogon_source_discord::config::SourceMode,
     trogon_source_discord::constants::DEFAULT_NATS_CONNECT_TIMEOUT,
@@ -20,7 +22,7 @@ use {
 
 #[cfg(not(coverage))]
 async fn run_gateway(
-    js: NatsJetStreamClient,
+    publisher: ClaimCheckPublisher<NatsJetStreamClient, NatsObjectStore>,
     config: &DiscordConfig,
     bot_token: &str,
     intents: twilight_model::gateway::Intents,
@@ -28,7 +30,7 @@ async fn run_gateway(
     info!("mode: gateway");
 
     let bridge = GatewayBridge::new(
-        Arc::new(js),
+        publisher,
         config.subject_prefix.clone(),
         config.nats_ack_timeout,
     );
@@ -71,14 +73,14 @@ async fn run_gateway(
 
 #[cfg(not(coverage))]
 async fn run_webhook(
-    js: NatsJetStreamClient,
+    publisher: ClaimCheckPublisher<NatsJetStreamClient, NatsObjectStore>,
     nats: async_nats::Client,
     public_key: ed25519_dalek::VerifyingKey,
     config: &DiscordConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("mode: webhook");
 
-    let app = trogon_source_discord::router(js, nats, public_key, config);
+    let app = trogon_source_discord::router(publisher, nats, public_key, config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "starting HTTP interactions endpoint");
 
@@ -105,9 +107,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Discord source starting");
 
     let nats = connect(&config.nats, DEFAULT_NATS_CONNECT_TIMEOUT).await?;
-    let js = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let max_payload = MaxPayload::from_server_limit(nats.server_info().max_payload);
+    let js_context = async_nats::jetstream::new(nats.clone());
+    let object_store = NatsObjectStore::provision(
+        &js_context,
+        async_nats::jetstream::object_store::Config {
+            bucket: "trogon-claims".to_string(),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let client = NatsJetStreamClient::new(js_context);
+    let publisher = ClaimCheckPublisher::new(
+        client.clone(),
+        object_store,
+        "trogon-claims".to_string(),
+        max_payload,
+    );
 
-    trogon_source_discord::provision(&js, &config)
+    trogon_source_discord::provision(&client, &config)
         .await
         .map_err(|e| format!("stream provisioning failed: {e}"))?;
 
@@ -115,8 +133,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SourceMode::Gateway {
             ref bot_token,
             intents,
-        } => run_gateway(js, &config, bot_token, intents).await,
-        SourceMode::Webhook { public_key } => run_webhook(js, nats, public_key, &config).await?,
+        } => run_gateway(publisher, &config, bot_token, intents).await,
+        SourceMode::Webhook { public_key } => {
+            run_webhook(publisher, nats, public_key, &config).await?
+        }
     }
 
     info!("Discord source stopped");
