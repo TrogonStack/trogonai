@@ -4,19 +4,21 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use crate::config::LinearConfig;
-use crate::constants::NATS_HEADER_REJECT_REASON;
+use crate::constants::{HTTP_BODY_SIZE_MAX, NATS_HEADER_REJECT_REASON};
 use crate::signature;
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateStreamError;
 use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
+    http::StatusCode, routing::get, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
 #[cfg(not(coverage))]
 use trogon_nats::jetstream::JetStreamContext;
-use trogon_nats::jetstream::{JetStreamPublisher, PublishOutcome, publish_event};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+};
 
 #[cfg(not(coverage))]
 #[derive(Debug)]
@@ -88,8 +90,8 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
     }
 }
 
-async fn publish_unroutable<P: JetStreamPublisher>(
-    js: &P,
+async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: &ClaimCheckPublisher<P, S>,
     subject_prefix: &NatsToken,
     reason: RejectReason,
     body: Bytes,
@@ -99,7 +101,9 @@ async fn publish_unroutable<P: JetStreamPublisher>(
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
-    let outcome = publish_event(js, subject, headers, body, ack_timeout).await;
+    let outcome = publisher
+        .publish_event(subject, headers, body, ack_timeout)
+        .await;
     if outcome.is_ok() {
         StatusCode::BAD_REQUEST
     } else {
@@ -109,8 +113,8 @@ async fn publish_unroutable<P: JetStreamPublisher>(
 }
 
 #[derive(Clone)]
-struct AppState<P: JetStreamPublisher> {
-    js: P,
+struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
+    publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: String,
     subject_prefix: NatsToken,
     timestamp_tolerance: Option<Duration>,
@@ -135,9 +139,12 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &LinearConfig) -> Re
     Ok(())
 }
 
-pub fn router<P: JetStreamPublisher>(js: P, config: &LinearConfig) -> Router {
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &LinearConfig,
+) -> Router {
     let state = AppState {
-        js,
+        publisher,
         webhook_secret: config.webhook_secret.clone(),
         subject_prefix: config.subject_prefix.clone(),
         timestamp_tolerance: config.timestamp_tolerance,
@@ -145,21 +152,28 @@ pub fn router<P: JetStreamPublisher>(js: P, config: &LinearConfig) -> Router {
     };
 
     Router::new()
-        .route("/webhook", post(handle_webhook::<P>))
+        .route("/webhook", post(handle_webhook::<P, S>))
         .route("/health", get(handle_health))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
 
 #[cfg(not(coverage))]
-pub async fn serve<J>(js: J, config: LinearConfig) -> Result<(), ServeError>
+pub async fn serve<C, P, S>(
+    context: C,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: LinearConfig,
+) -> Result<(), ServeError>
 where
-    J: JetStreamContext<Error = CreateStreamError> + JetStreamPublisher,
+    C: JetStreamContext<Error = CreateStreamError>,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
 {
-    provision(&js, &config)
+    provision(&context, &config)
         .await
         .map_err(ServeError::Provision)?;
 
-    let app = router(js, &config);
+    let app = router(publisher, &config);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(addr = %addr, "Linear webhook server listening");
 
@@ -176,8 +190,8 @@ async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
 
-fn handle_webhook<P: JetStreamPublisher>(
-    State(state): State<AppState<P>>,
+fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
@@ -194,8 +208,8 @@ fn handle_webhook<P: JetStreamPublisher>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook_inner<P: JetStreamPublisher>(
-    state: AppState<P>,
+async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
+    state: AppState<P, S>,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
@@ -220,7 +234,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
         Err(e) => {
             warn!(error = %e, "Failed to parse Linear webhook body as JSON");
             return publish_unroutable(
-                &state.js,
+                &state.publisher,
                 &state.subject_prefix,
                 RejectReason::InvalidJson,
                 body,
@@ -234,7 +248,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
         let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64()) else {
             warn!("Missing or malformed 'webhookTimestamp' field");
             return publish_unroutable(
-                &state.js,
+                &state.publisher,
                 &state.subject_prefix,
                 RejectReason::MissingWebhookTimestamp,
                 body,
@@ -254,7 +268,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
                 "Stale webhookTimestamp — potential replay attack"
             );
             return publish_unroutable(
-                &state.js,
+                &state.publisher,
                 &state.subject_prefix,
                 RejectReason::StaleWebhookTimestamp,
                 body,
@@ -267,7 +281,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Some(raw_type) = parsed.get("type").and_then(|v| v.as_str()) else {
         warn!("Missing 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::MissingType,
             body,
@@ -278,7 +292,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Ok(event_type) = NatsToken::new(raw_type) else {
         warn!("Invalid 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::InvalidType,
             body,
@@ -290,7 +304,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Some(raw_action) = parsed.get("action").and_then(|v| v.as_str()) else {
         warn!("Missing 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::MissingAction,
             body,
@@ -301,7 +315,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let Ok(action) = NatsToken::new(raw_action) else {
         warn!("Invalid 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.js,
+            &state.publisher,
             &state.subject_prefix,
             RejectReason::InvalidAction,
             body,
@@ -327,14 +341,10 @@ async fn handle_webhook_inner<P: JetStreamPublisher>(
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert("Nats-Msg-Id", webhook_id.as_str());
 
-    let outcome = publish_event(
-        &state.js,
-        subject,
-        nats_headers,
-        body,
-        state.nats_ack_timeout,
-    )
-    .await;
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .await;
 
     outcome_to_status(outcome)
 }
@@ -348,9 +358,22 @@ mod tests {
     use sha2::Sha256;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use trogon_nats::jetstream::MockJetStreamPublisher;
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+    };
 
     type HmacSha256 = Hmac<Sha256>;
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
 
     const TEST_SECRET: &str = "test-secret";
 
@@ -378,7 +401,7 @@ mod tests {
     }
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
-        router(publisher, &test_config())
+        router(wrap_publisher(publisher), &test_config())
     }
 
     fn webhook_request(body: &[u8], sig: Option<&str>) -> Request<Body> {
@@ -713,7 +736,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let mut config = test_config();
         config.timestamp_tolerance = None;
-        let app = router(publisher.clone(), &config);
+        let app = router(wrap_publisher(publisher.clone()), &config);
 
         let body = serde_json::to_vec(&serde_json::json!({
             "type": "Issue",

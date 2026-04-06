@@ -25,12 +25,30 @@ pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
 }
 
 #[cfg(not(coverage))]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ProvisionObjectStoreError {
-    #[error("failed to create object store: {0}")]
-    Create(#[source] async_nats::jetstream::context::CreateObjectStoreError),
-    #[error("failed to get existing object store: {0}")]
-    Get(#[source] async_nats::jetstream::context::ObjectStoreError),
+    Create(async_nats::jetstream::context::CreateObjectStoreError),
+    Get(async_nats::jetstream::context::ObjectStoreError),
+}
+
+#[cfg(not(coverage))]
+impl std::fmt::Display for ProvisionObjectStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Create(e) => write!(f, "failed to create object store: {e}"),
+            Self::Get(e) => write!(f, "failed to get existing object store: {e}"),
+        }
+    }
+}
+
+#[cfg(not(coverage))]
+impl Error for ProvisionObjectStoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Create(e) => Some(e),
+            Self::Get(e) => Some(e),
+        }
+    }
 }
 
 #[cfg(not(coverage))]
@@ -65,7 +83,11 @@ impl ObjectStorePut for NatsObjectStore {
     type Error = async_nats::jetstream::object_store::PutError;
     type Info = async_nats::jetstream::object_store::ObjectInfo;
 
-    async fn put<R: AsyncRead + Unpin + Send>(&self, name: &str, data: &mut R) -> Result<Self::Info, Self::Error> {
+    async fn put<R: AsyncRead + Unpin + Send>(
+        &self,
+        name: &str,
+        data: &mut R,
+    ) -> Result<Self::Info, Self::Error> {
         self.store.put(name, data).await
     }
 }

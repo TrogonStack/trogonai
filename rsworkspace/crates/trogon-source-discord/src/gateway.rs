@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::HeaderMap;
@@ -7,8 +6,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use tracing::{debug, warn};
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::JetStreamPublisher;
-use trogon_nats::jetstream::publish_event;
+use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use crate::constants::{NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
 
@@ -23,16 +21,20 @@ struct GatewayPayload<'a> {
     d: Option<&'a RawValue>,
 }
 
-pub struct GatewayBridge<P: JetStreamPublisher> {
-    js: Arc<P>,
+pub struct GatewayBridge<P: JetStreamPublisher, S: ObjectStorePut> {
+    publisher: ClaimCheckPublisher<P, S>,
     subject_prefix: NatsToken,
     nats_ack_timeout: Duration,
 }
 
-impl<P: JetStreamPublisher> GatewayBridge<P> {
-    pub fn new(js: Arc<P>, subject_prefix: NatsToken, nats_ack_timeout: Duration) -> Self {
+impl<P: JetStreamPublisher, S: ObjectStorePut> GatewayBridge<P, S> {
+    pub fn new(
+        publisher: ClaimCheckPublisher<P, S>,
+        subject_prefix: NatsToken,
+        nats_ack_timeout: Duration,
+    ) -> Self {
         Self {
-            js,
+            publisher,
             subject_prefix,
             nats_ack_timeout,
         }
@@ -92,14 +94,10 @@ impl<P: JetStreamPublisher> GatewayBridge<P> {
             headers.insert(async_nats::header::NATS_MESSAGE_ID, id.as_str());
         }
 
-        let outcome = publish_event(
-            self.js.as_ref(),
-            subject,
-            headers,
-            payload,
-            self.nats_ack_timeout,
-        )
-        .await;
+        let outcome = self
+            .publisher
+            .publish_event(subject, headers, payload, self.nats_ack_timeout)
+            .await;
 
         if outcome.is_ok() {
             debug!(event = event_name, "published gateway event to NATS");
@@ -191,23 +189,36 @@ fn extract_dedup_id(event_name: &str, data: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_nats::jetstream::MockJetStreamPublisher;
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+    };
 
-    fn bridge() -> GatewayBridge<MockJetStreamPublisher> {
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
+
+    fn bridge() -> GatewayBridge<MockJetStreamPublisher, MockObjectStore> {
         GatewayBridge::new(
-            Arc::new(MockJetStreamPublisher::new()),
+            wrap_publisher(MockJetStreamPublisher::new()),
             NatsToken::new("discord").unwrap(),
             Duration::from_secs(5),
         )
     }
 
     fn bridge_with_mock() -> (
-        GatewayBridge<MockJetStreamPublisher>,
+        GatewayBridge<MockJetStreamPublisher, MockObjectStore>,
         MockJetStreamPublisher,
     ) {
         let mock = MockJetStreamPublisher::new();
         let b = GatewayBridge::new(
-            Arc::new(mock.clone()),
+            wrap_publisher(mock.clone()),
             NatsToken::new("discord").unwrap(),
             Duration::from_secs(5),
         );
@@ -217,12 +228,12 @@ mod tests {
     fn bridge_with_prefix(
         prefix: &str,
     ) -> (
-        GatewayBridge<MockJetStreamPublisher>,
+        GatewayBridge<MockJetStreamPublisher, MockObjectStore>,
         MockJetStreamPublisher,
     ) {
         let mock = MockJetStreamPublisher::new();
         let b = GatewayBridge::new(
-            Arc::new(mock.clone()),
+            wrap_publisher(mock.clone()),
             NatsToken::new(prefix).unwrap(),
             Duration::from_secs(5),
         );
