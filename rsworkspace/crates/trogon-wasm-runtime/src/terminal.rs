@@ -48,7 +48,9 @@ impl WasmTerminal {
     pub fn snapshot(&self) -> TerminalOutputResponse {
         let buf = self.output_buf.lock().unwrap_or_else(|e| e.into_inner());
         let output = String::from_utf8_lossy(&buf).into_owned();
-        let truncated = self.was_truncated.load(std::sync::atomic::Ordering::Relaxed);
+        let truncated = self
+            .was_truncated
+            .load(std::sync::atomic::Ordering::Relaxed);
         let exit_status = self.exit_status.clone().or_else(|| {
             if let TerminalKind::Wasm { ref exit_arc } = self.kind {
                 exit_arc.get().cloned()
@@ -85,10 +87,12 @@ impl WasmTerminal {
     /// Returns `true` on success, `false` for WASM terminals (no stdin) or on error.
     pub async fn write_stdin(&mut self, data: &[u8]) -> bool {
         use tokio::io::AsyncWriteExt;
-        if let TerminalKind::Native { ref mut stdin, .. } = self.kind {
-            if let Some(ref mut s) = stdin {
-                return s.write_all(data).await.is_ok();
-            }
+        if let TerminalKind::Native {
+            stdin: Some(ref mut s),
+            ..
+        } = self.kind
+        {
+            return s.write_all(data).await.is_ok();
         }
         false
     }
@@ -127,7 +131,8 @@ impl WasmTerminal {
                     // aborted and will never write its own exit status.
                     // OnceLock::set is a no-op if the task already wrote its status
                     // (race between abort() and the task's final write).
-                    let _ = exit_arc.set(TerminalExitStatus::new().signal(Some("SIGKILL".to_string())));
+                    let _ =
+                        exit_arc.set(TerminalExitStatus::new().signal(Some("SIGKILL".to_string())));
                     true
                 } else {
                     false

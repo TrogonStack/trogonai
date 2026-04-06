@@ -21,9 +21,7 @@ impl WasmSession {
     /// Any path traversal that escapes the sandbox root is rejected.
     pub fn resolve_path(&self, agent_path: &Path) -> Option<PathBuf> {
         // Strip leading `/` so paths like `/workspace/file.txt` map into the sandbox.
-        let relative = agent_path
-            .strip_prefix("/")
-            .unwrap_or(agent_path);
+        let relative = agent_path.strip_prefix("/").unwrap_or(agent_path);
 
         let resolved = self.dir.join(relative);
 

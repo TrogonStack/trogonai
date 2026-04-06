@@ -1,5 +1,5 @@
 use crate::WasmRuntime;
-use acp_nats::nats::{ClientMethod, parse_client_subject};
+use acp_nats::nats::{parse_client_subject, ClientMethod};
 use agent_client_protocol::{
     CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
     RequestPermissionRequest, SessionNotification, TerminalOutputRequest,
@@ -151,7 +151,10 @@ pub async fn run(
     }
 
     // Drain all in-flight tasks before returning.
-    info!(tasks = tasks.len(), "Waiting for in-flight tasks to complete");
+    info!(
+        tasks = tasks.len(),
+        "Waiting for in-flight tasks to complete"
+    );
     tasks.join_all().await;
 
     // Clean up all sessions on graceful shutdown.
@@ -288,7 +291,9 @@ async fn dispatch(
             }
             match serde_json::from_slice::<WriteStdinRequest>(&payload) {
                 Ok(req) => {
-                    let result = runtime.handle_write_to_terminal(&req.terminal_id, &req.data).await;
+                    let result = runtime
+                        .handle_write_to_terminal(&req.terminal_id, &req.data)
+                        .await;
                     reply_result(&nats, reply, result).await;
                 }
                 Err(e) => {
