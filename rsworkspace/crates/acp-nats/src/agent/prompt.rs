@@ -17,6 +17,7 @@ use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
+use crate::prompt_event::{PromptPayload, UserContentBlock};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
@@ -113,13 +114,14 @@ where
     result
 }
 
+#[allow(dead_code)]
 async fn handle_nats<N, C, J, S>(
     bridge: &Bridge<N, C, J>,
     args: &PromptRequest,
     serializer: &S,
     session_id: &AcpSessionId,
     prefix: &crate::acp_prefix::AcpPrefix,
-    req_id: &str,
+    req_id: &ReqId,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
     N: PublishClient + SubscribeClient + FlushClient,
@@ -165,7 +167,7 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
 
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id);
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
