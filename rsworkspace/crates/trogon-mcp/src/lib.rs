@@ -16,4 +16,7 @@
 
 mod client;
 
-pub use client::{McpClient, McpTool};
+pub use client::{McpCallTool, McpClient, McpTool};
+
+#[cfg(feature = "test-support")]
+pub use client::mock::MockMcpClient;
