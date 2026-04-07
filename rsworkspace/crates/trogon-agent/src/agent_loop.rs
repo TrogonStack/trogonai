@@ -236,7 +236,7 @@ pub struct AgentLoop {
     pub tool_dispatcher: Arc<dyn ToolDispatcher>,
     /// Shared HTTP context used by handlers for non-tool operations (e.g.
     /// fetching the memory file from GitHub).
-    pub tool_context: Arc<crate::tools::ToolContext>,
+    pub tool_context: Arc<dyn crate::tools::AgentConfig>,
     /// GitHub repo owner for pre-fetching the memory file in handlers
     /// that don't have an implicit repo (e.g. Linear issue triage).
     pub memory_owner: Option<String>,

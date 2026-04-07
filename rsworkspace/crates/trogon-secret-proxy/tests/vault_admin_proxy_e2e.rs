@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -73,11 +74,11 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .expect("Failed to connect to NATS");
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
@@ -87,7 +88,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&jetstream),
+        jetstream: jetstream.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -102,7 +103,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&jetstream);
+    let worker_js = jetstream.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
@@ -200,10 +201,10 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
         .await
         .unwrap();
 
@@ -212,7 +213,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&jetstream),
+        jetstream: jetstream.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(5),
@@ -226,7 +227,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
         .timeout(Duration::from_secs(10))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&jetstream);
+    let worker_js = jetstream.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
@@ -347,10 +348,10 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .expect("Failed to connect to NATS");
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
@@ -359,7 +360,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&jetstream),
+        jetstream: jetstream.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -373,7 +374,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&jetstream);
+    let worker_js = jetstream.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");

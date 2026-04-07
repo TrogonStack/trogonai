@@ -4,10 +4,8 @@
 //! wraps them as [`OutboundHttpRequest`] messages, publishes to JetStream,
 //! and waits on a Core NATS reply subject for the worker's response.
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -22,11 +20,16 @@ use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
 use crate::provider;
 use crate::subjects;
 use trogon_nats::headers_with_trace_context;
+use trogon_nats::{SubscribeClient, jetstream::JetStreamPublisher};
 
 #[derive(Clone)]
-pub struct ProxyState {
-    pub nats: async_nats::Client,
-    pub jetstream: Arc<jetstream::Context>,
+pub struct ProxyState<N, J>
+where
+    N: SubscribeClient,
+    J: JetStreamPublisher,
+{
+    pub nats: N,
+    pub jetstream: J,
     pub prefix: String,
     pub outbound_subject: String,
     pub worker_timeout: Duration,
@@ -36,17 +39,25 @@ pub struct ProxyState {
 }
 
 /// Build the axum router for the HTTP proxy.
-pub fn router(state: ProxyState) -> Router {
+pub fn router<N, J>(state: ProxyState<N, J>) -> Router
+where
+    N: SubscribeClient,
+    J: JetStreamPublisher,
+{
     Router::new()
-        .route("/{provider}/{*path}", any(handle_request))
+        .route("/{provider}/{*path}", any(handle_request::<N, J>))
         .with_state(state)
 }
 
-async fn handle_request(
-    State(state): State<ProxyState>,
+async fn handle_request<N, J>(
+    State(state): State<ProxyState<N, J>>,
     Path((provider, path)): Path<(String, String)>,
     req: Request,
-) -> Result<Response<Body>, ProxyError> {
+) -> Result<Response<Body>, ProxyError>
+where
+    N: SubscribeClient,
+    J: JetStreamPublisher,
+{
     // An empty path (e.g. from `GET /anthropic/`) has no meaningful endpoint to
     // forward to.  Reject immediately with 400 rather than publishing to
     // JetStream and burning a worker slot on a request that will always fail.
@@ -492,5 +503,128 @@ mod tests {
                 .contains("boom")
         );
         assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
+    }
+
+    // ── Handler tests using mocks ─────────────────────────────────────────────
+
+    mod handler_tests {
+        use super::*;
+        use tower::util::ServiceExt as _;
+        use trogon_nats::{MockNatsClient, jetstream::MockJetStreamPublisher};
+
+        fn make_app(
+            nats: MockNatsClient,
+            js: MockJetStreamPublisher,
+            base_url_override: Option<String>,
+        ) -> axum::Router {
+            let state = ProxyState {
+                nats,
+                jetstream: js,
+                prefix: "trogon".to_string(),
+                outbound_subject: "trogon.outbound.http".to_string(),
+                worker_timeout: Duration::from_secs(5),
+                base_url_override,
+            };
+            router(state)
+        }
+
+        #[tokio::test]
+        async fn unknown_provider_returns_502_without_touching_nats() {
+            let nats = MockNatsClient::new();
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats.clone(), js, None);
+
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/fakeai/v1/generate")
+                .body(axum::body::Body::empty())
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+            assert!(nats.subscribed_to().is_empty(), "no subscribe on unknown provider");
+        }
+
+        #[tokio::test]
+        async fn happy_path_returns_upstream_status_and_body() {
+            use crate::messages::OutboundHttpResponse;
+
+            let nats = MockNatsClient::new();
+            let tx = nats.inject_messages();
+
+            // Pre-send the worker reply before the handler even subscribes.
+            let upstream = OutboundHttpResponse {
+                status: 201,
+                headers: vec![("content-type".to_string(), "application/json".to_string())],
+                body: b"{\"id\":\"msg-1\"}".to_vec(),
+                error: None,
+            };
+            let reply_bytes = bytes::Bytes::from(serde_json::to_vec(&upstream).unwrap());
+            tx.unbounded_send(async_nats::Message {
+                subject: "reply.ignored".into(),
+                reply: None,
+                payload: reply_bytes.clone(),
+                headers: None,
+                length: reply_bytes.len(),
+                status: None,
+                description: None,
+            })
+            .unwrap();
+
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js.clone(), Some("http://unused.local".to_string()));
+
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer tok_test_abc")
+                .body(axum::body::Body::from("{}"))
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::CREATED);
+            assert_eq!(js.published_subjects().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn worker_error_response_maps_to_expected_status() {
+            use crate::messages::OutboundHttpResponse;
+
+            let nats = MockNatsClient::new();
+            let tx = nats.inject_messages();
+
+            // Worker returns a 401 error response.
+            let upstream = OutboundHttpResponse {
+                status: 401,
+                headers: vec![],
+                body: vec![],
+                error: Some("Unauthorized".to_string()),
+            };
+            let reply_bytes = bytes::Bytes::from(serde_json::to_vec(&upstream).unwrap());
+            tx.unbounded_send(async_nats::Message {
+                subject: "reply.ignored".into(),
+                reply: None,
+                payload: reply_bytes.clone(),
+                headers: None,
+                length: reply_bytes.len(),
+                status: None,
+                description: None,
+            })
+            .unwrap();
+
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js, Some("http://unused.local".to_string()));
+
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("authorization", "Bearer tok_test")
+                .body(axum::body::Body::empty())
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
     }
 }

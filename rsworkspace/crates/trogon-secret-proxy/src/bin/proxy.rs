@@ -14,9 +14,9 @@
 //! | `PROXY_BASE_URL_OVERRIDE` | —         | Override AI provider base URL (tests)|
 //! | `RUST_LOG`                | `info`    | Log filter (tracing-subscriber)      |
 
-use std::sync::Arc;
 use std::time::Duration;
 
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsConfig, connect};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -50,12 +50,12 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
-
+    let js_context = async_nats::jetstream::new(nats.clone());
     let outbound_subject = subjects::outbound(&prefix);
-    stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
+    stream::ensure_stream(&js_context, &prefix, &outbound_subject)
         .await
         .expect("Failed to ensure JetStream stream");
+    let jetstream = NatsJetStreamClient::new(js_context);
 
     tracing::info!(
         port,

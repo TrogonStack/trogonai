@@ -8,6 +8,9 @@
 //! The underlying JetStream KV bucket (`INCIDENTS`) keeps 10 revisions per key,
 //! so recent history is preserved for auditing.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -25,6 +28,27 @@ impl std::fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+/// Abstraction over an incident state store.
+///
+/// Implementing this trait allows replacing the real NATS KV backend with a
+/// lightweight in-memory fake in unit tests.
+pub trait IncidentRepository: Clone + Send + Sync + 'static {
+    fn upsert<'a>(
+        &'a self,
+        id: &'a str,
+        json: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>;
+
+    fn list<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>>;
+}
 
 /// NATS KV-backed store for incident state.
 #[derive(Clone)]
@@ -95,6 +119,83 @@ impl IncidentStore {
             }
         }
         Ok(results)
+    }
+}
+
+impl IncidentRepository for IncidentStore {
+    fn upsert<'a>(
+        &'a self,
+        id: &'a str,
+        json: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.upsert(id, json).await })
+    }
+
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.get(id).await })
+    }
+
+    fn list<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.list().await })
+    }
+}
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    pub struct MockIncidentStore {
+        data: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    }
+
+    impl MockIncidentStore {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn snapshot(&self) -> HashMap<String, Vec<u8>> {
+            self.data.lock().unwrap().clone()
+        }
+    }
+
+    impl IncidentRepository for MockIncidentStore {
+        fn upsert<'a>(
+            &'a self,
+            id: &'a str,
+            json: &'a [u8],
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let id = id.to_string();
+            let json = json.to_vec();
+            Box::pin(async move {
+                data.lock().unwrap().insert(id, json);
+                Ok(())
+            })
+        }
+
+        fn get<'a>(
+            &'a self,
+            id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let id = id.to_string();
+            Box::pin(async move { Ok(data.lock().unwrap().get(&id).cloned()) })
+        }
+
+        fn list<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            Box::pin(async move { Ok(data.lock().unwrap().values().cloned().collect()) })
+        }
     }
 }
 

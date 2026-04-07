@@ -53,15 +53,16 @@ pub async fn fetch_memory(
 ) -> Option<String> {
     let url = format!(
         "{}/github/repos/{owner}/{repo}/contents/{path}",
-        agent.proxy_url,
+        agent.tool_context.proxy_url(),
     );
 
     let response = agent
-        .http_client
+        .tool_context
+        .http_client()
         .get(&url)
         .header(
             "Authorization",
-            format!("Bearer {}", agent.tool_context.github_token),
+            format!("Bearer {}", agent.tool_context.github_token()),
         )
         .header("Accept", "application/vnd.github.v3+json")
         .send()
@@ -212,26 +213,33 @@ mod tests {
         });
 
         // Agent has memory_owner/repo set so fetch_memory is attempted.
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::DefaultToolDispatcher;
         let http_client = reqwest::Client::new();
-        let agent = AgentLoop {
+        let tool_ctx = Arc::new(crate::tools::ToolContext {
             http_client: http_client.clone(),
             proxy_url: server.base_url(),
-            anthropic_token: String::new(),
+            github_token: "tok_github_prod_test01".to_string(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        let agent = AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http_client,
+                server.base_url(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(crate::tools::ToolContext {
-                http_client,
-                proxy_url: server.base_url(),
-                github_token: "tok_github_prod_test01".to_string(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: Some("owner".to_string()),
             memory_repo: Some("repo".to_string()),
             memory_path: Some(".trogon/memory.md".to_string()), // agent default
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
         };
         let mut automation = make_automation(vec![]);
@@ -242,26 +250,33 @@ mod tests {
     }
 
     fn make_agent(proxy_url: &str) -> AgentLoop {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::DefaultToolDispatcher;
         let http_client = reqwest::Client::new();
-        AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: http_client.clone(),
             proxy_url: proxy_url.to_string(),
-            anthropic_token: String::new(),
+            github_token: "tok_github_prod_test01".to_string(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http_client,
+                proxy_url.to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client,
-                proxy_url: proxy_url.to_string(),
-                github_token: "tok_github_prod_test01".to_string(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
         }
     }
@@ -446,7 +461,7 @@ pub async fn run_automation(
         })
         .collect();
     let (auto_mcp_defs, auto_mcp_dispatch) =
-        crate::runner::init_mcp_servers(&agent.http_client, &auto_mcp_configs).await;
+        crate::runner::init_mcp_servers(agent.tool_context.http_client(), &auto_mcp_configs).await;
     tools.extend(auto_mcp_defs);
 
     // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
@@ -457,21 +472,20 @@ pub async fn run_automation(
         let mut merged_dispatch = agent.mcp_dispatch.clone();
         merged_dispatch.extend(auto_mcp_dispatch);
         merged = AgentLoop {
-            http_client: agent.http_client.clone(),
-            proxy_url: agent.proxy_url.clone(),
-            anthropic_token: agent.anthropic_token.clone(),
+            anthropic_client: Arc::clone(&agent.anthropic_client),
             model: automation
                 .model
                 .clone()
                 .unwrap_or_else(|| agent.model.clone()),
             max_iterations: agent.max_iterations,
+            tool_dispatcher: Arc::clone(&agent.tool_dispatcher),
             tool_context: Arc::clone(&agent.tool_context),
             memory_owner: agent.memory_owner.clone(),
             memory_repo: agent.memory_repo.clone(),
             memory_path: agent.memory_path.clone(),
             mcp_tool_defs: agent.mcp_tool_defs.clone(),
             mcp_dispatch: merged_dispatch,
-            split_client: agent.split_client.clone(),
+            flag_client: Arc::clone(&agent.flag_client),
             tenant_id: agent.tenant_id.clone(),
         };
         &merged

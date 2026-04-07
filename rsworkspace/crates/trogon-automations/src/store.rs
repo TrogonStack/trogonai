@@ -11,6 +11,9 @@
 //! [`AutomationStore::watch`] returns a stream of all changes across all
 //! tenants — the runner filters by its own `tenant_id`.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
 use futures_util::StreamExt as _;
@@ -165,6 +168,189 @@ impl AutomationStore {
             .into_iter()
             .filter(|a| a.enabled && crate::trigger::matches(&a.trigger, nats_subject, payload))
             .collect())
+    }
+}
+
+// ── Repository trait ──────────────────────────────────────────────────────────
+
+/// Abstraction over an automation configuration store.
+pub trait AutomationRepository: Clone + Send + Sync + 'static {
+    fn put<'a>(
+        &'a self,
+        automation: &'a Automation,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+
+    fn get<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>>;
+
+    fn delete<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>;
+
+    fn matching<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        nats_subject: &'a str,
+        payload: &'a serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>;
+}
+
+impl AutomationRepository for AutomationStore {
+    fn put<'a>(
+        &'a self,
+        automation: &'a Automation,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.put(automation).await })
+    }
+
+    fn get<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.get(tenant_id, id).await })
+    }
+
+    fn delete<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.delete(tenant_id, id).await })
+    }
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.list(tenant_id).await })
+    }
+
+    fn matching<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        nats_subject: &'a str,
+        payload: &'a serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.matching(tenant_id, nats_subject, payload).await })
+    }
+}
+
+// ── In-memory mock (test-only) ────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    /// HashMap-backed in-memory automation store for unit tests.
+    #[derive(Clone, Default)]
+    pub struct MockAutomationStore {
+        data: Arc<Mutex<HashMap<String, Automation>>>,
+    }
+
+    impl MockAutomationStore {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn insert(&self, automation: Automation) {
+            let key = format!("{}.{}", automation.tenant_id, automation.id);
+            self.data.lock().unwrap().insert(key, automation);
+        }
+
+        pub fn snapshot(&self) -> HashMap<String, Automation> {
+            self.data.lock().unwrap().clone()
+        }
+    }
+
+    impl AutomationRepository for MockAutomationStore {
+        fn put<'a>(
+            &'a self,
+            automation: &'a Automation,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let automation = automation.clone();
+            Box::pin(async move {
+                let key = format!("{}.{}", automation.tenant_id, automation.id);
+                data.lock().unwrap().insert(key, automation);
+                Ok(())
+            })
+        }
+
+        fn get<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let key = format!("{tenant_id}.{id}");
+            Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let key = format!("{tenant_id}.{id}");
+            Box::pin(async move {
+                data.lock().unwrap().remove(&key);
+                Ok(())
+            })
+        }
+
+        fn list<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let prefix = format!("{tenant_id}.");
+            Box::pin(async move {
+                let guard = data.lock().unwrap();
+                Ok(guard
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(&prefix))
+                    .map(|(_, v)| v.clone())
+                    .collect())
+            })
+        }
+
+        fn matching<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            nats_subject: &'a str,
+            payload: &'a serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let prefix = format!("{tenant_id}.");
+            let nats_subject = nats_subject.to_string();
+            let payload = payload.clone();
+            Box::pin(async move {
+                let guard = data.lock().unwrap();
+                Ok(guard
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(&prefix))
+                    .map(|(_, v)| v.clone())
+                    .filter(|a| {
+                        a.enabled
+                            && crate::trigger::matches(&a.trigger, &nats_subject, &payload)
+                    })
+                    .collect())
+            })
+        }
     }
 }
 

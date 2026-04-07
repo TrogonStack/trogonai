@@ -9,33 +9,38 @@ use std::sync::Arc;
 use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
-    agent_loop::{AgentError, AgentLoop, Message},
-    tools::{ToolContext, tool_def},
+    agent_loop::{AgentError, AgentLoop, Message, ReqwestAnthropicClient},
+    flag_client::AlwaysOnFlagClient,
+    tools::{DefaultToolDispatcher, ToolContext, tool_def},
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn make_agent(proxy_url: &str) -> AgentLoop {
     let http_client = reqwest::Client::new();
-    AgentLoop {
+    let tool_ctx = Arc::new(ToolContext {
         http_client: http_client.clone(),
         proxy_url: proxy_url.to_string(),
-        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: "tok_github_prod_test01".to_string(),
+        linear_token: "tok_linear_prod_test01".to_string(),
+        slack_token: String::new(),
+    });
+    AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http_client,
+            proxy_url.to_string(),
+            "tok_anthropic_prod_test01".to_string(),
+        )),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
-        tool_context: Arc::new(ToolContext {
-            http_client,
-            proxy_url: proxy_url.to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        }),
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
+        flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
     }
 }
@@ -188,25 +193,29 @@ async fn agent_loop_max_iterations_reached() {
     });
 
     let http_client = reqwest::Client::new();
-    let agent = AgentLoop {
+    let tool_ctx = Arc::new(ToolContext {
         http_client: http_client.clone(),
         proxy_url: server.base_url(),
-        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: String::new(),
+        linear_token: String::new(),
+        slack_token: String::new(),
+    });
+    let agent = AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http_client,
+            server.base_url(),
+            "tok_anthropic_prod_test01".to_string(),
+        )),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 2, // low limit
-        tool_context: Arc::new(ToolContext {
-            http_client,
-            proxy_url: server.base_url(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        }),
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
+        flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
     };
 
@@ -447,25 +456,29 @@ async fn run_chat_max_iterations_reached() {
     });
 
     let http_client = reqwest::Client::new();
-    let agent = AgentLoop {
+    let tool_ctx = Arc::new(ToolContext {
         http_client: http_client.clone(),
         proxy_url: server.base_url(),
-        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: String::new(),
+        linear_token: String::new(),
+        slack_token: String::new(),
+    });
+    let agent = AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http_client,
+            server.base_url(),
+            "tok_anthropic_prod_test01".to_string(),
+        )),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 2,
-        tool_context: Arc::new(ToolContext {
-            http_client,
-            proxy_url: server.base_url(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        }),
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
+        flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
     };
 

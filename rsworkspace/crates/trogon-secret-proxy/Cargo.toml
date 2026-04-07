@@ -24,6 +24,7 @@ httpmock = "0.7"
 testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 
 [[bin]]
 name = "proxy"

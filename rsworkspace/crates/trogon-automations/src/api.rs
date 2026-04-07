@@ -27,15 +27,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::automation::{Automation, McpServer, Visibility};
-use crate::runs::RunStore;
-use crate::store::AutomationStore;
+use crate::runs::RunRepository;
+use crate::store::AutomationRepository;
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct AppState {
-    pub store: AutomationStore,
-    pub run_store: RunStore,
+pub struct AppState<A: AutomationRepository, R: RunRepository> {
+    pub store: A,
+    pub run_store: R,
 }
 
 // ── Tenant extraction ─────────────────────────────────────────────────────────
@@ -192,7 +192,10 @@ fn is_leap(y: u64) -> bool {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_automations(headers: HeaderMap, State(state): State<AppState>) -> Response {
+async fn list_automations<A: AutomationRepository, R: RunRepository>(
+    headers: HeaderMap,
+    State(state): State<AppState<A, R>>,
+) -> Response {
     let tid = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -206,9 +209,9 @@ async fn list_automations(headers: HeaderMap, State(state): State<AppState>) -> 
     }
 }
 
-async fn create_automation(
+async fn create_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     axum::Json(body): axum::Json<CreateRequest>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -241,9 +244,9 @@ async fn create_automation(
     }
 }
 
-async fn get_automation(
+async fn get_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -257,9 +260,9 @@ async fn get_automation(
     }
 }
 
-async fn update_automation(
+async fn update_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateRequest>,
 ) -> Response {
@@ -297,9 +300,9 @@ async fn update_automation(
     }
 }
 
-async fn delete_automation(
+async fn delete_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -317,23 +320,28 @@ async fn delete_automation(
     }
 }
 
-async fn enable_automation(
+async fn enable_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
 ) -> Response {
     set_enabled(headers, state, id, true).await
 }
 
-async fn disable_automation(
+async fn disable_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
 ) -> Response {
     set_enabled(headers, state, id, false).await
 }
 
-async fn set_enabled(headers: HeaderMap, state: AppState, id: String, enabled: bool) -> Response {
+async fn set_enabled<A: AutomationRepository, R: RunRepository>(
+    headers: HeaderMap,
+    state: AppState<A, R>,
+    id: String,
+    enabled: bool,
+) -> Response {
     let tid = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -362,9 +370,9 @@ pub struct RunsQuery {
     pub automation_id: Option<String>,
 }
 
-async fn list_runs(
+async fn list_runs<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Query(q): Query<RunsQuery>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -377,9 +385,9 @@ async fn list_runs(
     }
 }
 
-async fn list_runs_for_automation(
+async fn list_runs_for_automation<A: AutomationRepository, R: RunRepository>(
     headers: HeaderMap,
-    State(state): State<AppState>,
+    State(state): State<AppState<A, R>>,
     Path(id): Path<String>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -392,7 +400,10 @@ async fn list_runs_for_automation(
     }
 }
 
-async fn get_stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
+async fn get_stats<A: AutomationRepository, R: RunRepository>(
+    headers: HeaderMap,
+    State(state): State<AppState<A, R>>,
+) -> Response {
     let tid = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -405,29 +416,315 @@ async fn get_stats(headers: HeaderMap, State(state): State<AppState>) -> Respons
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-pub fn router(state: AppState) -> Router {
+pub fn router<A: AutomationRepository, R: RunRepository>(state: AppState<A, R>) -> Router {
     Router::new()
         .route(
             "/automations",
-            get(list_automations).post(create_automation),
+            get(list_automations::<A, R>).post(create_automation::<A, R>),
         )
         .route(
             "/automations/{id}",
-            get(get_automation)
-                .put(update_automation)
-                .delete(delete_automation),
+            get(get_automation::<A, R>)
+                .put(update_automation::<A, R>)
+                .delete(delete_automation::<A, R>),
         )
-        .route("/automations/{id}/enable", patch(enable_automation))
-        .route("/automations/{id}/disable", patch(disable_automation))
-        .route("/automations/{id}/runs", get(list_runs_for_automation))
-        .route("/runs", get(list_runs))
-        .route("/stats", get(get_stats))
+        .route(
+            "/automations/{id}/enable",
+            patch(enable_automation::<A, R>),
+        )
+        .route(
+            "/automations/{id}/disable",
+            patch(disable_automation::<A, R>),
+        )
+        .route(
+            "/automations/{id}/runs",
+            get(list_runs_for_automation::<A, R>),
+        )
+        .route("/runs", get(list_runs::<A, R>))
+        .route("/stats", get(get_stats::<A, R>))
         .with_state(state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runs::mock::MockRunStore;
+    use crate::store::mock::MockAutomationStore;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt as _;
+
+    fn mock_app(store: MockAutomationStore, run_store: MockRunStore) -> axum::Router {
+        router(AppState { store, run_store })
+    }
+
+    fn get_req(path: &str, tenant: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(path)
+            .header("x-tenant-id", tenant)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn sample_automation(id: &str, tenant: &str) -> crate::automation::Automation {
+        crate::automation::Automation {
+            id: id.to_string(),
+            tenant_id: tenant.to_string(),
+            name: "My Automation".to_string(),
+            trigger: "github.push".to_string(),
+            prompt: "Do something".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            mcp_servers: vec![],
+            enabled: true,
+            visibility: crate::automation::Visibility::default(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    // list_automations
+
+    #[tokio::test]
+    async fn list_automations_returns_empty_when_none() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let resp = app.oneshot(get_req("/automations", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn list_automations_returns_tenant_automations() {
+        let store = MockAutomationStore::new();
+        store.insert(sample_automation("a1", "acme"));
+        store.insert(sample_automation("a2", "acme"));
+        store.insert(sample_automation("a3", "other"));
+        let app = mock_app(store, MockRunStore::new());
+        let resp = app.oneshot(get_req("/automations", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_automations_missing_tenant_returns_400() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/automations")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // create_automation
+
+    #[tokio::test]
+    async fn create_automation_returns_201_and_persists() {
+        let store = MockAutomationStore::new();
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "Test Auto",
+            "trigger": "github.push",
+            "prompt": "Run checks"
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json["name"], "Test Auto");
+        assert_eq!(json["tenant_id"], "acme");
+        assert_eq!(store.snapshot().len(), 1);
+    }
+
+    // get_automation
+
+    #[tokio::test]
+    async fn get_automation_returns_404_when_not_found() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let resp = app
+            .oneshot(get_req("/automations/no-such", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_automation_returns_automation() {
+        let store = MockAutomationStore::new();
+        store.insert(sample_automation("a1", "acme"));
+        let app = mock_app(store, MockRunStore::new());
+        let resp = app
+            .oneshot(get_req("/automations/a1", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["id"], "a1");
+    }
+
+    // update_automation
+
+    #[tokio::test]
+    async fn update_automation_returns_404_when_not_found() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "New", "trigger": "x", "prompt": "y", "enabled": true
+        });
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/automations/no-such")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_automation_replaces_fields() {
+        let store = MockAutomationStore::new();
+        store.insert(sample_automation("a1", "acme"));
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "Updated Name",
+            "trigger": "github.push",
+            "prompt": "New prompt",
+            "enabled": false
+        });
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/automations/a1")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let snap = store.snapshot();
+        assert_eq!(snap["acme.a1"].name, "Updated Name");
+        assert!(!snap["acme.a1"].enabled);
+    }
+
+    // delete_automation
+
+    #[tokio::test]
+    async fn delete_automation_returns_404_when_not_found() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/automations/no-such")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_automation_removes_and_returns_204() {
+        let store = MockAutomationStore::new();
+        store.insert(sample_automation("a1", "acme"));
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/automations/a1")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(store.snapshot().is_empty());
+    }
+
+    // enable / disable
+
+    #[tokio::test]
+    async fn enable_automation_sets_enabled_true() {
+        let store = MockAutomationStore::new();
+        let mut auto = sample_automation("a1", "acme");
+        auto.enabled = false;
+        store.insert(auto);
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/automations/a1/enable")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(store.snapshot()["acme.a1"].enabled);
+    }
+
+    #[tokio::test]
+    async fn disable_automation_sets_enabled_false() {
+        let store = MockAutomationStore::new();
+        store.insert(sample_automation("a1", "acme"));
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/automations/a1/disable")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(!store.snapshot()["acme.a1"].enabled);
+    }
+
+    // runs
+
+    #[tokio::test]
+    async fn list_runs_returns_empty_when_none() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let resp = app.oneshot(get_req("/runs", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    // stats
+
+    #[tokio::test]
+    async fn get_stats_returns_zero_counts_when_empty() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let resp = app.oneshot(get_req("/stats", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total"], 0);
+        assert_eq!(json["successful_7d"], 0);
+        assert_eq!(json["failed_7d"], 0);
+    }
 
     #[test]
     fn tenant_id_missing_header_returns_err() {

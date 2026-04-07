@@ -11,12 +11,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream;
+use async_nats::HeaderMap;
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
 use futures_util::StreamExt;
 use reqwest::Client as ReqwestClient;
+use trogon_nats::PublishClient;
+use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsMessageOf};
+use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef, JsRequestMessage};
 use trogon_vault::VaultStore;
 
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
@@ -32,15 +35,18 @@ const HTTP_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 ///
 /// Pull messages from JetStream, resolve tokens, forward to AI providers.
 /// Runs until the process exits or NATS disconnects.
-pub async fn run<V>(
-    jetstream: Arc<jetstream::Context>,
-    nats: async_nats::Client,
+pub async fn run<J, N, V>(
+    jetstream: J,
+    nats: N,
     vault: Arc<V>,
     http_client: ReqwestClient,
     consumer_name: &str,
     stream_name: &str,
 ) -> Result<(), WorkerError>
 where
+    J: JetStreamGetStream,
+    JsMessageOf<J>: JsRequestMessage,
+    N: PublishClient,
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
 {
@@ -49,17 +55,14 @@ where
         .await
         .map_err(|e| WorkerError::JetStream(e.to_string()))?;
 
-    let consumer: jetstream::consumer::Consumer<pull::Config> = stream
-        .get_or_create_consumer(
-            consumer_name,
-            pull::Config {
-                durable_name: Some(consumer_name.to_string()),
-                ack_policy: AckPolicy::Explicit,
-                deliver_policy: DeliverPolicy::All,
-                max_deliver: 3,
-                ..Default::default()
-            },
-        )
+    let consumer = stream
+        .create_consumer(pull::Config {
+            durable_name: Some(consumer_name.to_string()),
+            ack_policy: AckPolicy::Explicit,
+            deliver_policy: DeliverPolicy::All,
+            max_deliver: 3,
+            ..Default::default()
+        })
         .await
         .map_err(|e| WorkerError::JetStream(e.to_string()))?;
 
@@ -79,10 +82,10 @@ where
             }
         };
 
-        let subject = msg.subject.clone();
+        let subject = msg.message().subject.clone();
         tracing::debug!(subject = %subject, "Received JetStream message");
 
-        let request: OutboundHttpRequest = match serde_json::from_slice(&msg.payload) {
+        let request: OutboundHttpRequest = match serde_json::from_slice(&msg.message().payload) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to deserialize OutboundHttpRequest; nacking");
@@ -104,7 +107,10 @@ where
             }
         };
 
-        if let Err(e) = nats.publish(reply_to.clone(), payload.into()).await {
+        if let Err(e) = nats
+            .publish_with_headers(reply_to.clone(), HeaderMap::new(), payload.into())
+            .await
+        {
             tracing::error!(
                 reply_to = %reply_to,
                 error = %e,
@@ -120,7 +126,9 @@ where
                 error: Some(format!("Worker failed to publish reply: {}", e)),
             };
             if let Ok(error_payload) = serde_json::to_vec(&error_response) {
-                let _ = nats.publish(reply_to.clone(), error_payload.into()).await;
+                let _ = nats
+                    .publish_with_headers(reply_to.clone(), HeaderMap::new(), error_payload.into())
+                    .await;
             }
         }
 

@@ -3,6 +3,8 @@
 //! Each record is stored under key `{tenant_id}.{run_id}` in the `RUNS` bucket.
 //! The bucket has an 8-day TTL so old records are purged automatically.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::jetstream::{self, kv};
@@ -153,6 +155,147 @@ impl RunStore {
             successful_7d,
             failed_7d,
         })
+    }
+}
+
+// ── Repository trait ──────────────────────────────────────────────────────────
+
+/// Abstraction over a run-history store.
+pub trait RunRepository: Clone + Send + Sync + 'static {
+    fn record<'a>(
+        &'a self,
+        run: &'a RunRecord,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        automation_id: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<RunRecord>, StoreError>> + Send + 'a>>;
+
+    fn stats<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<RunStats, StoreError>> + Send + 'a>>;
+}
+
+impl RunRepository for RunStore {
+    fn record<'a>(
+        &'a self,
+        run: &'a RunRecord,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.record(run).await })
+    }
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        automation_id: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<RunRecord>, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.list(tenant_id, automation_id).await })
+    }
+
+    fn stats<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<RunStats, StoreError>> + Send + 'a>> {
+        Box::pin(async move { self.stats(tenant_id).await })
+    }
+}
+
+// ── In-memory mock (test-only) ────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// Vec-backed in-memory run store for unit tests.
+    #[derive(Clone, Default)]
+    pub struct MockRunStore {
+        data: Arc<Mutex<Vec<RunRecord>>>,
+    }
+
+    impl MockRunStore {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn snapshot(&self) -> Vec<RunRecord> {
+            self.data.lock().unwrap().clone()
+        }
+    }
+
+    impl RunRepository for MockRunStore {
+        fn record<'a>(
+            &'a self,
+            run: &'a RunRecord,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let run = run.clone();
+            Box::pin(async move {
+                data.lock().unwrap().push(run);
+                Ok(())
+            })
+        }
+
+        fn list<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            automation_id: Option<&'a str>,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<RunRecord>, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let tenant_id = tenant_id.to_string();
+            let automation_id = automation_id.map(str::to_string);
+            Box::pin(async move {
+                let guard = data.lock().unwrap();
+                let mut runs: Vec<RunRecord> = guard
+                    .iter()
+                    .filter(|r| r.tenant_id == tenant_id)
+                    .filter(|r| {
+                        automation_id
+                            .as_deref()
+                            .map_or(true, |aid| r.automation_id == aid)
+                    })
+                    .cloned()
+                    .collect();
+                runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+                Ok(runs)
+            })
+        }
+
+        fn stats<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<RunStats, StoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let tenant_id = tenant_id.to_string();
+            Box::pin(async move {
+                let now = now_unix();
+                let seven_days_ago = now.saturating_sub(7 * 86_400);
+                let guard = data.lock().unwrap();
+                let runs: Vec<&RunRecord> =
+                    guard.iter().filter(|r| r.tenant_id == tenant_id).collect();
+                let total = runs.len() as u64;
+                let successful_7d = runs
+                    .iter()
+                    .filter(|r| {
+                        r.started_at >= seven_days_ago && r.status == RunStatus::Success
+                    })
+                    .count() as u64;
+                let failed_7d = runs
+                    .iter()
+                    .filter(|r| {
+                        r.started_at >= seven_days_ago && r.status == RunStatus::Failed
+                    })
+                    .count() as u64;
+                Ok(RunStats {
+                    total,
+                    successful_7d,
+                    failed_7d,
+                })
+            })
+        }
     }
 }
 
