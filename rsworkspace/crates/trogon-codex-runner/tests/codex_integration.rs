@@ -17,7 +17,8 @@ use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
     Agent, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
     ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SetSessionModelRequest, StopReason, TextContent,
+    ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    SetSessionModelRequest, StopReason, TextContent,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -1133,6 +1134,619 @@ async fn concurrent_prompts_on_different_sessions_complete_independently() {
 
             assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
             assert_eq!(r2.unwrap().stop_reason, StopReason::EndTurn);
+        })
+        .await;
+}
+
+// ── new_session error does not register the session ───────────────────────────
+
+/// When `thread/start` fails, `new_session` must return an error AND must NOT
+/// insert a partial session into the session map.  A subsequent `list_sessions`
+/// must return an empty list.
+#[tokio::test(flavor = "current_thread")]
+async fn new_session_error_leaves_session_list_empty() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_THREAD_START_FAILS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let _ = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap_err();
+
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+            assert!(
+                list.sessions.is_empty(),
+                "a failed new_session must not register a session (got {:?})",
+                list.sessions
+            );
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_THREAD_START_FAILS") };
+}
+
+// ── cancel when turn/interrupt fails is non-fatal ─────────────────────────────
+
+/// `turn/interrupt` failures must be logged but must NOT cause `cancel()` to
+/// return an error — the ACP contract is fire-and-forget for cancel.
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_turn_interrupt_failure_is_non_fatal() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_INTERRUPT_FAILS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            // turn/interrupt will return an error from the mock, but cancel()
+            // must swallow it and return Ok.
+            agent
+                .cancel(CancelNotification::new(sess.session_id.to_string()))
+                .await
+                .unwrap();
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_INTERRUPT_FAILS") };
+}
+
+// ── prompt receives all events when mock emits many ───────────────────────────
+
+/// When the subprocess emits many text-delta events in one turn, all of them
+/// must be received by `prompt()` and the turn must complete with `EndTurn`.
+/// Uses `MOCK_SEND_N_TEXT_EVENTS=100` to emit 100 events per turn.
+#[tokio::test(flavor = "current_thread")]
+async fn prompt_receives_many_text_events_and_completes() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "100") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("flood"))],
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
+// ── process death unblocks all active turn channels ──────────────────────────
+
+/// When the subprocess exits while two sessions are active (but not mid-turn),
+/// calling `new_session` afterwards must detect the dead process, clear the
+/// stale sessions, and spawn a fresh subprocess.
+///
+/// This covers the `read_loop` EOF path that drains `turn_senders` so that any
+/// in-flight `event_rx.recv()` callers unblock rather than hanging.
+#[tokio::test(flavor = "current_thread")]
+async fn process_death_clears_all_sessions_on_next_call() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            // Create two sessions.
+            let s1 = agent
+                .new_session(NewSessionRequest::new("/s1"))
+                .await
+                .unwrap();
+            let s2 = agent
+                .new_session(NewSessionRequest::new("/s2"))
+                .await
+                .unwrap();
+            assert_eq!(
+                agent
+                    .list_sessions(ListSessionsRequest::new())
+                    .await
+                    .unwrap()
+                    .sessions
+                    .len(),
+                2
+            );
+
+            // Kill the process by running a prompt (process exits after acking).
+            agent
+                .prompt(PromptRequest::new(
+                    s1.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("die"))],
+                ))
+                .await
+                .unwrap();
+
+            // Next call detects the dead process, clears sessions, and respawns.
+            let s3 = agent
+                .new_session(NewSessionRequest::new("/s3"))
+                .await
+                .unwrap();
+
+            // s1 and s2 must be gone; only s3 remains.
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+            assert_eq!(list.sessions.len(), 1);
+            assert_eq!(list.sessions[0].session_id.to_string(), s3.session_id.to_string());
+
+            // s2 must no longer be loadable.
+            assert!(
+                agent
+                    .load_session(LoadSessionRequest::new(s2.session_id.to_string(), "/s2"))
+                    .await
+                    .is_err(),
+                "s2 should be gone after process respawn"
+            );
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_EXIT_AFTER_TURN_ACK") };
+}
+
+// ── Drop kills subprocess ─────────────────────────────────────────────────────
+
+/// `Drop::drop` calls `start_kill()` on the child process. After the process
+/// exits, `read_loop` detects EOF and sets `alive = false`. This test verifies
+/// that chain by observing the alive flag after the struct is dropped.
+#[tokio::test(flavor = "current_thread")]
+async fn drop_kills_subprocess() {
+    let _guard = bin_env_lock().lock().unwrap();
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+            let proc = trogon_codex_runner::CodexProcess::spawn().await.unwrap();
+            let alive = proc.alive_flag();
+            assert!(
+                alive.load(std::sync::atomic::Ordering::Relaxed),
+                "process should be alive right after spawn"
+            );
+
+            // Drop the process — triggers start_kill() → SIGKILL.
+            drop(proc);
+
+            // Give the subprocess a moment to die and read_loop to detect EOF.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            assert!(
+                !alive.load(std::sync::atomic::Ordering::Relaxed),
+                "alive flag should be false after process is dropped"
+            );
+        })
+        .await;
+}
+
+// ── stray thread notification ─────────────────────────────────────────────────
+
+/// When the subprocess emits a notification for a `threadId` that has no
+/// active turn sender, `read_loop` must silently discard it. The current
+/// session's turn must still complete normally.
+#[tokio::test(flavor = "current_thread")]
+async fn stray_notification_is_silently_discarded() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_EMIT_STRAY_THREAD_EVENT", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("test"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_EMIT_STRAY_THREAD_EVENT") };
+}
+
+// ── NATS publish failure is non-fatal ────────────────────────────────────────
+
+/// A failing NATS server: completes the handshake then drops the TCP connection.
+/// With one allowed reconnect attempt the background `async_nats` task shuts
+/// down quickly, causing subsequent publishes to fail.
+async fn failing_nats() -> async_nats::Client {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (reader, mut writer) = stream.into_split();
+            writer
+                .write_all(
+                    b"INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\
+                      \"max_payload\":1048576,\"proto\":1,\"headers\":true}\r\n",
+                )
+                .await
+                .ok();
+            let mut lines = BufReader::new(reader).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.starts_with("CONNECT") {
+                    writer.write_all(b"+OK\r\n").await.ok();
+                    // Drop writer → closes TCP connection.
+                    // listener drops at end of task → no reconnect possible.
+                    return;
+                } else if line.starts_with("PING") {
+                    writer.write_all(b"PONG\r\n").await.ok();
+                }
+            }
+        }
+        // listener dropped here
+    });
+
+    // max_reconnects(1): after the connection drops, one reconnect attempt is
+    // made, fails (port no longer listening), then the background task exits.
+    async_nats::ConnectOptions::new()
+        .max_reconnects(1_usize)
+        .connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .unwrap()
+}
+
+/// `prompt()` publishes NATS notifications for each Codex event. When those
+/// publishes fail (NATS connection dead), the errors must be logged but must
+/// NOT cause `prompt()` to return `Err`. The turn must still complete normally.
+#[tokio::test(flavor = "current_thread")]
+async fn nats_publish_failure_during_prompt_is_non_fatal() {
+    let _guard = bin_env_lock().lock().unwrap();
+    // Emit multiple text events so NATS publish is attempted several times.
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "3") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+            let nats = failing_nats().await;
+
+            // Yield to let the NATS background task detect the dropped connection
+            // and exhaust its single reconnect attempt before calling prompt().
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            // Even if NATS publish fails for each event, prompt() must complete.
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("test"))],
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
+// ── cancel when process is dead ───────────────────────────────────────────────
+
+/// `cancel()` checks `is_alive()` before calling `turn_interrupt`. When the
+/// process has already exited, `is_alive()` returns false and the interrupt is
+/// skipped. The session must NOT be cleared (only `process()` clears sessions
+/// on death). `cancel()` must still return `Ok(())`.
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_when_process_dead_skips_interrupt_and_returns_ok() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let session_id = sess.session_id.to_string();
+
+            // Run prompt — process dies right after acking turn/start.
+            agent
+                .prompt(PromptRequest::new(
+                    session_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("die"))],
+                ))
+                .await
+                .unwrap();
+
+            // Process is now dead. cancel() must not call turn_interrupt (dead
+            // process) and must return Ok without spawning a new process.
+            agent
+                .cancel(CancelNotification::new(session_id.clone()))
+                .await
+                .unwrap();
+
+            // Session was NOT cleared by cancel — clearing only happens when
+            // process() detects a dead process on the next spawn call.
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+            assert!(
+                list.sessions
+                    .iter()
+                    .any(|s| s.session_id.to_string() == session_id),
+                "session must still exist after cancel on a dead process"
+            );
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_EXIT_AFTER_TURN_ACK") };
+}
+
+// ── broadcast channel lag in event loop ──────────────────────────────────────
+
+/// When the mock emits more events than the broadcast channel capacity (256),
+/// the oldest events are dropped and `recv()` returns `Lagged`. The `prompt()`
+/// loop handles this with `continue`, so the turn must still complete normally.
+#[tokio::test(flavor = "current_thread")]
+async fn prompt_handles_event_channel_lag() {
+    let _guard = bin_env_lock().lock().unwrap();
+    // 300 events exceeds the channel capacity of 256 — guarantees lag.
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "300") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("flood"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
+// ── NATS failure for tool events ──────────────────────────────────────────────
+
+/// `prompt()` publishes NATS notifications for `ToolStarted` and `ToolCompleted`
+/// events. When those publishes fail (NATS connection dead), the errors must be
+/// logged but must NOT cause `prompt()` to return `Err`.
+#[tokio::test(flavor = "current_thread")]
+async fn nats_publish_failure_for_tool_events_is_non_fatal() {
+    let _guard = bin_env_lock().lock().unwrap();
+    unsafe { std::env::set_var("MOCK_SEND_TOOL_EVENT", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+            let nats = failing_nats().await;
+
+            // Yield to let the NATS background task notice the dropped connection.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("use a tool"))],
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_TOOL_EVENT") };
+}
+
+// ── broadcast error (no threadId) reaches all active turns ───────────────────
+
+/// When `read_loop` receives a notification whose `threadId` is absent/empty,
+/// it must broadcast the event to ALL active turn channels (lines 346-353 of
+/// process.rs), and clear all senders if the event is terminal.
+///
+/// Setup: two sessions run concurrent prompts. The mock acks both `turn/start`
+/// requests normally, then on the second ack immediately emits an `error`
+/// notification without a `threadId`. Both receivers must get the error and
+/// both prompts must complete with `StopReason::EndTurn`.
+#[tokio::test(flavor = "current_thread")]
+async fn broadcast_error_without_thread_id_reaches_all_active_turns() {
+    let _guard = bin_env_lock().lock().unwrap();
+    // Emit the broadcast error after the 2nd turn/start is acked so that both
+    // turn senders are registered before the error is routed.
+    unsafe { std::env::set_var("MOCK_BROADCAST_ERROR_AFTER_TURNS", "2") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let sess1 = agent
+                .new_session(NewSessionRequest::new("/s1"))
+                .await
+                .unwrap();
+            let sess2 = agent
+                .new_session(NewSessionRequest::new("/s2"))
+                .await
+                .unwrap();
+
+            // Run both prompts concurrently. The mock will broadcast an error
+            // (no threadId) after the second turn/start, so both should
+            // receive it and complete.
+            let (r1, r2) = tokio::join!(
+                agent.prompt(PromptRequest::new(
+                    sess1.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("session 1"))],
+                )),
+                agent.prompt(PromptRequest::new(
+                    sess2.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("session 2"))],
+                )),
+            );
+
+            assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
+            assert_eq!(r2.unwrap().stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_BROADCAST_ERROR_AFTER_TURNS") };
+}
+
+// ── load_session happy path ───────────────────────────────────────────────────
+
+/// `load_session` is only tested negatively in integration (after close/respawn).
+/// This test verifies the happy path end-to-end: create a session via the real
+/// subprocess, set a model override, then load it and verify the state.
+#[tokio::test(flavor = "current_thread")]
+async fn load_session_returns_correct_state_after_new_session() {
+    let _guard = bin_env_lock().lock().unwrap();
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let session_id = sess.session_id.to_string();
+
+            // Without a model override, load_session must return the agent default.
+            let resp = agent
+                .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
+                .await
+                .unwrap();
+            let models = resp.models.expect("models must be present");
+            assert_eq!(
+                models.current_model_id.to_string(),
+                "o4-mini",
+                "should default to agent default model"
+            );
+            assert!(resp.modes.is_some(), "modes must be present");
+
+            // After setting a model override, load_session must reflect it.
+            agent
+                .set_session_model(SetSessionModelRequest::new(session_id.clone(), "o3"))
+                .await
+                .unwrap();
+
+            let resp2 = agent
+                .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
+                .await
+                .unwrap();
+            let models2 = resp2.models.expect("models must be present after set");
+            assert_eq!(
+                models2.current_model_id.to_string(),
+                "o3",
+                "should reflect the model override"
+            );
+        })
+        .await;
+}
+
+// ── set_session_mode integration ──────────────────────────────────────────────
+
+/// Codex has no named permission modes. `set_session_mode` must accept any
+/// mode string and return `Ok` without touching the subprocess.
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_mode_is_accepted_for_real_session() {
+    let _guard = bin_env_lock().lock().unwrap();
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            agent
+                .set_session_mode(SetSessionModeRequest::new(
+                    sess.session_id.to_string(),
+                    "full-auto",
+                ))
+                .await
+                .unwrap();
+
+            // Session must still be loadable after the mode change.
+            agent
+                .load_session(LoadSessionRequest::new(
+                    sess.session_id.to_string(),
+                    "/tmp",
+                ))
+                .await
+                .unwrap();
+        })
+        .await;
+}
+
+// ── set_session_config_option integration ────────────────────────────────────
+
+/// Codex has no per-session config options. `set_session_config_option` must
+/// return an empty list and leave the session intact.
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_config_option_returns_empty_and_session_survives() {
+    let _guard = bin_env_lock().lock().unwrap();
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            let resp = agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sess.session_id.to_string(),
+                    "approval-policy",
+                    "never",
+                ))
+                .await
+                .unwrap();
+            assert!(
+                resp.config_options.is_empty(),
+                "config_options must be empty (Codex ignores config options)"
+            );
+
+            // Session must still be loadable.
+            agent
+                .load_session(LoadSessionRequest::new(
+                    sess.session_id.to_string(),
+                    "/tmp",
+                ))
+                .await
+                .unwrap();
         })
         .await;
 }
