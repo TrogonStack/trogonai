@@ -21,6 +21,11 @@
 //! | `MOCK_UNKNOWN_ID_BEFORE_COMPLETE`| Emit response with unknown ID before `turn/completed`     |
 //! | `MOCK_NONINT_ID_BEFORE_COMPLETE` | Emit response with non-integer ID before `turn/completed` |
 //! | `MOCK_REQUIRE_MODEL=<id>`        | Fail `turn/start` unless `params.model` equals `<id>`     |
+//! | `MOCK_INTERRUPT_FAILS`           | Return JSON-RPC error for `turn/interrupt`                 |
+//! | `MOCK_SEND_N_TEXT_EVENTS=N`      | Emit N text-delta events before `turn/completed`           |
+//! | `MOCK_EMIT_STRAY_THREAD_EVENT`   | Emit an `item/updated` for a nonexistent thread before `turn/completed` |
+//! | `MOCK_SEND_TOOL_EVENT`           | Emit one tool `item/updated` + `item/completed` pair before `turn/completed` |
+//! | `MOCK_BROADCAST_ERROR_AFTER_TURNS=N` | After N `turn/start` acks, emit an `error` with no `threadId` (broadcasts to all active turns) |
 //!
 //! Set `CODEX_BIN` in the test process to the path of this binary so that
 //! `CodexProcess::spawn()` forks this mock instead of the real CLI.
@@ -45,11 +50,22 @@ fn main() {
     let unknown_id_before_complete = std::env::var("MOCK_UNKNOWN_ID_BEFORE_COMPLETE").is_ok();
     let nonint_id_before_complete = std::env::var("MOCK_NONINT_ID_BEFORE_COMPLETE").is_ok();
     let require_model = std::env::var("MOCK_REQUIRE_MODEL").ok();
+    let interrupt_fails = std::env::var("MOCK_INTERRUPT_FAILS").is_ok();
+    let send_n_text_events: usize = std::env::var("MOCK_SEND_N_TEXT_EVENTS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let emit_stray_thread_event = std::env::var("MOCK_EMIT_STRAY_THREAD_EVENT").is_ok();
+    let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
+    let broadcast_error_after_turns: Option<usize> = std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
+        .ok()
+        .and_then(|s| s.parse().ok());
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
     let mut thread_counter: u64 = 0;
+    let mut turn_ack_count: usize = 0;
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -141,6 +157,17 @@ fn main() {
 
                 // Ack the request first.
                 respond(&mut out, &id, Value::Null);
+                turn_ack_count += 1;
+
+                // After N acks, emit a broadcast error (no threadId) to all active turns.
+                if broadcast_error_after_turns == Some(turn_ack_count) {
+                    emit(
+                        &mut out,
+                        "error",
+                        serde_json::json!({"message": "mock broadcast error (no threadId)"}),
+                    );
+                    continue;
+                }
 
                 if exit_after_turn_ack {
                     return;
@@ -151,18 +178,62 @@ fn main() {
                     continue;
                 }
 
-                // Emit a TextDelta so callers see at least one real event.
-                emit(
-                    &mut out,
-                    "item/updated",
-                    serde_json::json!({
-                        "threadId": thread_id,
-                        "item": {
-                            "type": "message",
-                            "content": [{"type": "output_text", "text": "hello from mock"}]
-                        }
-                    }),
-                );
+                // Emit text-delta events (configurable count via MOCK_SEND_N_TEXT_EVENTS).
+                for i in 0..send_n_text_events {
+                    emit(
+                        &mut out,
+                        "item/updated",
+                        serde_json::json!({
+                            "threadId": thread_id,
+                            "item": {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": format!("event {i}")}]
+                            }
+                        }),
+                    );
+                }
+
+                if send_tool_event {
+                    emit(
+                        &mut out,
+                        "item/updated",
+                        serde_json::json!({
+                            "threadId": thread_id,
+                            "item": {
+                                "type": "tool_call",
+                                "id": "mock-tool-1",
+                                "name": "bash",
+                                "arguments": {"cmd": "echo hi"}
+                            }
+                        }),
+                    );
+                    emit(
+                        &mut out,
+                        "item/completed",
+                        serde_json::json!({
+                            "threadId": thread_id,
+                            "item": {
+                                "type": "tool_call",
+                                "id": "mock-tool-1",
+                                "output": "hi"
+                            }
+                        }),
+                    );
+                }
+
+                if emit_stray_thread_event {
+                    emit(
+                        &mut out,
+                        "item/updated",
+                        serde_json::json!({
+                            "threadId": "nonexistent-stray-thread-9999",
+                            "item": {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "stray"}]
+                            }
+                        }),
+                    );
+                }
 
                 if malformed_before_complete {
                     writeln!(&mut out, "{{INVALID JSON}}").unwrap();
@@ -201,7 +272,11 @@ fn main() {
                 }
             }
             "turn/interrupt" => {
-                respond(&mut out, &id, Value::Null);
+                if interrupt_fails {
+                    respond_error(&mut out, &id, "mock: turn/interrupt rejected");
+                } else {
+                    respond(&mut out, &id, Value::Null);
+                }
             }
             _ => {
                 respond(&mut out, &id, Value::Null);
