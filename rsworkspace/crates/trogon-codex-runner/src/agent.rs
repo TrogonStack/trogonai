@@ -949,6 +949,21 @@ mod tests {
         assert!(err.message.contains("not found"), "error: {}", err.message);
     }
 
+    /// `make_nats_client` is called before the session lookup inside `prompt()`.
+    /// A session ID containing "." fails `AcpSessionId::try_from`, so the error
+    /// is returned before any subprocess interaction occurs.
+    #[tokio::test]
+    async fn prompt_returns_error_for_invalid_session_id() {
+        let agent = make_agent().await;
+        // "invalid.session.id" contains dots → AcpSessionId::try_from rejects it
+        // → make_nats_client returns Err → prompt propagates the error.
+        let err = agent
+            .prompt(PromptRequest::new("invalid.session.id", vec![]))
+            .await
+            .unwrap_err();
+        assert!(!err.message.is_empty(), "expected non-empty error message");
+    }
+
     // ── cancel noop paths ─────────────────────────────────────────────────────
 
     #[tokio::test]

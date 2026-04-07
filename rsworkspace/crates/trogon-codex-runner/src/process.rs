@@ -98,6 +98,12 @@ impl CodexProcess {
         self.alive.load(Ordering::Relaxed)
     }
 
+    /// Returns a clone of the alive flag so callers can observe liveness
+    /// after the `CodexProcess` itself has been dropped.
+    pub fn alive_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.alive)
+    }
+
     /// Spawn `codex app-server` and perform the initialization handshake.
     ///
     /// The binary to invoke defaults to `codex` but can be overridden via the
@@ -647,6 +653,249 @@ mod tests {
     #[test]
     fn item_completed_with_no_params_returns_none() {
         assert!(CodexProcess::parse_event("item/completed", None).is_none());
+    }
+
+    // ── parse_event: text block edge cases ────────────────────────────────────
+
+    #[test]
+    fn text_blocks_whitespace_is_preserved() {
+        // Leading/trailing whitespace inside individual blocks must not be trimmed.
+        let params = serde_json::json!({
+            "threadId": "t-ws",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "foo "},
+                    {"type": "output_text", "text": " bar"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "foo  bar"));
+    }
+
+    #[test]
+    fn three_text_blocks_concatenated() {
+        let params = serde_json::json!({
+            "threadId": "t-three",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "a"},
+                    {"type": "output_text", "text": "b"},
+                    {"type": "output_text", "text": "c"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "abc"));
+    }
+
+    #[test]
+    fn output_text_block_missing_text_key_is_skipped() {
+        // A block with type=output_text but no "text" key must not contribute to output.
+        let params = serde_json::json!({
+            "threadId": "t-no-key",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text"},              // no "text" key
+                    {"type": "output_text", "text": "hi"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "hi"));
+    }
+
+    #[test]
+    fn output_text_block_with_null_text_is_skipped() {
+        // A block with text: null must not panic or contribute to the output.
+        let params = serde_json::json!({
+            "threadId": "t-null",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": null},
+                    {"type": "output_text", "text": "world"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "world"));
+    }
+
+    #[test]
+    fn all_output_text_blocks_empty_returns_none() {
+        // If every block has an empty text value, the combined text is "" → None.
+        let params = serde_json::json!({
+            "threadId": "t-all-empty",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": ""},
+                    {"type": "output_text", "text": ""}
+                ]
+            }
+        });
+        // Empty combined text triggers the `if text.is_empty() { return None }` path.
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn text_blocks_with_embedded_newlines_preserved() {
+        let params = serde_json::json!({
+            "threadId": "t-nl",
+            "item": {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "line1\n"},
+                    {"type": "output_text", "text": "line2"}
+                ]
+            }
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "line1\nline2"));
+    }
+
+    // ── broadcast channel lag recovery ────────────────────────────────────────
+
+    /// Verifies that a lagged broadcast receiver can continue receiving after lag.
+    ///
+    /// This documents the contract that `prompt()`'s `Lagged` arm (which does
+    /// `continue`) relies on: after a lag error the receiver skips missed
+    /// messages but resumes from the latest one.
+    #[tokio::test]
+    async fn broadcast_channel_lag_allows_recovery() {
+        use tokio::sync::broadcast;
+        let (tx, mut rx) = broadcast::channel::<i32>(2);
+        // Send 3 items into a capacity-2 channel without reading — forces lag.
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+
+        // First recv must return Lagged (not a value).
+        match rx.recv().await {
+            Err(broadcast::error::RecvError::Lagged(_)) => {}
+            other => panic!("expected Lagged, got {:?}", other),
+        }
+        // After lag the receiver is reset to the oldest surviving item (2),
+        // and further recvs continue in order.
+        let v = rx.recv().await.unwrap();
+        assert_eq!(v, 2);
+        let v = rx.recv().await.unwrap();
+        assert_eq!(v, 3);
+    }
+
+    // ── parse_event: item field edge cases ───────────────────────────────────
+
+    #[test]
+    fn item_updated_without_item_field_returns_none() {
+        // "item" key entirely absent.
+        let params = serde_json::json!({"threadId": "t-no-item"});
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn item_updated_with_non_string_type_returns_none() {
+        // "type" field is a number, not a string — as_str() returns None.
+        let params = serde_json::json!({
+            "threadId": "t-num-type",
+            "item": {"type": 42, "content": []}
+        });
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn item_updated_with_unknown_item_type_returns_none() {
+        // "type" is a valid string but not a recognised kind.
+        let params = serde_json::json!({
+            "threadId": "t-unknown-type",
+            "item": {"type": "image", "url": "http://example.com/img.png"}
+        });
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn message_item_with_non_array_content_returns_none() {
+        // "content" is a string, not a JSON array.
+        let params = serde_json::json!({
+            "threadId": "t-str-content",
+            "item": {"type": "message", "content": "not-an-array"}
+        });
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn tool_call_without_id_returns_none() {
+        // "id" key absent — as_str() chain returns None.
+        let params = serde_json::json!({
+            "threadId": "t-no-id",
+            "item": {"type": "tool_call", "name": "bash", "arguments": {}}
+        });
+        assert!(parse("item/updated", params).is_none());
+    }
+
+    #[test]
+    fn tool_call_without_name_or_command_uses_unknown() {
+        // Neither "name" nor "command" present — falls back to "unknown".
+        let params = serde_json::json!({
+            "threadId": "t-no-name",
+            "item": {"type": "tool_call", "id": "c1"}
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(
+            matches!(event, CodexEvent::ToolStarted { name, .. } if name == "unknown"),
+            "expected name == 'unknown'"
+        );
+    }
+
+    #[test]
+    fn tool_call_without_arguments_or_input_uses_null() {
+        // Neither "arguments" nor "input" present — input defaults to Value::Null.
+        let params = serde_json::json!({
+            "threadId": "t-no-args",
+            "item": {"type": "tool_call", "id": "c2", "name": "bash"}
+        });
+        let (_, event) = parse("item/updated", params).unwrap();
+        assert!(
+            matches!(event, CodexEvent::ToolStarted { input, .. } if input == serde_json::Value::Null),
+            "expected input == null"
+        );
+    }
+
+    #[test]
+    fn tool_completed_without_output_uses_empty_string() {
+        // "output" key absent — falls back to "".
+        let params = serde_json::json!({
+            "threadId": "t-no-output",
+            "item": {"type": "tool_call", "id": "c3"}
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(
+            matches!(event, CodexEvent::ToolCompleted { output, .. } if output.is_empty()),
+            "expected empty output"
+        );
+    }
+
+    // ── broadcast channel closed behaviour ───────────────────────────────────
+
+    /// Documents the `RecvError::Closed` branch in `prompt()`'s event loop.
+    ///
+    /// When all senders are dropped and the buffer is empty, `recv()` returns
+    /// `Err(RecvError::Closed)`.  In production this is unreachable (the
+    /// `read_loop` always sends an `Error` event before clearing senders), but
+    /// the loop has a catch-all `Ok(Err(_)) => break` arm for safety.
+    #[tokio::test]
+    async fn broadcast_channel_closed_returns_closed_error() {
+        use tokio::sync::broadcast;
+        let (tx, mut rx) = broadcast::channel::<i32>(8);
+        // Drop all senders without sending anything.
+        drop(tx);
+        match rx.recv().await {
+            Err(broadcast::error::RecvError::Closed) => {} // expected
+            other => panic!("expected Closed, got {:?}", other),
+        }
     }
 
     #[test]
