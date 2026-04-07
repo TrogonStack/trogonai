@@ -36,4 +36,5 @@ pub mod server;
 pub mod signature;
 
 pub use config::LinearConfig;
+#[cfg(not(coverage))]
 pub use server::serve;

@@ -1,21 +1,28 @@
+use std::future::IntoFuture as _;
 use std::time::Duration;
 
 use crate::config::DatadogConfig;
 use crate::signature;
-use async_nats::jetstream::{self, stream};
+use async_nats::jetstream::stream;
 use axum::{
     Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
     routing::post,
 };
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
+use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
+
+// ── Application state ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-struct AppState {
-    js: jetstream::Context,
+struct AppState<J> {
+    js: J,
     webhook_secret: Option<String>,
     subject_prefix: String,
+    ack_timeout: Duration,
 }
+
+// ── Server entry-point ────────────────────────────────────────────────────────
 
 /// Starts the Datadog webhook HTTP server.
 ///
@@ -23,28 +30,47 @@ struct AppState {
 /// for incoming requests:
 /// - `POST /webhook` — receives Datadog webhook events and publishes to NATS JetStream
 /// - `GET  /health`  — liveness probe, always returns 200 OK
+#[cfg(not(coverage))]
 pub async fn serve(
     config: DatadogConfig,
     nats: async_nats::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let js = jetstream::new(nats);
+    use async_nats::jetstream;
+    use trogon_nats::jetstream::NatsJetStreamClient;
+    serve_impl(config, NatsJetStreamClient::new(jetstream::new(nats))).await
+}
 
-    ensure_stream(
-        &js,
-        &config.stream_name,
-        &config.subject_prefix,
-        config.stream_max_age,
-    )
+async fn serve_impl<J>(
+    config: DatadogConfig,
+    js: J,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
+    <J as JetStreamContext>::Error: 'static,
+{
+    js.get_or_create_stream(stream::Config {
+        name: config.stream_name.clone(),
+        subjects: vec![format!("{}.>", config.subject_prefix)],
+        max_age: config.stream_max_age,
+        ..Default::default()
+    })
     .await?;
+
+    info!(
+        stream = config.stream_name,
+        max_age_secs = config.stream_max_age.as_secs(),
+        "JetStream stream ready"
+    );
 
     let state = AppState {
         js,
         webhook_secret: config.webhook_secret,
         subject_prefix: config.subject_prefix,
+        ack_timeout: Duration::from_secs(10),
     };
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/webhook", post(handle_webhook::<J>))
         .route("/health", get(handle_health))
         .with_state(state);
 
@@ -70,28 +96,6 @@ async fn shutdown_signal() {
         _ = sigterm.recv() => { info!("Received SIGTERM, shutting down"); }
         _ = sigint.recv()  => { info!("Received SIGINT, shutting down"); }
     }
-}
-
-async fn ensure_stream(
-    js: &jetstream::Context,
-    stream_name: &str,
-    subject_prefix: &str,
-    max_age: Duration,
-) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
-    js.get_or_create_stream(stream::Config {
-        name: stream_name.to_string(),
-        subjects: vec![format!("{}.>", subject_prefix)],
-        max_age,
-        ..Default::default()
-    })
-    .await?;
-
-    info!(
-        stream = stream_name,
-        max_age_secs = max_age.as_secs(),
-        "JetStream stream ready"
-    );
-    Ok(())
 }
 
 async fn handle_health() -> StatusCode {
@@ -176,11 +180,14 @@ mod tests {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook(
-    State(state): State<AppState>,
+async fn handle_webhook<J>(
+    State(state): State<AppState<J>>,
     headers: HeaderMap,
     body: Bytes,
-) -> StatusCode {
+) -> StatusCode
+where
+    J: JetStreamPublisher + Clone + Send + Sync + 'static,
+{
     if let Some(secret) = &state.webhook_secret {
         let sig = headers
             .get("x-datadog-signature")
@@ -217,27 +224,30 @@ async fn handle_webhook(
     nats_headers.insert("X-Datadog-Event-Type", ev_type.as_str());
     nats_headers.insert("DD-Request-ID", request_id.as_str());
 
-    const NATS_ACK_TIMEOUT: Duration = Duration::from_secs(10);
-
     match state
         .js
         .publish_with_headers(subject.clone(), nats_headers, body)
         .await
     {
-        Ok(ack_future) => match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
-            Ok(Ok(_)) => {
-                info!("Published Datadog event to NATS");
-                StatusCode::OK
+        Ok(ack_future) => {
+            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+                Ok(Ok(_)) => {
+                    info!("Published Datadog event to NATS");
+                    StatusCode::OK
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "NATS ack failed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+                Err(_) => {
+                    warn!(
+                        ack_timeout_ms = state.ack_timeout.as_millis(),
+                        "NATS ack timed out"
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
             }
-            Ok(Err(e)) => {
-                warn!(error = %e, "NATS ack failed");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            Err(_) => {
-                warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        },
+        }
         Err(e) => {
             warn!(error = %e, "Failed to publish Datadog event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR

@@ -34,4 +34,5 @@ pub mod server;
 pub mod signature;
 
 pub use config::DatadogConfig;
+#[cfg(not(coverage))]
 pub use server::serve;
