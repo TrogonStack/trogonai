@@ -7,7 +7,7 @@ use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
-use trogon_acp_runner::{SessionState, SessionStore};
+use trogon_acp_runner::{NatsSessionStore, SessionState, SessionStore};
 
 async fn setup() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
     let container: ContainerAsync<Nats> = Nats::default()
@@ -28,7 +28,7 @@ async fn setup() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Contex
 #[tokio::test]
 async fn load_missing_session_returns_default() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let state = store.load("does-not-exist").await.unwrap();
     assert!(state.messages.is_empty());
@@ -41,7 +41,7 @@ async fn load_missing_session_returns_default() {
 #[tokio::test]
 async fn save_and_load_roundtrip() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let state = SessionState {
         mode: "plan".to_string(),
@@ -61,7 +61,7 @@ async fn save_and_load_roundtrip() {
 #[tokio::test]
 async fn save_preserves_model_override() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let state = SessionState {
         model: Some("claude-sonnet-4-6".to_string()),
@@ -76,7 +76,7 @@ async fn save_preserves_model_override() {
 #[tokio::test]
 async fn save_preserves_allowed_tools() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let state = SessionState {
         allowed_tools: vec!["Bash".to_string(), "Read".to_string()],
@@ -91,7 +91,7 @@ async fn save_preserves_allowed_tools() {
 #[tokio::test]
 async fn overwrite_save_updates_value() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let v1 = SessionState {
         mode: "default".to_string(),
@@ -114,7 +114,7 @@ async fn overwrite_save_updates_value() {
 #[tokio::test]
 async fn delete_removes_session() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let state = SessionState {
         mode: "default".to_string(),
@@ -131,7 +131,7 @@ async fn delete_removes_session() {
 #[tokio::test]
 async fn delete_nonexistent_does_not_error() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
     // Should not panic or return Err
     let result = store.delete("never-existed").await;
     assert!(result.is_ok());
@@ -142,7 +142,7 @@ async fn delete_nonexistent_does_not_error() {
 #[tokio::test]
 async fn list_ids_empty_store_returns_empty() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
     let ids = store.list_ids().await.unwrap();
     assert!(ids.is_empty(), "new store must have no sessions");
 }
@@ -150,7 +150,7 @@ async fn list_ids_empty_store_returns_empty() {
 #[tokio::test]
 async fn list_ids_returns_all_saved_sessions() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     for id in &["alpha", "beta", "gamma"] {
         store
@@ -173,7 +173,7 @@ async fn list_ids_returns_all_saved_sessions() {
 #[tokio::test]
 async fn list_ids_excludes_deleted_session() {
     let (_c, _nats, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     store
         .save(
@@ -209,7 +209,7 @@ async fn list_ids_excludes_deleted_session() {
 #[tokio::test]
 async fn load_corrupted_json_returns_error() {
     let (_c, _, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     // Write raw invalid JSON directly to the underlying KV bucket.
     let kv = js
@@ -242,7 +242,7 @@ async fn load_corrupted_json_returns_error() {
 #[tokio::test]
 async fn load_empty_bytes_returns_error() {
     let (_c, _, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let kv = js
         .create_key_value(async_nats::jetstream::kv::Config {
@@ -265,7 +265,7 @@ async fn load_empty_bytes_returns_error() {
 #[tokio::test]
 async fn load_wrong_json_type_returns_error() {
     let (_c, _, js) = setup().await;
-    let store = SessionStore::open(&js).await.unwrap();
+    let store = NatsSessionStore::open(&js).await.unwrap();
 
     let kv = js
         .create_key_value(async_nats::jetstream::kv::Config {
@@ -294,8 +294,8 @@ async fn load_wrong_json_type_returns_error() {
 #[tokio::test]
 async fn open_twice_is_idempotent() {
     let (_c, _nats, js) = setup().await;
-    let store1 = SessionStore::open(&js).await.unwrap();
-    let store2 = SessionStore::open(&js).await.unwrap();
+    let store1 = NatsSessionStore::open(&js).await.unwrap();
+    let store2 = NatsSessionStore::open(&js).await.unwrap();
 
     store1
         .save(

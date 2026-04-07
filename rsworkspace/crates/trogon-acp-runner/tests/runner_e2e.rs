@@ -45,7 +45,8 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::{RwLock, mpsc};
 use trogon_acp_runner::{
-    GatewayConfig, PermissionReq, SessionState, SessionStore, StoredMcpServer, TrogonAgent,
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionState,
+    SessionStore, StoredMcpServer, TrogonAgent,
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -98,10 +99,11 @@ async fn start_agent(
     agent: AgentLoop,
     permission_tx: Option<trogon_acp_runner::PermissionTx>,
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
-) -> SessionStore {
-    let store = SessionStore::open(js).await.unwrap();
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
     let ta = TrogonAgent::new(
-        nats.clone(),
+        notifier,
         store.clone(),
         agent,
         prefix,
@@ -249,9 +251,9 @@ async fn agent_new_creates_session_bucket() {
             .await;
 
             // Opening the store again must be idempotent (bucket already exists).
-            SessionStore::open(&js)
+            NatsSessionStore::open(&js)
                 .await
-                .expect("SessionStore::open must succeed after start_agent");
+                .expect("NatsSessionStore::open must succeed after start_agent");
         })
         .await;
 }
@@ -824,7 +826,7 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
     let session_id = "sess-mcp-1";
 
     // Pre-save session state with the MCP server configured
-    let session_store = SessionStore::open(&js).await.unwrap();
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
     let state = SessionState {
         mcp_servers: vec![StoredMcpServer {
             name: "my_srv".to_string(),
