@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::nats::{ExtSessionReady, session as session_subjects};
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
@@ -20,18 +18,18 @@ use agent_client_protocol::{
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
     SetSessionModelResponse, StopReason,
 };
-use agent_client_protocol::Client as AcpClient;
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::StreamExt;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
-use trogon_agent_core::agent_loop::{AgentEvent, AgentLoop, ContentBlock as AgentContentBlock, ImageSource, Message};
+use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBlock, ImageSource, Message};
 use trogon_agent_core::tools::ToolDef;
 
+use crate::agent_runner::AgentRunner;
 use crate::permission::{ChannelPermissionChecker, PermissionTx};
 use crate::prompt_converter::PromptEventConverter;
-use crate::session_store::{SessionStore, StoredMcpServer, now_iso8601};
+use crate::session_notifier::{PromptEventClient, SessionNotifier};
+use crate::session_store::{NatsSessionStore, SessionStore, StoredMcpServer, now_iso8601};
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -164,10 +162,19 @@ fn internal_error(msg: impl Into<String>) -> Error {
 }
 
 /// Agent implementation that handles all ACP methods via NATS.
-pub struct TrogonAgent {
-    nats: async_nats::Client,
-    store: SessionStore,
-    agent: Arc<AgentLoop>,
+///
+/// Generic parameters with production defaults:
+/// - `S` — session store  (`NatsSessionStore`)
+/// - `A` — LLM runner     (`trogon_agent_core::agent_loop::AgentLoop`)
+/// - `N` — NATS notifier  (`crate::session_notifier::NatsSessionNotifier`)
+pub struct TrogonAgent<
+    S = NatsSessionStore,
+    A = trogon_agent_core::agent_loop::AgentLoop,
+    N = crate::session_notifier::NatsSessionNotifier,
+> {
+    notifier: N,
+    store: S,
+    agent: Arc<A>,
     prefix: String,
     default_model: String,
     permission_tx: Option<PermissionTx>,
@@ -176,19 +183,18 @@ pub struct TrogonAgent {
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
 
-impl TrogonAgent {
-    #[cfg_attr(coverage, coverage(off))]
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
     pub fn new(
-        nats: async_nats::Client,
-        store: SessionStore,
-        agent: AgentLoop,
+        notifier: N,
+        store: S,
+        agent: A,
         prefix: impl Into<String>,
         default_model: impl Into<String>,
         permission_tx: Option<PermissionTx>,
         gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     ) -> Self {
         Self {
-            nats,
+            notifier,
             store,
             agent: Arc::new(agent),
             prefix: prefix.into(),
@@ -228,13 +234,15 @@ impl TrogonAgent {
     #[cfg_attr(coverage, coverage(off))]
     async fn publish_session_ready(&self, session_id: &str) {
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
-        let subject = session_subjects::agent::ExtReadySubject::new(&acp_prefix, &AcpSessionId::new(session_id).expect("valid session_id")).to_string();
+        let subject = session_subjects::agent::ExtReadySubject::new(
+            &acp_prefix,
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        )
+        .to_string();
         let message = ExtSessionReady::new(SessionId::from(session_id.to_owned()));
         match serde_json::to_vec(&message) {
             Ok(bytes) => {
-                if let Err(e) = self.nats.publish(subject, bytes.into()).await {
-                    warn!(error = %e, session_id, "agent: failed to publish session.ready");
-                }
+                self.notifier.publish(subject, bytes.into()).await;
             }
             Err(e) => {
                 warn!(error = %e, "agent: failed to serialize session.ready");
@@ -242,27 +250,19 @@ impl TrogonAgent {
         }
     }
 
-    fn make_nats_client(
+    fn make_acp_session_id(
         &self,
         session_id: &agent_client_protocol::SessionId,
-    ) -> agent_client_protocol::Result<NatsClientProxy<async_nats::Client>> {
-        let acp_prefix =
-            AcpPrefix::new(&self.prefix).map_err(|e| internal_error(e.to_string()))?;
-        let acp_session_id =
-            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
-        Ok(NatsClientProxy::new(
-            self.nats.clone(),
-            acp_session_id,
-            acp_prefix,
-            Duration::from_secs(30),
-        ))
+    ) -> agent_client_protocol::Result<AcpSessionId> {
+        AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))
+    }
+
+    fn make_acp_prefix(&self) -> agent_client_protocol::Result<AcpPrefix> {
+        AcpPrefix::new(&self.prefix).map_err(|e| internal_error(e.to_string()))
     }
 
     /// Acquire (or create) the per-session semaphore permit, serializing concurrent prompts.
-    fn acquire_session_lock(
-        &self,
-        session_id: &str,
-    ) -> Arc<tokio::sync::Semaphore> {
+    fn acquire_session_lock(&self, session_id: &str) -> Arc<tokio::sync::Semaphore> {
         let mut locks = self.session_locks.lock().unwrap();
         locks
             .entry(session_id.to_string())
@@ -270,13 +270,13 @@ impl TrogonAgent {
             .clone()
     }
 
-    /// Core prompt execution. Streams events via `nats_client` and returns the final response.
+    /// Core prompt execution. Streams events via `prompt_client` and returns the final response.
     #[cfg_attr(coverage, coverage(off))]
     async fn run_prompt(
         &self,
         req: &PromptRequest,
-        nats_client: &NatsClientProxy<async_nats::Client>,
-        mut cancel_sub: Option<async_nats::Subscriber>,
+        prompt_client: &dyn PromptEventClient,
+        cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
     ) -> agent_client_protocol::Result<PromptResponse> {
         use acp_nats::prompt_event::PromptEvent;
 
@@ -317,7 +317,7 @@ impl TrogonAgent {
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
-        let agent: Arc<AgentLoop> = {
+        let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
                 || !state.mcp_servers.is_empty()
                 || needs_perm
@@ -325,16 +325,15 @@ impl TrogonAgent {
             if needs_clone {
                 let mut a = (*self.agent).clone();
                 if let Some(ref model) = state.model {
-                    a.model = model.clone();
+                    a.set_model(model.clone());
                 }
                 if !state.mcp_servers.is_empty() {
                     let (mcp_defs, mcp_dispatch) = build_session_mcp(&state.mcp_servers).await;
-                    a.mcp_tool_defs.extend(mcp_defs);
-                    a.mcp_dispatch.extend(mcp_dispatch);
+                    a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
                 if needs_perm {
                     if let Some(ref perm_tx) = self.permission_tx {
-                        a.permission_checker = Some(Arc::new(ChannelPermissionChecker {
+                        a.set_permission_checker(Arc::new(ChannelPermissionChecker {
                             session_id: session_id.clone(),
                             tx: perm_tx.clone(),
                             allowed_tools: state.allowed_tools.clone(),
@@ -342,9 +341,7 @@ impl TrogonAgent {
                     }
                 }
                 if let Some(ref gw) = gateway {
-                    a.anthropic_base_url = Some(gw.base_url.clone());
-                    a.anthropic_token = gw.token.clone();
-                    a.anthropic_extra_headers = gw.extra_headers.clone();
+                    a.apply_gateway(gw);
                 }
                 Arc::new(a)
             } else {
@@ -370,11 +367,11 @@ impl TrogonAgent {
             system_prompt
         };
 
-        let context_window = Some(context_window_tokens(&agent.model));
+        let context_window = Some(context_window_tokens(&agent.model()));
         let current_model = state
             .model
             .clone()
-            .unwrap_or_else(|| self.agent.model.clone());
+            .unwrap_or_else(|| self.agent.model());
 
         let agent_fut = tokio::task::spawn_local(async move {
             agent
@@ -390,12 +387,12 @@ impl TrogonAgent {
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
         let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
+        let mut cancel_rx = cancel_rx;
 
         loop {
-            // Build the cancel future: either wait for cancel or never resolve
             let cancel_fut = async {
-                match cancel_sub.as_mut() {
-                    Some(sub) => { sub.next().await; }
+                match cancel_rx.as_mut() {
+                    Some(rx) => { let _ = rx.await; }
                     None => std::future::pending().await,
                 }
             };
@@ -417,11 +414,11 @@ impl TrogonAgent {
                                         .map(|n| n == "EnterPlanMode")
                                         .unwrap_or(false);
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
-                                    publish_via_converter(nats_client, &mut converter, finished).await;
+                                    publish_via_converter(prompt_client, &mut converter, finished).await;
                                     if is_enter_plan {
                                         state.mode = "plan".to_string();
                                         publish_via_converter(
-                                            nats_client,
+                                            prompt_client,
                                             &mut converter,
                                             PromptEvent::ModeChanged {
                                                 mode: "plan".to_string(),
@@ -452,7 +449,7 @@ impl TrogonAgent {
                                     }
                                 }
                             };
-                            publish_via_converter(nats_client, &mut converter, prompt_event).await;
+                            publish_via_converter(prompt_client, &mut converter, prompt_event).await;
                         }
                         None => {
                             match agent_fut.await {
@@ -462,7 +459,7 @@ impl TrogonAgent {
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
                                         publish_via_converter(
-                                            nats_client,
+                                            prompt_client,
                                             &mut converter,
                                             PromptEvent::UsageUpdate {
                                                 input_tokens: last_input_tokens,
@@ -479,7 +476,7 @@ impl TrogonAgent {
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
                                         publish_via_converter(
-                                            nats_client,
+                                            prompt_client,
                                             &mut converter,
                                             PromptEvent::UsageUpdate {
                                                 input_tokens: last_input_tokens,
@@ -529,10 +526,10 @@ impl TrogonAgent {
     }
 }
 
-/// Convert a `PromptEvent` via `converter` and publish resulting notifications via `NatsClientProxy`.
+/// Convert a `PromptEvent` via `converter` and publish resulting notifications via the client.
 #[cfg_attr(coverage, coverage(off))]
 async fn publish_via_converter(
-    client: &NatsClientProxy<async_nats::Client>,
+    client: &dyn PromptEventClient,
     converter: &mut PromptEventConverter,
     event: acp_nats::prompt_event::PromptEvent,
 ) {
@@ -545,7 +542,9 @@ async fn publish_via_converter(
 }
 
 #[async_trait(?Send)]
-impl agent_client_protocol::Agent for TrogonAgent {
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client_protocol::Agent
+    for TrogonAgent<S, A, N>
+{
     #[cfg_attr(coverage, coverage(off))]
     async fn initialize(
         &self,
@@ -822,8 +821,12 @@ impl agent_client_protocol::Agent for TrogonAgent {
 
         // Cancel any running prompt for this session.
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
-        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id"));
-        let _ = self.nats.publish(cancel_subject, Bytes::new()).await;
+        let cancel_subject = session_subjects::agent::CancelSubject::new(
+            &acp_prefix,
+            &AcpSessionId::new(&session_id).expect("valid session_id"),
+        )
+        .to_string();
+        self.notifier.publish(cancel_subject, Bytes::new()).await;
 
         if let Err(e) = self.store.delete(&session_id).await {
             warn!(session_id, error = %e, "agent: failed to delete session");
@@ -838,7 +841,6 @@ impl agent_client_protocol::Agent for TrogonAgent {
         req: PromptRequest,
     ) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
-        let nats_client = self.make_nats_client(&req.session_id)?;
 
         // Serialize concurrent prompts for the same session.
         let semaphore = self.acquire_session_lock(&session_id);
@@ -847,18 +849,20 @@ impl agent_client_protocol::Agent for TrogonAgent {
             .await
             .map_err(|_| internal_error("session lock closed"))?;
 
-        // Subscribe to cancel subject before running the agent.
-        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
-        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id")).to_string();
-        let cancel_sub = match self.nats.subscribe(cancel_subject.clone()).await {
-            Ok(s) => Some(s),
-            Err(e) => {
-                warn!(subject = %cancel_subject, error = %e, "agent: could not subscribe to cancel — proceeding without cancel support");
-                None
-            }
-        };
+        let acp_prefix = self.make_acp_prefix()?;
+        let acp_session_id = self.make_acp_session_id(&req.session_id)?;
+        let cancel_subject = session_subjects::agent::CancelSubject::new(
+            &acp_prefix,
+            &AcpSessionId::new(&session_id).expect("valid session_id"),
+        )
+        .to_string();
 
-        self.run_prompt(&req, &nats_client, cancel_sub).await
+        let cancel_rx = self.notifier.subscribe_cancel(cancel_subject).await;
+        let prompt_client = self
+            .notifier
+            .make_prompt_client(acp_session_id, acp_prefix);
+
+        self.run_prompt(&req, &*prompt_client, cancel_rx).await
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -868,8 +872,12 @@ impl agent_client_protocol::Agent for TrogonAgent {
     ) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
-        let subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &AcpSessionId::new(&session_id).expect("valid session_id"));
-        let _ = self.nats.publish(subject, Bytes::new()).await;
+        let subject = session_subjects::agent::CancelSubject::new(
+            &acp_prefix,
+            &AcpSessionId::new(&session_id).expect("valid session_id"),
+        )
+        .to_string();
+        self.notifier.publish(subject, Bytes::new()).await;
         Ok(())
     }
 }
