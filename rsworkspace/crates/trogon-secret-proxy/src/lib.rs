@@ -18,10 +18,19 @@
 //! ```
 
 pub mod config;
+pub mod impls;
 pub mod messages;
 pub mod provider;
 pub mod proxy;
 pub mod stream;
 pub mod subjects;
+pub mod traits;
 pub mod vault_admin;
 pub mod worker;
+
+#[cfg(feature = "test-helpers")]
+pub mod mocks;
+
+pub use traits::{
+    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
+};

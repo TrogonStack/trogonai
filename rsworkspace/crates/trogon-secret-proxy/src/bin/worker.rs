@@ -41,8 +41,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream;
-use reqwest::Client as ReqwestClient;
 use trogon_nats::{NatsConfig, connect};
 use trogon_std::SystemEnv;
 use trogon_secret_proxy::{stream, subjects, vault_admin, worker};
@@ -51,9 +49,9 @@ use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 
 async fn run_all<V: VaultStore + 'static>(
     nats: async_nats::Client,
-    jetstream: Arc<jetstream::Context>,
+    jetstream: async_nats::jetstream::Context,
     vault: Arc<V>,
-    http_client: ReqwestClient,
+    http_client: reqwest::Client,
     consumer_name: &str,
     stream_name: &str,
     prefix: &str,
@@ -116,7 +114,7 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = async_nats::jetstream::new(nats.clone());
 
     let outbound_subject = subjects::outbound(&prefix);
     let sname = stream::stream_name(&prefix);
