@@ -14,7 +14,7 @@ use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
     agent_loop::AgentLoop,
-    handlers::{pr_review, issue_triage},
+    handlers::{issue_triage, pr_review},
     tools::{ToolContext, dispatch_tool},
 };
 
@@ -26,7 +26,7 @@ fn dummy_ctx() -> ToolContext {
         proxy_url: "http://localhost:9999".to_string(),
         github_token: String::new(),
         linear_token: String::new(),
-            slack_token: String::new(),
+        slack_token: String::new(),
     }
 }
 
@@ -48,10 +48,10 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
-    mcp_tool_defs: vec![],
-    mcp_dispatch: vec![],
-    split_client: None,
-    tenant_id: "test".to_string(),
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
     }
 }
 
@@ -63,9 +63,13 @@ async fn get_pr_diff_missing_owner_returns_error() {
         &dummy_ctx(),
         "get_pr_diff",
         &json!({ "repo": "r", "pr_number": 1 }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(result.contains("owner"), "expected 'owner' in error, got: {result}");
+    assert!(
+        result.contains("owner"),
+        "expected 'owner' in error, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -74,9 +78,13 @@ async fn get_pr_diff_missing_repo_returns_error() {
         &dummy_ctx(),
         "get_pr_diff",
         &json!({ "owner": "o", "pr_number": 1 }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(result.contains("repo"), "expected 'repo' in error, got: {result}");
+    assert!(
+        result.contains("repo"),
+        "expected 'repo' in error, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -85,9 +93,13 @@ async fn get_pr_diff_missing_pr_number_returns_error() {
         &dummy_ctx(),
         "get_pr_diff",
         &json!({ "owner": "o", "repo": "r" }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(result.contains("pr_number"), "expected 'pr_number' in error, got: {result}");
+    assert!(
+        result.contains("pr_number"),
+        "expected 'pr_number' in error, got: {result}"
+    );
 }
 
 // ── get_file_contents — individual missing fields ─────────────────────────────
@@ -98,9 +110,13 @@ async fn get_file_contents_missing_owner_returns_error() {
         &dummy_ctx(),
         "get_file_contents",
         &json!({ "repo": "r", "path": "src/main.rs" }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(result.contains("owner"), "expected 'owner' in error, got: {result}");
+    assert!(
+        result.contains("owner"),
+        "expected 'owner' in error, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -109,9 +125,13 @@ async fn get_file_contents_missing_repo_returns_error() {
         &dummy_ctx(),
         "get_file_contents",
         &json!({ "owner": "o", "path": "src/main.rs" }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(result.contains("repo"), "expected 'repo' in error, got: {result}");
+    assert!(
+        result.contains("repo"),
+        "expected 'repo' in error, got: {result}"
+    );
 }
 
 // ── pr_review::handle — missing repository fields → None ─────────────────────
@@ -125,7 +145,8 @@ async fn pr_review_handle_missing_repository_owner_returns_none() {
         "action": "opened",
         "number": 1,
         "repository": { "name": "repo" }  // owner missing
-    })).unwrap();
+    }))
+    .unwrap();
 
     assert!(pr_review::handle(&agent, &payload).await.is_none());
 }
@@ -139,7 +160,8 @@ async fn pr_review_handle_missing_repository_name_returns_none() {
         "action": "opened",
         "number": 1,
         "repository": { "owner": { "login": "org" } }  // name missing
-    })).unwrap();
+    }))
+    .unwrap();
 
     assert!(pr_review::handle(&agent, &payload).await.is_none());
 }
@@ -167,18 +189,27 @@ async fn issue_triage_handle_missing_title_uses_fallback() {
         "action": "create",
         "type": "Issue",
         "data": { "id": "ISS-10" }  // title missing
-    })).unwrap();
+    }))
+    .unwrap();
 
     let agent = make_agent(&server.base_url());
     let result = issue_triage::handle(&agent, &payload).await;
-    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
+    assert!(
+        matches!(result, Some(Ok(_))),
+        "expected Some(Ok), got: {result:?}"
+    );
 }
 
 // ── pr_review_tools — verify tool names ──────────────────────────────────────
 
 #[test]
 fn pr_review_tools_has_correct_names() {
-    let expected = ["list_pr_files", "get_pr_diff", "get_file_contents", "post_pr_comment"];
+    let expected = [
+        "list_pr_files",
+        "get_pr_diff",
+        "get_file_contents",
+        "post_pr_comment",
+    ];
     assert_eq!(expected.len(), 4);
 }
 
@@ -186,7 +217,11 @@ fn pr_review_tools_has_correct_names() {
 
 #[test]
 fn triage_tools_has_correct_names() {
-    let expected = ["get_linear_issue", "post_linear_comment", "update_linear_issue"];
+    let expected = [
+        "get_linear_issue",
+        "post_linear_comment",
+        "update_linear_issue",
+    ];
     assert_eq!(expected.len(), 3);
 }
 
@@ -216,12 +251,16 @@ async fn pr_review_prompt_contains_expected_keywords() {
         "action": "opened",
         "number": 42,
         "repository": { "owner": { "login": "org" }, "name": "repo" }
-    })).unwrap();
+    }))
+    .unwrap();
 
     let agent = make_agent(&server.base_url());
     let result = pr_review::handle(&agent, &payload).await;
 
-    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
+    assert!(
+        matches!(result, Some(Ok(_))),
+        "expected Some(Ok), got: {result:?}"
+    );
     mock.assert_hits_async(1).await;
 }
 
@@ -249,12 +288,16 @@ async fn issue_triage_prompt_contains_expected_keywords() {
         "action": "create",
         "type": "Issue",
         "data": { "id": "ISS-5", "title": "Bug in login" }
-    })).unwrap();
+    }))
+    .unwrap();
 
     let agent = make_agent(&server.base_url());
     let result = issue_triage::handle(&agent, &payload).await;
 
-    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
+    assert!(
+        matches!(result, Some(Ok(_))),
+        "expected Some(Ok), got: {result:?}"
+    );
     mock.assert_hits_async(1).await;
 }
 

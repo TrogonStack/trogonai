@@ -18,7 +18,7 @@ use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
     agent_loop::{AgentLoop, ContentBlock, Message, ToolResult},
-    handlers::{pr_review, issue_triage},
+    handlers::{issue_triage, pr_review},
     tools::{ToolContext, dispatch_tool},
 };
 
@@ -30,7 +30,7 @@ fn make_ctx(proxy_url: &str) -> ToolContext {
         proxy_url: proxy_url.to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
     }
 }
 
@@ -52,10 +52,10 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
-    mcp_tool_defs: vec![],
-    mcp_dispatch: vec![],
-    split_client: None,
-    tenant_id: "test".to_string(),
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
     }
 }
 
@@ -64,7 +64,9 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
 /// `ContentBlock::Text` serializes with `"type": "text"`.
 #[test]
 fn content_block_text_serializes_with_type_tag() {
-    let block = ContentBlock::Text { text: "hello".to_string() };
+    let block = ContentBlock::Text {
+        text: "hello".to_string(),
+    };
     let json = serde_json::to_value(&block).unwrap();
     assert_eq!(json["type"], "text");
     assert_eq!(json["text"], "hello");
@@ -124,8 +126,14 @@ fn content_block_tool_use_deserializes_correctly() {
 #[test]
 fn message_tool_results_with_multiple_entries() {
     let results = vec![
-        ToolResult { tool_use_id: "id1".to_string(), content: "out1".to_string() },
-        ToolResult { tool_use_id: "id2".to_string(), content: "out2".to_string() },
+        ToolResult {
+            tool_use_id: "id1".to_string(),
+            content: "out1".to_string(),
+        },
+        ToolResult {
+            tool_use_id: "id2".to_string(),
+            content: "out2".to_string(),
+        },
     ];
     let msg = Message::tool_results(results);
     let json = serde_json::to_value(&msg).unwrap();
@@ -145,7 +153,8 @@ async fn pr_review_handle_reopened_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({

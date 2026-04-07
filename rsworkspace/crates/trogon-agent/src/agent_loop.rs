@@ -35,7 +35,10 @@ impl Message {
 
     /// Assistant turn (used when appending a model response to history).
     pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Self { role: "assistant".to_string(), content }
+        Self {
+            role: "assistant".to_string(),
+            content,
+        }
     }
 
     /// User turn carrying `tool_result` blocks.
@@ -60,9 +63,16 @@ pub enum ContentBlock {
     /// Plain text from the model or the user.
     Text { text: String },
     /// Tool invocation requested by the model.
-    ToolUse { id: String, name: String, input: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     /// Result returned to the model after executing a tool.
-    ToolResult { tool_use_id: String, content: String },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
 }
 
 /// Pair of tool-use ID and the string result to feed back to the model.
@@ -93,7 +103,9 @@ struct CacheControl {
 
 impl CacheControl {
     const fn ephemeral() -> Self {
-        Self { cache_type: "ephemeral" }
+        Self {
+            cache_type: "ephemeral",
+        }
     }
 }
 
@@ -135,7 +147,11 @@ impl std::fmt::Display for AgentError {
 
 impl std::error::Error for AgentError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::Http(e) = self { Some(e) } else { None }
+        if let Self::Http(e) = self {
+            Some(e)
+        } else {
+            None
+        }
     }
 }
 
@@ -216,7 +232,11 @@ impl AgentLoop {
 
             // Build the cacheable system block on each iteration (cheap — just wraps a &str).
             let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
-                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+                vec![SystemBlock {
+                    block_type: "text",
+                    text,
+                    cache_control: CacheControl::ephemeral(),
+                }]
             });
 
             let request = AnthropicRequest {
@@ -230,10 +250,7 @@ impl AgentLoop {
             let response = self
                 .http_client
                 .post(format!("{}/anthropic/v1/messages", self.proxy_url))
-                .header(
-                    "Authorization",
-                    format!("Bearer {}", self.anthropic_token),
-                )
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
                 .header("anthropic-version", "2023-06-01")
                 .json(&request)
                 .send()
@@ -303,7 +320,11 @@ impl AgentLoop {
             debug!(iteration, "Chat loop iteration");
 
             let system: Option<Vec<SystemBlock<'_>>> = system_prompt.map(|text| {
-                vec![SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() }]
+                vec![SystemBlock {
+                    block_type: "text",
+                    text,
+                    cache_control: CacheControl::ephemeral(),
+                }]
             });
 
             let request = AnthropicRequest {
@@ -333,7 +354,11 @@ impl AgentLoop {
                         .content
                         .iter()
                         .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -365,8 +390,10 @@ impl AgentLoop {
                 debug!(tool = %name, "Executing tool");
 
                 // Check MCP dispatch first, then fall back to built-in tools.
-                let output = if let Some((_, original, client)) =
-                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                let output = if let Some((_, original, client)) = self
+                    .mcp_dispatch
+                    .iter()
+                    .find(|(prefixed, _, _)| prefixed == name)
                 {
                     match client.call_tool(original, input).await {
                         Ok(out) => out,
@@ -418,12 +445,16 @@ mod tests {
 
     #[test]
     fn agent_error_display() {
-        assert!(AgentError::MaxIterationsReached
-            .to_string()
-            .contains("max iterations"));
-        assert!(AgentError::UnexpectedStopReason("pause".to_string())
-            .to_string()
-            .contains("pause"));
+        assert!(
+            AgentError::MaxIterationsReached
+                .to_string()
+                .contains("max iterations")
+        );
+        assert!(
+            AgentError::UnexpectedStopReason("pause".to_string())
+                .to_string()
+                .contains("pause")
+        );
     }
 
     #[test]
@@ -439,9 +470,7 @@ mod tests {
 
     #[test]
     fn agent_error_source_none_for_non_http() {
-        assert!(
-            std::error::Error::source(&AgentError::MaxIterationsReached).is_none()
-        );
+        assert!(std::error::Error::source(&AgentError::MaxIterationsReached).is_none());
     }
 
     /// When `system_prompt` is `Some`, the serialized request body contains a
@@ -454,9 +483,11 @@ mod tests {
 
         let tools = vec![tool_def("t", "d", json!({"type": "object"}))];
         let text = "You are helpful.";
-        let system: Option<Vec<SystemBlock<'_>>> = Some(vec![
-            SystemBlock { block_type: "text", text, cache_control: CacheControl::ephemeral() },
-        ]);
+        let system: Option<Vec<SystemBlock<'_>>> = Some(vec![SystemBlock {
+            block_type: "text",
+            text,
+            cache_control: CacheControl::ephemeral(),
+        }]);
         let req = AnthropicRequest {
             model: "test-model",
             max_tokens: 1024,
@@ -466,7 +497,9 @@ mod tests {
         };
         let body = serde_json::to_value(&req).unwrap();
 
-        let sys_arr = body["system"].as_array().expect("system should be an array");
+        let sys_arr = body["system"]
+            .as_array()
+            .expect("system should be an array");
         assert_eq!(sys_arr.len(), 1);
         assert_eq!(sys_arr[0]["type"], "text");
         assert_eq!(sys_arr[0]["text"], text);
@@ -552,14 +585,17 @@ mod tests {
             messages: &[],
         };
         let body = serde_json::to_value(&req).unwrap();
-        assert!(body.get("system").is_none(), "system key should be absent when None");
+        assert!(
+            body.get("system").is_none(),
+            "system key should be absent when None"
+        );
     }
 
     // ── is_flag_enabled ───────────────────────────────────────────────────────
 
     fn make_test_agent(split_client: Option<trogon_splitio::SplitClient>) -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let http = reqwest::Client::new();
         AgentLoop {
             http_client: http.clone(),

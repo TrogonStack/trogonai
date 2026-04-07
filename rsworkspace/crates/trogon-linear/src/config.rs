@@ -70,8 +70,7 @@ impl LinearConfig {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(DEFAULT_STREAM_MAX_AGE_SECS),
             ),
-            timestamp_tolerance: (tolerance_secs > 0)
-                .then(|| Duration::from_secs(tolerance_secs)),
+            timestamp_tolerance: (tolerance_secs > 0).then(|| Duration::from_secs(tolerance_secs)),
             nats_ack_timeout: Duration::from_millis(
                 env.var("LINEAR_NATS_ACK_TIMEOUT_MS")
                     .ok()
@@ -105,8 +104,14 @@ mod tests {
         assert_eq!(config.stream_name, "LINEAR");
         assert_eq!(config.stream_max_age, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.timestamp_tolerance, Some(Duration::from_secs(60)));
-        assert_eq!(config.nats_ack_timeout, Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS));
-        assert_eq!(config.nats_stream_op_timeout, Duration::from_millis(DEFAULT_NATS_STREAM_OP_TIMEOUT_MS));
+        assert_eq!(
+            config.nats_ack_timeout,
+            Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS)
+        );
+        assert_eq!(
+            config.nats_stream_op_timeout,
+            Duration::from_millis(DEFAULT_NATS_STREAM_OP_TIMEOUT_MS)
+        );
     }
 
     #[test]
@@ -156,7 +161,10 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
+        assert_eq!(
+            config.stream_max_age,
+            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
+        );
     }
 
     #[test]
@@ -233,7 +241,10 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
+        assert_eq!(
+            config.stream_max_age,
+            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
+        );
     }
 
     #[test]
@@ -243,7 +254,10 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
+        assert_eq!(
+            config.stream_max_age,
+            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
+        );
     }
 
     // ── Parser edge cases: timestamp tolerance ────────────────────────────────
@@ -306,7 +320,10 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("LINEAR_NATS_ACK_TIMEOUT_MS", "not-a-number");
         let config = LinearConfig::from_env(&env);
-        assert_eq!(config.nats_ack_timeout, Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS));
+        assert_eq!(
+            config.nats_ack_timeout,
+            Duration::from_millis(DEFAULT_NATS_ACK_TIMEOUT_MS)
+        );
     }
 
     #[test]

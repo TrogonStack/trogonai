@@ -41,6 +41,7 @@ pub struct ChatAppState {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+#[allow(clippy::result_large_err)]
 fn tenant_id(headers: &HeaderMap) -> Result<String, Response> {
     match headers.get("x-tenant-id").and_then(|v| v.to_str().ok()) {
         Some(t) if !t.is_empty() => Ok(t.to_string()),
@@ -66,20 +67,45 @@ fn now_iso8601() -> String {
     let mut year = 1970u64;
     let mut remaining = days;
     loop {
-        let dy = if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 366 } else { 365 };
-        if remaining < dy { break; }
+        let dy =
+            if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) {
+                366
+            } else {
+                365
+            };
+        if remaining < dy {
+            break;
+        }
         remaining -= dy;
         year += 1;
     }
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let months = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
+    let months = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &dim in &months {
-        if remaining < dim { break; }
+        if remaining < dim {
+            break;
+        }
         remaining -= dim;
         month += 1;
     }
-    format!("{year:04}-{month:02}-{:02}T{h:02}:{m:02}:{s:02}Z", remaining + 1)
+    format!(
+        "{year:04}-{month:02}-{:02}T{h:02}:{m:02}:{s:02}Z",
+        remaining + 1
+    )
 }
 
 // ── Response types ─────────────────────────────────────────────────────────────
@@ -155,11 +181,11 @@ pub struct SendMessageResponse {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_sessions(
-    headers: HeaderMap,
-    State(state): State<ChatAppState>,
-) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+async fn list_sessions(headers: HeaderMap, State(state): State<ChatAppState>) -> Response {
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.session_store.list(&tid).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(sessions) => {
@@ -174,7 +200,10 @@ async fn create_session(
     State(state): State<ChatAppState>,
     axum::Json(body): axum::Json<CreateSessionRequest>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     let now = now_iso8601();
     let session = ChatSession {
         id: uuid::Uuid::new_v4().to_string(),
@@ -189,7 +218,11 @@ async fn create_session(
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (StatusCode::CREATED, axum::Json(SessionSummary::from(&session))).into_response(),
+        Ok(()) => (
+            StatusCode::CREATED,
+            axum::Json(SessionSummary::from(&session)),
+        )
+            .into_response(),
     }
 }
 
@@ -198,7 +231,10 @@ async fn get_session(
     State(state): State<ChatAppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.session_store.get(&tid, &id).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => err(StatusCode::NOT_FOUND, format!("session {id} not found")),
@@ -213,16 +249,27 @@ async fn update_session(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateSessionRequest>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     let mut session = match state.session_store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("session {id} not found")),
         Ok(Some(s)) => s,
     };
-    if let Some(name) = body.name { session.name = name; }
-    if let Some(model) = body.model { session.model = Some(model); }
-    if let Some(tools) = body.tools { session.tools = tools; }
-    if let Some(mp) = body.memory_path { session.memory_path = Some(mp); }
+    if let Some(name) = body.name {
+        session.name = name;
+    }
+    if let Some(model) = body.model {
+        session.model = Some(model);
+    }
+    if let Some(tools) = body.tools {
+        session.tools = tools;
+    }
+    if let Some(mp) = body.memory_path {
+        session.memory_path = Some(mp);
+    }
     session.updated_at = now_iso8601();
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -235,7 +282,10 @@ async fn delete_session(
     State(state): State<ChatAppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.session_store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("session {id} not found")),
@@ -253,7 +303,10 @@ async fn send_message(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<SendMessageRequest>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
 
     let mut session = match state.session_store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -274,11 +327,16 @@ async fn send_message(
     let tools: Vec<_> = if session.tools.is_empty() {
         all
     } else {
-        all.into_iter().filter(|t| session.tools.contains(&t.name)).collect()
+        all.into_iter()
+            .filter(|t| session.tools.contains(&t.name))
+            .collect()
     };
 
     // Resolve the effective agent: override model if the session specifies one.
-    let effective_model = session.model.clone().unwrap_or_else(|| state.agent.model.clone());
+    let effective_model = session
+        .model
+        .clone()
+        .unwrap_or_else(|| state.agent.model.clone());
     let temp_agent;
     let agent: &AgentLoop = if effective_model == state.agent.model {
         &state.agent
@@ -313,7 +371,10 @@ async fn send_message(
     };
 
     // Run the chat loop — returns (final_text, updated_messages).
-    match agent.run_chat(session.messages.clone(), &tools, memory.as_deref()).await {
+    match agent
+        .run_chat(session.messages.clone(), &tools, memory.as_deref())
+        .await
+    {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         Ok((text, updated_messages)) => {
             let message_count = updated_messages.len();
@@ -324,7 +385,13 @@ async fn send_message(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, e);
             }
 
-            (StatusCode::OK, axum::Json(SendMessageResponse { content: text, message_count }))
+            (
+                StatusCode::OK,
+                axum::Json(SendMessageResponse {
+                    content: text,
+                    message_count,
+                }),
+            )
                 .into_response()
         }
     }
@@ -337,7 +404,9 @@ pub fn router(state: ChatAppState) -> Router {
         .route("/sessions", get(list_sessions).post(create_session))
         .route(
             "/sessions/{id}",
-            get(get_session).patch(update_session).delete(delete_session),
+            get(get_session)
+                .patch(update_session)
+                .delete(delete_session),
         )
         .route("/sessions/{id}/messages", post(send_message))
         .with_state(state)

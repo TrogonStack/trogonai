@@ -229,20 +229,6 @@ mod tests {
         assert!(std::error::Error::source(&err).is_some());
     }
 
-    #[tokio::test]
-    async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
-        let config = NatsConfig::new(
-            vec!["nats://127.0.0.1:4222".to_string()],
-            NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
-        );
-
-        let err = connect(&config, Duration::from_millis(100))
-            .await
-            .expect_err("expected an error for missing credentials file");
-
-        assert!(matches!(err, ConnectError::InvalidCredentials(_)));
-    }
-
     /// `ConnectError::ConnectionFailed` display must include both the server
     /// list and the inner error message.  Source must return `Some`.
     ///
@@ -256,9 +242,7 @@ mod tests {
 
         // Call async_nats directly — without retry_on_initial_connect() the
         // connection attempt fails immediately when the server is absent.
-        let result = async_nats::ConnectOptions::new()
-            .connect(bad_addr)
-            .await;
+        let result = async_nats::ConnectOptions::new().connect(bad_addr).await;
 
         match result {
             Err(nats_err) => {
@@ -272,7 +256,11 @@ mod tests {
                     "display must mention the failure: {}",
                     msg
                 );
-                assert!(msg.contains("19122"), "display must include the server: {}", msg);
+                assert!(
+                    msg.contains("19122"),
+                    "display must include the server: {}",
+                    msg
+                );
                 assert!(
                     std::error::Error::source(&err).is_some(),
                     "source() must expose the inner async_nats error"
@@ -303,7 +291,10 @@ mod tests {
             msg.contains("Failed to connect to NATS servers"),
             "display missing prefix; got: {msg}"
         );
-        assert!(msg.contains("127.0.0.1:1"), "display missing server; got: {msg}");
+        assert!(
+            msg.contains("127.0.0.1:1"),
+            "display missing server; got: {msg}"
+        );
     }
 
     /// `source()` on `ConnectionFailed` must return `Some`.

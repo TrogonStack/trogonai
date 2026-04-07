@@ -71,7 +71,8 @@ mod tests {
 
     #[test]
     fn incident_id_extracted() {
-        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-123","name":"test"}}"#;
+        let body =
+            br#"{"event_type":"incident.created","incident":{"id":"inc-123","name":"test"}}"#;
         assert_eq!(incident_id(body), Some("inc-123".to_string()));
     }
 
@@ -102,7 +103,10 @@ mod tests {
     fn non_string_event_type_falls_back_to_event() {
         // Numbers and objects are not strings — as_str() returns None.
         assert_eq!(nats_subject_suffix(br#"{"event_type":42}"#), "event");
-        assert_eq!(nats_subject_suffix(br#"{"event_type":{"nested":"val"}}"#), "event");
+        assert_eq!(
+            nats_subject_suffix(br#"{"event_type":{"nested":"val"}}"#),
+            "event"
+        );
         assert_eq!(nats_subject_suffix(br#"{"event_type":["a","b"]}"#), "event");
     }
 
@@ -116,6 +120,9 @@ mod tests {
 
     #[test]
     fn incident_id_when_incident_is_null_returns_none() {
-        assert_eq!(incident_id(br#"{"event_type":"incident.created","incident":null}"#), None);
+        assert_eq!(
+            incident_id(br#"{"event_type":"incident.created","incident":null}"#),
+            None
+        );
     }
 }

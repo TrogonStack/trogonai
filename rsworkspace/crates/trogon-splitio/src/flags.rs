@@ -43,8 +43,8 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::{CONTROL, SplitClient, error::SplitError};
 
@@ -92,7 +92,9 @@ impl SplitClient {
         flag: &dyn FeatureFlag,
         attributes: Option<&HashMap<String, Value>>,
     ) -> bool {
-        self.get_treatment_or_control(key, flag.name(), attributes).await == "on"
+        self.get_treatment_or_control(key, flag.name(), attributes)
+            .await
+            == "on"
     }
 
     /// Return `true` if **all** of the provided flags are `"on"` for the user.
@@ -146,14 +148,18 @@ impl SplitClient {
 pub struct AlwaysOn(pub &'static str);
 
 impl FeatureFlag for AlwaysOn {
-    fn name(&self) -> &'static str { self.0 }
+    fn name(&self) -> &'static str {
+        self.0
+    }
 }
 
 /// A feature flag that is always `"off"` — useful in tests.
 pub struct AlwaysOff(pub &'static str);
 
 impl FeatureFlag for AlwaysOff {
-    fn name(&self) -> &'static str { self.0 }
+    fn name(&self) -> &'static str {
+        self.0
+    }
 }
 
 /// The treatment returned for [`CONTROL`] — the safe default when a flag
@@ -163,8 +169,8 @@ pub const CONTROL_TREATMENT: &str = CONTROL;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::MockServer;
     use crate::{SplitClient, SplitConfig};
+    use httpmock::MockServer;
 
     // Sample flag enum — exactly like Spacedrive's pattern
     enum AppFlag {
@@ -176,7 +182,7 @@ mod tests {
         fn name(&self) -> &'static str {
             match self {
                 Self::NewDashboard => "new_dashboard",
-                Self::BetaSearch   => "beta_search",
+                Self::BetaSearch => "beta_search",
             }
         }
     }
@@ -197,11 +203,16 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
-        assert!(client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
+        assert!(
+            client
+                .is_enabled("user-1", &AppFlag::NewDashboard, None)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -211,29 +222,44 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "off" }));
         });
 
         let client = make_client(&server.base_url());
-        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
+        assert!(
+            !client
+                .is_enabled("user-1", &AppFlag::NewDashboard, None)
+                .await
+        );
     }
 
     #[tokio::test]
     async fn is_enabled_returns_false_for_control() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/client/get-treatment");
-            then.status(200).json_body(serde_json::json!({ "treatment": "control" }));
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment");
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "control" }));
         });
 
         let client = make_client(&server.base_url());
-        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
+        assert!(
+            !client
+                .is_enabled("user-1", &AppFlag::NewDashboard, None)
+                .await
+        );
     }
 
     #[tokio::test]
     async fn is_enabled_returns_false_on_network_error() {
         let client = make_client("http://127.0.0.1:1");
-        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
+        assert!(
+            !client
+                .is_enabled("user-1", &AppFlag::NewDashboard, None)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -244,7 +270,8 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "beta_search");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -258,8 +285,10 @@ mod tests {
     async fn all_enabled_returns_true_when_all_on() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/client/get-treatment");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment");
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -275,13 +304,15 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
         server.mock(|when, then| {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "beta_search");
-            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "off" }));
         });
 
         let client = make_client(&server.base_url());
@@ -304,13 +335,15 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "off" }));
         });
         server.mock(|when, then| {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "beta_search");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -322,8 +355,10 @@ mod tests {
     async fn any_enabled_returns_false_when_all_off() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/client/get-treatment");
-            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment");
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "off" }));
         });
 
         let client = make_client(&server.base_url());
@@ -346,11 +381,15 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "blue" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "blue" }));
         });
 
         let client = make_client(&server.base_url());
-        let t = client.treatment_for("u", &AppFlag::NewDashboard, None).await.unwrap();
+        let t = client
+            .treatment_for("u", &AppFlag::NewDashboard, None)
+            .await
+            .unwrap();
         assert_eq!(t, "blue");
     }
 
@@ -363,8 +402,10 @@ mod tests {
     async fn is_enabled_returns_false_for_custom_variant() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/client/get-treatment");
-            then.status(200).json_body(serde_json::json!({ "treatment": "blue" }));
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment");
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "blue" }));
         });
 
         let client = make_client(&server.base_url());
@@ -385,14 +426,16 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "off" }));
         });
         let beta_mock = server
             .mock_async(|when, then| {
                 when.method(httpmock::Method::GET)
                     .path("/client/get-treatment")
                     .query_param("split-name", "beta_search");
-                then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+                then.status(200)
+                    .json_body(serde_json::json!({ "treatment": "on" }));
             })
             .await;
 
@@ -415,14 +458,16 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "new_dashboard");
-            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200)
+                .json_body(serde_json::json!({ "treatment": "on" }));
         });
         let beta_mock = server
             .mock_async(|when, then| {
                 when.method(httpmock::Method::GET)
                     .path("/client/get-treatment")
                     .query_param("split-name", "beta_search");
-                then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
+                then.status(200)
+                    .json_body(serde_json::json!({ "treatment": "off" }));
             })
             .await;
 
@@ -440,6 +485,9 @@ mod tests {
 
     #[test]
     fn description_defaults_to_name() {
-        assert_eq!(AppFlag::NewDashboard.description(), AppFlag::NewDashboard.name());
+        assert_eq!(
+            AppFlag::NewDashboard.description(),
+            AppFlag::NewDashboard.name()
+        );
     }
 }

@@ -78,9 +78,9 @@ mod tests {
     /// `hex::decode` returns an error → `verify` must return false.
     #[test]
     fn odd_length_hex_fails() {
-        assert!(!verify("secret", b"body", "abc"));   // 3 valid hex chars
+        assert!(!verify("secret", b"body", "abc")); // 3 valid hex chars
         assert!(!verify("secret", b"body", "abcde")); // 5 valid hex chars
-        assert!(!verify("secret", b"body", "a"));     // 1 valid hex char
+        assert!(!verify("secret", b"body", "a")); // 1 valid hex char
     }
 
     /// HMAC-SHA256 is well-defined for an empty key.  `verify` must succeed

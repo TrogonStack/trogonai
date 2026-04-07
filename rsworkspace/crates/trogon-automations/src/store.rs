@@ -75,7 +75,12 @@ impl AutomationStore {
     /// Fetch a single automation by tenant + id.  Returns `None` if not found.
     pub async fn get(&self, tenant_id: &str, id: &str) -> Result<Option<Automation>, StoreError> {
         let key = kv_key(tenant_id, id);
-        match self.kv.get(&key).await.map_err(|e| StoreError(e.to_string()))? {
+        match self
+            .kv
+            .get(&key)
+            .await
+            .map_err(|e| StoreError(e.to_string()))?
+        {
             None => Ok(None),
             Some(bytes) => {
                 let a = serde_json::from_slice::<Automation>(&bytes)
@@ -88,14 +93,21 @@ impl AutomationStore {
     /// Delete an automation by tenant + id.
     pub async fn delete(&self, tenant_id: &str, id: &str) -> Result<(), StoreError> {
         let key = kv_key(tenant_id, id);
-        self.kv.delete(&key).await.map_err(|e| StoreError(e.to_string()))?;
+        self.kv
+            .delete(&key)
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
         Ok(())
     }
 
     /// Return all automations belonging to `tenant_id`.
     pub async fn list(&self, tenant_id: &str) -> Result<Vec<Automation>, StoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys = self.kv.keys().await.map_err(|e| StoreError(e.to_string()))?;
+        let mut keys = self
+            .kv
+            .keys()
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
         let mut result = Vec::new();
         while let Some(key) = keys.next().await {
             let key = key.map_err(|e| StoreError(e.to_string()))?;

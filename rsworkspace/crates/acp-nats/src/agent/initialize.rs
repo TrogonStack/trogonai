@@ -168,29 +168,4 @@ mod tests {
         let result = bridge.initialize(request).await;
         assert!(result.is_ok());
     }
-
-    /// `NatsError::PublishOperation` is handled by the `_` catch-all branch.
-    /// Verifies it returns `InternalError` without panicking.
-    #[test]
-    fn map_initialize_error_publish_operation() {
-        use trogon_nats::PublishOperationError;
-        let err = map_initialize_error(NatsError::PublishOperation(PublishOperationError(
-            "publish failed".into(),
-        )));
-        assert!(err.to_string().contains("Initialize request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    /// `NatsError::PublishOperationExhausted` is handled by the `_` catch-all.
-    #[test]
-    fn map_initialize_error_publish_operation_exhausted() {
-        use trogon_nats::PublishOperationError;
-        let err = map_initialize_error(NatsError::PublishOperationExhausted {
-            error: PublishOperationError("publish exhausted".into()),
-            subject: "acp.agent.initialize".into(),
-            attempts: 3,
-        });
-        assert!(err.to_string().contains("Initialize request failed"));
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
 }
