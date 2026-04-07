@@ -9,10 +9,10 @@ pub struct WasmSession {
 }
 
 impl WasmSession {
-    pub fn new(dir: PathBuf) -> Self {
+    pub fn new(dir: PathBuf, now: std::time::Instant) -> Self {
         Self {
             dir,
-            last_activity: std::time::Instant::now(),
+            last_activity: now,
         }
     }
 
@@ -70,7 +70,7 @@ mod tests {
     use super::*;
 
     fn session(dir: &str) -> WasmSession {
-        WasmSession::new(PathBuf::from(dir))
+        WasmSession::new(PathBuf::from(dir), std::time::Instant::now())
     }
 
     #[test]

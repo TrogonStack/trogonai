@@ -1,3 +1,4 @@
+use crate::traits::ChildProcessHandle;
 use agent_client_protocol::{TerminalExitStatus, TerminalOutputResponse};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::warn;
@@ -6,13 +7,13 @@ use tracing::warn;
 ///
 /// Each variant carries only the state relevant to that kind, eliminating
 /// the `Option<>` fields that were required when both lived in one struct.
-pub(crate) enum TerminalKind {
-    /// A native OS process spawned via `tokio::process::Command`.
+pub(crate) enum TerminalKind<H: ChildProcessHandle> {
+    /// A native OS process spawned via `ProcessSpawner`.
     Native {
-        /// The child process handle. Taken out when `wait_with_output` is called.
-        child: Option<tokio::process::Child>,
+        /// The child process handle. Taken out when `wait_for_terminal_exit` is called.
+        child: Option<H>,
         /// Stdin pipe. `None` after `close_stdin()` or if piping failed.
-        stdin: Option<tokio::process::ChildStdin>,
+        stdin: Option<H::Stdin>,
     },
     /// A WASM module running as a background `spawn_local` task.
     Wasm {
@@ -27,8 +28,8 @@ pub(crate) enum TerminalKind {
 /// Spawned by `create_terminal` and tracked by `terminal_id`.
 /// Output (stdout + stderr interleaved) is buffered in `output_buf`.
 /// The buffer is capped at `output_byte_limit`; oldest bytes are dropped.
-pub(crate) struct WasmTerminal {
-    pub(crate) kind: TerminalKind,
+pub(crate) struct WasmTerminal<H: ChildProcessHandle> {
+    pub(crate) kind: TerminalKind<H>,
     pub(crate) output_buf: Arc<Mutex<Vec<u8>>>,
     /// Background task that drains stdout/stderr (native) or runs the WASM module.
     pub(crate) output_collector: Option<tokio::task::JoinHandle<()>>,
@@ -40,7 +41,7 @@ pub(crate) struct WasmTerminal {
     pub(crate) was_truncated: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl WasmTerminal {
+impl<H: ChildProcessHandle> WasmTerminal<H> {
     /// Collects the current output and exit status without waiting.
     ///
     /// For WASM terminals, peeks at the shared exit arc so that `terminal_output`
@@ -61,27 +62,6 @@ impl WasmTerminal {
         TerminalOutputResponse::new(output, truncated).exit_status(exit_status)
     }
 
-    /// Appends bytes to the output buffer, dropping the oldest bytes if the
-    /// limit would be exceeded. Preserves UTF-8 char boundaries when trimming.
-    /// Sets `was_truncated` to `true` the first time bytes are dropped.
-    pub fn append_output(
-        buf: &Arc<Mutex<Vec<u8>>>,
-        was_truncated: &Arc<std::sync::atomic::AtomicBool>,
-        limit: usize,
-        data: &[u8],
-    ) {
-        let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
-        guard.extend_from_slice(data);
-        if guard.len() > limit {
-            let excess = guard.len() - limit;
-            let mut trim_at = excess;
-            while trim_at < guard.len() && (guard[trim_at] & 0xC0) == 0x80 {
-                trim_at += 1;
-            }
-            guard.drain(..trim_at);
-            was_truncated.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
 
     /// Writes bytes to the stdin pipe of a native process.
     /// Returns `true` on success, `false` for WASM terminals (no stdin) or on error.
@@ -139,6 +119,28 @@ impl WasmTerminal {
                 }
             }
         }
+    }
+}
+
+/// Appends bytes to the output buffer, dropping the oldest bytes if the
+/// limit would be exceeded. Preserves UTF-8 char boundaries when trimming.
+/// Sets `was_truncated` to `true` the first time bytes are dropped.
+pub(crate) fn append_output(
+    buf: &Arc<Mutex<Vec<u8>>>,
+    was_truncated: &Arc<std::sync::atomic::AtomicBool>,
+    limit: usize,
+    data: &[u8],
+) {
+    let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
+    guard.extend_from_slice(data);
+    if guard.len() > limit {
+        let excess = guard.len() - limit;
+        let mut trim_at = excess;
+        while trim_at < guard.len() && (guard[trim_at] & 0xC0) == 0x80 {
+            trim_at += 1;
+        }
+        guard.drain(..trim_at);
+        was_truncated.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
