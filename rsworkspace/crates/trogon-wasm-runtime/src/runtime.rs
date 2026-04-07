@@ -1,17 +1,13 @@
 use crate::config::Config;
-
-/// Cache fingerprint combining crate version and wasmtime version.
-/// The wasmtime version is injected at build time from Cargo.lock by build.rs,
-/// so it updates automatically when the dependency is bumped.
-const CACHE_FINGERPRINT: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    "+wasmtime-",
-    env!("WASMTIME_VERSION")
-);
 use crate::metrics::METRICS;
 use crate::session::WasmSession;
 use crate::terminal::{TerminalKind, WasmTerminal};
-use crate::wasm;
+use crate::traits::{
+    ChildProcessHandle, Clock, Fs, IdGenerator, NatsBroker, ProcessSpawner, Runtime,
+    SemaphoreTaskLimiter, StdClock, StdSyncFs, TaskLimiter, TokioFs, TokioProcessSpawner,
+    UuidGenerator, WasmExecutor, WasmRunConfig,
+};
+use crate::wasm::RealWasmExecutor;
 use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
@@ -25,26 +21,40 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
-use tokio::sync::Semaphore;
 use tracing::{debug, info};
-use uuid::Uuid;
-use wasmtime::{Engine, InstancePre, Module};
-
-/// Tuple stored in the in-memory module cache: `(instance_pre, source_mtime, last_accessed)`.
-type CachedModuleEntry = (
-    InstancePre<wasm::WasmStoreData>,
-    std::time::SystemTime,
-    std::time::Instant,
-);
 
 /// Central execution runtime — one instance per process, shared across sessions.
 ///
 /// Manages per-session sandbox directories and terminal processes.
 /// The wasmtime `Engine` is pre-initialized for WASM module execution.
-pub struct WasmRuntime {
-    /// Shared wasmtime engine (Cranelift JIT, reuses compiled module cache).
-    pub(crate) engine: Engine,
+///
+/// The default type parameters (`TokioFs`, `TokioProcessSpawner`) use the real
+/// OS filesystem and process APIs. Pass `MockFs` / `MockProcessSpawner` in
+/// tests to avoid touching disk or spawning real processes.
+pub struct WasmRuntime<
+    FS = TokioFs,
+    PS = TokioProcessSpawner,
+    N  = async_nats::Client,
+    WE = RealWasmExecutor<async_nats::Client, StdClock, StdSyncFs>,
+    CL = StdClock,
+    IG = UuidGenerator,
+    TL = SemaphoreTaskLimiter,
+>
+where
+    FS: Fs,
+    PS: ProcessSpawner,
+    N:  NatsBroker + Send + Sync,
+    WE: WasmExecutor<N>,
+    CL: Clock,
+    IG: IdGenerator,
+    TL: TaskLimiter,
+{
+    /// Filesystem abstraction for session sandbox operations.
+    fs: FS,
+    /// Process spawner abstraction for native terminal creation.
+    process_spawner: PS,
+    /// WASM executor abstraction for module compilation and execution.
+    wasm_executor: WE,
     /// Root directory under which per-session sandboxes are created.
     session_root: PathBuf,
     /// Maximum output bytes retained per terminal.
@@ -60,26 +70,13 @@ pub struct WasmRuntime {
     /// Live sessions keyed by ACP session_id.
     sessions: RefCell<HashMap<String, WasmSession>>,
     /// All terminals across all sessions, keyed by terminal_id.
-    terminals: RefCell<HashMap<String, WasmTerminal>>,
-    /// In-memory cache of pre-linked module instances keyed by absolute path.
-    /// Value is `(instance_pre, source_mtime, last_accessed)`:
-    ///   - `instance_pre` — ready for `instantiate_async`; avoids rebuilding the linker per invocation.
-    ///   - `source_mtime` — used for invalidation when the `.wasm` file changes on disk.
-    ///   - `last_accessed` — updated on every hit; LRU entry is evicted at capacity.
-    ///
-    /// Capped at `MAX_CACHED_MODULES` entries.
-    modules: RefCell<HashMap<PathBuf, CachedModuleEntry>>,
-    /// Linker with all WASI and `trogon_v1` host functions registered.
-    /// Built once at startup; shared across all module invocations via `instantiate_pre`.
-    linker: wasmtime::Linker<wasm::WasmStoreData>,
-    /// Optional directory for on-disk compiled module cache.
-    module_cache_dir: Option<PathBuf>,
+    terminals: RefCell<HashMap<String, WasmTerminal<PS::Handle>>>,
     /// Maps session_id → set of terminal_ids for session-level auto-cleanup.
     session_terminals: RefCell<HashMap<String, HashSet<String>>>,
     /// Reverse mapping terminal_id → session_id (for O(1) session lookup on terminal ops).
     terminal_session: RefCell<HashMap<String, String>>,
     /// Optional NATS client for trogon host functions in WASM modules.
-    nats_client: Option<async_nats::Client>,
+    nats_client: Option<N>,
     /// Optional memory limit for WASM module execution in bytes.
     wasm_memory_limit_bytes: Option<usize>,
     /// Maximum fuel (instruction budget) for a single WASM module execution.
@@ -88,39 +85,21 @@ pub struct WasmRuntime {
     wasm_host_call_limit: u32,
     /// ACP subject prefix for WASM permission requests over NATS.
     acp_prefix: String,
-    /// Semaphore limiting concurrent WASM task spawns.
-    task_semaphore: Arc<Semaphore>,
+    /// Task limiter controlling concurrent WASM task spawns.
+    task_limiter: TL,
     /// How long (in seconds) a session can be idle before automatic cleanup.
     /// 0 means disabled.
     session_idle_timeout_secs: u64,
-    /// Maximum allowed size for a `.wasm` module file in bytes. 0 means unlimited.
-    wasm_max_module_size_bytes: usize,
     /// Maximum seconds to wait for a terminal to exit before killing it. 0 means no timeout.
     wait_for_exit_timeout_secs: u64,
+    /// Clock abstraction for session idle-timeout tracking.
+    clock: CL,
+    /// ID generator for terminal IDs and atomic temp-file names.
+    id_gen: IG,
 }
 
-/// Maximum number of compiled modules kept in the per-process in-memory cache.
-/// When this limit is reached, the least-recently-accessed (LRU) entry is evicted
-/// before inserting the new module. Prevents unbounded memory growth in
-/// long-running deployments with many unique modules.
-const MAX_CACHED_MODULES: usize = 64;
-
-/// Derives an on-disk cache key from the absolute path of a `.wasm` file.
-///
-/// Uses FNV-1a 64-bit, which is deterministic across Rust versions and
-/// process restarts. `DefaultHasher` is explicitly avoided because its
-/// implementation is "subject to change" between compiler versions, which
-/// would silently invalidate on-disk caches after a toolchain upgrade.
-fn cache_key(path: &std::path::Path) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in path.as_os_str().as_encoded_bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
-
-impl WasmRuntime {
+/// Constructors that default to the real OS filesystem, process spawner, clock, and ID generator.
+impl WasmRuntime<TokioFs, TokioProcessSpawner, async_nats::Client> {
     pub fn new(config: &Config) -> Result<Self, wasmtime::Error> {
         Self::with_nats(config, None)
     }
@@ -129,19 +108,52 @@ impl WasmRuntime {
         config: &Config,
         nats_client: Option<async_nats::Client>,
     ) -> Result<Self, wasmtime::Error> {
-        let mut wasm_config = wasmtime::Config::new();
-        wasm_config.async_support(true);
-        wasm_config.consume_fuel(true);
-        let engine = Engine::new(&wasm_config)?;
-        let linker = wasm::build_linker(&engine)?;
-        let semaphore_permits = if config.wasm_max_concurrent_tasks == 0 {
+        let wasm_executor = RealWasmExecutor::new(config)?;
+        let permits = if config.wasm_max_concurrent_tasks == 0 {
             tokio::sync::Semaphore::MAX_PERMITS
         } else {
             config.wasm_max_concurrent_tasks.max(1)
         };
+        Self::with_services(
+            config,
+            nats_client,
+            TokioFs,
+            TokioProcessSpawner,
+            wasm_executor,
+            StdClock,
+            UuidGenerator,
+            SemaphoreTaskLimiter::new(permits),
+        )
+    }
+}
+
+impl<FS, PS, N, WE, CL, IG, TL> WasmRuntime<FS, PS, N, WE, CL, IG, TL>
+where
+    FS: Fs,
+    PS: ProcessSpawner,
+    N:  NatsBroker + Send + Sync,
+    WE: WasmExecutor<N>,
+    CL: Clock,
+    IG: IdGenerator,
+    TL: TaskLimiter,
+{
+    /// Creates a runtime with fully injectable dependencies.
+    ///
+    /// Production code uses [`WasmRuntime::new`] or [`WasmRuntime::with_nats`].
+    pub fn with_services(
+        config: &Config,
+        nats_client: Option<N>,
+        fs: FS,
+        process_spawner: PS,
+        wasm_executor: WE,
+        clock: CL,
+        id_gen: IG,
+        task_limiter: TL,
+    ) -> Result<Self, wasmtime::Error> {
         Ok(Self {
-            engine,
-            linker,
+            fs,
+            process_spawner,
+            wasm_executor,
             session_root: config.session_root.clone(),
             output_byte_limit: config.output_byte_limit,
             auto_allow_permissions: config.auto_allow_permissions,
@@ -150,19 +162,18 @@ impl WasmRuntime {
             wasm_allow_network: config.wasm_allow_network,
             sessions: RefCell::new(HashMap::new()),
             terminals: RefCell::new(HashMap::new()),
-            modules: RefCell::new(HashMap::new()),
             session_terminals: RefCell::new(HashMap::new()),
             terminal_session: RefCell::new(HashMap::new()),
             nats_client,
             wasm_memory_limit_bytes: config.wasm_memory_limit_bytes,
-            module_cache_dir: config.module_cache_dir.clone(),
             wasm_fuel_limit: config.wasm_fuel_limit,
             wasm_host_call_limit: config.wasm_host_call_limit,
             acp_prefix: config.acp_prefix.clone(),
-            task_semaphore: Arc::new(Semaphore::new(semaphore_permits)),
+            task_limiter,
             session_idle_timeout_secs: config.session_idle_timeout_secs,
-            wasm_max_module_size_bytes: config.wasm_max_module_size_bytes,
             wait_for_exit_timeout_secs: config.wait_for_exit_timeout_secs,
+            clock,
+            id_gen,
         })
     }
 
@@ -172,18 +183,18 @@ impl WasmRuntime {
     fn session_dir(&self, session_id: &str) -> PathBuf {
         let mut sessions = self.sessions.borrow_mut();
         if let Some(s) = sessions.get_mut(session_id) {
-            s.last_activity = std::time::Instant::now();
+            s.last_activity = self.clock.now();
             return s.dir.clone();
         }
         let dir = self.session_root.join(session_id);
-        sessions.insert(session_id.to_string(), WasmSession::new(dir.clone()));
+        sessions.insert(session_id.to_string(), WasmSession::new(dir.clone(), self.clock.now()));
         dir
     }
 
     /// Updates the last_activity timestamp for a session (called on every access).
     pub fn tick_last_activity(&self, session_id: &str) {
         if let Some(s) = self.sessions.borrow_mut().get_mut(session_id) {
-            s.last_activity = std::time::Instant::now();
+            s.last_activity = self.clock.now();
         }
     }
 
@@ -199,7 +210,7 @@ impl WasmRuntime {
         if self.session_idle_timeout_secs == 0 {
             return;
         }
-        let now = std::time::Instant::now();
+        let now = self.clock.now();
         let timeout = std::time::Duration::from_secs(self.session_idle_timeout_secs);
         let idle: Vec<String> = {
             let sessions = self.sessions.borrow();
@@ -239,9 +250,10 @@ impl WasmRuntime {
             }
             if let Some(session) = self.sessions.borrow_mut().remove(&session_id) {
                 let dir = session.dir.clone();
+                let fs = self.fs.clone();
                 // Spawn the fs removal as a background task if we're in an async context.
                 tokio::task::spawn_local(async move {
-                    let _ = tokio::fs::remove_dir_all(&dir).await;
+                    let _ = fs.remove_dir_all(&dir).await;
                     debug!(session_id = %session_id, "Idle session sandbox cleaned up");
                 });
             }
@@ -260,14 +272,13 @@ impl WasmRuntime {
     /// Called once at startup before accepting any requests.
     pub async fn cleanup_stale_sessions(&self) {
         let root = &self.session_root;
-        let mut rd = match tokio::fs::read_dir(root).await {
-            Ok(r) => r,
+        let dirs = match self.fs.list_subdirs(root).await {
+            Ok(d) => d,
             Err(_) => return, // root doesn't exist yet, nothing to clean
         };
         let mut cleaned = 0u32;
-        while let Ok(Some(entry)) = rd.next_entry().await {
-            let path = entry.path();
-            if path.is_dir() && tokio::fs::remove_dir_all(&path).await.is_ok() {
+        for path in dirs {
+            if self.fs.remove_dir_all(&path).await.is_ok() {
                 cleaned += 1;
             }
         }
@@ -283,164 +294,10 @@ impl WasmRuntime {
     /// Ensures the sandbox directory for a session exists on disk.
     async fn ensure_session_dir(&self, session_id: &str) -> std::io::Result<PathBuf> {
         let dir = self.session_dir(session_id);
-        tokio::fs::create_dir_all(&dir).await?;
+        self.fs.create_dir_all(&dir).await?;
         // Create the tmp sub-directory so that TMPDIR is usable for native processes.
-        tokio::fs::create_dir_all(dir.join("tmp")).await?;
+        self.fs.create_dir_all(&dir.join("tmp")).await?;
         Ok(dir)
-    }
-
-    // ── Module cache ───────────────────────────────────────────────────────
-
-    /// Returns a compiled `Module` for `wasm_path`, using in-memory and on-disk
-    /// caches. Invalidates both caches when the source file's mtime changes.
-    ///
-    /// Disk I/O and Cranelift compilation run inside `spawn_blocking` so the
-    /// tokio `LocalSet` is not stalled during CPU-intensive JIT compilation.
-    async fn get_or_compile_module(
-        &self,
-        wasm_path: &std::path::Path,
-    ) -> Result<InstancePre<wasm::WasmStoreData>, anyhow::Error> {
-        let abs_path = wasm_path
-            .canonicalize()
-            .unwrap_or_else(|_| wasm_path.to_path_buf());
-
-        // Check file size limit and mtime via blocking I/O.
-        let max_size = self.wasm_max_module_size_bytes;
-        let abs_path_b = abs_path.clone();
-        let (meta_len, current_mtime) = tokio::task::spawn_blocking(move || {
-            let meta = std::fs::metadata(&abs_path_b)?;
-            Ok::<_, anyhow::Error>((meta.len(), meta.modified()?))
-        })
-        .await??;
-
-        if max_size > 0 && meta_len as usize > max_size {
-            return Err(anyhow::anyhow!(
-                "WASM module too large: {} bytes (limit: {})",
-                meta_len,
-                max_size
-            ));
-        }
-
-        // Check in-memory cache (synchronous — just a RefCell borrow).
-        {
-            let mut cached = self.modules.borrow_mut();
-            if let Some((pre, mtime, last_accessed)) = cached.get_mut(&abs_path) {
-                if *mtime == current_mtime {
-                    *last_accessed = std::time::Instant::now();
-                    METRICS
-                        .cache_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return Ok(pre.clone());
-                }
-            }
-        }
-
-        // Check on-disk cache and compile if needed — all blocking work in one closure.
-        let engine = self.engine.clone();
-        let cache_dir = self.module_cache_dir.clone();
-        let abs_path_b = abs_path.clone();
-        let m = tokio::task::spawn_blocking(move || -> Result<Module, anyhow::Error> {
-            if let Some(ref cache_dir) = cache_dir {
-                let key = cache_key(&abs_path_b);
-                let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
-                let mtime_path = cache_dir.join(format!("{key}.mtime"));
-                let version_path = cache_dir.join(format!("{key}.version"));
-
-                if cwasm_path.exists() && mtime_path.exists() {
-                    let stored_version = std::fs::read_to_string(&version_path).unwrap_or_default();
-                    let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
-
-                    if version_ok {
-                        if let Ok(mtime_str) = std::fs::read_to_string(&mtime_path) {
-                            let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
-                            let current_nanos = current_mtime
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_nanos() as u64)
-                                .unwrap_or(0);
-                            if stored_nanos != 0 && stored_nanos == current_nanos {
-                                // SAFETY: the engine config is always identical for cached
-                                // modules — same wasmtime::Config, same Cranelift settings.
-                                let cached_module =
-                                    unsafe { Module::deserialize_file(&engine, &cwasm_path) };
-                                match cached_module {
-                                    Ok(m) => {
-                                        METRICS
-                                            .cache_hits
-                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                        return Ok(m);
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            path = %cwasm_path.display(),
-                                            error = %e,
-                                            "on-disk module cache invalid, recompiling"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        tracing::warn!(
-                            path = %cwasm_path.display(),
-                            stored = %stored_version.trim(),
-                            current = %CACHE_FINGERPRINT,
-                            "module cache version mismatch, recompiling"
-                        );
-                    }
-                }
-            }
-
-            // Compile fresh from source (cache miss).
-            METRICS
-                .cache_misses
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let m = Module::from_file(&engine, &abs_path_b)?;
-
-            // Write on-disk cache if configured (fire-and-forget; errors are non-fatal).
-            if let Some(ref cache_dir) = cache_dir {
-                let key = cache_key(&abs_path_b);
-                if std::fs::create_dir_all(cache_dir).is_ok() {
-                    if let Ok(serialized) = m.serialize() {
-                        let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
-                        let mtime_path = cache_dir.join(format!("{key}.mtime"));
-                        let version_path = cache_dir.join(format!("{key}.version"));
-                        let current_nanos = current_mtime
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_nanos() as u64)
-                            .unwrap_or(0);
-                        let _ = std::fs::write(&cwasm_path, &serialized);
-                        let _ = std::fs::write(&mtime_path, current_nanos.to_string());
-                        let _ = std::fs::write(&version_path, CACHE_FINGERPRINT);
-                    }
-                }
-            }
-
-            Ok(m)
-        })
-        .await??;
-
-        // Build InstancePre on the LocalSet thread — it is !Send and cannot be
-        // created inside spawn_blocking. This call is fast (import resolution only;
-        // Cranelift compilation already happened in the spawn_blocking above).
-        let pre = self.linker.instantiate_pre(&m)?;
-        {
-            let mut cache = self.modules.borrow_mut();
-            // Evict the least-recently-accessed (LRU) entry when at capacity.
-            if cache.len() >= MAX_CACHED_MODULES && !cache.contains_key(&abs_path) {
-                if let Some(lru) = cache
-                    .iter()
-                    .min_by_key(|(_, (_, _, last_accessed))| *last_accessed)
-                    .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&lru);
-                }
-            }
-            cache.insert(
-                abs_path,
-                (pre.clone(), current_mtime, std::time::Instant::now()),
-            );
-        }
-        Ok(pre)
     }
 
     // ── Terminal operations ────────────────────────────────────────────────
@@ -464,7 +321,8 @@ impl WasmRuntime {
         };
 
         // Ensure the cwd exists inside the sandbox.
-        tokio::fs::create_dir_all(&cwd)
+        self.fs
+            .create_dir_all(&cwd)
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
@@ -494,44 +352,43 @@ impl WasmRuntime {
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let mut cmd = Command::new(command);
-        cmd.args(args)
-            .current_dir(&cwd)
-            .env_clear()
-            .env("HOME", &cwd)
-            .env("TMPDIR", sandbox_dir.join("tmp"))
-            .env("PWD", &cwd);
+        // Build the env pairs to forward from the request.
+        let env_pairs: Vec<(String, String)> = req
+            .env
+            .iter()
+            .map(|e| (e.name.clone(), e.value.clone()))
+            .collect();
 
-        // Forward safe env vars from request.
-        for env_var in &req.env {
-            cmd.env(&env_var.name, &env_var.value);
-        }
+        let mut handle = self
+            .process_spawner
+            .spawn(
+                command,
+                args,
+                &env_pairs,
+                &cwd,
+                &cwd,
+                &sandbox_dir.join("tmp"),
+            )
+            .await
+            .map_err(|e| {
+                agent_client_protocol::Error::new(-32603, format!("Failed to spawn process: {e}"))
+            })?;
 
-        // Capture stdout + stderr separately, merge into output_buf.
-        // Pipe stdin so callers can write to the process via handle_write_to_terminal.
-        cmd.stdin(std::process::Stdio::piped());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
+        let stdin = handle.take_stdin();
 
-        let mut child = cmd.spawn().map_err(|e| {
-            agent_client_protocol::Error::new(-32603, format!("Failed to spawn process: {e}"))
-        })?;
-
-        let stdin = child.stdin.take();
-
-        let terminal_id = Uuid::new_v4().to_string();
+        let terminal_id = self.id_gen.new_id();
 
         // Spawn background task to collect stdout.
         let buf_stdout = Arc::clone(&output_buf);
         let trunc_stdout = Arc::clone(&was_truncated_flag);
         let limit = self.output_byte_limit;
-        let stdout_handle = if let Some(mut stdout) = child.stdout.take() {
+        let stdout_handle = if let Some(mut stdout) = handle.take_stdout() {
             tokio::task::spawn(async move {
                 let mut chunk = [0u8; 4096];
                 loop {
                     match stdout.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(
+                        Ok(n) => crate::terminal::append_output(
                             &buf_stdout,
                             &trunc_stdout,
                             limit,
@@ -548,13 +405,13 @@ impl WasmRuntime {
         // Spawn background task to collect stderr.
         let buf_stderr = Arc::clone(&output_buf);
         let trunc_stderr = Arc::clone(&was_truncated_flag);
-        let stderr_handle = if let Some(mut stderr) = child.stderr.take() {
+        let stderr_handle = if let Some(mut stderr) = handle.take_stderr() {
             tokio::task::spawn(async move {
                 let mut chunk = [0u8; 4096];
                 loop {
                     match stderr.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => WasmTerminal::append_output(
+                        Ok(n) => crate::terminal::append_output(
                             &buf_stderr,
                             &trunc_stderr,
                             limit,
@@ -575,7 +432,7 @@ impl WasmRuntime {
 
         let terminal = WasmTerminal {
             kind: TerminalKind::Native {
-                child: Some(child),
+                child: Some(handle),
                 stdin,
             },
             output_buf,
@@ -643,9 +500,13 @@ impl WasmRuntime {
             .map(|e| (e.name.clone(), e.value.clone()))
             .collect();
 
-        let instance_pre = self
-            .get_or_compile_module(&wasm_path)
-            .await
+        // Eagerly validate the WASM file (executor-specific pre-flight check) before
+        // spawning the background task. This preserves the contract that `create_terminal`
+        // returns an error synchronously when the module is missing or too large.
+        // `MockWasmExecutor::validate` is a no-op; `RealWasmExecutor::validate` checks
+        // file existence and size limits.
+        self.wasm_executor
+            .validate(&wasm_path)
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
         // Shared output buffer and exit status arc for the background task.
@@ -654,7 +515,7 @@ impl WasmRuntime {
         let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> =
             Arc::new(std::sync::OnceLock::new());
 
-        let terminal_id = Uuid::new_v4().to_string();
+        let terminal_id = self.id_gen.new_id();
 
         // Clone what the background task needs.
         let buf = Arc::clone(&output_buf);
@@ -669,7 +530,8 @@ impl WasmRuntime {
         let fuel_limit = self.wasm_fuel_limit;
         let host_call_limit = self.wasm_host_call_limit;
         let acp_prefix = self.acp_prefix.clone();
-        let semaphore = Arc::clone(&self.task_semaphore);
+        let task_limiter = self.task_limiter.clone();
+        let executor = self.wasm_executor.clone();
         // Build full argv: command (wasm_path) as argv[0], then user-supplied args.
         let mut argv_cloned: Vec<String> = Vec::with_capacity(args.len() + 1);
         argv_cloned.push(command.to_string());
@@ -677,42 +539,41 @@ impl WasmRuntime {
         let sandbox_dir_cloned = sandbox_dir.to_path_buf();
         let cwd_cloned = cwd.to_path_buf();
         let session_id_cloned = session_id.to_string();
+        let wasm_path_cloned = wasm_path.clone();
 
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
-            let _permit = semaphore
-                .acquire_owned()
-                .await
-                .expect("semaphore closed unexpectedly");
+            let _permit = task_limiter.acquire().await;
             // Count tasks that actually start executing, not just those queued for a permit.
             METRICS
                 .wasm_tasks_started
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let result = wasm::run_module_compiled(wasm::WasmExecConfig {
-                instance_pre,
-                argv: argv_cloned,
-                env_vars: env_pairs,
-                sandbox_dir: sandbox_dir_cloned.clone(),
-                cwd: if cwd_cloned != sandbox_dir_cloned {
-                    Some(cwd_cloned)
-                } else {
-                    None
-                },
-                output_buf: Arc::clone(&buf),
-                was_truncated: Arc::clone(&trunc),
-                output_byte_limit: limit,
-                timeout_secs: timeout,
-                memory_limit_bytes: memory_limit,
-                nats_client: nats_for_task,
-                session_id: session_id_cloned,
-                allow_network,
-                auto_allow_permissions: auto_allow,
-                fuel_limit,
-                host_call_limit,
-                acp_prefix,
-            })
-            .await;
+            let result = executor
+                .run(WasmRunConfig {
+                    wasm_path: wasm_path_cloned,
+                    argv: argv_cloned,
+                    env_vars: env_pairs,
+                    sandbox_dir: sandbox_dir_cloned.clone(),
+                    cwd: if cwd_cloned != sandbox_dir_cloned {
+                        Some(cwd_cloned)
+                    } else {
+                        None
+                    },
+                    output_buf: Arc::clone(&buf),
+                    was_truncated: Arc::clone(&trunc),
+                    output_byte_limit: limit,
+                    timeout_secs: timeout,
+                    memory_limit_bytes: memory_limit,
+                    nats_client: nats_for_task,
+                    session_id: session_id_cloned,
+                    allow_network,
+                    auto_allow_permissions: auto_allow,
+                    fuel_limit,
+                    host_call_limit,
+                    acp_prefix,
+                })
+                .await;
             let exit_status = match result {
                 Ok(status) => status,
                 Err(e) => TerminalExitStatus::new().signal(Some(format!("{e}"))),
@@ -1095,7 +956,7 @@ impl WasmRuntime {
         // Clone the dir path out so the RefMut borrow is dropped before the await.
         let session_dir = self.sessions.borrow_mut().remove(session_id).map(|s| s.dir);
         if let Some(dir) = session_dir {
-            let _ = tokio::fs::remove_dir_all(&dir).await;
+            let _ = self.fs.remove_dir_all(&dir).await;
             debug!(session_id, "Session sandbox cleaned up");
         }
     }
@@ -1126,23 +987,33 @@ impl WasmRuntime {
         })?;
 
         if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent)
+            self.fs
+                .create_dir_all(parent)
                 .await
                 .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
         }
 
         // Write atomically: write to a temp file first, then rename.
-        let tmp_dest = dest.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
-        tokio::fs::write(&tmp_dest, req.content.as_bytes())
+        let tmp_dest = dest.with_file_name(format!(".{}.tmp", self.id_gen.new_id()));
+        self.fs
+            .write(&tmp_dest, req.content.as_bytes())
             .await
             .map_err(|e| {
                 agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}"))
             })?;
-        tokio::fs::rename(&tmp_dest, &dest).await.map_err(|e| {
-            // Clean up temp file on failure (best-effort).
-            let _ = std::fs::remove_file(&tmp_dest);
-            agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
-        })?;
+        let tmp_dest_clone = tmp_dest.clone();
+        let fs = self.fs.clone();
+        self.fs
+            .rename(&tmp_dest, &dest)
+            .await
+            .map_err(|e| {
+                // Clean up temp file on failure (best-effort).
+                let fs2 = fs.clone();
+                tokio::task::spawn_local(async move {
+                    let _ = fs2.remove_file(&tmp_dest_clone).await;
+                });
+                agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
+            })?;
 
         debug!(
             session_id,
@@ -1176,7 +1047,9 @@ impl WasmRuntime {
             )
         })?;
 
-        let content = tokio::fs::read_to_string(&src)
+        let content = self
+            .fs
+            .read_to_string(&src)
             .await
             .map_err(|e| agent_client_protocol::Error::new(-32603, e.to_string()))?;
 
@@ -1232,5 +1105,110 @@ impl WasmRuntime {
             update_type = ?std::mem::discriminant(&notif.update),
             "Session notification received (passthrough)"
         );
+    }
+}
+
+impl<FS, PS, N, WE, CL, IG, TL> Runtime for WasmRuntime<FS, PS, N, WE, CL, IG, TL>
+where
+    FS: Fs,
+    PS: ProcessSpawner,
+    N:  NatsBroker + Send + Sync,
+    WE: WasmExecutor<N>,
+    CL: Clock,
+    IG: IdGenerator,
+    TL: TaskLimiter,
+{
+    async fn handle_create_terminal(
+        &self,
+        session_id: &str,
+        req: agent_client_protocol::CreateTerminalRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::CreateTerminalResponse> {
+        WasmRuntime::handle_create_terminal(self, session_id, req).await
+    }
+
+    async fn handle_terminal_output(
+        &self,
+        req: agent_client_protocol::TerminalOutputRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::TerminalOutputResponse> {
+        WasmRuntime::handle_terminal_output(self, req).await
+    }
+
+    async fn handle_kill_terminal(
+        &self,
+        req: agent_client_protocol::KillTerminalRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::KillTerminalResponse> {
+        WasmRuntime::handle_kill_terminal(self, req).await
+    }
+
+    async fn handle_write_to_terminal(
+        &self,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> agent_client_protocol::Result<()> {
+        WasmRuntime::handle_write_to_terminal(self, terminal_id, data).await
+    }
+
+    fn handle_close_terminal_stdin(
+        &self,
+        terminal_id: &str,
+    ) -> agent_client_protocol::Result<()> {
+        WasmRuntime::handle_close_terminal_stdin(self, terminal_id)
+    }
+
+    async fn handle_release_terminal(
+        &self,
+        req: agent_client_protocol::ReleaseTerminalRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::ReleaseTerminalResponse> {
+        WasmRuntime::handle_release_terminal(self, req).await
+    }
+
+    async fn handle_wait_for_terminal_exit(
+        &self,
+        req: agent_client_protocol::WaitForTerminalExitRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::WaitForTerminalExitResponse> {
+        WasmRuntime::handle_wait_for_terminal_exit(self, req).await
+    }
+
+    async fn handle_write_text_file(
+        &self,
+        session_id: &str,
+        req: agent_client_protocol::WriteTextFileRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::WriteTextFileResponse> {
+        WasmRuntime::handle_write_text_file(self, session_id, req).await
+    }
+
+    async fn handle_read_text_file(
+        &self,
+        session_id: &str,
+        req: agent_client_protocol::ReadTextFileRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::ReadTextFileResponse> {
+        WasmRuntime::handle_read_text_file(self, session_id, req).await
+    }
+
+    fn handle_request_permission(
+        &self,
+        req: agent_client_protocol::RequestPermissionRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
+        WasmRuntime::handle_request_permission(self, req)
+    }
+
+    fn handle_session_notification(&self, notif: agent_client_protocol::SessionNotification) {
+        WasmRuntime::handle_session_notification(self, notif)
+    }
+
+    fn list_sessions(&self) -> Vec<String> {
+        WasmRuntime::list_sessions(self)
+    }
+
+    fn list_terminals(&self) -> Vec<(String, String)> {
+        WasmRuntime::list_terminals(self)
+    }
+
+    fn cleanup_idle_sessions(&self) {
+        WasmRuntime::cleanup_idle_sessions(self)
+    }
+
+    async fn cleanup_all_sessions(&self) {
+        WasmRuntime::cleanup_all_sessions(self).await
     }
 }

@@ -1,12 +1,14 @@
+use crate::config::Config;
 use crate::metrics::METRICS;
-use crate::terminal::WasmTerminal;
+use crate::traits::{Clock, NatsBroker, StdClock, StdSyncFs, SyncFs, WasmExecutor, WasmRunConfig};
 use agent_client_protocol::TerminalExitStatus;
 use futures::StreamExt as _;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
-use wasmtime::{Caller, Engine, Extern, InstancePre, Linker, ResourceLimiter, Store, ValType};
+use wasmtime::{Caller, Engine, Extern, InstancePre, Linker, Module, ResourceLimiter, Store, ValType};
 use wasmtime_wasi::pipe::AsyncWriteStream;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
@@ -15,10 +17,10 @@ use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
 
 /// All parameters needed to execute one WASM module invocation.
 /// Replaces the previous 17-argument function signature.
-pub(crate) struct WasmExecConfig {
+pub(crate) struct WasmExecConfig<N: NatsBroker + Send + Sync = async_nats::Client> {
     /// Pre-linked instance ready for `instantiate_async`.
     /// Built once per unique module path and cached in `WasmRuntime`.
-    pub instance_pre: InstancePre<WasmStoreData>,
+    pub instance_pre: InstancePre<WasmStoreData<N>>,
     /// Full argv, including argv[0] (the module path / program name).
     pub argv: Vec<String>,
     /// Environment variables to expose inside the module.
@@ -38,7 +40,7 @@ pub(crate) struct WasmExecConfig {
     /// Optional linear-memory limit in bytes.
     pub memory_limit_bytes: Option<usize>,
     /// Optional NATS client for trogon.* host functions.
-    pub nats_client: Option<async_nats::Client>,
+    pub nats_client: Option<N>,
     /// Session identifier forwarded to host functions for logging / NATS subjects.
     pub session_id: String,
     /// Allow WASI network access (`inherit_network`).
@@ -56,10 +58,10 @@ pub(crate) struct WasmExecConfig {
 // ── Store state ─────────────────────────────────────────────────────────────
 
 /// Custom store state that wraps WASI context plus limits and host state.
-pub(crate) struct WasmStoreData {
+pub(crate) struct WasmStoreData<N: NatsBroker + Send + Sync = async_nats::Client> {
     pub wasi: WasiP1Ctx,
     pub limits: StoreLimitsData,
-    pub nats: Option<async_nats::Client>,
+    pub nats: Option<N>,
     pub session_id: String,
     /// When `true`, `request_permission` auto-selects the first option.
     pub auto_allow_permissions: bool,
@@ -67,7 +69,7 @@ pub(crate) struct WasmStoreData {
     /// When zero, host functions return -1 without executing.
     pub host_call_budget: u32,
     /// Active NATS subscriptions keyed by subscription ID.
-    pub subscriptions: HashMap<i32, async_nats::Subscriber>,
+    pub subscriptions: HashMap<i32, N::Sub>,
     /// Counter for next subscription ID.
     pub next_sub_id: i32,
     /// ACP subject prefix for permission requests over NATS.
@@ -79,7 +81,7 @@ pub(crate) struct StoreLimitsData {
     pub memory_limit: Option<usize>,
 }
 
-impl ResourceLimiter for WasmStoreData {
+impl<N: NatsBroker + Send + Sync> ResourceLimiter for WasmStoreData<N> {
     fn memory_growing(
         &mut self,
         _current: usize,
@@ -170,16 +172,18 @@ const MAX_SUBSCRIPTIONS_PER_MODULE: usize = 64;
 /// Called once per `WasmRuntime` instance; the resulting linker is stored on the runtime
 /// and reused across all module invocations. Call `linker.instantiate_pre(&module)` to
 /// produce an `InstancePre` that can be cached per-module and cloned per invocation.
-pub(crate) fn build_linker(engine: &Engine) -> anyhow::Result<Linker<WasmStoreData>> {
-    let mut linker: Linker<WasmStoreData> = Linker::new(engine);
+pub(crate) fn build_linker<N: NatsBroker + Send + Sync + 'static>(
+    engine: &Engine,
+) -> anyhow::Result<Linker<WasmStoreData<N>>> {
+    let mut linker: Linker<WasmStoreData<N>> = Linker::new(engine);
     preview1::add_to_linker_async(&mut linker, |t| &mut t.wasi)?;
-    add_trogon_host_functions(engine, &mut linker)?;
+    add_trogon_host_functions::<N>(engine, &mut linker)?;
     Ok(linker)
 }
 
-fn add_trogon_host_functions(
+fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
     engine: &Engine,
-    linker: &mut Linker<WasmStoreData>,
+    linker: &mut Linker<WasmStoreData<N>>,
 ) -> anyhow::Result<()> {
     // trogon_v1.log(level_ptr, level_len, msg_ptr, msg_len)
     linker.func_new_async(
@@ -190,7 +194,7 @@ fn add_trogon_host_functions(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             [],
         ),
-        |mut caller: Caller<'_, WasmStoreData>, params, _results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, _results| {
             let level_ptr = params[0].unwrap_i32() as usize;
             let level_len = params[1].unwrap_i32() as usize;
             let msg_ptr = params[2].unwrap_i32() as usize;
@@ -244,7 +248,7 @@ fn add_trogon_host_functions(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             [ValType::I32],
         ),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let subj_ptr = params[0].unwrap_i32() as usize;
             let subj_len = params[1].unwrap_i32() as usize;
             let payload_ptr = params[2].unwrap_i32() as usize;
@@ -294,7 +298,7 @@ fn add_trogon_host_functions(
                     None => {
                         results[0] = wasmtime::Val::I32(-1);
                     }
-                    Some(nc) => match nc.publish(subject, payload_bytes).await {
+                    Some(nc) => match NatsBroker::publish(&nc, subject.into(), payload_bytes).await {
                         Ok(_) => {
                             results[0] = wasmtime::Val::I32(0);
                         }
@@ -328,7 +332,7 @@ fn add_trogon_host_functions(
             ],
             [ValType::I32],
         ),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let subj_ptr = params[0].unwrap_i32() as usize;
             let subj_len = params[1].unwrap_i32() as usize;
             let pay_ptr = params[2].unwrap_i32() as usize;
@@ -395,7 +399,7 @@ fn add_trogon_host_functions(
                     std::time::Duration::from_millis(timeout_ms as u64)
                 };
                 let response =
-                    match tokio::time::timeout(timeout, nats.request(subject, payload)).await {
+                    match tokio::time::timeout(timeout, NatsBroker::request(&nats, subject, payload)).await {
                         Ok(Ok(msg)) => msg.payload,
                         _ => {
                             results[0] = wasmtime::Val::I32(-1);
@@ -423,7 +427,7 @@ fn add_trogon_host_functions(
         "trogon_v1",
         "subscribe",
         wasmtime::FuncType::new(engine, [ValType::I32, ValType::I32], [ValType::I32]),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let subj_ptr = params[0].unwrap_i32() as usize;
             let subj_len = params[1].unwrap_i32() as usize;
             Box::new(async move {
@@ -476,7 +480,7 @@ fn add_trogon_host_functions(
                     }
                 };
 
-                let sub = match nats.subscribe(subject).await {
+                let sub = match NatsBroker::subscribe(&nats, &subject).await {
                     Ok(s) => s,
                     Err(_) => {
                         results[0] = wasmtime::Val::I32(-1);
@@ -522,7 +526,7 @@ fn add_trogon_host_functions(
             ],
             [ValType::I32],
         ),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let sub_id = params[0].unwrap_i32();
             let out_subj_ptr = params[1].unwrap_i32() as usize;
             let out_subj_max = params[2].unwrap_i32() as usize;
@@ -628,7 +632,7 @@ fn add_trogon_host_functions(
         "trogon_v1",
         "unsubscribe",
         wasmtime::FuncType::new(engine, [ValType::I32], [ValType::I32]),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let sub_id = params[0].unwrap_i32();
             Box::new(async move {
                 // Check and decrement host call budget; return -1 if exhausted.
@@ -661,7 +665,7 @@ fn add_trogon_host_functions(
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I32],
         ),
-        |mut caller: Caller<'_, WasmStoreData>, params, results| {
+        |mut caller: Caller<'_, WasmStoreData<N>>, params, results| {
             let opt_ptr = params[0].unwrap_i32() as usize;
             let opt_len = params[1].unwrap_i32() as usize;
             let out_ptr = params[2].unwrap_i32() as usize;
@@ -736,7 +740,7 @@ fn add_trogon_host_functions(
                     .to_string();
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(30),
-                        nats_client.request(subject, bytes::Bytes::from(request_json)),
+                        NatsBroker::request(&nats_client, subject, bytes::Bytes::from(request_json)),
                     )
                     .await
                     {
@@ -797,6 +801,304 @@ fn add_trogon_host_functions(
     Ok(())
 }
 
+// ── RealWasmExecutor ─────────────────────────────────────────────────────────
+
+/// Cache fingerprint combining crate version and wasmtime version.
+/// The wasmtime version is injected at build time from Cargo.lock by build.rs,
+/// so it updates automatically when the dependency is bumped.
+pub(crate) const CACHE_FINGERPRINT: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+wasmtime-",
+    env!("WASMTIME_VERSION")
+);
+
+/// Maximum number of compiled modules kept in the per-process in-memory cache.
+const MAX_CACHED_MODULES: usize = 64;
+
+/// Derives an on-disk cache key from the absolute path of a `.wasm` file.
+///
+/// Uses FNV-1a 64-bit, which is deterministic across Rust versions and
+/// process restarts. `DefaultHasher` is explicitly avoided because its
+/// implementation is "subject to change" between compiler versions, which
+/// would silently invalidate on-disk caches after a toolchain upgrade.
+pub(crate) fn cache_key(path: &std::path::Path) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Tuple stored in the in-memory module cache: `(instance_pre, source_mtime, last_accessed)`.
+pub(crate) type CachedModuleEntry<N> = (
+    InstancePre<WasmStoreData<N>>,
+    std::time::SystemTime,
+    std::time::Instant,
+);
+
+/// Production `WasmExecutor` implementation backed by a real `wasmtime::Engine`.
+///
+/// Contains the engine, linker, module cache, and cache directory. Handles
+/// compiling (or loading from cache) a `.wasm` file and running it via
+/// `run_module_compiled`.
+pub struct RealWasmExecutor<
+    N:  NatsBroker + Send + Sync = async_nats::Client,
+    CL: Clock = StdClock,
+    SF: SyncFs = StdSyncFs,
+> {
+    engine: Engine,
+    linker: Linker<WasmStoreData<N>>,
+    modules: Arc<RefCell<HashMap<PathBuf, CachedModuleEntry<N>>>>,
+    module_cache_dir: Option<PathBuf>,
+    wasm_max_module_size_bytes: usize,
+    clock: CL,
+    sync_fs: SF,
+}
+
+impl<N: NatsBroker + Send + Sync, CL: Clock, SF: SyncFs> Clone for RealWasmExecutor<N, CL, SF> {
+    fn clone(&self) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            linker: self.linker.clone(),
+            modules: Arc::clone(&self.modules),
+            module_cache_dir: self.module_cache_dir.clone(),
+            wasm_max_module_size_bytes: self.wasm_max_module_size_bytes,
+            clock: self.clock.clone(),
+            sync_fs: self.sync_fs.clone(),
+        }
+    }
+}
+
+impl<N: NatsBroker + Send + Sync + 'static> RealWasmExecutor<N, StdClock, StdSyncFs> {
+    /// Creates a new executor from a [`Config`].
+    pub fn new(config: &Config) -> Result<Self, wasmtime::Error> {
+        Self::new_with(config, StdClock, StdSyncFs)
+    }
+}
+
+impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecutor<N, CL, SF> {
+    /// Creates a new executor from a [`Config`] with custom clock and sync fs.
+    pub fn new_with(config: &Config, clock: CL, sync_fs: SF) -> Result<Self, wasmtime::Error> {
+        let mut wasm_config = wasmtime::Config::new();
+        wasm_config.async_support(true);
+        wasm_config.consume_fuel(true);
+        let engine = Engine::new(&wasm_config)?;
+        let linker = build_linker::<N>(&engine)?;
+        Ok(Self {
+            engine,
+            linker,
+            modules: Arc::new(RefCell::new(HashMap::new())),
+            module_cache_dir: config.module_cache_dir.clone(),
+            wasm_max_module_size_bytes: config.wasm_max_module_size_bytes,
+            clock,
+            sync_fs,
+        })
+    }
+
+    /// Returns a compiled `InstancePre` for `wasm_path`, using in-memory and
+    /// on-disk caches. Invalidates both caches when the source file's mtime changes.
+    ///
+    /// Disk I/O and Cranelift compilation run inside `spawn_blocking` so the
+    /// tokio `LocalSet` is not stalled during CPU-intensive JIT compilation.
+    async fn get_or_compile_module(
+        &self,
+        wasm_path: &std::path::Path,
+    ) -> Result<InstancePre<WasmStoreData<N>>, anyhow::Error> {
+        let abs_path = wasm_path
+            .canonicalize()
+            .unwrap_or_else(|_| wasm_path.to_path_buf());
+
+        // Check file size limit and mtime via blocking I/O.
+        let max_size = self.wasm_max_module_size_bytes;
+        let abs_path_b = abs_path.clone();
+        let sync_fs = self.sync_fs.clone();
+        let (meta_len, current_mtime) = tokio::task::spawn_blocking(move || {
+            let meta = sync_fs.metadata(&abs_path_b)?;
+            Ok::<_, anyhow::Error>((meta.len, meta.modified))
+        })
+        .await??;
+
+        if max_size > 0 && meta_len as usize > max_size {
+            return Err(anyhow::anyhow!(
+                "WASM module too large: {} bytes (limit: {})",
+                meta_len,
+                max_size
+            ));
+        }
+
+        // Check in-memory cache (synchronous — just a RefCell borrow).
+        {
+            let mut cached = self.modules.borrow_mut();
+            if let Some((pre, mtime, last_accessed)) = cached.get_mut(&abs_path) {
+                if *mtime == current_mtime {
+                    *last_accessed = self.clock.now();
+                    METRICS
+                        .cache_hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    return Ok(pre.clone());
+                }
+            }
+        }
+
+        // Check on-disk cache and compile if needed — all blocking work in one closure.
+        let engine = self.engine.clone();
+        let cache_dir = self.module_cache_dir.clone();
+        let abs_path_b = abs_path.clone();
+        let sync_fs2 = self.sync_fs.clone();
+        let m = tokio::task::spawn_blocking(move || -> Result<Module, anyhow::Error> {
+            if let Some(ref cache_dir) = cache_dir {
+                let key = cache_key(&abs_path_b);
+                let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+                let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                let version_path = cache_dir.join(format!("{key}.version"));
+
+                if cwasm_path.exists() && mtime_path.exists() {
+                    let stored_version = sync_fs2.read_to_string(&version_path).unwrap_or_default();
+                    let version_ok = stored_version.trim() == CACHE_FINGERPRINT;
+
+                    if version_ok {
+                        if let Ok(mtime_str) = sync_fs2.read_to_string(&mtime_path) {
+                            let stored_nanos: u64 = mtime_str.trim().parse().unwrap_or(0);
+                            let current_nanos = current_mtime
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_nanos() as u64)
+                                .unwrap_or(0);
+                            if stored_nanos != 0 && stored_nanos == current_nanos {
+                                // SAFETY: the engine config is always identical for cached
+                                // modules — same wasmtime::Config, same Cranelift settings.
+                                let cached_module =
+                                    unsafe { Module::deserialize_file(&engine, &cwasm_path) };
+                                match cached_module {
+                                    Ok(m) => {
+                                        METRICS
+                                            .cache_hits
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        return Ok(m);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            path = %cwasm_path.display(),
+                                            error = %e,
+                                            "on-disk module cache invalid, recompiling"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::warn!(
+                            path = %cwasm_path.display(),
+                            stored = %stored_version.trim(),
+                            current = %CACHE_FINGERPRINT,
+                            "module cache version mismatch, recompiling"
+                        );
+                    }
+                }
+            }
+
+            // Compile fresh from source (cache miss).
+            METRICS
+                .cache_misses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let m = Module::from_file(&engine, &abs_path_b)?;
+
+            // Write on-disk cache if configured (fire-and-forget; errors are non-fatal).
+            if let Some(ref cache_dir) = cache_dir {
+                let key = cache_key(&abs_path_b);
+                if sync_fs2.create_dir_all(cache_dir).is_ok() {
+                    if let Ok(serialized) = m.serialize() {
+                        let cwasm_path = cache_dir.join(format!("{key}.cwasm"));
+                        let mtime_path = cache_dir.join(format!("{key}.mtime"));
+                        let version_path = cache_dir.join(format!("{key}.version"));
+                        let current_nanos = current_mtime
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        let _ = sync_fs2.write(&cwasm_path, &serialized);
+                        let _ = sync_fs2.write(&mtime_path, current_nanos.to_string().as_bytes());
+                        let _ = sync_fs2.write(&version_path, CACHE_FINGERPRINT.as_bytes());
+                    }
+                }
+            }
+
+            Ok(m)
+        })
+        .await??;
+
+        // Build InstancePre on the LocalSet thread — it is !Send and cannot be
+        // created inside spawn_blocking. This call is fast (import resolution only;
+        // Cranelift compilation already happened in the spawn_blocking above).
+        let pre = self.linker.instantiate_pre(&m)?;
+        {
+            let mut cache = self.modules.borrow_mut();
+            // Evict the least-recently-accessed (LRU) entry when at capacity.
+            if cache.len() >= MAX_CACHED_MODULES && !cache.contains_key(&abs_path) {
+                if let Some(lru) = cache
+                    .iter()
+                    .min_by_key(|(_, (_, _, last_accessed))| *last_accessed)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&lru);
+                }
+            }
+            cache.insert(
+                abs_path,
+                (pre.clone(), current_mtime, self.clock.now()),
+            );
+        }
+        Ok(pre)
+    }
+}
+
+impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<N> for RealWasmExecutor<N, CL, SF> {
+    fn validate(&self, wasm_path: &std::path::Path) -> Result<(), anyhow::Error> {
+        let meta = self.sync_fs.metadata(wasm_path)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", wasm_path.display()))?;
+        let max_size = self.wasm_max_module_size_bytes;
+        if max_size > 0 && meta.len as usize > max_size {
+            return Err(anyhow::anyhow!(
+                "WASM module too large: {} bytes (limit: {})",
+                meta.len,
+                max_size
+            ));
+        }
+        Ok(())
+    }
+
+    async fn run(
+        &self,
+        config: WasmRunConfig<N>,
+    ) -> Result<TerminalExitStatus, anyhow::Error> {
+        let instance_pre = self.get_or_compile_module(&config.wasm_path).await?;
+        let cwd = if config.cwd.as_deref().unwrap_or(&config.sandbox_dir) != config.sandbox_dir {
+            config.cwd
+        } else {
+            None
+        };
+        run_module_compiled(WasmExecConfig {
+            instance_pre,
+            argv: config.argv,
+            env_vars: config.env_vars,
+            sandbox_dir: config.sandbox_dir,
+            cwd,
+            output_buf: config.output_buf,
+            was_truncated: config.was_truncated,
+            output_byte_limit: config.output_byte_limit,
+            timeout_secs: config.timeout_secs,
+            memory_limit_bytes: config.memory_limit_bytes,
+            nats_client: config.nats_client,
+            session_id: config.session_id,
+            allow_network: config.allow_network,
+            auto_allow_permissions: config.auto_allow_permissions,
+            fuel_limit: config.fuel_limit,
+            host_call_limit: config.host_call_limit,
+            acp_prefix: config.acp_prefix,
+        })
+        .await
+    }
+}
+
 // ── Module execution ─────────────────────────────────────────────────────────
 
 /// Runs a WASIp1 core module from a pre-linked `InstancePre`.
@@ -807,8 +1109,8 @@ fn add_trogon_host_functions(
 /// `"."` so that WASIp1 programs using `getcwd()` / relative paths see the
 /// correct working directory.
 /// Output is appended directly to `config.output_buf` as bytes arrive.
-pub async fn run_module_compiled(
-    config: WasmExecConfig,
+pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
+    config: WasmExecConfig<N>,
 ) -> Result<TerminalExitStatus, anyhow::Error> {
     let WasmExecConfig {
         instance_pre,
@@ -908,7 +1210,7 @@ pub async fn run_module_compiled(
         loop {
             match stdout_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => WasmTerminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n]),
+                Ok(n) => crate::terminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n]),
             }
         }
     });
@@ -920,7 +1222,7 @@ pub async fn run_module_compiled(
         loop {
             match stderr_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => WasmTerminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n]),
+                Ok(n) => crate::terminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n]),
             }
         }
     });
