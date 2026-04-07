@@ -4,10 +4,8 @@
 //! wraps them as [`OutboundHttpRequest`] messages, publishes to JetStream,
 //! and waits on a Core NATS reply subject for the worker's response.
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -21,12 +19,13 @@ use uuid::Uuid;
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
 use crate::provider;
 use crate::subjects;
+use crate::traits::{JetStreamPublisher, NatsClient};
 use trogon_nats::headers_with_trace_context;
 
 #[derive(Clone)]
-pub struct ProxyState {
-    pub nats: async_nats::Client,
-    pub jetstream: Arc<jetstream::Context>,
+pub struct ProxyState<N = async_nats::Client, J = async_nats::jetstream::Context> {
+    pub nats: N,
+    pub jetstream: J,
     pub prefix: String,
     pub outbound_subject: String,
     pub worker_timeout: Duration,
@@ -36,17 +35,25 @@ pub struct ProxyState {
 }
 
 /// Build the axum router for the HTTP proxy.
-pub fn router(state: ProxyState) -> Router {
+pub fn router<N, J>(state: ProxyState<N, J>) -> Router
+where
+    N: NatsClient,
+    J: JetStreamPublisher,
+{
     Router::new()
-        .route("/{provider}/{*path}", any(handle_request))
+        .route("/{provider}/{*path}", any(handle_request::<N, J>))
         .with_state(state)
 }
 
-async fn handle_request(
-    State(state): State<ProxyState>,
+async fn handle_request<N, J>(
+    State(state): State<ProxyState<N, J>>,
     Path((provider, path)): Path<(String, String)>,
     req: Request,
-) -> Result<Response<Body>, ProxyError> {
+) -> Result<Response<Body>, ProxyError>
+where
+    N: NatsClient,
+    J: JetStreamPublisher,
+{
     // An empty path (e.g. from `GET /anthropic/`) has no meaningful endpoint to
     // forward to.  Reject immediately with 400 rather than publishing to
     // JetStream and burning a worker slot on a request that will always fail.
@@ -121,7 +128,7 @@ async fn handle_request(
         .nats
         .subscribe(reply_subject.clone())
         .await
-        .map_err(|e| ProxyError::NatsSubscribe(e.to_string()))?;
+        .map_err(|e| ProxyError::NatsSubscribe(e))?;
 
     // Publish OutboundHttpRequest to JetStream, injecting the current trace context
     // into NATS headers so the worker can continue the distributed trace.
@@ -140,9 +147,7 @@ async fn handle_request(
         .jetstream
         .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
         .await
-        .map_err(|e| ProxyError::NatsPublish(e.to_string()))?
-        .await
-        .map_err(|e| ProxyError::NatsPublish(e.to_string()))?;
+        .map_err(|e| ProxyError::NatsPublish(e))?;
 
     tracing::debug!(
         correlation_id = %correlation_id,
@@ -297,14 +302,6 @@ mod tests {
         }
     }
 
-    /// `StatusCode::from_u16` accepts values 100–999; outside that range it
-    /// returns `Err`.  `proxy.rs:164` uses `.unwrap_or(INTERNAL_SERVER_ERROR)`
-    /// so the proxy returns 500 instead of panicking when a worker sends an
-    /// out-of-range status code.
-    ///
-    /// This unit test verifies the fallback expression directly.  The e2e test
-    /// `e2e_invalid_response_status_code_falls_back_to_500` exercises the same
-    /// behaviour end-to-end; this test documents it at the unit level.
     #[test]
     fn invalid_upstream_status_code_falls_back_to_500() {
         for invalid in [0u16, 99, 1000] {
@@ -320,12 +317,6 @@ mod tests {
         }
     }
 
-    // ── Worker error + status code selection ─────────────────────────────────
-
-    /// Documents the status-selection logic at `proxy.rs:170-174`:
-    /// when the worker sets `error` but the status code is 2xx (success),
-    /// the proxy must fall back to 502 BAD_GATEWAY to avoid leaking a
-    /// spurious 2xx response to the caller.
     #[test]
     fn worker_error_with_2xx_status_falls_back_to_502() {
         for ok_status in [200u16, 201, 204] {
@@ -343,8 +334,6 @@ mod tests {
         }
     }
 
-    /// A 4xx status from the worker is preserved as-is when the error field
-    /// is set — the original client-error code is more informative than 502.
     #[test]
     fn worker_error_with_4xx_status_preserved() {
         for client_err in [400u16, 401, 403, 404, 422] {
@@ -361,8 +350,6 @@ mod tests {
         }
     }
 
-    /// A 3xx redirect status from the worker is NOT a client-error or
-    /// server-error, so the proxy falls back to 502 just like a 2xx status.
     #[test]
     fn worker_error_with_3xx_status_falls_back_to_502() {
         for redirect in [301u16, 302, 307, 308] {
@@ -380,8 +367,6 @@ mod tests {
         }
     }
 
-    /// A 5xx status from the worker is preserved as-is when the error field
-    /// is set — propagating the upstream server-error code to the caller.
     #[test]
     fn worker_error_with_5xx_status_preserved() {
         for server_err in [500u16, 502, 503, 504] {
@@ -398,8 +383,6 @@ mod tests {
         }
     }
 
-    /// Mirrors the `HOP_BY_HOP` constant and filter in `handle_request`.
-    /// `te` and `trailers` must be stripped per RFC 7230 §6.1.
     #[test]
     fn te_and_trailers_are_filtered_as_hop_by_hop_headers() {
         const HOP_BY_HOP: &[&str] = &[
@@ -440,14 +423,10 @@ mod tests {
         }
     }
 
-    /// Mirrors the header-parsing guard at `proxy.rs handle_request` lines 189-196.
-    /// An invalid header name (e.g. containing a null byte) must be silently
-    /// dropped rather than causing a panic or propagating an error.
     #[test]
     fn invalid_response_header_name_is_silently_dropped() {
         let raw = vec![
             ("content-type".to_string(), "application/json".to_string()),
-            // Null byte makes this an invalid HTTP header name.
             ("x-invalid\x00header".to_string(), "value".to_string()),
             ("x-valid-header".to_string(), "ok".to_string()),
         ];
@@ -462,7 +441,6 @@ mod tests {
         }
         assert!(headers.contains_key("content-type"));
         assert!(headers.contains_key("x-valid-header"));
-        // Invalid header was silently dropped — only 2 entries remain.
         assert_eq!(headers.len(), 2);
     }
 
