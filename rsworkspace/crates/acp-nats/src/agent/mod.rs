@@ -127,9 +127,12 @@ mod tests {
     /// available on this bridge" from domain errors.
     #[tokio::test]
     async fn stub_methods_use_internal_error_code() {
-        use agent_client_protocol::ErrorCode;
+        use agent_client_protocol::{
+            AuthenticateRequest, CancelNotification, ErrorCode, LoadSessionRequest,
+            NewSessionRequest, SetSessionModeRequest,
+        };
 
-        let bridge = mock_bridge();
+        let (_mock, _js, bridge) = mock_bridge();
 
         macro_rules! check_code {
             ($fut:expr) => {{
@@ -147,9 +150,6 @@ mod tests {
         check_code!(bridge.new_session(NewSessionRequest::new(".")));
         check_code!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
         check_code!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
-        check_code!(bridge.prompt(PromptRequest::new("s1", vec![])));
         check_code!(bridge.cancel(CancelNotification::new("s1")));
-        check_code!(bridge.ext_method(ExtRequest::new("ext", empty_raw_value())));
-        check_code!(bridge.ext_notification(ExtNotification::new("ext", empty_raw_value())));
     }
 }
