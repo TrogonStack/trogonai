@@ -1,17 +1,16 @@
-use crate::WasmRuntime;
+use crate::traits::{NatsBroker, Runtime};
 use acp_nats::nats::{parse_client_subject, ClientMethod};
 use agent_client_protocol::{
     CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
     RequestPermissionRequest, SessionNotification, TerminalOutputRequest,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use async_nats::Client as NatsClient;
 use bytes::Bytes;
 use futures::StreamExt;
 use std::rc::Rc;
 use tracing::{debug, error, info, warn};
 
-/// Subscribes to all ACP client subjects and dispatches to `WasmRuntime`.
+/// Subscribes to all ACP client subjects and dispatches to a [`Runtime`].
 ///
 /// Subject pattern: `{prefix}.session.*.client.>`
 ///
@@ -34,16 +33,19 @@ use tracing::{debug, error, info, warn};
 /// redundant check here would duplicate the NATS ACL boundary and add no
 /// real security. Operators must configure NATS publish permissions to
 /// restrict each client to its own session subject.
-pub async fn run(
-    nats: NatsClient,
+pub async fn run<N, R>(
+    nats: N,
     prefix: String,
-    runtime: Rc<WasmRuntime>,
+    runtime: Rc<R>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-) {
+) where
+    N: NatsBroker,
+    R: Runtime + 'static,
+{
     let subject = format!("{prefix}.session.*.client.>");
     info!(%subject, "WASM runtime dispatcher subscribing");
 
-    let mut sub = match nats.subscribe(subject.clone()).await {
+    let mut sub = match nats.subscribe(&subject).await {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to subscribe to client subjects");
@@ -163,14 +165,17 @@ pub async fn run(
     info!("WASM runtime dispatcher exited");
 }
 
-async fn dispatch(
-    nats: NatsClient,
+async fn dispatch<N, R>(
+    nats: N,
     session_id: String,
     method: ClientMethod,
     payload: Bytes,
     reply: Option<async_nats::Subject>,
-    runtime: Rc<WasmRuntime>,
-) {
+    runtime: Rc<R>,
+) where
+    N: NatsBroker,
+    R: Runtime,
+{
     match method {
         ClientMethod::TerminalCreate => {
             let req = match serde_json::from_slice::<CreateTerminalRequest>(&payload) {
@@ -354,11 +359,14 @@ async fn dispatch(
     }
 }
 
-async fn reply_result<T: serde::Serialize>(
-    nats: &NatsClient,
+async fn reply_result<N, T>(
+    nats: &N,
     reply: Option<async_nats::Subject>,
     result: agent_client_protocol::Result<T>,
-) {
+) where
+    N: NatsBroker,
+    T: serde::Serialize,
+{
     let Some(reply_to) = reply else { return };
 
     let body = match result {
@@ -389,8 +397,8 @@ async fn reply_result<T: serde::Serialize>(
     }
 }
 
-async fn reply_error(
-    nats: &NatsClient,
+async fn reply_error<N: NatsBroker>(
+    nats: &N,
     reply: Option<async_nats::Subject>,
     code: i64,
     message: &str,
