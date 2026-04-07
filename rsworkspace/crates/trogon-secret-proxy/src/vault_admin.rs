@@ -11,10 +11,12 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use trogon_vault::{ApiKeyToken, VaultStore};
 
 use crate::subjects;
+use crate::traits::NatsClient;
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -75,15 +77,18 @@ impl std::error::Error for VaultAdminError {}
 
 /// Subscribe to vault admin subjects and serve requests until the NATS client
 /// is closed or an unrecoverable error occurs.
-pub async fn run<V>(
-    nats: async_nats::Client,
+pub async fn run<V, N>(
+    nats: N,
     vault: Arc<V>,
     prefix: &str,
 ) -> Result<(), VaultAdminError>
 where
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
+    N: NatsClient,
 {
+    use futures_util::StreamExt as _;
+
     let store_subject = subjects::vault_store(prefix);
     let rotate_subject = subjects::vault_rotate(prefix);
     let revoke_subject = subjects::vault_revoke(prefix);
@@ -93,7 +98,7 @@ where
         .await
         .map_err(|e| VaultAdminError::Subscribe {
             subject: store_subject.clone(),
-            source: e.to_string(),
+            source: e,
         })?;
 
     let mut rotate_sub = nats
@@ -101,7 +106,7 @@ where
         .await
         .map_err(|e| VaultAdminError::Subscribe {
             subject: rotate_subject.clone(),
-            source: e.to_string(),
+            source: e,
         })?;
 
     let mut revoke_sub = nats
@@ -109,7 +114,7 @@ where
         .await
         .map_err(|e| VaultAdminError::Subscribe {
             subject: revoke_subject.clone(),
-            source: e.to_string(),
+            source: e,
         })?;
 
     tracing::info!(
@@ -118,8 +123,6 @@ where
         revoke = %revoke_subject,
         "Vault admin listener started"
     );
-
-    use futures_util::StreamExt as _;
 
     loop {
         tokio::select! {
@@ -143,10 +146,11 @@ where
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn handle_store<V>(nats: &async_nats::Client, vault: &Arc<V>, msg: async_nats::Message)
+async fn handle_store<V, N>(nats: &N, vault: &Arc<V>, msg: async_nats::Message)
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
+    N: NatsClient,
 {
     let Some(reply) = msg.reply.clone() else {
         tracing::warn!("vault.store: received message without reply subject, ignoring");
@@ -164,13 +168,14 @@ where
         },
     };
 
-    publish_response(nats, reply, &response).await;
+    publish_response(nats, reply.to_string(), &response).await;
 }
 
-async fn handle_rotate<V>(nats: &async_nats::Client, vault: &Arc<V>, msg: async_nats::Message)
+async fn handle_rotate<V, N>(nats: &N, vault: &Arc<V>, msg: async_nats::Message)
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
+    N: NatsClient,
 {
     let Some(reply) = msg.reply.clone() else {
         tracing::warn!("vault.rotate: received message without reply subject, ignoring");
@@ -188,13 +193,14 @@ where
         },
     };
 
-    publish_response(nats, reply, &response).await;
+    publish_response(nats, reply.to_string(), &response).await;
 }
 
-async fn handle_revoke<V>(nats: &async_nats::Client, vault: &Arc<V>, msg: async_nats::Message)
+async fn handle_revoke<V, N>(nats: &N, vault: &Arc<V>, msg: async_nats::Message)
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
+    N: NatsClient,
 {
     let Some(reply) = msg.reply.clone() else {
         tracing::warn!("vault.revoke: received message without reply subject, ignoring");
@@ -212,12 +218,12 @@ where
         },
     };
 
-    publish_response(nats, reply, &response).await;
+    publish_response(nats, reply.to_string(), &response).await;
 }
 
-async fn publish_response(
-    nats: &async_nats::Client,
-    reply: async_nats::Subject,
+async fn publish_response<N: NatsClient>(
+    nats: &N,
+    reply: String,
     response: &VaultAdminResponse,
 ) {
     let bytes = match serde_json::to_vec(response) {
@@ -228,7 +234,7 @@ async fn publish_response(
         }
     };
 
-    if let Err(e) = nats.publish(reply, bytes.into()).await {
+    if let Err(e) = nats.publish(reply, Bytes::from(bytes)).await {
         tracing::warn!(error = %e, "Failed to publish vault admin response");
     }
 }
@@ -280,8 +286,6 @@ mod tests {
         assert_eq!(v["error"], "something went wrong");
     }
 
-    // ── VaultAdminError Display ────────────────────────────────────────────────
-
     #[test]
     fn vault_admin_error_display_includes_subject_and_source() {
         let err = VaultAdminError::Subscribe {
@@ -295,12 +299,9 @@ mod tests {
 
     #[test]
     fn vault_admin_error_is_std_error() {
-        // Verifies that VaultAdminError implements std::error::Error (compile-time check).
         fn assert_error<E: std::error::Error>() {}
         assert_error::<VaultAdminError>();
     }
-
-    // ── VaultAdminResponse builder edge cases ─────────────────────────────────
 
     #[test]
     fn vault_admin_response_ok_serializes_without_error_key() {
@@ -326,8 +327,6 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["error"].as_str().unwrap().len(), 10_000);
     }
-
-    // ── Request deserialization edge cases ────────────────────────────────────
 
     #[test]
     fn vault_store_request_rejects_missing_plaintext() {
@@ -364,7 +363,6 @@ mod tests {
 
     #[test]
     fn vault_store_request_accepts_extra_fields() {
-        // serde ignores unknown fields by default
         let json = r#"{"token":"tok_anthropic_prod_abc","plaintext":"sk-ant","extra":"ignored"}"#;
         let req = serde_json::from_str::<VaultStoreRequest>(json).unwrap();
         assert_eq!(req.token, "tok_anthropic_prod_abc");
