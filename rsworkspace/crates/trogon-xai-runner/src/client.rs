@@ -42,11 +42,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::stream::StreamExt as _;
+use futures_util::stream::{LocalBoxStream, StreamExt as _};
 use futures_util::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
+
+use crate::http_client::XaiHttpClient;
 
 /// A single message in the conversation history.
 ///
@@ -211,15 +214,7 @@ impl XaiClient {
         }
     }
 
-    /// Start a streaming Responses API call and return a stream of `XaiEvent`s.
-    ///
-    /// - `input` — items for this turn (user message, or tool results for follow-up turns)
-    /// - `api_key` — xAI bearer token for this request
-    /// - `tools` — server-side tool names to enable, e.g. `["web_search", "x_search"]`
-    /// - `previous_response_id` — ID from the prior response; enables stateful
-    ///   multi-turn without re-sending full history
-    /// - `max_turns` — maximum agentic tool-call iterations the server may perform
-    pub async fn chat_stream(
+    async fn do_chat_stream(
         &self,
         model: &str,
         input: &[InputItem],
@@ -227,7 +222,7 @@ impl XaiClient {
         tools: &[String],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
-    ) -> impl Stream<Item = XaiEvent> + use<> {
+    ) -> LocalBoxStream<'static, XaiEvent> {
         debug!(
             model,
             input_len = input.len(),
@@ -303,6 +298,21 @@ impl XaiClient {
         }
 
         Ok(response)
+    }
+}
+
+#[async_trait(?Send)]
+impl XaiHttpClient for XaiClient {
+    async fn chat_stream(
+        &self,
+        model: &str,
+        input: &[InputItem],
+        api_key: &str,
+        tools: &[String],
+        previous_response_id: Option<&str>,
+        max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        self.do_chat_stream(model, input, api_key, tools, previous_response_id, max_turns).await
     }
 }
 
