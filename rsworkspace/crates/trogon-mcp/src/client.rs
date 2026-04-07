@@ -1,5 +1,7 @@
 //! MCP HTTP JSON-RPC client.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use reqwest::Client;
@@ -24,6 +26,21 @@ pub struct McpTool {
     /// JSON Schema for the tool's input parameters.
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
+}
+
+// ── McpCallTool trait ─────────────────────────────────────────────────────────
+
+/// Abstraction over the single operation the agent loop needs from an MCP server:
+/// calling a named tool and receiving its text output.
+///
+/// Implementing this trait allows the agent loop to be tested without a live
+/// MCP server by injecting a [`MockMcpClient`] or any other fake.
+pub trait McpCallTool: Send + Sync + 'static {
+    fn call_tool<'a>(
+        &'a self,
+        name: &'a str,
+        arguments: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
 }
 
 // ── Internal response types ───────────────────────────────────────────────────
@@ -141,5 +158,66 @@ impl McpClient {
             .json::<Value>()
             .await
             .map_err(|e| format!("MCP parse error: {e}"))
+    }
+}
+
+impl McpCallTool for McpClient {
+    fn call_tool<'a>(
+        &'a self,
+        name: &'a str,
+        arguments: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(McpClient::call_tool(self, name, arguments))
+    }
+}
+
+// ── Test mock ─────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "test-support")]
+pub mod mock {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// A configurable in-memory fake for [`McpCallTool`].
+    ///
+    /// By default every call returns `Ok("mock response")`.  Call
+    /// [`MockMcpClient::set_response`] to change what is returned, or
+    /// [`MockMcpClient::set_error`] to make calls fail.
+    #[derive(Clone)]
+    pub struct MockMcpClient {
+        result: Arc<Mutex<Result<String, String>>>,
+    }
+
+    impl MockMcpClient {
+        pub fn new() -> Self {
+            Self {
+                result: Arc::new(Mutex::new(Ok("mock response".to_string()))),
+            }
+        }
+
+        pub fn set_response(&self, response: impl Into<String>) {
+            *self.result.lock().unwrap() = Ok(response.into());
+        }
+
+        pub fn set_error(&self, error: impl Into<String>) {
+            *self.result.lock().unwrap() = Err(error.into());
+        }
+    }
+
+    impl Default for MockMcpClient {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl McpCallTool for MockMcpClient {
+        fn call_tool<'a>(
+            &'a self,
+            _name: &'a str,
+            _arguments: &'a Value,
+        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+            let result = self.result.lock().unwrap().clone();
+            Box::pin(async move { result })
+        }
     }
 }

@@ -31,12 +31,13 @@ use futures_util::StreamExt;
 use tracing::{error, info, warn};
 use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
 
-use crate::agent_loop::AgentLoop;
+use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
 use crate::chat_api::{ChatAppState, router as chat_router};
 use crate::config::{AgentConfig, McpServerConfig};
+use crate::flag_client::{AlwaysOnFlagClient, SplitFlagClient};
 use crate::handlers::{self, make_tool_context};
 use crate::session::SessionStore;
-use crate::tools::{ToolContext, ToolDef};
+use crate::tools::{DefaultToolDispatcher, ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -95,19 +96,34 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let (mcp_tool_defs, mcp_dispatch) = init_mcp_servers(&http_client, &cfg.mcp_servers).await;
 
+    let anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient> = Arc::new(
+        ReqwestAnthropicClient::new(
+            http_client.clone(),
+            cfg.proxy_url.clone(),
+            cfg.anthropic_token.clone(),
+        ),
+    );
+
+    let tool_dispatcher: Arc<dyn crate::tools::ToolDispatcher> =
+        Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx)));
+
+    let flag_client: Arc<dyn crate::flag_client::FeatureFlagClient> = match split_client {
+        Some(c) => Arc::new(SplitFlagClient::new(c)),
+        None => Arc::new(AlwaysOnFlagClient),
+    };
+
     let agent = Arc::new(AgentLoop {
-        http_client,
-        proxy_url: cfg.proxy_url.clone(),
-        anthropic_token: cfg.anthropic_token.clone(),
+        anthropic_client,
         model: cfg.model.clone(),
         max_iterations: cfg.max_iterations,
+        tool_dispatcher,
         tool_context: tool_ctx,
         memory_owner: cfg.memory_owner.clone(),
         memory_repo: cfg.memory_repo.clone(),
         memory_path: cfg.memory_path.clone(),
         mcp_tool_defs,
         mcp_dispatch,
-        split_client,
+        flag_client,
         tenant_id: cfg.tenant_id.clone(),
     });
 
@@ -565,7 +581,7 @@ pub async fn init_mcp_servers(
     servers: &[McpServerConfig],
 ) -> (
     Vec<ToolDef>,
-    Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
 ) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
@@ -596,7 +612,7 @@ pub async fn init_mcp_servers(
                         input_schema: tool.input_schema.clone(),
                         cache_control: None,
                     });
-                    dispatch.push((prefixed, tool.name, Arc::clone(&client)));
+                    dispatch.push((prefixed, tool.name, Arc::clone(&client) as Arc<dyn trogon_mcp::McpCallTool>));
                 }
             }
         }
@@ -623,26 +639,33 @@ mod tests {
     use std::sync::Arc;
 
     fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::DefaultToolDispatcher;
         let http_client = reqwest::Client::new();
-        Arc::new(crate::agent_loop::AgentLoop {
+        let tool_ctx = Arc::new(crate::tools::ToolContext {
             http_client: http_client.clone(),
             proxy_url: proxy_url.to_string(),
-            anthropic_token: String::new(),
+            github_token: "tok_github_prod_test01".to_string(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http_client,
+                proxy_url.to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(crate::tools::ToolContext {
-                http_client,
-                proxy_url: proxy_url.to_string(),
-                github_token: "tok_github_prod_test01".to_string(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
         })
     }

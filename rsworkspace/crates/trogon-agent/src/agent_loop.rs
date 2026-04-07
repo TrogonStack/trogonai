@@ -7,13 +7,82 @@
 //!    results, and send another request.
 //! 4. Repeat until `end_turn` or `max_iterations` is reached.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::tools::{ToolContext, ToolDef, dispatch_tool};
+use crate::flag_client::FeatureFlagClient;
+use crate::tools::{ToolDef, ToolDispatcher};
+
+// ── AnthropicClient trait ──────────────────────────────────────────────────────
+
+/// Trait for sending a request to the Anthropic messages API.
+pub trait AnthropicClient: Send + Sync + 'static {
+    fn complete<'a>(
+        &'a self,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>;
+}
+
+/// Concrete [`AnthropicClient`] backed by a [`reqwest::Client`].
+pub struct ReqwestAnthropicClient {
+    http: reqwest::Client,
+    proxy_url: String,
+    anthropic_token: String,
+}
+
+impl ReqwestAnthropicClient {
+    pub fn new(http: reqwest::Client, proxy_url: String, anthropic_token: String) -> Self {
+        Self {
+            http,
+            proxy_url,
+            anthropic_token,
+        }
+    }
+}
+
+impl AnthropicClient for ReqwestAnthropicClient {
+    fn complete<'a>(
+        &'a self,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            self.http
+                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await?
+                .json::<serde_json::Value>()
+                .await
+        })
+    }
+}
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+
+    pub struct MockAnthropicClient {
+        pub response: serde_json::Value,
+    }
+
+    impl AnthropicClient for MockAnthropicClient {
+        fn complete<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+        {
+            let resp = self.response.clone();
+            Box::pin(async move { Ok(resp) })
+        }
+    }
+}
 
 // ── Wire types ────────────────────────────────────────────────────────────────
 
@@ -159,15 +228,15 @@ impl std::error::Error for AgentError {
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
 pub struct AgentLoop {
-    pub http_client: reqwest::Client,
-    /// Base URL of the running `trogon-secret-proxy`.
-    pub proxy_url: String,
-    /// Opaque proxy token for Anthropic (never the real API key).
-    pub anthropic_token: String,
+    /// Client for calling the Anthropic messages API (via proxy).
+    pub anthropic_client: Arc<dyn AnthropicClient>,
     pub model: String,
     pub max_iterations: u32,
-    /// Shared context passed to every tool execution.
-    pub tool_context: Arc<ToolContext>,
+    /// Dispatcher for built-in tool calls.
+    pub tool_dispatcher: Arc<dyn ToolDispatcher>,
+    /// Shared HTTP context used by handlers for non-tool operations (e.g.
+    /// fetching the memory file from GitHub).
+    pub tool_context: Arc<crate::tools::ToolContext>,
     /// GitHub repo owner for pre-fetching the memory file in handlers
     /// that don't have an implicit repo (e.g. Linear issue triage).
     pub memory_owner: Option<String>,
@@ -179,25 +248,23 @@ pub struct AgentLoop {
     /// Extra tool definitions from MCP servers — appended to every `run` call.
     pub mcp_tool_defs: Vec<ToolDef>,
     /// Dispatch map for MCP tools: prefixed_name → (client, original_tool_name).
-    pub mcp_dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
-    /// Split.io client for feature flag evaluation.
-    /// `None` when `SPLIT_EVALUATOR_URL` is not configured — all flags default
-    /// to `true` (fail-open).
-    pub split_client: Option<trogon_splitio::SplitClient>,
-    /// Tenant identifier used as the Split.io user key for flag evaluation.
+    pub mcp_dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
+    /// Feature flag client for evaluating flags per tenant.
+    pub flag_client: Arc<dyn FeatureFlagClient>,
+    /// Tenant identifier used as the feature flag evaluation key.
     pub tenant_id: String,
 }
 
 impl AgentLoop {
     /// Check whether a feature flag is enabled for this agent's tenant.
     ///
-    /// Returns `true` when Split.io is not configured (`split_client` is
-    /// `None`) — fail-open ensures all handlers run by default.
+    /// Delegates to the injected [`FeatureFlagClient`].  When an
+    /// [`AlwaysOnFlagClient`] is configured (no Split.io), all flags return
+    /// `true` — fail-open ensures all handlers run by default.
+    ///
+    /// [`AlwaysOnFlagClient`]: crate::flag_client::AlwaysOnFlagClient
     pub async fn is_flag_enabled(&self, flag: &dyn trogon_splitio::flags::FeatureFlag) -> bool {
-        match &self.split_client {
-            Some(client) => client.is_enabled(&self.tenant_id, flag, None).await,
-            None => true,
-        }
+        self.flag_client.is_enabled(&self.tenant_id, flag).await
     }
 
     /// Run the agentic loop starting from `initial_messages`.
@@ -247,18 +314,16 @@ impl AgentLoop {
                 messages: &messages,
             };
 
-            let response = self
-                .http_client
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01")
-                .json(&request)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .json::<AnthropicResponse>()
+            let body =
+                serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
+            let raw = self
+                .anthropic_client
+                .complete(body)
                 .await
                 .map_err(AgentError::Http)?;
+            let response = serde_json::from_value::<AnthropicResponse>(raw).map_err(|e| {
+                AgentError::UnexpectedStopReason(format!("Deserialization error: {e}"))
+            })?;
 
             debug!(stop_reason = %response.stop_reason, "Model response received");
 
@@ -335,18 +400,16 @@ impl AgentLoop {
                 messages: &messages,
             };
 
-            let response = self
-                .http_client
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01")
-                .json(&request)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .json::<AnthropicResponse>()
+            let body =
+                serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
+            let raw = self
+                .anthropic_client
+                .complete(body)
                 .await
                 .map_err(AgentError::Http)?;
+            let response = serde_json::from_value::<AnthropicResponse>(raw).map_err(|e| {
+                AgentError::UnexpectedStopReason(format!("Deserialization error: {e}"))
+            })?;
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
@@ -400,7 +463,7 @@ impl AgentLoop {
                         Err(e) => format!("Tool error: {e}"),
                     }
                 } else {
-                    dispatch_tool(&self.tool_context, name, input).await
+                    self.tool_dispatcher.dispatch(name, input).await
                 };
 
                 results.push(ToolResult {
@@ -594,28 +657,40 @@ mod tests {
     // ── is_flag_enabled ───────────────────────────────────────────────────────
 
     fn make_test_agent(split_client: Option<trogon_splitio::SplitClient>) -> AgentLoop {
-        use crate::tools::ToolContext;
+        use crate::flag_client::{AlwaysOnFlagClient, SplitFlagClient};
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
+
         let http = reqwest::Client::new();
-        AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: http.clone(),
             proxy_url: "http://127.0.0.1:1".to_string(),
-            anthropic_token: String::new(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+
+        let flag_client: Arc<dyn crate::flag_client::FeatureFlagClient> = match split_client {
+            Some(c) => Arc::new(SplitFlagClient::new(c)),
+            None => Arc::new(AlwaysOnFlagClient),
+        };
+
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http,
+                "http://127.0.0.1:1".to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: http,
-                proxy_url: "http://127.0.0.1:1".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client,
+            flag_client,
             tenant_id: "test-tenant".to_string(),
         }
     }

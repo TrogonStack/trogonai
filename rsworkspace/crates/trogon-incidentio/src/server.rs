@@ -10,10 +10,11 @@
 //! - **Headers**: `X-Incident-Event-Type`, `X-Incident-Delivery`
 //! - **Payload**: raw JSON body from incident.io
 
+use std::future::IntoFuture as _;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, stream};
+use async_nats::jetstream::stream;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -26,51 +27,82 @@ use tracing::{info, instrument, warn};
 use crate::config::IncidentioConfig;
 use crate::events;
 use crate::signature;
-use crate::store::IncidentStore;
+use crate::store::IncidentRepository;
+use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
+
+// ── Application state ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-struct AppState {
-    js: jetstream::Context,
-    incident_store: IncidentStore,
+struct AppState<J, R> {
+    js: J,
+    incident_store: R,
     webhook_secret: Option<String>,
     subject_prefix: String,
+    ack_timeout: Duration,
 }
+
+// ── Server entry-point ────────────────────────────────────────────────────────
 
 /// Start the incident.io webhook HTTP server.
 ///
 /// Ensures JetStream stream and KV bucket exist, then listens for:
 /// - `POST /webhook` — incident.io events → NATS JetStream + KV update
 /// - `GET  /health`  — liveness probe
+/// - `GET  /incidents` — list all stored incidents
+/// - `GET  /incidents/:id` — get a single stored incident
+#[cfg(not(coverage))]
 pub async fn serve(
     config: IncidentioConfig,
     nats: async_nats::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let js = jetstream::new(nats);
+    use async_nats::jetstream;
+    use crate::store::IncidentStore;
+    use trogon_nats::jetstream::NatsJetStreamClient;
 
-    ensure_stream(
-        &js,
-        &config.stream_name,
-        &config.subject_prefix,
-        config.stream_max_age,
-    )
-    .await?;
-
-    let incident_store = IncidentStore::open(&js)
+    let js = NatsJetStreamClient::new(jetstream::new(nats));
+    let incident_store = IncidentStore::open(js.context())
         .await
         .map_err(|e| format!("Failed to open IncidentStore: {e}"))?;
+    serve_impl(config, js, incident_store).await
+}
+
+async fn serve_impl<J, R>(
+    config: IncidentioConfig,
+    js: J,
+    incident_store: R,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
+    <J as JetStreamContext>::Error: 'static,
+    R: IncidentRepository,
+{
+    js.get_or_create_stream(stream::Config {
+        name: config.stream_name.clone(),
+        subjects: vec![format!("{}.>", config.subject_prefix)],
+        max_age: config.stream_max_age,
+        ..Default::default()
+    })
+    .await?;
+
+    info!(
+        stream = config.stream_name,
+        max_age_secs = config.stream_max_age.as_secs(),
+        "JetStream stream ready"
+    );
 
     let state = AppState {
         js,
         incident_store,
         webhook_secret: config.webhook_secret,
         subject_prefix: config.subject_prefix,
+        ack_timeout: Duration::from_secs(10),
     };
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/webhook", post(handle_webhook::<J, R>))
         .route("/health", get(handle_health))
-        .route("/incidents", get(list_incidents))
-        .route("/incidents/:id", get(get_incident_by_id))
+        .route("/incidents", get(list_incidents::<J, R>))
+        .route("/incidents/:id", get(get_incident_by_id::<J, R>))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -97,28 +129,6 @@ async fn shutdown_signal() {
     }
 }
 
-async fn ensure_stream(
-    js: &jetstream::Context,
-    stream_name: &str,
-    subject_prefix: &str,
-    max_age: Duration,
-) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
-    js.get_or_create_stream(stream::Config {
-        name: stream_name.to_string(),
-        subjects: vec![format!("{}.>", subject_prefix)],
-        max_age,
-        ..Default::default()
-    })
-    .await?;
-
-    info!(
-        stream = stream_name,
-        max_age_secs = max_age.as_secs(),
-        "JetStream stream ready"
-    );
-    Ok(())
-}
-
 async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
@@ -132,11 +142,15 @@ async fn handle_health() -> StatusCode {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook(
-    State(state): State<AppState>,
+async fn handle_webhook<J, R>(
+    State(state): State<AppState<J, R>>,
     headers: HeaderMap,
     body: Bytes,
-) -> StatusCode {
+) -> StatusCode
+where
+    J: JetStreamPublisher + Clone + Send + Sync + 'static,
+    R: IncidentRepository,
+{
     // Validate HMAC signature when a secret is configured.
     if let Some(secret) = &state.webhook_secret {
         let sig = headers
@@ -181,27 +195,27 @@ async fn handle_webhook(
     nats_headers.insert("X-Incident-Event-Type", ev_type.as_str());
     nats_headers.insert("X-Incident-Delivery", delivery_id.as_str());
 
-    const NATS_ACK_TIMEOUT: Duration = Duration::from_secs(10);
-
     match state
         .js
         .publish_with_headers(subject.clone(), nats_headers, body)
         .await
     {
-        Ok(ack_future) => match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
-            Ok(Ok(_)) => {
-                info!(subject, "Published incident.io event to NATS");
-                StatusCode::OK
+        Ok(ack_future) => {
+            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+                Ok(Ok(_)) => {
+                    info!(subject, "Published incident.io event to NATS");
+                    StatusCode::OK
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "NATS ack failed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+                Err(_) => {
+                    warn!("NATS ack timed out");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
             }
-            Ok(Err(e)) => {
-                warn!(error = %e, "NATS ack failed");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            Err(_) => {
-                warn!("NATS ack timed out");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        },
+        }
         Err(e) => {
             warn!(error = %e, "Failed to publish incident.io event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -210,9 +224,13 @@ async fn handle_webhook(
 }
 
 /// `GET /incidents` — returns all stored incidents as a JSON array.
-async fn list_incidents(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+async fn list_incidents<J, R>(
+    State(state): State<AppState<J, R>>,
+) -> Result<Json<Vec<serde_json::Value>>, StatusCode>
+where
+    J: Clone + Send + Sync + 'static,
+    R: IncidentRepository,
+{
     let raw_list = state.incident_store.list().await.map_err(|e| {
         warn!(error = %e, "Failed to list incidents from KV");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -227,10 +245,14 @@ async fn list_incidents(
 }
 
 /// `GET /incidents/:id` — returns the stored state of a single incident.
-async fn get_incident_by_id(
-    State(state): State<AppState>,
+async fn get_incident_by_id<J, R>(
+    State(state): State<AppState<J, R>>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, StatusCode>
+where
+    J: Clone + Send + Sync + 'static,
+    R: IncidentRepository,
+{
     match state.incident_store.get(&id).await {
         Ok(Some(bytes)) => {
             let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
