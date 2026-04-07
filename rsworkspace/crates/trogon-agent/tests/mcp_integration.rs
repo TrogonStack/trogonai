@@ -10,10 +10,11 @@ use std::sync::Arc;
 use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
-    agent_loop::{AgentLoop, Message},
-    tools::{ToolContext, ToolDef},
+    agent_loop::{AgentLoop, Message, ReqwestAnthropicClient},
+    flag_client::AlwaysOnFlagClient,
+    tools::{DefaultToolDispatcher, ToolContext, ToolDef},
 };
-use trogon_mcp::McpClient;
+use trogon_mcp::{McpCallTool, McpClient};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,19 +37,23 @@ fn mcp_tool_def(name: &str, description: &str) -> ToolDef {
 /// entry pointing to `mcp_server`.
 fn make_agent_with_mcp(
     proxy_url: &str,
-    mcp_client: Arc<McpClient>,
+    mcp_client: Arc<dyn McpCallTool>,
     prefixed_name: &str,
     original_name: &str,
     description: &str,
 ) -> AgentLoop {
     let http_client = reqwest::Client::new();
+    let tool_ctx = make_tool_ctx(proxy_url);
     AgentLoop {
-        http_client: http_client.clone(),
-        proxy_url: proxy_url.to_string(),
-        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http_client,
+            proxy_url.to_string(),
+            "tok_anthropic_prod_test01".to_string(),
+        )),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
-        tool_context: make_tool_ctx(proxy_url),
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -58,7 +63,7 @@ fn make_agent_with_mcp(
             original_name.to_string(),
             mcp_client,
         )],
-        split_client: None,
+        flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
     }
 }
@@ -121,7 +126,7 @@ async fn mcp_tool_call_is_dispatched_and_result_fed_back() {
     });
 
     let http_client = reqwest::Client::new();
-    let mcp_client = Arc::new(McpClient::new(http_client, mcp.base_url()));
+    let mcp_client: Arc<dyn McpCallTool> = Arc::new(McpClient::new(http_client, mcp.base_url()));
 
     let agent = make_agent_with_mcp(
         &proxy.base_url(),
@@ -192,7 +197,7 @@ async fn mcp_tool_error_is_returned_as_tool_result() {
     });
 
     let http_client = reqwest::Client::new();
-    let mcp_client = Arc::new(McpClient::new(http_client, mcp.base_url()));
+    let mcp_client: Arc<dyn McpCallTool> = Arc::new(McpClient::new(http_client, mcp.base_url()));
 
     let agent = make_agent_with_mcp(
         &proxy.base_url(),
@@ -249,7 +254,7 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
 
     let http_client = reqwest::Client::new();
     // MCP client points to a real mock server but will never be called in this test.
-    let mcp_client = Arc::new(McpClient::new(http_client, mcp.base_url()));
+    let mcp_client: Arc<dyn McpCallTool> = Arc::new(McpClient::new(http_client, mcp.base_url()));
 
     let agent = make_agent_with_mcp(
         &proxy.base_url(),
@@ -349,7 +354,7 @@ async fn mcp_tool_defs_appear_in_anthropic_request() {
         .await;
 
     let http_client = reqwest::Client::new();
-    let mcp_client = Arc::new(McpClient::new(http_client, mcp.base_url()));
+    let mcp_client: Arc<dyn McpCallTool> = Arc::new(McpClient::new(http_client, mcp.base_url()));
 
     let agent = make_agent_with_mcp(
         &proxy.base_url(),

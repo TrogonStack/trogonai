@@ -39,5 +39,6 @@ pub mod store;
 
 pub use client::IncidentioClient;
 pub use config::IncidentioConfig;
+#[cfg(not(coverage))]
 pub use server::serve;
 pub use store::IncidentStore;
