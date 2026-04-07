@@ -68,10 +68,16 @@ mod tests {
         let token = tok("tok_anthropic_prod_abc123");
 
         vault.store(&token, "sk-ant-v1").await.unwrap();
-        assert_eq!(vault.resolve(&token).await.unwrap(), Some("sk-ant-v1".to_string()));
+        assert_eq!(
+            vault.resolve(&token).await.unwrap(),
+            Some("sk-ant-v1".to_string())
+        );
 
         vault.rotate(&token, "sk-ant-v2").await.unwrap();
-        assert_eq!(vault.resolve(&token).await.unwrap(), Some("sk-ant-v2".to_string()));
+        assert_eq!(
+            vault.resolve(&token).await.unwrap(),
+            Some("sk-ant-v2".to_string())
+        );
 
         vault.revoke(&token).await.unwrap();
         assert_eq!(vault.resolve(&token).await.unwrap(), None);
@@ -113,7 +119,10 @@ mod tests {
         let vault = MemoryVault::new();
         let token = tok("tok_openai_prod_newone1");
         vault.rotate(&token, "sk-new-key").await.unwrap();
-        assert_eq!(vault.resolve(&token).await.unwrap(), Some("sk-new-key".to_string()));
+        assert_eq!(
+            vault.resolve(&token).await.unwrap(),
+            Some("sk-new-key".to_string())
+        );
     }
 
     /// store for different tokens does not interfere.
@@ -126,7 +135,13 @@ mod tests {
         vault.store(&t1, "key-for-t1").await.unwrap();
         vault.store(&t2, "key-for-t2").await.unwrap();
 
-        assert_eq!(vault.resolve(&t1).await.unwrap(), Some("key-for-t1".to_string()));
-        assert_eq!(vault.resolve(&t2).await.unwrap(), Some("key-for-t2".to_string()));
+        assert_eq!(
+            vault.resolve(&t1).await.unwrap(),
+            Some("key-for-t1".to_string())
+        );
+        assert_eq!(
+            vault.resolve(&t2).await.unwrap(),
+            Some("key-for-t2".to_string())
+        );
     }
 }

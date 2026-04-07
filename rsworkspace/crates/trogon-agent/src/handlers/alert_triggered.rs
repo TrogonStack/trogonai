@@ -18,14 +18,18 @@
 use serde_json::Value;
 use tracing::{info, warn};
 
+use super::{fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
 use crate::tools::{ToolDef, slack};
-use super::{fetch_memory, run_agent};
 
 /// Run the alert-triage agent from a raw Datadog webhook payload.
 ///
 /// Always handles the event — returns `Some(Ok)` on success, `Some(Err)` on failure.
-pub async fn handle(agent: &AgentLoop, nats_subject: &str, payload: &[u8]) -> Option<Result<String, String>> {
+pub async fn handle(
+    agent: &AgentLoop,
+    nats_subject: &str,
+    payload: &[u8],
+) -> Option<Result<String, String>> {
     let event: Value = match serde_json::from_slice(payload) {
         Ok(v) => v,
         Err(e) => return Some(Err(format!("JSON parse error: {e}"))),
@@ -36,7 +40,10 @@ pub async fn handle(agent: &AgentLoop, nats_subject: &str, payload: &[u8]) -> Op
     let alert_id = event["alert_id"].as_str().unwrap_or("unknown");
     let host = event["host"].as_str().unwrap_or("unknown");
 
-    info!(alert_id, title, transition, host, "Starting Datadog alert handler");
+    info!(
+        alert_id,
+        title, transition, host, "Starting Datadog alert handler"
+    );
 
     let prompt = format!(
         "You are an on-call assistant handling a Datadog alert.\n\
@@ -56,7 +63,10 @@ pub async fn handle(agent: &AgentLoop, nats_subject: &str, payload: &[u8]) -> Op
 
     let tools = alert_tools();
 
-    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent
+        .memory_path
+        .as_deref()
+        .unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -87,12 +97,15 @@ mod tests {
         let tools = alert_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"send_slack_message"), "slack tool missing");
-        assert!(names.contains(&"read_slack_channel"), "read channel tool missing");
+        assert!(
+            names.contains(&"read_slack_channel"),
+            "read channel tool missing"
+        );
     }
 
     fn make_agent(proxy_url: &str) -> AgentLoop {
-        use std::sync::Arc;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         AgentLoop {
             http_client: reqwest::Client::new(),
             proxy_url: proxy_url.to_string(),
@@ -183,7 +196,8 @@ mod tests {
         let server = httpmock::MockServer::start_async().await;
         // Memory endpoint returns 404.
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path_contains("memory.md");
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
             then.status(404);
         });
         // Anthropic endpoint succeeds — must be called even without memory.
@@ -198,9 +212,9 @@ mod tests {
                 }));
         });
 
-        use std::sync::Arc;
         use crate::agent_loop::AgentLoop;
         use crate::tools::ToolContext;
+        use std::sync::Arc;
         let http_client = reqwest::Client::new();
         let agent = AgentLoop {
             http_client: http_client.clone(),
@@ -232,7 +246,10 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "datadog.alert", &bytes).await;
-        assert!(matches!(result, Some(Ok(_))), "expected Ok even without memory: {result:?}");
+        assert!(
+            matches!(result, Some(Ok(_))),
+            "expected Ok even without memory: {result:?}"
+        );
         anthropic_mock.assert_async().await;
     }
 

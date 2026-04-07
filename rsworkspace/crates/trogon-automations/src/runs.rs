@@ -97,7 +97,11 @@ impl RunStore {
         automation_id: Option<&str>,
     ) -> Result<Vec<RunRecord>, StoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys = self.kv.keys().await.map_err(|e| StoreError(e.to_string()))?;
+        let mut keys = self
+            .kv
+            .keys()
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
         let mut result = Vec::new();
 
         while let Some(key) = keys.next().await {
@@ -105,17 +109,19 @@ impl RunStore {
             if !key.starts_with(&prefix) {
                 continue;
             }
-            if let Some(bytes) =
-                self.kv.get(&key).await.map_err(|e| StoreError(e.to_string()))?
+            if let Some(bytes) = self
+                .kv
+                .get(&key)
+                .await
+                .map_err(|e| StoreError(e.to_string()))?
+                && let Ok(run) = serde_json::from_slice::<RunRecord>(&bytes)
             {
-                if let Ok(run) = serde_json::from_slice::<RunRecord>(&bytes) {
-                    if let Some(aid) = automation_id {
-                        if run.automation_id != aid {
-                            continue;
-                        }
-                    }
-                    result.push(run);
+                if let Some(aid) = automation_id
+                    && run.automation_id != aid
+                {
+                    continue;
                 }
+                result.push(run);
             }
         }
 
@@ -142,7 +148,11 @@ impl RunStore {
             .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
             .count() as u64;
 
-        Ok(RunStats { total, successful_7d, failed_7d })
+        Ok(RunStats {
+            total,
+            successful_7d,
+            failed_7d,
+        })
     }
 }
 
@@ -193,17 +203,21 @@ mod tests {
     fn stats_counts_correctly() {
         let now = now_unix();
         let runs = vec![
-            sample_run("r1", RunStatus::Success, now - 3600),   // 1h ago — in 7d window
-            sample_run("r2", RunStatus::Failed, now - 3600),    // 1h ago — in 7d window
+            sample_run("r1", RunStatus::Success, now - 3600), // 1h ago — in 7d window
+            sample_run("r2", RunStatus::Failed, now - 3600),  // 1h ago — in 7d window
             sample_run("r3", RunStatus::Success, now - 8 * 86_400), // 8d ago — outside window
         ];
 
         let seven_days_ago = now.saturating_sub(7 * 86_400);
         let total = runs.len() as u64;
-        let successful_7d =
-            runs.iter().filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Success).count() as u64;
-        let failed_7d =
-            runs.iter().filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed).count() as u64;
+        let successful_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Success)
+            .count() as u64;
+        let failed_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
+            .count() as u64;
 
         assert_eq!(total, 3);
         assert_eq!(successful_7d, 1);
@@ -267,7 +281,11 @@ mod tests {
 
     #[test]
     fn run_stats_struct_fields() {
-        let stats = RunStats { total: 10, successful_7d: 7, failed_7d: 3 };
+        let stats = RunStats {
+            total: 10,
+            successful_7d: 7,
+            failed_7d: 3,
+        };
         let v: serde_json::Value = serde_json::to_value(&stats).unwrap();
         assert_eq!(v["total"], 10);
         assert_eq!(v["successful_7d"], 7);

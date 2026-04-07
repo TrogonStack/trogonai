@@ -145,7 +145,11 @@ mod tests {
         let cfg = Config::for_test()
             .with_proxy_port(1000)
             .with_proxy_port(2000);
-        assert_eq!(cfg.proxy_port(), 2000, "Second call must overwrite the first");
+        assert_eq!(
+            cfg.proxy_port(),
+            2000,
+            "Second call must overwrite the first"
+        );
     }
 
     // ── Gap: whitespace-only prefix ───────────────────────────────────────────
@@ -161,7 +165,11 @@ mod tests {
             auth: NatsAuth::None,
         };
         let cfg = Config::new(" ", nats);
-        assert_eq!(cfg.prefix(), " ", "Whitespace-only prefix must be stored as-is");
+        assert_eq!(
+            cfg.prefix(),
+            " ",
+            "Whitespace-only prefix must be stored as-is"
+        );
     }
 
     /// Calling `with_worker_timeout` twice must apply the last value.
@@ -170,6 +178,10 @@ mod tests {
         let cfg = Config::for_test()
             .with_worker_timeout(Duration::from_secs(10))
             .with_worker_timeout(Duration::from_secs(99));
-        assert_eq!(cfg.worker_timeout(), Duration::from_secs(99), "Second call must overwrite the first");
+        assert_eq!(
+            cfg.worker_timeout(),
+            Duration::from_secs(99),
+            "Second call must overwrite the first"
+        );
     }
 }

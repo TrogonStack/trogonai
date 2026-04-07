@@ -22,7 +22,10 @@ async fn initialize_sends_correct_json_rpc() {
             .json_body(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mock"}}}));
     }).await;
 
-    client(&server).initialize().await.expect("initialize should succeed");
+    client(&server)
+        .initialize()
+        .await
+        .expect("initialize should succeed");
     mock.assert_async().await;
 }
 
@@ -33,7 +36,9 @@ async fn initialize_propagates_rpc_error() {
         when.method(httpmock::Method::POST);
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"bad request"}}));
+            .json_body(
+                json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"bad request"}}),
+            );
     });
 
     let err = client(&server).initialize().await.unwrap_err();
@@ -77,7 +82,10 @@ async fn list_tools_returns_tool_definitions() {
             }));
     });
 
-    let tools = client(&server).list_tools().await.expect("list_tools should succeed");
+    let tools = client(&server)
+        .list_tools()
+        .await
+        .expect("list_tools should succeed");
     assert_eq!(tools.len(), 2);
     assert_eq!(tools[0].name, "search");
     assert_eq!(tools[0].description, "Search the web");
@@ -181,7 +189,10 @@ async fn call_tool_is_error_returns_err() {
             }));
     });
 
-    let err = client(&server).call_tool("t", &json!({})).await.unwrap_err();
+    let err = client(&server)
+        .call_tool("t", &json!({}))
+        .await
+        .unwrap_err();
     assert_eq!(err, "tool failed internally");
 }
 
@@ -192,10 +203,15 @@ async fn call_tool_propagates_rpc_error() {
         when.method(httpmock::Method::POST);
         then.status(200)
             .header("content-type", "application/json")
-            .json_body(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params"}}));
+            .json_body(
+                json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params"}}),
+            );
     });
 
-    let err = client(&server).call_tool("t", &json!({})).await.unwrap_err();
+    let err = client(&server)
+        .call_tool("t", &json!({}))
+        .await
+        .unwrap_err();
     assert!(err.contains("MCP tool error"), "got: {err}");
 }
 

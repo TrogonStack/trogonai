@@ -26,7 +26,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer::pull, consumer::AckPolicy, consumer::DeliverPolicy};
+use async_nats::jetstream::{self, consumer::AckPolicy, consumer::DeliverPolicy, consumer::pull};
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
 use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
@@ -93,8 +93,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         })
     });
 
-    let (mcp_tool_defs, mcp_dispatch) =
-        init_mcp_servers(&http_client, &cfg.mcp_servers).await;
+    let (mcp_tool_defs, mcp_dispatch) = init_mcp_servers(&http_client, &cfg.mcp_servers).await;
 
     let agent = Arc::new(AgentLoop {
         http_client,
@@ -140,8 +139,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
-            let combined = trogon_automations::api::router(auto_state)
-                .merge(chat_router(chat_state));
+            let combined =
+                trogon_automations::api::router(auto_state).merge(chat_router(chat_state));
             match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
                 Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind API"),
                 Ok(listener) => {
@@ -162,18 +161,58 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     // Ensure all required JetStream streams exist before binding consumers.
     // This removes the hard startup-order dependency on trogon-github, trogon-linear,
     // and trogon-cron — the agent creates streams idempotently if they are absent.
-    ensure_stream(&js, github_stream_name, &["github.>"], Duration::from_secs(7 * 86_400)).await?;
-    ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
-    ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
-    ensure_stream(&js, datadog_stream_name, &["datadog.>"], Duration::from_secs(7 * 86_400)).await?;
+    ensure_stream(
+        &js,
+        github_stream_name,
+        &["github.>"],
+        Duration::from_secs(7 * 86_400),
+    )
+    .await?;
+    ensure_stream(
+        &js,
+        linear_stream_name,
+        &["linear.>"],
+        Duration::from_secs(7 * 86_400),
+    )
+    .await?;
+    ensure_stream(
+        &js,
+        cron_stream_name,
+        &["cron.>"],
+        Duration::from_secs(86_400),
+    )
+    .await?;
+    ensure_stream(
+        &js,
+        datadog_stream_name,
+        &["datadog.>"],
+        Duration::from_secs(7 * 86_400),
+    )
+    .await?;
 
-    let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
-    let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
-    let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
-    let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
-    let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
+    let mut pr_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        GITHUB_CONSUMER,
+        "github.pull_request",
+    )
+    .await?;
+    let mut comment_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        COMMENT_CONSUMER,
+        "github.issue_comment",
+    )
+    .await?;
+    let mut push_messages =
+        bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
+    let mut ci_messages =
+        bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
+    let mut issue_messages =
+        bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
     let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
-    let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
+    let mut datadog_messages =
+        bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
 
     // incident.io stream is optional: when `incidentio_stream_name` is `None` the runner
     // skips both stream creation and consumer binding so no incidentio events are processed.
@@ -183,7 +222,13 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             None
         }
         Some(name) => {
-            ensure_stream(&js, name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
+            ensure_stream(
+                &js,
+                name,
+                &["incidentio.>"],
+                Duration::from_secs(7 * 86_400),
+            )
+            .await?;
             Some(bind_consumer(&js, name, INCIDENTIO_CONSUMER, "incidentio.>").await?)
         }
     };
@@ -518,15 +563,15 @@ pub(crate) async fn dispatch_automations(
 pub async fn init_mcp_servers(
     http_client: &reqwest::Client,
     servers: &[McpServerConfig],
-) -> (Vec<ToolDef>, Vec<(String, String, Arc<trogon_mcp::McpClient>)>) {
+) -> (
+    Vec<ToolDef>,
+    Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
     for server in servers {
-        let client = Arc::new(trogon_mcp::McpClient::new(
-            http_client.clone(),
-            &server.url,
-        ));
+        let client = Arc::new(trogon_mcp::McpClient::new(http_client.clone(), &server.url));
 
         if let Err(e) = client.initialize().await {
             warn!(server = %server.name, error = %e, "Failed to initialize MCP server — skipping");
@@ -534,12 +579,16 @@ pub async fn init_mcp_servers(
         }
 
         match client.list_tools().await {
-            Err(e) => warn!(server = %server.name, error = %e, "Failed to list MCP tools — skipping server"),
+            Err(e) => {
+                warn!(server = %server.name, error = %e, "Failed to list MCP tools — skipping server")
+            }
             Ok(tools) => {
                 info!(server = %server.name, count = tools.len(), "MCP tools loaded");
                 for tool in tools {
                     let prefixed = format!(
-                        "mcp__{}__{}", sanitize_name(&server.name), sanitize_name(&tool.name)
+                        "mcp__{}__{}",
+                        sanitize_name(&server.name),
+                        sanitize_name(&tool.name)
                     );
                     tool_defs.push(ToolDef {
                         name: prefixed.clone(),
@@ -558,7 +607,13 @@ pub async fn init_mcp_servers(
 
 pub(crate) fn sanitize_name(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -611,12 +666,23 @@ mod tests {
     }
 
     async fn make_run_store() -> (trogon_automations::RunStore, impl Drop) {
-        use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
-        let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+        use testcontainers_modules::{
+            nats::Nats,
+            testcontainers::{ImageExt, runners::AsyncRunner},
+        };
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("NATS");
         let port = container.get_host_port_ipv4(4222).await.expect("port");
-        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .expect("connect");
         let js = async_nats::jetstream::new(nats);
-        let rs = trogon_automations::RunStore::open(&js).await.expect("RunStore");
+        let rs = trogon_automations::RunStore::open(&js)
+            .await
+            .expect("RunStore");
         (rs, container)
     }
 
@@ -625,7 +691,8 @@ mod tests {
     async fn dispatch_automations_runs_all() {
         let server = httpmock::MockServer::start_async().await;
         let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -683,7 +750,8 @@ mod tests {
     async fn init_mcp_servers_skips_server_that_fails_initialize() {
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            when.method(httpmock::Method::POST)
+                .body_contains("\"initialize\"");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -699,7 +767,10 @@ mod tests {
         let http_client = reqwest::Client::new();
         let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
 
-        assert!(tools.is_empty(), "no tools expected when server fails to initialize");
+        assert!(
+            tools.is_empty(),
+            "no tools expected when server fails to initialize"
+        );
         assert!(dispatch.is_empty(), "no dispatch entries expected");
     }
 
@@ -717,7 +788,8 @@ mod tests {
                 }));
         });
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("tools/list");
+            when.method(httpmock::Method::POST)
+                .body_contains("tools/list");
             then.status(500);
         });
 
@@ -739,13 +811,14 @@ async fn ensure_stream(
     subjects: &[&str],
     max_age: Duration,
 ) -> Result<(), RunnerError> {
-    let result = js.get_or_create_stream(async_nats::jetstream::stream::Config {
-        name: stream_name.to_string(),
-        subjects: subjects.iter().map(|s| s.to_string()).collect(),
-        max_age,
-        ..Default::default()
-    })
-    .await;
+    let result = js
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: stream_name.to_string(),
+            subjects: subjects.iter().map(|s| s.to_string()).collect(),
+            max_age,
+            ..Default::default()
+        })
+        .await;
 
     match result {
         Ok(_) => Ok(()),
@@ -756,7 +829,9 @@ async fn ensure_stream(
                 tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
                 Ok(())
             } else {
-                Err(RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))
+                Err(RunnerError::JetStream(format!(
+                    "ensure stream {stream_name}: {e}"
+                )))
             }
         }
     }
@@ -767,7 +842,15 @@ async fn bind_consumer(
     stream_name: &str,
     consumer_name: &str,
     filter_subject: &str,
-) -> Result<impl futures_util::Stream<Item = Result<jetstream::Message, async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>>>, RunnerError> {
+) -> Result<
+    impl futures_util::Stream<
+        Item = Result<
+            jetstream::Message,
+            async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>,
+        >,
+    >,
+    RunnerError,
+> {
     let stream = js
         .get_stream(stream_name)
         .await

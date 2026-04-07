@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
-use async_nats::jetstream::AckKind;
 use futures_util::StreamExt;
 use reqwest::Client as ReqwestClient;
 use trogon_vault::VaultStore;
@@ -162,8 +162,7 @@ where
         .headers
         .iter()
         .filter(|(k, _)| {
-            !k.eq_ignore_ascii_case("authorization")
-                && !k.eq_ignore_ascii_case("x-request-id")
+            !k.eq_ignore_ascii_case("authorization") && !k.eq_ignore_ascii_case("x-request-id")
         })
         .cloned()
         .collect();
@@ -191,10 +190,7 @@ where
 }
 
 /// Extract the `tok_...` token from the Authorization header and resolve it.
-async fn resolve_token<V>(
-    vault: &V,
-    headers: &[(String, String)],
-) -> Result<String, String>
+async fn resolve_token<V>(vault: &V, headers: &[(String, String)]) -> Result<String, String>
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
@@ -228,10 +224,7 @@ where
         .ok_or_else(|| format!("Token not found in vault: {}", token))?;
 
     if real_key.is_empty() {
-        return Err(format!(
-            "Vault returned an empty key for token: {}",
-            token
-        ));
+        return Err(format!("Vault returned an empty key for token: {}", token));
     }
 
     Ok(real_key)
@@ -376,7 +369,10 @@ mod tests {
 
     use crate::messages::OutboundHttpRequest;
 
-    use super::{forward_request, forward_request_with_retry, process_request, resolve_token, HTTP_INITIAL_RETRY_DELAY};
+    use super::{
+        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry, process_request,
+        resolve_token,
+    };
 
     fn make_headers(auth: &str) -> Vec<(String, String)> {
         vec![("Authorization".to_string(), auth.to_string())]
@@ -437,7 +433,11 @@ mod tests {
         let headers = make_headers("Bearer sk-ant-realkey");
         let result = resolve_token(&vault, &headers).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not look like a proxy token"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("does not look like a proxy token")
+        );
     }
 
     /// Gap 3: token starting with `tok_` but missing provider/env/id segments
@@ -447,9 +447,9 @@ mod tests {
         let vault = MemoryVault::new();
 
         let cases = [
-            "Bearer tok_anthropic",          // missing env and id
-            "Bearer tok_anthropic_prod",     // missing id
-            "Bearer tok_",                   // nothing after tok_
+            "Bearer tok_anthropic",      // missing env and id
+            "Bearer tok_anthropic_prod", // missing id
+            "Bearer tok_",               // nothing after tok_
         ];
 
         for header in cases {
@@ -613,7 +613,11 @@ mod tests {
 
         assert_eq!(resp.status, 503);
         // HTTP_MAX_RETRIES=3 → 1 initial + 3 retries = 4 total calls
-        assert_eq!(mock.hits(), 4, "should attempt exactly 4 times (1 + 3 retries)");
+        assert_eq!(
+            mock.hits(),
+            4,
+            "should attempt exactly 4 times (1 + 3 retries)"
+        );
     }
 
     /// GET requests with an empty body must not send a body to the upstream.
@@ -638,9 +642,7 @@ mod tests {
             idempotency_key: "idem".to_string(),
         };
 
-        let resp = forward_request(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 200);
         mock.assert_async().await;
@@ -785,7 +787,9 @@ mod tests {
         assert!(result.is_err(), "double-space Bearer must be rejected");
         // raw_token is " tok_..." which starts with a space, not "tok_".
         assert!(
-            result.unwrap_err().contains("does not look like a proxy token"),
+            result
+                .unwrap_err()
+                .contains("does not look like a proxy token"),
             "Error must describe the rejection reason"
         );
     }
@@ -998,7 +1002,11 @@ mod tests {
         assert!(resp.error.is_some(), "Error field must be set");
 
         // The mock must not have been called — the failure happens before TCP.
-        assert_eq!(mock.hits(), 0, "Upstream must not be called when header is invalid");
+        assert_eq!(
+            mock.hits(),
+            0,
+            "Upstream must not be called when header is invalid"
+        );
     }
 
     // ── Gap: single-char real key strips every header containing that byte ────
@@ -1026,8 +1034,8 @@ mod tests {
                 when.method(httpmock::Method::POST).path("/v1/messages");
                 then.status(200)
                     .header("content-type", "application/json") // no 'k' → preserved
-                    .header("x-link", "bookmark")               // "bookmark" contains 'k' → stripped
-                    .header("x-safe", "clean-value")            // no 'k' → preserved
+                    .header("x-link", "bookmark") // "bookmark" contains 'k' → stripped
+                    .header("x-safe", "clean-value") // no 'k' → preserved
                     .body(r#"{"id":"msg_onechar"}"#);
             })
             .await;
@@ -1050,7 +1058,10 @@ mod tests {
 
         // "application/json" does not contain 'k' → preserved.
         let ct_present = resp.headers.iter().any(|(k, _)| k == "content-type");
-        assert!(ct_present, "content-type must be preserved (no 'k' in value)");
+        assert!(
+            ct_present,
+            "content-type must be preserved (no 'k' in value)"
+        );
 
         // "clean-value" does not contain 'k' → preserved.
         let safe_present = resp.headers.iter().any(|(k, _)| k == "x-safe");
@@ -1118,7 +1129,7 @@ mod tests {
             method: "GET".to_string(),
             url: format!("{}/v1/models", mock_server.base_url()),
             headers: vec![],
-            body: vec![],   // empty body — forward_request skips .body()
+            body: vec![], // empty body — forward_request skips .body()
             reply_to: "test.reply".to_string(),
             idempotency_key: "idem-get-ct".to_string(),
         };
@@ -1168,11 +1179,20 @@ mod tests {
             url,
             headers: vec![
                 // Primary tok_ token (valid).
-                ("Authorization".to_string(), "Bearer tok_anthropic_prod_dupauth1".to_string()),
+                (
+                    "Authorization".to_string(),
+                    "Bearer tok_anthropic_prod_dupauth1".to_string(),
+                ),
                 // Duplicate — must also be stripped.
-                ("Authorization".to_string(), "Bearer some-extra-key-1".to_string()),
+                (
+                    "Authorization".to_string(),
+                    "Bearer some-extra-key-1".to_string(),
+                ),
                 // Lowercase key — eq_ignore_ascii_case catches this too.
-                ("authorization".to_string(), "Bearer some-extra-key-2".to_string()),
+                (
+                    "authorization".to_string(),
+                    "Bearer some-extra-key-2".to_string(),
+                ),
             ],
             body: b"{}".to_vec(),
             reply_to: "test.reply".to_string(),
@@ -1182,7 +1202,10 @@ mod tests {
         let client = ReqwestClient::new();
         let resp = process_request(&request, &vault, &client).await;
 
-        assert_eq!(resp.status, 200, "All duplicate Authorization headers must be stripped and real key injected");
+        assert_eq!(
+            resp.status, 200,
+            "All duplicate Authorization headers must be stripped and real key injected"
+        );
         mock.assert_async().await;
     }
 
@@ -1284,8 +1307,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(
-            err,
-            "Vault error: simulated backend failure",
+            err, "Vault error: simulated backend failure",
             "Vault error format must be 'Vault error: <display>'"
         );
     }
@@ -1439,7 +1461,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status, 200, "Second attempt must return 200");
-        assert_eq!(resp.body, b"retried", "Body from successful retry must be returned");
+        assert_eq!(
+            resp.body, b"retried",
+            "Body from successful retry must be returned"
+        );
         assert_eq!(
             attempt_count.load(Ordering::SeqCst),
             2,
@@ -1463,12 +1488,21 @@ mod tests {
         let token_first = ApiKeyToken::new("tok_anthropic_prod_first01").unwrap();
         let token_second = ApiKeyToken::new("tok_anthropic_prod_second1").unwrap();
         vault.store(&token_first, "sk-ant-first-key").await.unwrap();
-        vault.store(&token_second, "sk-ant-second-key").await.unwrap();
+        vault
+            .store(&token_second, "sk-ant-second-key")
+            .await
+            .unwrap();
 
         // First header uses uppercase casing, second uses lowercase.
         let headers = vec![
-            ("AUTHORIZATION".to_string(), "Bearer tok_anthropic_prod_first01".to_string()),
-            ("authorization".to_string(), "Bearer tok_anthropic_prod_second1".to_string()),
+            (
+                "AUTHORIZATION".to_string(),
+                "Bearer tok_anthropic_prod_first01".to_string(),
+            ),
+            (
+                "authorization".to_string(),
+                "Bearer tok_anthropic_prod_second1".to_string(),
+            ),
         ];
 
         let key = resolve_token(&vault, &headers).await.unwrap();
@@ -1495,7 +1529,10 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(result.is_err(), "Long non-tok_ header must produce an error");
+        assert!(
+            result.is_err(),
+            "Long non-tok_ header must produce an error"
+        );
         let msg = result.unwrap_err();
 
         // The truncated snippet must be exactly 16 'X' characters.
@@ -1541,7 +1578,10 @@ mod tests {
 
         let result = forward_request(&client, &request, &headers).await;
 
-        assert!(result.is_err(), "Control char in header value must cause an error");
+        assert!(
+            result.is_err(),
+            "Control char in header value must cause an error"
+        );
         assert!(
             result.unwrap_err().contains("HTTP request failed"),
             "Error must originate from the HTTP layer"
@@ -1566,10 +1606,7 @@ mod tests {
         };
         let headers = vec![
             ("Authorization".to_string(), "Bearer sk-realkey".to_string()),
-            (
-                "X-Evil".to_string(),
-                "value\r\nX-Injected: yes".to_string(),
-            ),
+            ("X-Evil".to_string(), "value\r\nX-Injected: yes".to_string()),
         ];
 
         let result = forward_request(&client, &request, &headers).await;
@@ -1673,9 +1710,14 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(result.is_err(), "Empty token after 'Bearer ' must be rejected");
         assert!(
-            result.unwrap_err().contains("does not look like a proxy token"),
+            result.is_err(),
+            "Empty token after 'Bearer ' must be rejected"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .contains("does not look like a proxy token"),
             "Error must mention the token format expectation"
         );
     }
@@ -1700,7 +1742,10 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(result.is_err(), "CRLF in Authorization value must be rejected");
+        assert!(
+            result.is_err(),
+            "CRLF in Authorization value must be rejected"
+        );
         // Either the token fails ApiKeyToken validation or the vault doesn't
         // find it — either way the request must not succeed.
         let msg = result.unwrap_err();

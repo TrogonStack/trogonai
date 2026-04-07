@@ -138,10 +138,7 @@ async fn graphql_request(ctx: &ToolContext, body: &Value) -> Result<Value, Strin
 
     ctx.http_client
         .post(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", ctx.linear_token),
-        )
+        .header("Authorization", format!("Bearer {}", ctx.linear_token))
         .header("Content-Type", "application/json")
         .json(body)
         .send()

@@ -20,8 +20,8 @@
 //! Requires Docker. Run with:
 //!   cargo test -p trogon-agent --test webhook_pipeline_e2e
 
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 use async_nats::jetstream;
@@ -29,12 +29,15 @@ use hmac::{Hmac, Mac};
 use httpmock::MockServer;
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_github::{GithubConfig, serve as github_serve};
 use trogon_linear::{LinearConfig, serve as linear_serve};
 use trogon_nats::{NatsAuth, NatsConfig};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_std::env::InMemoryEnv;
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
@@ -123,9 +126,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"LGTM."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"LGTM."}]}"#);
         })
         .await;
 
@@ -237,7 +238,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -437,7 +438,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,

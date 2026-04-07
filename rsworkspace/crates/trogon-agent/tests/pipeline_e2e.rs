@@ -24,13 +24,16 @@ use httpmock::MockServer;
 use serde_json::json;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{
-    core::ContainerPort, runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt,
+    ContainerAsync, GenericImage, ImageExt, core::ContainerPort, runners::AsyncRunner,
 };
 use trogon_agent::{AgentConfig, run};
 use trogon_github::GithubConfig;
 use trogon_linear::LinearConfig;
 use trogon_nats::{NatsAuth, NatsConfig};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_vault::{
     ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, MemoryVault, VaultAuth, VaultStore,
 };
@@ -110,7 +113,10 @@ async fn wait_for_vault(addr: &str) {
         if ready {
             return;
         }
-        assert!(tokio::time::Instant::now() < deadline, "Vault not ready within 30s");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Vault not ready within 30s"
+        );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
@@ -171,9 +177,7 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     // ── 7. Start proxy HTTP server on a random port ────────────────────────
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_url = format!("http://127.0.0.1:{proxy_port}");
 
@@ -229,7 +233,7 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -242,9 +246,9 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
 
     tokio::spawn(async move {
@@ -302,7 +306,9 @@ async fn pipeline_tool_use_github_api_detokenized() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
@@ -316,7 +322,8 @@ async fn pipeline_tool_use_github_api_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -324,7 +331,8 @@ async fn pipeline_tool_use_github_api_detokenized() {
                         "name": "list_pr_files",
                         "input": {"owner":"acme","repo":"trogon","pr_number":42}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -392,9 +400,16 @@ async fn pipeline_tool_use_github_api_detokenized() {
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault, http_client, "pipeline-tool-worker", &worker_stream)
-            .await
-            .ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            http_client,
+            "pipeline-tool-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -408,7 +423,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
         github_stream_name: None,
@@ -421,9 +436,9 @@ async fn pipeline_tool_use_github_api_detokenized() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -463,7 +478,9 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
+                );
         })
         .await;
 
@@ -507,9 +524,16 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault, http_client, "pipeline-e2e-linear-worker", &worker_stream)
-            .await
-            .ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            http_client,
+            "pipeline-e2e-linear-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -523,7 +547,7 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -536,9 +560,9 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -612,7 +636,8 @@ async fn pipeline_tool_use_linear_api_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -620,7 +645,8 @@ async fn pipeline_tool_use_linear_api_detokenized() {
                         "name": "update_linear_issue",
                         "input": {"issue_id": "issue-linear-123", "priority": 2}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -712,7 +738,7 @@ async fn pipeline_tool_use_linear_api_detokenized() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
         github_stream_name: None,
@@ -725,9 +751,9 @@ async fn pipeline_tool_use_linear_api_detokenized() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -738,16 +764,19 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     // Publish a Linear Issue create event to trigger the issue_triage handler.
     js.publish(
         "linear.Issue.create",
-        bytes::Bytes::from(serde_json::to_vec(&json!({
-            "action": "create",
-            "type": "Issue",
-            "data": {
-                "id": "issue-linear-123",
-                "title": "Performance degradation in prod",
-                "priority": 1,
-                "team": { "name": "Platform" }
-            }
-        })).unwrap()),
+        bytes::Bytes::from(
+            serde_json::to_vec(&json!({
+                "action": "create",
+                "type": "Issue",
+                "data": {
+                    "id": "issue-linear-123",
+                    "title": "Performance degradation in prod",
+                    "priority": 1,
+                    "team": { "name": "Platform" }
+                }
+            }))
+            .unwrap(),
+        ),
     )
     .await
     .expect("Failed to publish Linear Issue event");
@@ -801,7 +830,8 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -809,7 +839,8 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
                         "name": "list_pr_files",
                         "input": {"owner":"acme","repo":"trogon","pr_number":99}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -901,7 +932,7 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
         github_stream_name: None,
@@ -914,9 +945,9 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -962,7 +993,8 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -970,7 +1002,8 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
                         "name": "list_pr_files",
                         "input": {"owner":"acme","repo":"trogon","pr_number":1}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -1062,7 +1095,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 2,
         github_stream_name: None,
@@ -1075,9 +1108,9 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -1099,7 +1132,10 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         }
     })
     .await;
-    assert!(reached.is_ok(), "Anthropic was not called 2 times within 20 s");
+    assert!(
+        reached.is_ok(),
+        "Anthropic was not called 2 times within 20 s"
+    );
 
     // Wait a moment to confirm no 3rd call arrives (loop capped at 2).
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1209,7 +1245,7 @@ async fn pipeline_concurrent_events_processed_independently() {
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 1,
         github_stream_name: None,
@@ -1222,9 +1258,9 @@ async fn pipeline_concurrent_events_processed_independently() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -1338,20 +1374,34 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
             when.method(httpmock::Method::GET)
                 .path("/repos/test-org/test-repo/pulls/42")
                 .header("authorization", "Bearer sk-gh-realkey");
-            then.status(200)
-                .header("content-type", "text/plain")
-                .body("diff --git a/src/main.rs b/src/main.rs\n+++ b/src/main.rs\n+fn helper() {}\n");
+            then.status(200).header("content-type", "text/plain").body(
+                "diff --git a/src/main.rs b/src/main.rs\n+++ b/src/main.rs\n+fn helper() {}\n",
+            );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1359,50 +1409,78 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "diff-tool-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "diff-tool-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not received");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_diff_mock.assert_async().await;
@@ -1424,7 +1502,9 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#,
+                );
         })
         .await;
 
@@ -1455,13 +1535,27 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1469,50 +1563,78 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "contents-tool-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "contents-tool-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not received");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_contents_mock.assert_async().await;
@@ -1562,13 +1684,27 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1576,50 +1712,78 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "pr-comment-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "pr-comment-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not received");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_comment_mock.assert_async().await;
@@ -1644,17 +1808,27 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewing."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewing."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1662,62 +1836,98 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "sync-reopen-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "sync-reopen-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Both actions are in REVIEW_ACTIONS — each should trigger one agent run.
-    js.publish("github.pull_request", pr_payload("synchronize")).await.unwrap();
-    js.publish("github.pull_request", pr_payload("reopened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("synchronize"))
+        .await
+        .unwrap();
+    js.publish("github.pull_request", pr_payload("reopened"))
+        .await
+        .unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if anthropic_mock.hits_async().await >= 2 { return; }
+            if anthropic_mock.hits_async().await >= 2 {
+                return;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-    }).await;
-    assert!(both_hit.is_ok(), "Anthropic not called twice within 30 s (synchronize + reopened)");
+    })
+    .await;
+    assert!(
+        both_hit.is_ok(),
+        "Anthropic not called twice within 30 s (synchronize + reopened)"
+    );
 
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 2,
-        "Expected exactly 2 Anthropic calls for synchronize + reopened events");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        2,
+        "Expected exactly 2 Anthropic calls for synchronize + reopened events"
+    );
 }
 
 /// `get_linear_issue` tool exercised end-to-end: a Linear Issue event triggers
@@ -1765,13 +1975,27 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1779,50 +2003,78 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "get-issue-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "get-issue-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not received");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_mock.assert_async().await;
@@ -1872,13 +2124,27 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1886,50 +2152,78 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "post-comment-linear-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "post-comment-linear-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not received");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_mock.assert_async().await;
@@ -1984,13 +2278,27 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -1998,51 +2306,78 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "gql-failure-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "gql-failure-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — GraphQL failure should be wrapped as tool_result and loop should continue");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — GraphQL failure should be wrapped as tool_result and loop should continue"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_failure_mock.assert_async().await;
@@ -2072,12 +2407,20 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2085,63 +2428,99 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "unexpected-stop-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "unexpected-stop-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — each triggers one Anthropic call before UnexpectedStopReason.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if anthropic_mock.hits_async().await >= 2 { return; }
+            if anthropic_mock.hits_async().await >= 2 {
+                return;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-    }).await;
-    assert!(both_hit.is_ok(), "Anthropic not called twice within 30 s — runner may have stalled on UnexpectedStopReason");
+    })
+    .await;
+    assert!(
+        both_hit.is_ok(),
+        "Anthropic not called twice within 30 s — runner may have stalled on UnexpectedStopReason"
+    );
 
     // Confirm no extra calls and no crash.
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 2,
-        "Expected exactly 2 Anthropic calls — one per event, no retries");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        2,
+        "Expected exactly 2 Anthropic calls — one per event, no retries"
+    );
 }
 
 /// Verifies that when the model returns **two** `tool_use` blocks in a single
@@ -2174,7 +2553,8 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason":"tool_use",
                     "content":[
                         {"type":"tool_use","id":"tu_multi_01","name":"list_pr_files",
@@ -2182,7 +2562,8 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
                         {"type":"tool_use","id":"tu_multi_02","name":"get_pr_diff",
                          "input":{"owner":"test-org","repo":"test-repo","pr_number":42}}
                     ]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -2211,13 +2592,27 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2225,51 +2620,78 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "multi-tool-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "multi-tool-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — both tools should execute and loop should complete");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — both tools should execute and loop should complete"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     // Critical: BOTH tool endpoints must have been called exactly once.
@@ -2295,17 +2717,27 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2313,58 +2745,90 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "ignored-pr-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "ignored-pr-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // "closed" is not in REVIEW_ACTIONS — handler returns None, no agent run.
-    js.publish("github.pull_request", pr_payload("closed")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("closed"))
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must NOT be called for 'closed' PR action");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must NOT be called for 'closed' PR action"
+    );
 
     // Runner must still be alive — valid event should reach Anthropic.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
-        "Runner must still process events after silently acking a 'closed' event");
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
+        "Runner must still process events after silently acking a 'closed' event"
+    );
     assert_eq!(anthropic_mock.hits_async().await, 1);
 }
 
@@ -2383,17 +2847,27 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2401,63 +2875,98 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "ignored-linear-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "ignored-linear-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // action="update" is not "create" — issue_triage::handle returns None.
-    let ignored_payload = bytes::Bytes::from(serde_json::to_vec(&serde_json::json!({
-        "action": "update",
-        "type": "Issue",
-        "data": { "id": "issue-x", "title": "Irrelevant" }
-    })).unwrap());
-    js.publish("linear.Issue.update", ignored_payload).await.unwrap();
+    let ignored_payload = bytes::Bytes::from(
+        serde_json::to_vec(&serde_json::json!({
+            "action": "update",
+            "type": "Issue",
+            "data": { "id": "issue-x", "title": "Irrelevant" }
+        }))
+        .unwrap(),
+    );
+    js.publish("linear.Issue.update", ignored_payload)
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must NOT be called for a Linear 'update' event");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must NOT be called for a Linear 'update' event"
+    );
 
     // Runner still alive — valid create event must be processed.
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
-        "Runner must still process events after silently acking a Linear 'update' event");
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
+        "Runner must still process events after silently acking a Linear 'update' event"
+    );
     assert_eq!(anthropic_mock.hits_async().await, 1);
 }
 
@@ -2476,17 +2985,27 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2494,59 +3013,93 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "invalid-json-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "invalid-json-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish garbage bytes — serde_json::from_slice will fail.
-    js.publish("github.pull_request", bytes::Bytes::from("not json at all }{"))
-        .await.unwrap();
+    js.publish(
+        "github.pull_request",
+        bytes::Bytes::from("not json at all }{"),
+    )
+    .await
+    .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must NOT be called when the NATS payload is invalid JSON");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must NOT be called when the NATS payload is invalid JSON"
+    );
 
     // Runner must still be alive — valid event must be processed.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
-        "Runner must continue processing after receiving an invalid JSON payload");
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
+        "Runner must continue processing after receiving an invalid JSON payload"
+    );
     assert_eq!(anthropic_mock.hits_async().await, 1);
 }
 
@@ -2596,13 +3149,27 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2610,51 +3177,78 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "update-fail-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "update-fail-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — issueUpdate failure should be wrapped as tool_result");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — issueUpdate failure should be wrapped as tool_result"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_failure_mock.assert_async().await;
@@ -2676,17 +3270,27 @@ async fn pipeline_custom_stream_names_route_correctly() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
 
     // Use custom stream names — do NOT create the default "GITHUB"/"LINEAR".
     create_stream(&js, "MY_GITHUB", &["github.pull_request"]).await;
@@ -2697,33 +3301,52 @@ async fn pipeline_custom_stream_names_route_correctly() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "custom-stream-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "custom-stream-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Agent configured with custom stream names.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
         github_stream_name: Some("MY_GITHUB".to_string()),
         linear_stream_name: Some("MY_LINEAR".to_string()),
         cron_stream_name: None,
@@ -2734,17 +3357,23 @@ async fn pipeline_custom_stream_names_route_correctly() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
-        "Anthropic not called — runner should bind to MY_GITHUB and process events");
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic not called — runner should bind to MY_GITHUB and process events"
+    );
     anthropic_mock.assert_async().await;
 }
 
@@ -2794,13 +3423,27 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2808,51 +3451,78 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "no-content-field-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "no-content-field-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — missing content field should be wrapped as tool_result");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — missing content field should be wrapped as tool_result"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -2898,18 +3568,34 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
                 .header("authorization", "Bearer sk-gh-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"name":"lib.rs","content":"!!!not-valid-base64!!!","encoding":"base64"}"#);
+                .body(
+                    r#"{"name":"lib.rs","content":"!!!not-valid-base64!!!","encoding":"base64"}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -2917,51 +3603,78 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "invalid-b64-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "invalid-b64-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — invalid base64 should be wrapped as tool_result");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — invalid base64 should be wrapped as tool_result"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -3016,13 +3729,27 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3030,51 +3757,78 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "non-utf8-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "non-utf8-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — non-UTF8 bytes should be wrapped as tool_result");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — non-UTF8 bytes should be wrapped as tool_result"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -3124,13 +3878,27 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3138,51 +3906,78 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "pr-nourl-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "pr-nourl-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — missing html_url should use (no url) fallback and succeed");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — missing html_url should use (no url) fallback and succeed"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -3232,13 +4027,27 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3246,51 +4055,78 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "linear-nourl-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "linear-nourl-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — missing comment url should use (no url) fallback and succeed");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — missing comment url should use (no url) fallback and succeed"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_mock.assert_async().await;
@@ -3312,17 +4148,27 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3330,62 +4176,95 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "missing-number-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "missing-number-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Valid JSON, correct action, but no "number" field → handler returns None.
-    let no_number = bytes::Bytes::from(serde_json::to_vec(&json!({
-        "action": "opened",
-        "repository": { "name": "test-repo", "owner": { "login": "test-org" } }
-    })).unwrap());
+    let no_number = bytes::Bytes::from(
+        serde_json::to_vec(&json!({
+            "action": "opened",
+            "repository": { "name": "test-repo", "owner": { "login": "test-org" } }
+        }))
+        .unwrap(),
+    );
     js.publish("github.pull_request", no_number).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must NOT be called when PR payload is missing the 'number' field");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must NOT be called when PR payload is missing the 'number' field"
+    );
 
     // Runner must still be alive.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
-        "Runner must still process events after silently acking a payload missing 'number'");
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
+        "Runner must still process events after silently acking a payload missing 'number'"
+    );
     assert_eq!(anthropic_mock.hits_async().await, 1);
 }
 
@@ -3405,17 +4284,27 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3423,63 +4312,96 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "missing-id-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "missing-id-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Correct action + type, but data.id is missing → handler returns None.
-    let no_id = bytes::Bytes::from(serde_json::to_vec(&json!({
-        "action": "create",
-        "type": "Issue",
-        "data": { "title": "No ID issue" }
-    })).unwrap());
+    let no_id = bytes::Bytes::from(
+        serde_json::to_vec(&json!({
+            "action": "create",
+            "type": "Issue",
+            "data": { "title": "No ID issue" }
+        }))
+        .unwrap(),
+    );
     js.publish("linear.Issue.create", no_id).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must NOT be called when Linear payload is missing 'data.id'");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must NOT be called when Linear payload is missing 'data.id'"
+    );
 
     // Runner must still be alive.
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
-        "Runner must still process events after silently acking a payload missing 'data.id'");
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
+        "Runner must still process events after silently acking a payload missing 'data.id'"
+    );
     assert_eq!(anthropic_mock.hits_async().await, 1);
 }
 
@@ -3517,12 +4439,20 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3530,51 +4460,78 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "unknown-tool-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "unknown-tool-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — unknown tool name should produce a tool_result error, not crash");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — unknown tool name should produce a tool_result error, not crash"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
 }
@@ -3600,12 +4557,20 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3613,66 +4578,101 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "http-error-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "http-error-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — both trigger AgentError::Http but must be acked (not redelivered).
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if anthropic_500.hits_async().await >= 2 { return; }
+            if anthropic_500.hits_async().await >= 2 {
+                return;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-    }).await;
-    assert!(both_hit.is_ok(), "Anthropic 500 not hit twice within 30 s — runner may have stalled");
+    })
+    .await;
+    assert!(
+        both_hit.is_ok(),
+        "Anthropic 500 not hit twice within 30 s — runner may have stalled"
+    );
 
     // The worker retries 5xx responses up to HTTP_MAX_RETRIES (3) times with
     // exponential backoff, so each event can produce up to 4 Anthropic calls.
     // With 2 published events the total hit count can be anywhere from 2 to 8;
     // we only assert at least 2 (one per published event) — not the exact count.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(anthropic_500.hits_async().await >= 2,
-        "Expected at least 2 Anthropic calls — one per published event");
+    assert!(
+        anthropic_500.hits_async().await >= 2,
+        "Expected at least 2 Anthropic calls — one per published event"
+    );
 }
 
 // ── cross-crate + remaining agent edge-case tests ─────────────────────────────
@@ -3690,7 +4690,10 @@ async fn get_free_port() -> u16 {
 async fn wait_for_tcp(port: u16) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await.is_ok() {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .is_ok()
+        {
             return;
         }
         assert!(
@@ -3717,7 +4720,9 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Updated."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Updated."}]}"#,
+                );
         })
         .await;
 
@@ -3746,13 +4751,27 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3760,51 +4779,78 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "state-assignee-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "state-assignee-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — update_linear_issue with state_id + assignee_id should succeed");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — update_linear_issue with state_id + assignee_id should succeed"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     graphql_mock.assert_async().await;
@@ -3826,7 +4872,9 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#,
+                );
         })
         .await;
 
@@ -3857,13 +4905,27 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3871,51 +4933,78 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "explicit-ref-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "explicit-ref-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
-        "end_turn not received — get_file_contents with explicit ref should succeed");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not received — get_file_contents with explicit ref should succeed"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -3937,17 +5026,27 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -3955,57 +5054,85 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "no-title-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "no-title-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Payload with id but NO title field → handler uses "(no title)" fallback.
-    let no_title = bytes::Bytes::from(serde_json::to_vec(&json!({
-        "action": "create",
-        "type": "Issue",
-        "data": { "id": "issue-notitle-1" }
-    })).unwrap());
+    let no_title = bytes::Bytes::from(
+        serde_json::to_vec(&json!({
+            "action": "create",
+            "type": "Issue",
+            "data": { "id": "issue-notitle-1" }
+        }))
+        .unwrap(),
+    );
     js.publish("linear.Issue.create", no_title).await.unwrap();
 
-    assert!(wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
-        "Anthropic not called — handler should run even when title is missing");
+    assert!(
+        wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
+        "Anthropic not called — handler should run even when title is missing"
+    );
     anthropic_mock.assert_async().await;
 }
 
@@ -4032,7 +5159,13 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
@@ -4049,7 +5182,10 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         subject_prefix: "github".to_string(),
         stream_name: "GITHUB".to_string(),
         stream_max_age: Duration::from_secs(3600),
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
     };
     tokio::spawn(async move {
         trogon_github::serve(github_cfg, github_nats).await.ok();
@@ -4058,7 +5194,9 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
 
     // ── 2. Start proxy + worker.
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     // trogon-github created GITHUB stream; agent needs LINEAR too.
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4066,46 +5204,69 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "cross-crate-gh-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "cross-crate-gh-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 3. Start agent.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 4. POST a PR webhook directly to trogon-github (no secret → no sig needed).
@@ -4113,7 +5274,8 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         "action": "opened",
         "number": 42,
         "repository": { "name": "test-repo", "owner": { "login": "test-org" } }
-    })).unwrap();
+    }))
+    .unwrap();
 
     let client = reqwest::Client::new();
     let resp = client
@@ -4125,7 +5287,11 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         .send()
         .await
         .expect("Failed to POST to trogon-github");
-    assert_eq!(resp.status().as_u16(), 200, "trogon-github should return 200");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "trogon-github should return 200"
+    );
 
     // ── 5. Verify the full pipeline fired.
     assert!(
@@ -4149,12 +5315,20 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
@@ -4174,7 +5348,10 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         timestamp_tolerance: None, // disabled — no timestamp field required in payload
         nats_ack_timeout: Duration::from_secs(10),
         nats_stream_op_timeout: Duration::from_secs(10),
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
     };
     tokio::spawn(async move {
         trogon_linear::serve(linear_cfg, linear_nats).await.ok();
@@ -4183,53 +5360,78 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
 
     // ── 2. Start proxy + worker.
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     // trogon-linear created LINEAR stream; agent needs GITHUB too.
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "cross-crate-lin-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "cross-crate-lin-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 3. Start agent.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 4. POST a Linear Issue create webhook to trogon-linear (no signature needed).
@@ -4242,7 +5444,8 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
             "priority": 2,
             "team": { "name": "Platform" }
         }
-    })).unwrap();
+    }))
+    .unwrap();
 
     let client = reqwest::Client::new();
     let resp = client
@@ -4252,7 +5455,11 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         .send()
         .await
         .expect("Failed to POST to trogon-linear");
-    assert_eq!(resp.status().as_u16(), 200, "trogon-linear should return 200");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "trogon-linear should return 200"
+    );
 
     // ── 5. Verify the full pipeline fired.
     assert!(
@@ -4268,10 +5475,7 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
 async fn pipeline_runner_startup_fails_when_nats_unreachable() {
     // Point to a port that has nothing listening.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec!["nats://127.0.0.1:19998".to_string()],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec!["nats://127.0.0.1:19998".to_string()], NatsAuth::None),
         proxy_url: "http://127.0.0.1:19999".to_string(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4289,9 +5493,9 @@ async fn pipeline_runner_startup_fails_when_nats_unreachable() {
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), run(agent_cfg)).await;
@@ -4339,12 +5543,20 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4352,48 +5564,73 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "missing-field-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "missing-field-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 5,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -4428,17 +5665,27 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
+                );
         })
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4447,45 +5694,62 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_millis(300), // short: no worker → times out
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── Event 1: no worker → proxy times out → AgentError::Http → acked.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
     // Wait for the proxy timeout + processing to complete.
     tokio::time::sleep(Duration::from_millis(700)).await;
-    assert_eq!(anthropic_mock.hits_async().await, 0,
-        "Anthropic must not be reached when the proxy times out");
+    assert_eq!(
+        anthropic_mock.hits_async().await,
+        0,
+        "Anthropic must not be reached when the proxy times out"
+    );
 
     // ── Now start the worker — the runner must still be alive.
     let worker_js = Arc::clone(&js);
@@ -4493,14 +5757,26 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "timeout-recovery-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "timeout-recovery-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // ── Event 2: worker now running → reaches Anthropic.
-    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened"))
+        .await
+        .unwrap();
 
     // The proxy publishes the outbound NATS request before timing out, so the
     // stale outbound message from event 1 may also be consumed by the worker
@@ -4556,7 +5832,9 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4564,48 +5842,73 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "vault-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "vault-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None,
+        memory_owner: None,
+        memory_repo: None,
         memory_path: None,
         mcp_servers: vec![],
         api_port: 0,
         tenant_id: "default".to_string(),
-        incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
+    js.publish("github.pull_request", pr_opened_payload())
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(25)).await,
@@ -4645,7 +5948,8 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -4653,7 +5957,8 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
                         "name": "get_pr_comments",
                         "input": {"owner":"acme","repo":"trogon","pr_number":42}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -4670,13 +5975,27 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4688,52 +6007,81 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
     let proxy_base = mock_server.base_url();
     let proxy_outbound = outbound.clone();
     tokio::spawn(async move {
-        axum::serve(listener, trogon_secret_proxy::proxy::router(ProxyState {
-            nats: proxy_nats,
-            jetstream: proxy_js,
-            prefix: "trogon".to_string(),
-            outbound_subject: proxy_outbound,
-            worker_timeout: Duration::from_secs(15),
-            base_url_override: Some(proxy_base),
-        })).await.ok();
+        axum::serve(
+            listener,
+            trogon_secret_proxy::proxy::router(ProxyState {
+                nats: proxy_nats,
+                jetstream: proxy_js,
+                prefix: "trogon".to_string(),
+                outbound_subject: proxy_outbound,
+                worker_timeout: Duration::from_secs(15),
+                base_url_override: Some(proxy_base),
+            }),
+        )
+        .await
+        .ok();
     });
 
     let (nats2, js2) = js_client(nats_port).await;
     let js2 = Arc::new(js2);
     let stream_name = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(js2, nats2, vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "gpc-worker", &stream_name).await.ok();
+        worker::run(
+            js2,
+            nats2,
+            vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "gpc-worker",
+            &stream_name,
+        )
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+            nats: NatsConfig::new(
+                vec![format!("nats://127.0.0.1:{nats_port}")],
+                NatsAuth::None,
+            ),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
             slack_token: String::new(),
-            model: "claude-opus-4-6".to_string(), max_iterations: 5,
-            github_stream_name: None, linear_stream_name: None,
-        cron_stream_name: None,
-        datadog_stream_name: None,
-            memory_owner: None, memory_repo: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 5,
+            github_stream_name: None,
+            linear_stream_name: None,
+            cron_stream_name: None,
+            datadog_stream_name: None,
+            memory_owner: None,
+            memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
             api_port: 0,
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        }).await.ok();
+            incidentio_stream_name: None,
+        })
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
+    js.publish("github.pull_request", pr_opened_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not hit");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not hit"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -4765,7 +6113,8 @@ async fn pipeline_update_file_tool_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -4779,7 +6128,8 @@ async fn pipeline_update_file_tool_detokenized() {
                             "branch":"trogon/memory-update"
                         }
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -4796,13 +6146,27 @@ async fn pipeline_update_file_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4814,52 +6178,81 @@ async fn pipeline_update_file_tool_detokenized() {
     let proxy_base = mock_server.base_url();
     let proxy_outbound = outbound.clone();
     tokio::spawn(async move {
-        axum::serve(listener, trogon_secret_proxy::proxy::router(ProxyState {
-            nats: proxy_nats,
-            jetstream: proxy_js,
-            prefix: "trogon".to_string(),
-            outbound_subject: proxy_outbound,
-            worker_timeout: Duration::from_secs(15),
-            base_url_override: Some(proxy_base),
-        })).await.ok();
+        axum::serve(
+            listener,
+            trogon_secret_proxy::proxy::router(ProxyState {
+                nats: proxy_nats,
+                jetstream: proxy_js,
+                prefix: "trogon".to_string(),
+                outbound_subject: proxy_outbound,
+                worker_timeout: Duration::from_secs(15),
+                base_url_override: Some(proxy_base),
+            }),
+        )
+        .await
+        .ok();
     });
 
     let (nats2, js2) = js_client(nats_port).await;
     let js2 = Arc::new(js2);
     let stream_name = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(js2, nats2, vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "uf-worker", &stream_name).await.ok();
+        worker::run(
+            js2,
+            nats2,
+            vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "uf-worker",
+            &stream_name,
+        )
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+            nats: NatsConfig::new(
+                vec![format!("nats://127.0.0.1:{nats_port}")],
+                NatsAuth::None,
+            ),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
             slack_token: String::new(),
-            model: "claude-opus-4-6".to_string(), max_iterations: 5,
-            github_stream_name: None, linear_stream_name: None,
-        cron_stream_name: None,
-        datadog_stream_name: None,
-            memory_owner: None, memory_repo: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 5,
+            github_stream_name: None,
+            linear_stream_name: None,
+            cron_stream_name: None,
+            datadog_stream_name: None,
+            memory_owner: None,
+            memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
             api_port: 0,
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        }).await.ok();
+            incidentio_stream_name: None,
+        })
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
+    js.publish("github.pull_request", pr_opened_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not hit");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not hit"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -4880,7 +6273,9 @@ async fn pipeline_create_pull_request_tool_detokenized() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"PR opened."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"PR opened."}]}"#,
+                );
         })
         .await;
 
@@ -4891,7 +6286,8 @@ async fn pipeline_create_pull_request_tool_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -4905,7 +6301,8 @@ async fn pipeline_create_pull_request_tool_detokenized() {
                             "body":"Agent learned new conventions."
                         }
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -4922,13 +6319,27 @@ async fn pipeline_create_pull_request_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "sk-gh-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -4940,52 +6351,81 @@ async fn pipeline_create_pull_request_tool_detokenized() {
     let proxy_base = mock_server.base_url();
     let proxy_outbound = outbound.clone();
     tokio::spawn(async move {
-        axum::serve(listener, trogon_secret_proxy::proxy::router(ProxyState {
-            nats: proxy_nats,
-            jetstream: proxy_js,
-            prefix: "trogon".to_string(),
-            outbound_subject: proxy_outbound,
-            worker_timeout: Duration::from_secs(15),
-            base_url_override: Some(proxy_base),
-        })).await.ok();
+        axum::serve(
+            listener,
+            trogon_secret_proxy::proxy::router(ProxyState {
+                nats: proxy_nats,
+                jetstream: proxy_js,
+                prefix: "trogon".to_string(),
+                outbound_subject: proxy_outbound,
+                worker_timeout: Duration::from_secs(15),
+                base_url_override: Some(proxy_base),
+            }),
+        )
+        .await
+        .ok();
     });
 
     let (nats2, js2) = js_client(nats_port).await;
     let js2 = Arc::new(js2);
     let stream_name = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(js2, nats2, vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "cpr-worker", &stream_name).await.ok();
+        worker::run(
+            js2,
+            nats2,
+            vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "cpr-worker",
+            &stream_name,
+        )
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+            nats: NatsConfig::new(
+                vec![format!("nats://127.0.0.1:{nats_port}")],
+                NatsAuth::None,
+            ),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
             linear_token: "tok_linear_prod_test01".to_string(),
             slack_token: String::new(),
-            model: "claude-opus-4-6".to_string(), max_iterations: 5,
-            github_stream_name: None, linear_stream_name: None,
-        cron_stream_name: None,
-        datadog_stream_name: None,
-            memory_owner: None, memory_repo: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 5,
+            github_stream_name: None,
+            linear_stream_name: None,
+            cron_stream_name: None,
+            datadog_stream_name: None,
+            memory_owner: None,
+            memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
             api_port: 0,
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        }).await.ok();
+            incidentio_stream_name: None,
+        })
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
+    js.publish("github.pull_request", pr_opened_payload())
+        .await
+        .unwrap();
 
-    assert!(wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await, "end_turn not hit");
+    assert!(
+        wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
+        "end_turn not hit"
+    );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
     github_mock.assert_async().await;
@@ -5018,7 +6458,8 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{
+                .body(
+                    r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -5026,7 +6467,8 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
                         "name": "get_linear_comments",
                         "input": {"issue_id":"ISS-42"}
                     }]
-                }"#);
+                }"#,
+                );
         })
         .await;
 
@@ -5044,13 +6486,27 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
         .await;
 
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
-    vault.store(&ApiKeyToken::new("tok_linear_prod_test01").unwrap(), "sk-linear-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_linear_prod_test01").unwrap(),
+            "sk-linear-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound)
+        .await
+        .unwrap();
     create_stream(&js, "GITHUB", &["github.pull_request"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
     create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
@@ -5062,56 +6518,85 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     let proxy_base = mock_server.base_url();
     let proxy_outbound = outbound.clone();
     tokio::spawn(async move {
-        axum::serve(listener, trogon_secret_proxy::proxy::router(ProxyState {
-            nats: proxy_nats,
-            jetstream: proxy_js,
-            prefix: "trogon".to_string(),
-            outbound_subject: proxy_outbound,
-            worker_timeout: Duration::from_secs(15),
-            base_url_override: Some(proxy_base),
-        })).await.ok();
+        axum::serve(
+            listener,
+            trogon_secret_proxy::proxy::router(ProxyState {
+                nats: proxy_nats,
+                jetstream: proxy_js,
+                prefix: "trogon".to_string(),
+                outbound_subject: proxy_outbound,
+                worker_timeout: Duration::from_secs(15),
+                base_url_override: Some(proxy_base),
+            }),
+        )
+        .await
+        .ok();
     });
 
     let (nats2, js2) = js_client(nats_port).await;
     let js2 = Arc::new(js2);
     let stream_name = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(js2, nats2, vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "glc-worker", &stream_name).await.ok();
+        worker::run(
+            js2,
+            nats2,
+            vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "glc-worker",
+            &stream_name,
+        )
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let linear_payload = bytes::Bytes::from(serde_json::to_vec(&json!({
-        "action": "create",
-        "type": "Issue",
-        "data": { "id": "ISS-42", "title": "Fix memory leak" }
-    })).unwrap());
+    let linear_payload = bytes::Bytes::from(
+        serde_json::to_vec(&json!({
+            "action": "create",
+            "type": "Issue",
+            "data": { "id": "ISS-42", "title": "Fix memory leak" }
+        }))
+        .unwrap(),
+    );
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+            nats: NatsConfig::new(
+                vec![format!("nats://127.0.0.1:{nats_port}")],
+                NatsAuth::None,
+            ),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
-               linear_token: "tok_linear_prod_test01".to_string(),
+            linear_token: "tok_linear_prod_test01".to_string(),
             slack_token: String::new(),
-            model: "claude-opus-4-6".to_string(), max_iterations: 5,
-            github_stream_name: None, linear_stream_name: None,
-        cron_stream_name: None,
-        datadog_stream_name: None,
-            memory_owner: None, memory_repo: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 5,
+            github_stream_name: None,
+            linear_stream_name: None,
+            cron_stream_name: None,
+            datadog_stream_name: None,
+            memory_owner: None,
+            memory_repo: None,
             memory_path: None,
             mcp_servers: vec![],
             api_port: 0,
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        }).await.ok();
+            incidentio_stream_name: None,
+        })
+        .await
+        .ok();
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.publish("linear.Issue.create", linear_payload).await.unwrap();
+    js.publish("linear.Issue.create", linear_payload)
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -5125,14 +6610,25 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
 // ── New event types ────────────────────────────────────────────────────────────
 
 /// Helper: spin up NATS + proxy + worker + agent with github.> stream.
-async fn setup_full_pipeline(nats_port: u16, mock_server: &MockServer) -> (u16, Arc<jetstream::Context>) {
+async fn setup_full_pipeline(
+    nats_port: u16,
+    mock_server: &MockServer,
+) -> (u16, Arc<jetstream::Context>) {
     let vault = Arc::new(MemoryVault::new());
-    vault.store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey").await.unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
     // Use github.> so all GitHub consumers (PR, comment, push, check_run) can bind.
     create_stream(&js, "GITHUB", &["github.>"]).await;
     create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
@@ -5141,41 +6637,68 @@ async fn setup_full_pipeline(nats_port: u16, mock_server: &MockServer) -> (u16, 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats: nats.clone(), jetstream: Arc::clone(&js), prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(), worker_timeout: Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: Arc::clone(&js),
+        prefix: "trogon".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
     let worker_js = Arc::clone(&js);
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(worker_js, worker_nats, worker_vault,
-            reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap(),
-            "new-events-worker", &worker_stream).await.ok();
+        worker::run(
+            worker_js,
+            worker_nats,
+            worker_vault,
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            "new-events-worker",
+            &worker_stream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        model: "claude-opus-4-6".to_string(), max_iterations: 1,
-        github_stream_name: None, linear_stream_name: None,
+        slack_token: String::new(),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 1,
+        github_stream_name: None,
+        linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        memory_owner: None, memory_repo: None, memory_path: None, mcp_servers: vec![],
-        api_port: 0, tenant_id: "default".to_string(),
- split_evaluator_url: None,
- split_auth_token: None,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_servers: vec![],
+        api_port: 0,
+        tenant_id: "default".to_string(),
+        split_evaluator_url: None,
+        split_auth_token: None,
+        incidentio_stream_name: None,
     };
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     (proxy_port, js)
@@ -5202,7 +6725,9 @@ async fn pipeline_pr_merged_event_reaches_anthropic() {
         "pull_request": { "merged": true, "title": "Add feature", "merged_by": { "login": "alice" } },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     })).unwrap();
-    js.publish("github.pull_request", bytes::Bytes::from(payload)).await.unwrap();
+    js.publish("github.pull_request", bytes::Bytes::from(payload))
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -5216,12 +6741,16 @@ async fn pipeline_issue_comment_event_reaches_anthropic() {
     let (_c, nats_port) = start_nats().await;
     let mock_server = MockServer::start_async().await;
 
-    let anthropic_mock = mock_server.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/v1/messages")
-            .header("authorization", "Bearer sk-ant-realkey");
-        then.status(200).header("content-type", "application/json")
+    let anthropic_mock =
+        mock_server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path("/v1/messages")
+                    .header("authorization", "Bearer sk-ant-realkey");
+                then.status(200).header("content-type", "application/json")
             .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Replied."}]}"#);
-    }).await;
+            })
+            .await;
 
     let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
 
@@ -5230,8 +6759,11 @@ async fn pipeline_issue_comment_event_reaches_anthropic() {
         "issue": { "number": 12, "pull_request": {} },
         "comment": { "body": "What does this do?", "user": { "login": "carol" } },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
-    })).unwrap();
-    js.publish("github.issue_comment", bytes::Bytes::from(payload)).await.unwrap();
+    }))
+    .unwrap();
+    js.publish("github.issue_comment", bytes::Bytes::from(payload))
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -5261,8 +6793,11 @@ async fn pipeline_push_to_branch_event_reaches_anthropic() {
         "commits": [{ "id": "abc123" }],
         "head_commit": { "message": "add feature y" },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
-    })).unwrap();
-    js.publish("github.push", bytes::Bytes::from(payload)).await.unwrap();
+    }))
+    .unwrap();
+    js.publish("github.push", bytes::Bytes::from(payload))
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -5294,8 +6829,11 @@ async fn pipeline_ci_failure_event_reaches_anthropic() {
             "pull_requests": [{ "number": 42 }]
         },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
-    })).unwrap();
-    js.publish("github.check_run", bytes::Bytes::from(payload)).await.unwrap();
+    }))
+    .unwrap();
+    js.publish("github.check_run", bytes::Bytes::from(payload))
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,

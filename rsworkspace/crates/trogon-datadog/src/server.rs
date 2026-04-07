@@ -3,7 +3,10 @@ use std::time::Duration;
 use crate::config::DatadogConfig;
 use crate::signature;
 use async_nats::jetstream::{self, stream};
-use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post};
+use axum::{
+    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
+    routing::post,
+};
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
 
@@ -26,7 +29,13 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let js = jetstream::new(nats);
 
-    ensure_stream(&js, &config.stream_name, &config.subject_prefix, config.stream_max_age).await?;
+    ensure_stream(
+        &js,
+        &config.stream_name,
+        &config.subject_prefix,
+        config.stream_max_age,
+    )
+    .await?;
 
     let state = AppState {
         js,
@@ -77,7 +86,11 @@ async fn ensure_stream(
     })
     .await?;
 
-    info!(stream = stream_name, max_age_secs = max_age.as_secs(), "JetStream stream ready");
+    info!(
+        stream = stream_name,
+        max_age_secs = max_age.as_secs(),
+        "JetStream stream ready"
+    );
     Ok(())
 }
 
@@ -114,12 +127,18 @@ mod tests {
 
     #[test]
     fn retriggered_maps_to_alert() {
-        assert_eq!(event_type(br#"{"alert_transition":"Re-Triggered"}"#), "alert");
+        assert_eq!(
+            event_type(br#"{"alert_transition":"Re-Triggered"}"#),
+            "alert"
+        );
     }
 
     #[test]
     fn recovered_maps_to_alert_recovered() {
-        assert_eq!(event_type(br#"{"alert_transition":"Recovered"}"#), "alert.recovered");
+        assert_eq!(
+            event_type(br#"{"alert_transition":"Recovered"}"#),
+            "alert.recovered"
+        );
     }
 
     #[test]
@@ -205,22 +224,20 @@ async fn handle_webhook(
         .publish_with_headers(subject.clone(), nats_headers, body)
         .await
     {
-        Ok(ack_future) => {
-            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
-                Ok(Ok(_)) => {
-                    info!("Published Datadog event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
+        Ok(ack_future) => match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+            Ok(Ok(_)) => {
+                info!("Published Datadog event to NATS");
+                StatusCode::OK
             }
-        }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NATS ack failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Err(_) => {
+                warn!("NATS ack timed out after {NATS_ACK_TIMEOUT:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
         Err(e) => {
             warn!(error = %e, "Failed to publish Datadog event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR

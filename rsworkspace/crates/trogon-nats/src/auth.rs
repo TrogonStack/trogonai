@@ -82,10 +82,11 @@ fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
     if let Ok(nkey) = env.var(ENV_NATS_NKEY) {
         return NatsAuth::NKey(nkey);
     }
-    if let (Ok(user), Ok(password)) = (env.var(ENV_NATS_USER), env.var(ENV_NATS_PASSWORD)) {
-        if !user.is_empty() && !password.is_empty() {
-            return NatsAuth::UserPassword { user, password };
-        }
+    if let (Ok(user), Ok(password)) = (env.var(ENV_NATS_USER), env.var(ENV_NATS_PASSWORD))
+        && !user.is_empty()
+        && !password.is_empty()
+    {
+        return NatsAuth::UserPassword { user, password };
     }
     if let Ok(token) = env.var(ENV_NATS_TOKEN) {
         return NatsAuth::Token(token);
